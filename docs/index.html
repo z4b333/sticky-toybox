@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Toybox — flash it from the browser</title>
+<style>
+  /* Styled like the panel it flashes: 1-bit, portrait, unhurried. */
+  :root { --ink: #111; --paper: #f4f2ec; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font: 17px/1.55 Georgia, 'Times New Roman', serif;
+    display: flex; justify-content: center; padding: 40px 16px 80px;
+  }
+  main { max-width: 560px; width: 100%; }
+  h1 {
+    font-family: 'Courier New', monospace; letter-spacing: .35em;
+    text-align: center; font-size: 28px; margin: 12px 0 4px;
+  }
+  .diamonds { text-align: center; letter-spacing: .6em; margin-bottom: 28px; }
+  .card {
+    border: 2px solid var(--ink); padding: 22px 24px; margin: 22px 0;
+    background: #fff;
+  }
+  .card h2 {
+    font-family: 'Courier New', monospace; font-size: 15px;
+    letter-spacing: .18em; margin: 0 0 10px;
+  }
+  .flashrow { text-align: center; padding: 30px 24px; }
+  esp-web-install-button::part(button) {
+    background: var(--ink); color: var(--paper); border: none;
+    font: 700 16px 'Courier New', monospace; letter-spacing: .15em;
+    padding: 16px 34px; cursor: pointer;
+  }
+  ol { padding-left: 22px; margin: 8px 0; }
+  li { margin: 6px 0; }
+  code {
+    font: 14px 'Courier New', monospace; background: #eae7de;
+    padding: 1px 5px;
+  }
+  .fine { font-size: 14px; color: #444; }
+  a { color: inherit; }
+  .unsupported { display: none; border: 2px dashed var(--ink);
+    padding: 14px 18px; margin-top: 14px; font-size: 15px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>TOYBOX</h1>
+  <div class="diamonds">&#9670; &nbsp; &#9670;</div>
+
+  <p>Games and small tools for the <strong>Seeed reTerminal Sticky</strong> —
+  Wordle, Nonogram, 2048, Sudoku, Battleship, XO, dice and coins, a timer,
+  flashcards and fridge-notes you write from your phone. Notes and flashcards
+  speak English, Thai, Chinese, Korean, Japanese and Vietnamese.</p>
+
+  <div class="card flashrow">
+    <h2>FLASH FROM THIS PAGE</h2>
+    <esp-web-install-button manifest="manifest.json">
+      <button slot="activate">INSTALL TOYBOX</button>
+      <div slot="unsupported" class="unsupported" style="display:block">
+        This browser has no WebSerial. Use <strong>Chrome or Edge on a
+        computer</strong> — phones and Firefox/Safari cannot flash.
+      </div>
+    </esp-web-install-button>
+    <p class="fine" style="margin-top:16px">
+      Plug the Sticky in over USB-C first. The full install erases the
+      device and takes about a minute.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>IF NO PORT SHOWS UP</h2>
+    <ol>
+      <li>The Sticky talks through a CH34x USB-serial bridge — Windows and
+        older macOS may need the
+        <a href="https://www.wch-ic.com/downloads/CH343SER_ZIP.html">CH343 driver</a>.</li>
+      <li>Use a data USB-C cable, not a charge-only one.</li>
+      <li>If it still refuses: hold the power button while plugging in to
+        enter the bootloader, then try INSTALL again.</li>
+    </ol>
+  </div>
+
+  <div class="card">
+    <h2>AFTER FLASHING</h2>
+    <ol>
+      <li>The hub appears. Tap a tile to play; the gear hides apps you
+        don't want.</li>
+      <li>Open NOTES &rarr; WRITE and scan the QR with your phone to write
+        or dictate your first note. PIN it and it stays on the panel with
+        the power off.</li>
+      <li>First boot formats the 11.9&nbsp;MB filesystem — give it a few
+        extra seconds, once.</li>
+    </ol>
+    <p class="fine">First time on real hardware? The full checklist is in
+      <a href="https://github.com/z4b333/sticky-toybox/blob/master/docs/BRINGUP.md">BRINGUP.md</a>.</p>
+  </div>
+
+  <div class="card">
+    <h2>PREFER A CABLE AND A TERMINAL?</h2>
+    <p class="fine" style="margin:0">
+      <code>esptool --chip esp32s3 write_flash 0x0 toybox-full.bin</code><br>
+      The image is <a href="firmware/toybox-full.bin">firmware/toybox-full.bin</a>
+      (bootloader + partition table + app, merged). Source, docs and the
+      host-side screen previews live in the
+      <a href="https://github.com/z4b333/sticky-toybox">repository</a>.
+    </p>
+  </div>
+
+  <div class="diamonds">&#9670; &nbsp; &#9670;</div>
+</main>
+<script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+</body>
+</html>
