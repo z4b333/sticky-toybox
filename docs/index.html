@@ -36,6 +36,15 @@
     color: var(--muted);
     margin: 8px 0 40px;
   }
+  .variants { margin: 0 0 20px; display: grid; gap: 8px; }
+  .variant {
+    display: flex; gap: 12px; align-items: flex-start;
+    border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 14px; cursor: pointer; background: #fff;
+  }
+  .variant:has(input:checked) { border-color: var(--fg); }
+  .variant input { margin-top: 5px; accent-color: var(--fg); }
+  .variant small { color: var(--muted); }
   .install { margin: 0 0 12px; }
   esp-web-install-button {
     --esp-tools-button-color: var(--accent);
@@ -102,11 +111,24 @@
   <p class="sub">Games, tools and fridge notes for the Seeed reTerminal
   Sticky. Install it straight from this page.</p>
 
+  <div class="variants">
+    <label class="variant">
+      <input type="radio" name="variant" value="manifest.json" checked>
+      <span><strong>Standard</strong><br>
+      <small>3.4 MB. Covers everyday text in all six languages.</small></span>
+    </label>
+    <label class="variant">
+      <input type="radio" name="variant" value="manifest-fonts.json">
+      <span><strong>With full language packs</strong><br>
+      <small>16 MB. Adds every rare Chinese, Japanese and Korean character.</small></span>
+    </label>
+  </div>
+
   <div class="install">
     <esp-web-install-button manifest="manifest.json"></esp-web-install-button>
   </div>
   <p class="hint">Needs Chrome or Edge on a computer, and a USB-C data
-  cable. Takes about a minute and erases the device.</p>
+  cable. Erases the device.</p>
 
   <div class="steps">
     <h2>After installing</h2>
@@ -145,6 +167,14 @@
     · <a href="https://github.com/z4b333/sticky-toybox/blob/master/docs/BRINGUP.md">First-boot checklist</a>
   </footer>
 </main>
+<script>
+  document.querySelectorAll('input[name="variant"]').forEach(function (r) {
+    r.addEventListener('change', function () {
+      document.querySelector('esp-web-install-button')
+        .setAttribute('manifest', this.value);
+    });
+  });
+</script>
 <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
 </body>
 </html>
