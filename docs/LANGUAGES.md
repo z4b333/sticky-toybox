@@ -1,129 +1,107 @@
-# Languages
+# Language support
 
-Notes and flashcards accept whatever a phone keyboard can produce. This
-document describes what renders, at what quality, and how the pieces fit.
-The UI itself (buttons, titles, help cards) stays English; the multilingual
-surface is user content.
+Notes and flashcards accept any text a phone keyboard can produce. This page
+explains what renders, how well, and how the system works. The UI itself
+(buttons, titles, help cards) stays in English. Language support applies to
+your content.
 
-## What works out of the box
+## Included in the firmware
 
-The firmware bakes 8,290 glyphs at three sizes (16 / 24 / 32 px boxes, about
-2.1 MB of flash), covering:
+The firmware ships with 8,290 glyphs at three sizes (16, 24 and 32 px),
+about 2.1 MB of flash:
 
-| script | coverage | source face |
+| script | coverage | font |
 |---|---|---|
-| Thai | full block (87 codepoints) | Loma (TLWG) |
-| Chinese | GB2312 level 1 — the 3,755 most common simplified characters | Noto Sans CJK SC |
-| Japanese | all kana + JIS X 0208 level 1 kanji | Noto Sans CJK (SC style for han) |
-| Korean | KS X 1001 — the 2,350 syllables of practical Korean + jamo | Noto Sans CJK KR |
-| Vietnamese | Latin Extended Additional, precomposed | DejaVu Sans |
-| European | Latin-1 Supplement + Latin Extended-A | DejaVu Sans |
+| Thai | complete (87 characters) | Loma |
+| Chinese | GB2312 level 1, the 3,755 most common simplified characters | Noto Sans CJK SC |
+| Japanese | all kana, plus JIS level 1 kanji | Noto Sans CJK |
+| Korean | KS X 1001, the 2,350 syllables used in practice | Noto Sans CJK KR |
+| Vietnamese | complete | DejaVu Sans |
+| European languages | Latin-1 and Latin Extended-A | DejaVu Sans |
 
-Coverage is derived by round-tripping the standard codecs in the generator,
-not from hand-maintained lists. Anything outside the baked set renders as a
-hollow box — honest about the gap, without derailing the line.
+These sets cover normal everyday text. A character outside them is drawn as
+a small empty box.
 
-## Font packs: full coverage on demand
+## Font packs for full coverage
 
-`tools/make_font_pack.py` builds `.tfp` packs holding a language's **full**
-character set minus what is already baked:
+If you need rare characters, install a font pack. Each pack contains a
+language's full character set, minus what the firmware already includes:
 
 | pack | adds | size |
 |---|---|---|
-| `zh_full.tfp` | the rest of the CJK Unified Ideographs block (15,967 glyphs/size) | 4.3 MB |
-| `ko_full.tfp` | the remaining 8,822 Hangul syllables | 2.3 MB |
-| `ja_full.tfp` | the rest of JIS X 0208 (2,732 glyphs/size) | 0.7 MB |
+| `zh_full.tfp` | 15,967 more Chinese characters | 4.3 MB |
+| `ko_full.tfp` | the remaining 8,822 Korean syllables | 2.3 MB |
+| `ja_full.tfp` | 2,732 more kanji | 0.7 MB |
 
-A pack placed in `/fonts/` on the LittleFS partition is loaded whole into
-PSRAM at boot (`gfx::loadFontPacks()`) and answers lookups behind the baked
-tables. All three packs fit on the filesystem at once. The phone-side install
-flow (upload over the pairing portal) is planned but not yet built; until
-then packs go on over USB or a filesystem image.
+Packs are built with `tools/make_font_pack.py`. A pack copied to `/fonts/`
+on the device's filesystem is loaded into PSRAM at boot and used
+automatically. All three packs fit at the same time. Installing packs from
+the phone over WiFi is planned but not built yet, so for now they have to be
+written over USB.
 
-Pack format (little-endian, all sections 4-aligned): `'TFP1'`, face count,
-then per face a 16-byte header (box, toneDrop, count, bitsLen), sorted
-`uint16` codepoints, 12-byte glyph records matching `IntlGlyph`, and bitmap
-bits.
+## How the text engine works
 
-## The text engine
+ASCII text uses the original bitmap font tables. Everything else uses a
+second set of tables where each glyph stores its own position offset and
+width. This matters for Thai: vowel and tone marks have zero width and a
+negative offset, so they draw on top of the previous letter without any
+special handling.
 
-ASCII stays in the original `UiFont` tables (`fonts_ui.h`). Everything past
-ASCII goes through `fonts_intl` glyphs, which carry what ASCII never needed:
+All text functions read UTF-8. Bad bytes render as `?` instead of breaking
+the rest of the string.
 
-* a **signed left bearing** — Thai combining marks have advance 0 and a
-  negative bearing, so they land back on top of the previous glyph with no
-  special case in the draw loop;
-* a **real advance** separate from the bitmap width;
-* interval-free **sorted-codepoint lookup** (binary search per face).
+There is one Thai-specific rule. A tone mark sits higher when it rides on an
+upper vowel (as in กี่) and lower on a bare consonant (as in ก่). The fonts
+are baked at the higher position, and the font generator measures how far
+the mark must drop in the second case by comparing against a real text
+shaping engine. The result is stored per font size. The study behind this is
+`tools/thai_proof.py`.
 
-`gfx::drawText`, `textWidth` and the wrap code all walk UTF-8 codepoints
-(`uni::next` in `toybox-core/src/tools/unicode.h`); malformed bytes render as
-`?` one byte at a time rather than desynchronising the walk.
-
-**The Thai tone rule** is the one piece of shaping the engine has. A tone mark
-is baked at second-storey height (where it sits over an upper vowel, as in
-กี่); over a bare consonant (ก่) it must come down. The distance is *measured*
-by the generator — it renders one cluster through a real shaping engine and
-through the dumb per-glyph path, takes the difference per face and size, and
-stores it as `toneDrop`. `tools/thai_proof.py` is the study that validated
-this approach against a HarfBuzz reference before any C was written.
-
-**Bold** past ASCII is a one-pixel double-strike; real bold cuts would double
-the tables, and at 235 DPI the difference does not earn the flash.
+Bold for non-ASCII text is drawn by printing the glyph twice with a 1 px
+offset. Real bold fonts would double the flash cost for little visible gain
+at this resolution.
 
 ## Line breaking
 
-Thai and Chinese have no spaces between words. The wrap code (segment
-iterator in `note_md.h`, and the flashcard `wrap()`) breaks:
+Thai and Chinese don't use spaces between words, so the normal break-on-space
+rule doesn't work. The wrap code breaks:
 
-* **CJK** — at any character boundary, except before closing punctuation
-  (、。！？」 and friends — a light kinsoku rule);
-* **Thai** — at cluster boundaries: never before a combining mark, sara am,
-  or the repetition signs. This is the standard embedded fallback; true Thai
-  segmentation needs a dictionary, and breaks can land mid-word. Readable,
-  not perfect;
-* **Korean, Latin** — on spaces, as before.
+- Chinese, Japanese and Korean at any character, except before closing
+  punctuation like 。、！？
+- Thai between letter clusters, but never before a vowel or tone mark
+- everything else on spaces, as usual
 
-Segments split inside a spaceless run carry a `glue` flag so no phantom space
-is drawn or measured at the join.
+Thai breaking is approximate. Proper Thai word breaking needs a dictionary,
+which the firmware doesn't carry, so a line can break mid-word.
 
-## Per-script minimum sizes
+## Minimum sizes
 
-Readability floors live in `scriptFloor()` (`tools_ui.h`) and apply wherever
-user text is drawn — list rows, the top bar, the flashcard size ladder, the
-lock-screen note name, and note body lines:
+Small text that's readable in English can be unreadable in other scripts.
+Thai in a 16 px line comes out to a 9 pt font, which is too small. So the
+firmware enforces minimum sizes wherever your text appears:
 
-* **Thai floors at `TS_LARGE`** (24 px box). Loma metric-fitted into a 16 px
-  box is a 9 pt face — the two mark storeys eat the line — and is not
-  readable. Thai never shrinks below this; layouts spend lines instead.
-* **Han and hangul floor at `TS_MED`** (16 px box); they hold up there at
-  235 DPI but turn to mush in a 12 px line. If real-panel testing shows dense
-  syllables muddy at 16 px, moving hangul to `TS_LARGE` is a one-line change.
-* Note body lines containing Thai or CJK are promoted one step to `TS_LARGE`
-  outright (`bodySize()` in `note_md.h`) — reading is the point there.
+- Thai always renders at 24 px or larger
+- Chinese, Japanese and Korean always render at 16 px or larger
+- note body lines containing Thai or CJK are bumped to 24 px for comfortable
+  reading
 
-Names survive in their own script: `sanitizeName` in both stores passes
-UTF-8 through whole (the filesystem only objects to `/` and control bytes)
-and truncates on codepoint boundaries.
+File names also keep their original script. A note named รายการ stays
+รายการ in the list and in the title bar.
 
-## Regenerating
+## Regenerating the fonts
 
 ```
-python3 tools/make_fonts.py       > src/fonts_ui.h     # ASCII faces
-python3 tools/make_fonts_intl.py                       # writes src/fonts_intl.{h,cpp}
-python3 tools/make_font_pack.py /tmp/packs             # builds the three .tfp packs
-python3 tools/thai_proof.py                            # the rendering study, /tmp/thai/
+python3 tools/make_fonts.py > src/fonts_ui.h
+python3 tools/make_fonts_intl.py
+python3 tools/make_font_pack.py /tmp/packs
 ```
 
-The generators need PIL (with FreeType), fontTools, and the source fonts
-(DejaVu, TLWG Loma, Noto Sans CJK) installed on the build machine.
+The scripts need Python with Pillow and fontTools, plus the DejaVu, Loma and
+Noto Sans CJK fonts installed.
 
-## Known limits
+## Current limitations
 
-* Thai line breaks are cluster-based, not dictionary-based.
-* Codepoints above U+FFFF (emoji, rare ideographs) are not covered.
-* The CrossPoint Reader port maps text onto that firmware's own fonts, which
-  currently have no Thai — Toybox-in-CrossPoint shows boxes for Thai until
-  that host gains a Thai-capable face.
-* A 12 px line asked to draw CJK borrows the 16 px face nudged up 2 px; rare,
-  and only cosmetically imperfect.
+- Thai line breaks can fall mid-word (see above).
+- No characters above U+FFFF, so no emoji.
+- The CrossPoint Reader port uses that firmware's own fonts, which have no
+  Thai. Thai text shows as boxes there.

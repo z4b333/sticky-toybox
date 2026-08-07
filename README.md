@@ -1,95 +1,88 @@
 # Toybox
 
-Games and small tools for the **Seeed reTerminal Sticky** (ESP32-S3, 3.97"
-800×480 monochrome e-paper, GT911 capacitive touch) — the things you reach for
-in an idle moment, driven entirely by tapping the screen.
+Custom firmware for the [Seeed reTerminal Sticky](https://www.seeedstudio.com)
+(ESP32-S3, 3.97" 800×480 e-paper display, capacitive touch). It turns the
+device into a small touch-operated toy box: six games, a few everyday tools,
+and notes you can pin to the screen.
 
-Every screen is laid out **portrait, 480×800** (the device held tall). Rotation
-lives in one place, the display driver's `drawPixel()`, so graphics and text
-rotate together, and touch coordinates are mapped back to match in `touch.cpp`.
+You can flash it from your browser, no tools needed:
+**https://z4b333.github.io/sticky-toybox/**
 
-The user-facing content — notes and flashcards — is **multilingual**: English,
-Thai, Chinese, Korean, Japanese and Vietnamese render out of the box, with
-optional full-coverage font packs for rare characters. See
-[docs/LANGUAGES.md](docs/LANGUAGES.md).
+Notes and flashcards support English, Thai, Chinese, Korean, Japanese and
+Vietnamese. See [docs/LANGUAGES.md](docs/LANGUAGES.md) for details.
 
-*(เอกสารฉบับภาษาไทยเดิมอยู่ที่ [docs/README.th.md](docs/README.th.md))*
+The original Thai readme is at [docs/README.th.md](docs/README.th.md).
 
-## What's on the hub
+## Features
 
-**Play** — Wordle (1,634 answers / 4,667 accepted guesses; win %, streak and a
-guess-distribution chart), Nonogram (5×5 and 10×10, every generated puzzle
-verified logic-solvable, timed with best times, HINT reveals one square),
-2048 (undo, a dashed border marks the newly spawned tile and a one-shot blink
-marks the merge — emphasis first, then stillness, so no e-ink refresh sits
-between the swipe and its result), Sudoku (three difficulties, every puzzle
-generated with a unique solution, per-difficulty solve counts), Battleship
-(8×8, aim then FIRE to commit; a hunt/target AI averaging 40.5 shots of 64, or
-**two devices** over ESP-NOW with hidden fleets), and XO (EASY / HARD /
-2-player, CLASSIC or **3 MARKS** rules).
+**Games**
 
-**3 MARKS** exists because 3×3 XO is nearly always a draw: each side keeps at
-most three marks on the board, and placing a fourth lifts the oldest off (the
-one about to leave is drawn faint a turn ahead, so you can plan around it).
-The board never fills, there are no board-full draws, and the game becomes a
-chase. HARD is negamax with alpha-beta (full-depth in CLASSIC, 6 plies in
-3 MARKS); a host-side test walks the complete game tree to confirm it never
-loses, moving first or second.
+- **Wordle** – 1,634 answers, 4,667 accepted guesses. Tracks win rate, streak
+  and a guess chart.
+- **Nonogram** – 5×5 and 10×10 picture puzzles. Every generated puzzle is
+  checked to be solvable by logic alone. Timed, with best times.
+- **2048** – swipe to merge, with undo. New tiles get a dashed border and
+  merged tiles blink once, so you can see what changed after each move.
+- **Sudoku** – three difficulties. Every puzzle is generated with exactly one
+  solution.
+- **Battleship** – play against the device, or between two devices over
+  ESP-NOW. The AI averages 40.5 shots out of 64.
+- **XO (tic-tac-toe)** – easy, hard, or two players. The optional **3 MARKS**
+  rule keeps only three marks per side on the board. Placing a fourth removes
+  your oldest one, so the game never ends in a full-board draw. Hard mode
+  never loses. This is verified by a test that searches the entire game tree.
 
-**Decide** — coin flip with an all-time tally, dice (D4–D20 drawn as real
-wireframe solids, with count and modifier), random number / card draw, and a
-list picker whose list can come from your phone.
+**Tools**
 
-**Everyday** — countdown/stopwatch timer, Leitner flashcards imported from
-your phone over a QR-joined access point, and notes written or dictated on
-your phone, rendered as Markdown with tappable checkboxes and strikethrough.
-A note can be **pinned**: it becomes the power-off screen (e-paper keeps its
-image with no power — the note stays on the fridge), waking straight back
-into it, ticking lines with a tap and locking again with the power button.
+- Coin flip, dice (D4 to D20, with modifiers), random number, card draw.
+- A list picker. Type the list on the device or send it from your phone.
+- A countdown timer and stopwatch.
+- Flashcards with spaced repetition. Decks are imported from your phone.
+- Notes. Write or dictate them on your phone, then read and tick checkboxes
+  on the device. A note can be pinned so it stays on the screen even when
+  the device is off. E-paper keeps its image without power.
 
-Apps can be hidden from the hub in Settings (the gear in the top bar), which
-also holds sound on/off, "show how to play again", and stats reset. Hiding an
-app keeps everything saved in it.
+The gear icon on the hub opens settings, where you can hide apps, turn sound
+on or off, restore the how-to-play cards, and reset stats.
 
-## Building and flashing
+## Building
+
+The project uses [PlatformIO](https://platformio.org).
 
 ```
-pio run                    # build (PlatformIO, pioarduino ESP32 platform)
+pio run                    # build
 pio run -t upload          # flash over USB-C
 pio device monitor -b 115200
 ```
 
-A prebuilt image is committed at `prebuilt/toybox_full.bin` for flashing
-without a toolchain (app offset 0x10000, partition table
-`partitions_toybox.csv`).
+If you don't want to install a toolchain, use the web flasher above, or flash
+the prebuilt image directly:
 
-The partition map is a single 4 MB app slot plus an **11.9 MB LittleFS**
-filesystem — this firmware has no OTA, and the filesystem holds notes,
-flashcard decks and downloadable font packs.
+```
+esptool --chip esp32s3 write_flash 0x0 docs/firmware/toybox-full.bin
+```
 
-First time on real hardware? Follow [docs/BRINGUP.md](docs/BRINGUP.md).
+The partition table (`partitions_toybox.csv`) has one 4 MB app slot and an
+11.9 MB LittleFS filesystem for notes, decks and font packs. There is no OTA.
 
-## Testing without the device
+Before running on real hardware for the first time, read
+[docs/BRINGUP.md](docs/BRINGUP.md).
 
-Nothing here has to be judged on hardware. Two host-side programs cover logic
-and pixels:
+## Testing
 
-**Logic tests** — `test/host/test_logic.cpp`: the nonogram line solver and 100
-generated puzzles (all logic-solvable, all matching their solution), Wordle
-scoring including repeated letters, 2048 sliding/merging, the picker's list
-codec, XO rules and the full game-tree proof for HARD, Battleship rules, AI
-and the two-device duel protocol including dropped packets, and the Sudoku
-generator (every generated puzzle re-solved to confirm uniqueness).
+Everything can be tested on a PC. There are two host-side programs in
+`test/host/`:
 
-**Screen previews** — `test/host/host_preview.cpp` builds the firmware against
-a mock panel, drives the same `Toybox` object through the same host seam,
-renders **every screen to an image**, and runs guards over the results: hub
-tap routing under both visibility masks, the settings flow, note taps landing
-in the Markdown, the pinned lock screen, tool lifecycle under repeated
-open/close, help-card gating, record clears, script width sanity, multilingual
-note and flashcard rendering, Thai name survival, font-pack installation, and
-a **text-overflow detector** — on the device, text past the panel edge is
-clipped silently; here it fails the run, named by screen.
+`test_logic.cpp` covers game logic: the nonogram generator and solver, Wordle
+scoring, 2048 moves, Sudoku uniqueness, Battleship rules and its network
+protocol, and the XO game-tree proof.
+
+`host_preview.cpp` builds the firmware against a fake display, renders every
+screen to an image file, and checks the results. It verifies tap routing,
+the settings flow, note editing, the pinned screen, multilingual rendering,
+font pack loading, and that no text runs off the edge of the panel. On the
+real device, text past the edge is clipped silently. Here it fails the test
+run instead.
 
 ```
 cd test/host
@@ -101,62 +94,50 @@ g++ -std=gnu++17 -O2 -w -DTOYBOX_HOST -I . -I mock -I ../../src \
   ../../toybox-core/src/settings.cpp ../../toybox-core/src/wordle.cpp \
   ../../toybox-core/src/nonogram.cpp ../../toybox-core/src/game2048.cpp \
   ../../toybox-core/src/xo.cpp -o preview
-./preview        # writes preview_NN_<screen>.pgm + prints guard results
+./preview
 ```
 
-Adding `-DTOYBOX_CP_FONTS` re-renders every screen with the CrossPoint
-Reader's UI faces (up to twice as tall) to prove the shared core survives a
-different host's metrics. Reference renders live in `docs/screens/`. The
-phone-side picker page has its own Chromium-driven test in `test/web/`.
+Build with `-DTOYBOX_CP_FONTS` to render all screens with the CrossPoint
+Reader's fonts instead. This checks that the shared code still lays out
+correctly under a different host's font metrics. Sample renders are in
+`docs/screens/`.
 
 ## Text sizes
 
-The panel is 235 DPI, so pixel sizes translate directly to physical size:
+The display is 235 DPI, so pixel sizes map directly to physical sizes:
 
-| | box | real size | used for |
+| size | box | on screen | used for |
 |---|---|---|---|
-| `TS_HUGE` | 32 px | 3.4 mm | scores, dice totals, headline numbers |
-| `TS_LARGE` | 24 px | 2.6 mm | primary buttons, screen titles |
-| `TS_MED` | 16 px | 1.7 mm | body text, captions, secondary buttons |
-| `TS_SMALL` | 12 px | 1.3 mm | one-word labels and footnotes only |
+| `TS_HUGE` | 32 px | 3.4 mm | scores and large numbers |
+| `TS_LARGE` | 24 px | 2.6 mm | primary buttons, titles |
+| `TS_MED` | 16 px | 1.7 mm | body text and captions |
+| `TS_SMALL` | 12 px | 1.3 mm | short labels only |
 
-ASCII draws from proportional DejaVu faces baked at each box, with real bold
-cuts rather than a smeared regular. Non-Latin scripts have **per-script
-minimum sizes** — Thai never renders below `TS_LARGE`, han and hangul never
-below `TS_MED` — enforced by `scriptFloor()` wherever user text is drawn.
-The full text-engine story is in [docs/LANGUAGES.md](docs/LANGUAGES.md).
+Some scripts have a minimum size for readability: Thai never renders below
+24 px, and Chinese, Japanese and Korean never below 16 px. See
+[docs/LANGUAGES.md](docs/LANGUAGES.md).
 
-## Repository layout
+## Project layout
 
 ```
-src/               the firmware shell: panel driver, touch, buzzer, power
-                   latch, the loop, and the StickyHost/StickyCanvas seam
-src/fonts_ui.h     generated ASCII faces (DejaVu, 4 sizes, regular + bold)
-src/fonts_intl.*   generated international faces (6 scripts, 3 sizes)
-toybox-core/       everything above the seam: hub, settings, all 13 apps —
-                   consumed as a PlatformIO library, and built unchanged by
-                   the CrossPoint Reader port
-tools/             font generators (make_fonts.py, make_fonts_intl.py,
-                   make_font_pack.py) and the Thai rendering study
-                   (thai_proof.py) that shaped the text engine
-test/host/         logic tests + the preview harness and its guards
-test/web/          Chromium test for the phone-side picker page
-docs/              documentation and reference screen renders
-prebuilt/          flashable firmware image from the current source
+src/            hardware layer: display, touch, buzzer, power, main loop
+toybox-core/    all apps and screens, hardware independent
+tools/          font generators and the Thai rendering study
+test/host/      logic tests and the screen preview harness
+test/web/       browser test for the phone-side picker page
+docs/           documentation, screen renders, and the web flasher page
+prebuilt/       flashable firmware image
 ```
 
-## Porting
+`toybox-core/` only talks to two small interfaces (a canvas and a host), so
+it can be embedded in other firmware. The CrossPoint Reader port does this in
+about 110 lines. See [docs/PORTING.md](docs/PORTING.md).
 
-`toybox-core/` draws through two small interfaces — `ToolsCanvas` (pixels and
-text) and `ToolsHost` (prefs, refresh, beeper, navigation) — and includes no
-display or input headers. The CrossPoint Reader port implements that seam over
-its `GfxRenderer` in about 110 lines and builds this directory unchanged. To
-put Toybox inside another firmware, see [docs/PORTING.md](docs/PORTING.md).
+## Known limitations
 
-## Hardware caveat
-
-Panel scan direction and touch orientation follow community bring-up data,
-not yet verified on this project's own hardware. If the image comes up
-mirrored or upside down on a real device, adjust the scan direction in
-`epd.cpp` (the TB bits of command 0x01) and the flips in `touch.cpp` —
-and see [docs/BRINGUP.md](docs/BRINGUP.md) for the full first-boot checklist.
+- Nothing has been tested on real hardware yet. Display orientation and touch
+  mapping come from community bring-up notes. If the image is mirrored or
+  flipped on your device, see the notes in `epd.cpp` and `touch.cpp`.
+- Thai line breaking works at character-cluster level, not word level, so a
+  line can break in the middle of a word.
+- Characters above U+FFFF (such as emoji) are not supported.

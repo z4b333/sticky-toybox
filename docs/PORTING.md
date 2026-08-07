@@ -1,79 +1,77 @@
-# Porting Toybox into another firmware
+# Porting Toybox to another firmware
 
-`toybox-core/` is the whole product — hub, settings, four games, Battleship,
-eight tools, Unicode text rules — and it includes no display, touch or board
-headers. A host firmware supplies two small interfaces and owns the loop; the
-core never learns which firmware it is running in. The standalone Sticky
-firmware (`src/sticky_host.*`) and the CrossPoint Reader port
-(`src/activities/toybox/` in that repository, ~110 lines) are the two
-existing hosts, and either is a usable template.
+All apps and screens live in `toybox-core/`, which has no display, touch or
+board code. It draws through two small interfaces. To embed Toybox in
+another firmware you implement those interfaces and forward input to it.
+There are two working examples: the standalone firmware in this repository
+(`src/sticky_host.*`) and the CrossPoint Reader port, which is about 110
+lines.
 
-## What a host provides
+## The two interfaces
 
-**`ToolsCanvas`** (`toybox-core/src/tools/tools_ui.h`) — pixels and text:
-`width/height`, `clear`, `fillRect/drawRect/drawLine/fillCircle/drawCircle`,
-`text/textWidth/textHeight` for the four `TSize` buckets, and optionally
-`textPad()` reporting the blank space glyphs leave in their box, which the
-core uses to centre big single characters on their ink (leave it zero and
-centring falls back to the box). Layouts assume a **480×800 portrait**
-canvas; the core's `chrome.h` hardcodes `SCREEN_W/H` to match.
+Both are defined in `toybox-core/src/tools/tools_ui.h`.
 
-**`ToolsHost`** — everything else: `canvas()`, `prefs()` (an ESP32 Arduino
-`Preferences`), `refresh(full)` (re-render the active screen and push it to
-the panel; full = the slow, ghost-clearing refresh — the Sticky host calls
-`toybox.render()` then `displayFull/Partial`), `beep(kind)` (0 tap, 1
-confirm, 2 reject, 3 alarm), `topBar(title, withHelp)` and the matching
-`isBackTap/isHelpTap`, `contentTop()`, `canExit()/exit()` (whether there is
-anything above Toybox to leave to — the hub only draws its BACK button when
-there is), and `soundOn/setSoundOn` (sound belongs to the host; a reader has
-its own idea about it).
+**ToolsCanvas** is drawing: width and height, clear, rectangles, lines,
+circles, and text at four sizes (`TS_SMALL` to `TS_HUGE`). Layouts assume a
+480×800 portrait canvas. The optional `textPad()` method reports the empty
+space around glyphs so large single characters can be centered on their ink.
+If you don't implement it, centering falls back to the text box, which is
+fine for most fonts.
 
-## Wiring it up
+**ToolsHost** is everything else:
 
-1. Consume the directory as a PlatformIO library:
-   `lib_deps = Toybox=symlink://toybox-core` (the CrossPoint port points the
-   symlink at a checkout of this repository).
-2. Implement the two interfaces.
-3. Drive the singleton:
+- `canvas()` and `prefs()` (an Arduino `Preferences` object)
+- `refresh(full)` – re-render the current screen and push it to the panel.
+  `full` means the slow flicker refresh that clears ghosting.
+- `beep(kind)` – 0 tap, 1 confirm, 2 reject, 3 alarm
+- `topBar(title)`, `isBackTap()`, `isHelpTap()`, `contentTop()`
+- `canExit()` and `exit()` – whether there is something above Toybox to
+  return to. The hub only shows a BACK button when there is.
+- `soundOn()` / `setSoundOn()` – sound settings belong to the host
 
-```cpp
-toybox.begin(myHost);          // once; nothing is drawn yet
-myHost.refresh(true);          // first paint
+## Wiring
 
-// in the loop:
-toybox.onTap(x, y);            // logical portrait coordinates
-toybox.onSwipe(dx, dy);        // 2048 uses swipes
-if (toybox.wantsTick()) toybox.tick();   // timers, pairing servers
-toybox.atHub();                // physical back button: leave app vs leave Toybox
+Add the library and drive the singleton:
+
+```
+lib_deps = Toybox=symlink://toybox-core
 ```
 
-Apps are constructed when opened and destroyed when left; an idle Toybox
-costs a pointer, which matters in a host that is usually busy being
-something else.
+```cpp
+toybox.begin(myHost);        // once, draws nothing yet
+myHost.refresh(true);        // first paint
 
-## What travels and what doesn't
+// in your loop:
+toybox.onTap(x, y);
+toybox.onSwipe(dx, dy);      // 2048 uses swipes
+if (toybox.wantsTick()) toybox.tick();
+toybox.atHub();              // for a physical back button
+```
 
-State (NVS namespace `"toybox"`, LittleFS files for notes and decks) follows
-the ESP32 Arduino APIs, so any ESP32 host inherits it. Fonts do **not**
-travel: the core asks the canvas to draw text and the host answers with
-whatever faces it has. The standalone firmware's non-Latin support
-(`src/fonts_intl.*`, see LANGUAGES.md) lives in its canvas, not in the core —
-a new host needs its own answer for scripts beyond what its fonts cover
-(CrossPoint currently has none for Thai). The core's Unicode *rules* — UTF-8
-walking, line breaking, per-script size floors, name sanitising — do travel,
-since they live in `toybox-core`.
+Apps are created when opened and destroyed when closed, so Toybox costs
+almost nothing while idle. That matters when the host firmware is usually
+busy being something else, like an e-reader.
 
-Input is tap-first. A buttons-only host would need a focus/cursor layer that
-does not exist yet; the hooks to build it against are `hub.h`'s tile table
-and each app's tap handler.
+## What carries over and what doesn't
 
-## Keeping a port honest
+Settings and files use standard ESP32 APIs (NVS and LittleFS), so they work
+on any ESP32 host.
 
-The preview harness renders every screen and runs behavioral guards without
-hardware (see README). Its `-DTOYBOX_CP_FONTS` build exists precisely for
-ports: it re-renders all screens with the CrossPoint fonts (up to twice the
-line height) and re-runs every guard, which is how this codebase keeps one
-layout working under two hosts' metrics. A new port with very different
-fonts deserves the same treatment: bake its faces into the harness format
-(`tools/make_fonts_cp.py` is the worked example) and look at the pictures
-before flashing anything.
+Fonts do not carry over. The core asks the canvas to draw text, and the
+host draws it with whatever fonts it has. The multilingual support in this
+repository lives in the standalone firmware's font tables, not in the core.
+A new host needs its own fonts for any script beyond ASCII. The text rules
+themselves (UTF-8 handling, line breaking, minimum sizes) are in the core
+and work everywhere.
+
+Input is touch only. A buttons-only device would need a cursor or focus
+system, which doesn't exist yet.
+
+## Verifying a port
+
+The preview harness in `test/host/` renders every screen and runs checks
+without hardware. It can also be built with a different font set
+(`-DTOYBOX_CP_FONTS`) to check that layouts survive other font metrics.
+If your host's fonts differ a lot, bake them into the harness format
+(`tools/make_fonts_cp.py` shows how) and review the rendered screens before
+flashing.
