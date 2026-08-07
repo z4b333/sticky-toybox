@@ -1,0 +1,56 @@
+// The frame around every screen: the top bar, and the geometry its two buttons
+// occupy. Drawn entirely through the canvas, so it belongs to the core rather
+// than to either firmware.
+#pragma once
+#include "tools/decor.h"
+#include "tools/tools_ui.h"
+
+// Both hosts drive the same 3.97" panel, held portrait. The layouts here are
+// tuned to these numbers rather than to a runtime size, which is why they read
+// as pixel constants throughout.
+constexpr int SCREEN_W = 480, SCREEN_H = 800;
+
+constexpr int TOPBAR_H = 40;
+constexpr int BACK_W = 110;
+constexpr int HELP_W = 56;
+
+inline void drawTopBar(ToolsCanvas& c, const char* title, bool withHelp = false) {
+  const int w = c.width();
+  c.fillRect(0, 0, w, TOPBAR_H, false);
+  c.fillRect(0, TOPBAR_H - 2, w, 2, true);
+  c.button(6, 4, BACK_W - 12, TOPBAR_H - 10, "< HUB", false, TS_MED);
+  // Only drawn where something is actually behind it, so a "?" always means
+  // "there are rules here" rather than sometimes doing nothing.
+  if (withHelp) c.button(w - HELP_W + 6, 4, HELP_W - 12, TOPBAR_H - 10, "?", false, TS_MED);
+
+  // Keep the centred title clear of the back button on the narrow portrait bar.
+  // A Thai title cannot take the shrink-to-small escape -- below TS_LARGE it is
+  // not readable at all -- so it starts at its floor and gives up tracking
+  // instead of size when the bar gets tight.
+  const int room = w - 2 * BACK_W - 8;
+  TSize sz = scriptFloor(title, TS_MED);
+  int sp = 2;
+  if (c.textTrackedWidth(title, sz, false, sp) > room) sp = 0;
+  if (c.textTrackedWidth(title, sz, false, sp) > room && sz == TS_MED) {
+    sz = TS_SMALL;
+    sp = 1;
+  }
+  c.textTrackedCentered(w / 2, (TOPBAR_H - c.textHeight(sz)) / 2, title, sz, true, false, sp);
+
+  // A diamond either side of the title. Two marks and nothing else: enough to
+  // stop the bar reading as a form field, small enough that a long title simply
+  // squeezes them out rather than colliding with them.
+  const int half = c.textTrackedWidth(title, sz, false, sp) / 2;
+  if (w / 2 - half - BACK_W - 8 >= 26)
+    for (int side = -1; side <= 1; side += 2)
+      decor::diamond(c, w / 2 + side * (half + 14), TOPBAR_H / 2 - 1, 4, true);
+}
+
+inline bool tappedBack(int x, int y) { return tHit(x, y, 0, 0, BACK_W, TOPBAR_H); }
+inline bool tappedHelp(int x, int y, int screenW) {
+  return tHit(x, y, screenW - HELP_W, 0, HELP_W, TOPBAR_H);
+}
+
+inline bool inRect(int px, int py, int x, int y, int w, int h) {
+  return tHit(px, py, x, y, w, h);
+}

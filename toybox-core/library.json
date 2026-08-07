@@ -1,0 +1,8 @@
+{
+  "name": "Toybox",
+  "version": "1.0.0",
+  "description": "Games and small tools that draw through ToolsCanvas, with no display or input code of their own. Built into the standalone Sticky firmware and into the CrossPoint Reader port from this one source.",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "build": { "srcFilter": ["+<*>"] }
+}
