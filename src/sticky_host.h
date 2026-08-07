@@ -1,0 +1,98 @@
+// The standalone firmware's half of the seam: it draws with Epd + gfx, keeps
+// its settings in its own NVS namespace, and beeps with the on-board buzzer.
+// Everything above this file is shared with the CrossPoint port.
+#pragma once
+#include <Preferences.h>
+
+#include "board_pins.h"
+#include "epd.h"
+
+#include "buzzer.h"
+#include "chrome.h"
+#include "gfx.h"
+#include "toybox.h"
+
+class StickyCanvas : public ToolsCanvas {
+ public:
+  int width() const override { return EPD_W; }
+  int height() const override { return EPD_H; }
+  void clear() override { epd.clear(); }
+  void fillRect(int x, int y, int w, int h, bool black) override {
+    epd.fillRect(x, y, w, h, black ? 0 : 1);
+  }
+  void drawRect(int x, int y, int w, int h, int t, bool black) override {
+    epd.drawRect(x, y, w, h, black ? 0 : 1, t);
+  }
+  void drawLine(int x0, int y0, int x1, int y1, int t, bool black) override {
+    epd.drawLine(x0, y0, x1, y1, black ? 0 : 1, t);
+  }
+  void fillCircle(int cx, int cy, int r, bool black) override {
+    epd.fillCircle(cx, cy, r, black ? 0 : 1);
+  }
+  void drawCircle(int cx, int cy, int r, int t, bool black) override {
+    epd.drawCircle(cx, cy, r, black ? 0 : 1, t);
+  }
+  void text(int x, int y, const char* s, TSize sz, bool black, bool bold) override {
+    gfx::drawText(x, y, s, scaleOf(sz), black ? 0 : 1, bold);
+  }
+  int textWidth(const char* s, TSize sz, bool bold) const override {
+    return gfx::textWidth(s, scaleOf(sz), bold);
+  }
+  int textHeight(TSize sz) const override { return gfx::textHeight(scaleOf(sz)); }
+  void textPad(const char* s, TSize sz, int& l, int& r, int& t, int& b) const override {
+    gfx::textInk(s, scaleOf(sz), false, 0, l, r, t, b);
+  }
+
+ private:
+  // The four buckets are pixel heights now, not multipliers.
+  static int scaleOf(TSize sz) {
+    switch (sz) {
+      case TS_SMALL: return 12;
+      case TS_LARGE: return 24;
+      case TS_HUGE: return 32;
+      default: return 16;
+    }
+  }
+};
+
+class StickyHost : public ToolsHost {
+ public:
+  ToolsCanvas& canvas() override { return _canvas; }
+  Preferences& prefs() override;
+  void refresh(bool full) override {
+    epd.clear();
+    toybox.render(_canvas);
+    if (full)
+      epd.displayFull();
+    else
+      epd.displayPartial();
+  }
+  void beep(uint8_t kind) override;
+  void goHub() override { toybox.goHub(); }
+  void topBar(const char* t, bool withHelp) override { drawTopBar(_canvas, t, withHelp); }
+  bool isHelpTap(int x, int y) const override { return tappedHelp(x, y, EPD_W); }
+  bool isBackTap(int x, int y) const override { return tappedBack(x, y); }
+  int contentTop() const override { return TOPBAR_H + 4; }
+  bool soundOn() const override { return buzzer::enabled(); }
+  void setSoundOn(bool on) override;
+
+  ToolsCanvas& sharedCanvas() { return _canvas; }
+
+#ifdef TOYBOX_HOST
+  // The standalone firmware is the whole device, so it never offers a way out.
+  // The preview flips this to render the hub as it will look inside the reader.
+  bool canExit() const override { return _canExit; }
+  void exit() override { _exited = true; }
+  void hostSetCanExit(bool on) { _canExit = on; }
+  bool hostExited() const { return _exited; }
+  void hostClearExited() { _exited = false; }
+#endif
+
+ private:
+  StickyCanvas _canvas;
+#ifdef TOYBOX_HOST
+  bool _canExit = false, _exited = false;
+#endif
+};
+
+extern StickyHost stickyHost;

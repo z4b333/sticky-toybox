@@ -1,0 +1,11 @@
+# Toybox partition map (16 MB).
+#
+# One app slot, no OTA pair: this firmware updates over USB, and the second
+# slot's 6.5 MB is worth far more as filesystem. LittleFS gets 11.9 MB so the
+# full-coverage font packs (zh 4.3 MB + ko 2.3 MB + ja 0.7 MB), notes and
+# flashcard decks all fit at once with room left over.
+# Name,     Type, SubType, Offset,   Size
+nvs,        data, nvs,     0x9000,   0x5000
+phy_init,   data, phy,     0xe000,   0x1000
+factory,    app,  factory, 0x10000,  0x400000
+spiffs,     data, spiffs,  0x410000, 0xBF0000

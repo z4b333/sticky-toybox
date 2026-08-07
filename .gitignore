@@ -1,0 +1,7 @@
+.pio/
+test/host/preview
+test/host/preview_cp
+test/host/preview_cp_asan
+test/host/test_logic
+test/host/*.pgm
+__pycache__/

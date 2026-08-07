@@ -1,0 +1,10 @@
+{
+  "name": "QRCode",
+  "version": "0.0.1",
+  "description": "QR code generator for embedded targets (vendored so the project builds offline).",
+  "keywords": "qrcode, qr",
+  "authors": [{ "name": "Richard Moore", "url": "https://github.com/ricmoo/QRCode" }],
+  "license": "MIT",
+  "frameworks": "arduino",
+  "platforms": "*"
+}
