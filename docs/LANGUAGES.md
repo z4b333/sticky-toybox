@@ -33,11 +33,15 @@ language's full character set, minus what the firmware already includes:
 | `ko_full.tfp` | the remaining 8,822 Korean syllables | 2.3 MB |
 | `ja_full.tfp` | 2,732 more kanji | 0.7 MB |
 
-Packs are built with `tools/make_font_pack.py`. A pack copied to `/fonts/`
-on the device's filesystem is loaded into PSRAM at boot and used
-automatically. All three packs fit at the same time. Installing packs from
-the phone over WiFi is planned but not built yet, so for now they have to be
-written over USB.
+The easiest way to install packs is the web flasher: each language is a
+checkbox, and any combination can be selected. Each pack has its own flash
+partition (see `partitions_toybox.csv`) and is written there directly. The
+firmware memory-maps installed packs straight from flash, so they cost no
+RAM. An empty partition is simply skipped.
+
+Packs are built with `tools/make_font_pack.py`. As an alternative to the
+flasher, a pack file copied to `/fonts/` on the device's filesystem is also
+picked up at boot.
 
 ## How the text engine works
 

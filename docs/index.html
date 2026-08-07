@@ -37,6 +37,10 @@
     margin: 8px 0 40px;
   }
   .variants { margin: 0 0 20px; display: grid; gap: 8px; }
+  .varhead {
+    font-size: 13px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--muted); margin-bottom: 4px;
+  }
   .variant {
     display: flex; gap: 12px; align-items: flex-start;
     border: 1px solid var(--line); border-radius: 10px;
@@ -112,15 +116,22 @@
   Sticky. Install it straight from this page.</p>
 
   <div class="variants">
+    <p class="varhead">Optional language packs</p>
     <label class="variant">
-      <input type="radio" name="variant" value="manifest.json" checked>
-      <span><strong>Standard</strong><br>
-      <small>3.4 MB. Covers everyday text in all six languages.</small></span>
+      <input type="checkbox" name="pack" value="zh">
+      <span><strong>Chinese</strong><br>
+      <small>+4.2 MB. Common characters are already included; this adds the
+      rare ones.</small></span>
     </label>
     <label class="variant">
-      <input type="radio" name="variant" value="manifest-fonts.json">
-      <span><strong>With full language packs</strong><br>
-      <small>16 MB. Adds every rare Chinese, Japanese and Korean character.</small></span>
+      <input type="checkbox" name="pack" value="ko">
+      <span><strong>Korean</strong><br>
+      <small>+2.3 MB. Adds every possible syllable.</small></span>
+    </label>
+    <label class="variant">
+      <input type="checkbox" name="pack" value="ja">
+      <span><strong>Japanese</strong><br>
+      <small>+0.7 MB. Adds the full kanji set.</small></span>
     </label>
   </div>
 
@@ -168,12 +179,34 @@
   </footer>
 </main>
 <script>
-  document.querySelectorAll('input[name="variant"]').forEach(function (r) {
-    r.addEventListener('change', function () {
-      document.querySelector('esp-web-install-button')
-        .setAttribute('manifest', this.value);
+  // The install button reads a manifest URL. Base firmware is always included;
+  // each checked pack adds one more file, written to that pack's own flash
+  // partition. The combined manifest is generated here and served as a blob.
+  var OFFSETS = { zh: 0x410000, ko: 0x840000, ja: 0xa90000 };
+  var lastUrl = null;
+  function updateManifest() {
+    var parts = [{ path: new URL('firmware/toybox-full.bin', location.href).href, offset: 0 }];
+    document.querySelectorAll('input[name="pack"]:checked').forEach(function (c) {
+      parts.push({
+        path: new URL('firmware/' + c.value + '_full.tfp', location.href).href,
+        offset: OFFSETS[c.value]
+      });
     });
+    var manifest = {
+      name: 'Toybox',
+      version: '1.0',
+      new_install_prompt_erase: false,
+      builds: [{ chipFamily: 'ESP32-S3', parts: parts }]
+    };
+    if (lastUrl) URL.revokeObjectURL(lastUrl);
+    lastUrl = URL.createObjectURL(
+      new Blob([JSON.stringify(manifest)], { type: 'application/json' }));
+    document.querySelector('esp-web-install-button').setAttribute('manifest', lastUrl);
+  }
+  document.querySelectorAll('input[name="pack"]').forEach(function (c) {
+    c.addEventListener('change', updateManifest);
   });
+  updateManifest();
 </script>
 <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
 </body>

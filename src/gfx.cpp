@@ -5,6 +5,11 @@
 #include "board_pins.h"
 #include "tools/tiny_fs.h"
 
+#ifndef TOYBOX_HOST
+#include <esp_partition.h>
+#include <spi_flash_mmap.h>
+#endif
+
 // The preview harness can swap in CrossPoint's four UI faces (23/24/29/51 px
 // against the 12/16/24/32 these layouts were drawn for) to render every screen
 // the way the reader port would. Same tables, same code path -- only the glyphs
@@ -333,6 +338,28 @@ bool registerPack(char* blob, size_t len) {
 }  // namespace
 
 int loadFontPacks() {
+#ifndef TOYBOX_HOST
+  // Raw pack partitions, written directly by the web installer. Memory-mapped,
+  // so a pack costs no RAM at all -- the glyph tables read from flash exactly
+  // like the baked ones. An empty partition is all 0xFF and fails the magic
+  // check, which is the whole "is it installed" protocol.
+  static bool partitionsDone = false;
+  if (!partitionsDone) {
+    partitionsDone = true;
+    const char* parts[3] = {"zh_font", "ko_font", "ja_font"};
+    for (int i = 0; i < 3; i++) {
+      const esp_partition_t* p =
+          esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, parts[i]);
+      if (!p) continue;
+      const void* mapped = nullptr;
+      esp_partition_mmap_handle_t h;
+      if (esp_partition_mmap(p, 0, p->size, ESP_PARTITION_MMAP_DATA, &mapped, &h) != ESP_OK)
+        continue;
+      // The handle is deliberately kept for the life of the firmware.
+      if (!registerPack((char*)mapped, p->size)) esp_partition_munmap(h);
+    }
+  }
+#endif
   char names[MAX_PACKS][24];
   const int n = tfs::list("/fonts", ".tfp", &names[0][0], sizeof(names[0]), MAX_PACKS, 23);
   for (int i = 0; i < n; i++) {

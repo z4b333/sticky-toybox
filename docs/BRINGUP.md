@@ -61,9 +61,9 @@ Tap every tile on the hub and check the right app opens.
 - The first boot formats the filesystem. This takes a few seconds, once.
 - The notes and flashcards apps create sample content. Check both open.
 - Reboot and confirm stats and content survive.
-- If font packs are installed in `/fonts/`, the boot log should count
-  3 faces per pack, and rare characters should render instead of showing
-  boxes.
+- If font packs were selected in the web flasher (or copied to `/fonts/`),
+  the boot log should count 3 faces per pack, and rare characters should
+  render instead of showing boxes.
 
 ## 6. Wireless (needs a phone or second device)
 
