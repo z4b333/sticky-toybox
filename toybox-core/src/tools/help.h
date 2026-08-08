@@ -46,8 +46,11 @@ inline void suppress(Preferences& p, const char* game) {
   p.putBool(k, true);
 }
 
-inline void render(ToolsCanvas& c, const Text& t) {
-  c.textCentered(c.width() / 2, 46, "HOW TO PLAY", TS_LARGE, true, true);
+// The heading is a parameter because not every card is about a game: the
+// flashcards card explains a tool, and "HOW TO PLAY" over a study screen reads
+// like a mistake.
+inline void render(ToolsCanvas& c, const Text& t, const char* heading = "HOW TO PLAY") {
+  c.textCentered(c.width() / 2, 46, heading, TS_LARGE, true, true);
   decor::ornament(c, c.width() / 2, 80, 300, true);
 
   // The buttons are pinned to the bottom where the thumb is, so the emblem and
@@ -169,6 +172,22 @@ inline constexpr Text SHIPS{{
 },
                             false,
                             7};
+
+inline constexpr Text FLASHCARDS{{
+    "Cards come from your phone.",
+    "",
+    "Tap IMPORT, scan the QR to",
+    "join the device's wifi, and",
+    "a page opens where you can",
+    "paste or upload them.",
+    "",
+    "SPACED REPEAT brings the",
+    "cards you found hard back",
+    "sooner. JUST FLIP shuffles",
+    "and keeps nothing.",
+},
+                                 false,
+                                 5};
 
 inline constexpr Text SUDOKU{{
     "Fill every empty square so",

@@ -117,14 +117,18 @@ class RandomTool : public ToolApp {
              _unique, TS_MED);
     c.button(DRAW_NUM.x, DRAW_NUM.y, DRAW_NUM.w, DRAW_NUM.h, "DRAW", true, TS_HUGE);
 
+    // The same block the card side uses, so the two halves of this tool agree
+    // with each other. It also gives the foot of the screen something to do
+    // besides one small centred line.
     if (_histN > 0) {
-      char line[120] = "recent: ";
-      for (int i = 0; i < _histN; i++) {
+      c.drawLine(40, 648, 440, 648, 1, true);
+      c.text(40, 658, "BEFORE THAT", TS_MED, true);
+      const int slots = _histN < 6 ? _histN : 6;
+      for (int i = 0; i < slots; i++) {
         char n[12];
-        snprintf(n, sizeof(n), "%d  ", _hist[i]);
-        strncat(line, n, sizeof(line) - strlen(line) - 1);
+        snprintf(n, sizeof(n), "%d", _hist[i]);
+        c.textCentered(42 + i * 66 + 33, 694, n, TS_LARGE, true);
       }
-      c.textCentered(c.width() / 2, 650, line, TS_MED, true);
     }
   }
 

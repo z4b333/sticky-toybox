@@ -7,18 +7,37 @@
 #pragma once
 #include <esp_random.h>
 
+#include "decor.h"
 #include "flash_qr.h"
+#include "help.h"
 #include "flash_store.h"
 #include "flash_web.h"
 #include "tools_draw.h"
 
 namespace fcui {
 // deck list
-inline constexpr int LIST_X = 20, LIST_Y = 56, LIST_W = 440, ROW_H = 46;
+inline constexpr int LIST_X = 20, LIST_Y = 56, LIST_W = 440;
 inline constexpr int DEL_W = 34;
 inline constexpr int PANEL_X = 20, PANEL_W = 440;
-inline constexpr TRect IMPORT_BTN{PANEL_X, 448, PANEL_W, 72};
-inline constexpr TRect MODE_BTN{PANEL_X, 548, 300, 52};
+inline constexpr TRect IMPORT_BTN{PANEL_X, 480, PANEL_W, 68};
+// Two buttons for two modes rather than one button that renames itself. The
+// timer and the randomiser already offer their modes this way, and a toggle
+// whose label is the state you are not in is a puzzle every time.
+inline constexpr TRect SRS_BTN{PANEL_X, 584, 216, 54};
+inline constexpr TRect FLIP_BTN{PANEL_X + 224, 584, 216, 54};
+
+// The list has to hold every deck the storage layer allows, and twelve rows at
+// a comfortable height do not fit above the buttons. Rows give up height as
+// they crowd rather than running underneath IMPORT, which is what they used to
+// do past the eighth deck.
+inline constexpr int LIST_BOTTOM = 468;
+inline constexpr int ROW_MAX = 46, ROW_MIN = 34;
+inline int rowH(int n) {
+  if (n <= 0) return ROW_MAX;
+  const int fits = (LIST_BOTTOM - LIST_Y) / n;
+  if (fits > ROW_MAX) return ROW_MAX;
+  return fits < ROW_MIN ? ROW_MIN : fits;
+}
 
 // study
 // The card gets the room. It used to stop 340 px down an 800 px panel, with the
@@ -41,10 +60,15 @@ inline constexpr int QR_X = 110, QR_Y = 140, QR_SIZE = 260;
 inline constexpr TRect ALT_BTN{40, 588, 400, 60};
 inline constexpr TRect DONE_BTN{40, 672, 400, 72};
 
-inline TRect rowRect(int i) { return TRect{LIST_X, LIST_Y + i * ROW_H, LIST_W, ROW_H - 6}; }
-inline TRect delRect(int i) {
-  return TRect{LIST_X + LIST_W - DEL_W - 4, LIST_Y + i * ROW_H + 3, DEL_W, ROW_H - 12};
+inline TRect rowRect(int i, int n) {
+  const int h = rowH(n);
+  return TRect{LIST_X, LIST_Y + i * h, LIST_W, h - 6};
 }
+inline TRect delRect(int i, int n) {
+  const int h = rowH(n);
+  return TRect{LIST_X + LIST_W - DEL_W - 4, LIST_Y + i * h + 3, DEL_W, h - 12};
+}
+inline int listBottom(int n) { return LIST_Y + n * rowH(n); }
 }  // namespace fcui
 
 class FlashTool : public ToolApp {
@@ -63,6 +87,7 @@ class FlashTool : public ToolApp {
     fcard::ensureSampleDeck();
     _srs = prefs().getBool("fc_srs", true);
     _screen = Screen::Decks;
+    _help = !help::suppressed(prefs(), "fc");
     refreshDeckList();
   }
 
@@ -80,7 +105,15 @@ class FlashTool : public ToolApp {
   }
 
   void render(ToolsCanvas& c) override {
-    host().topBar(title());
+    // The four import steps used to be printed under the buttons on the deck
+    // list, permanently, on the screen you see every time you open the app.
+    // They belong on the card the rest of the device already keeps its
+    // instructions on, behind the "?" that is always in the corner.
+    host().topBar(title(), true);
+    if (_help) {
+      help::render(c, help::FLASHCARDS, "HOW IT WORKS");
+      return;
+    }
     switch (_screen) {
       case Screen::Decks: renderDecks(c); break;
       case Screen::Study: renderStudy(c); break;
@@ -104,6 +137,21 @@ class FlashTool : public ToolApp {
       }
       return;
     }
+    if (host().isHelpTap(x, y)) {
+      _help = !_help;
+      host().beep(1);
+      host().refresh(true);
+      return;
+    }
+    if (_help) {
+      const help::Tap t = help::hit(x, y);
+      if (t == help::Tap::None) return;
+      if (t == help::Tap::Never) help::suppress(prefs(), "fc");
+      _help = false;
+      host().beep(1);
+      host().refresh(true);
+      return;
+    }
     switch (_screen) {
       case Screen::Decks: tapDecks(x, y); break;
       case Screen::Study: tapStudy(x, y); break;
@@ -119,13 +167,17 @@ class FlashTool : public ToolApp {
 
   void renderDecks(ToolsCanvas& c) {
     using namespace fcui;
-    if (_deckCount == 0) {
-      c.drawRect(LIST_X, LIST_Y, LIST_W, 4 * ROW_H, 1, true);
-      c.textInBox(LIST_X, LIST_Y, LIST_W, 4 * ROW_H, "no decks yet", TS_MED, true);
-    }
+    const int capH = c.textHeight(TS_MED);
     char buf[40];
+
+    if (_deckCount == 0) {
+      c.drawRect(LIST_X, LIST_Y, LIST_W, LIST_BOTTOM - LIST_Y, 1, true);
+      c.textInBox(LIST_X, LIST_Y, LIST_W, LIST_BOTTOM - LIST_Y, "no decks yet", TS_LARGE, true,
+                  true);
+    }
+
     for (int i = 0; i < _deckCount; i++) {
-      const TRect r = rowRect(i);
+      const TRect r = rowRect(i, _deckCount);
       c.drawRect(r.x, r.y, r.w, r.h, 2, true);
       const TSize nsz = scriptFloor(_decks[i].name, TS_MED);
       c.text(r.x + 10, r.y + (r.h - c.textHeight(nsz)) / 2, _decks[i].name, nsz, true);
@@ -140,65 +192,55 @@ class FlashTool : public ToolApp {
       tdraw::progressBar(c, barX, r.y + (r.h - 16) / 2, barW, 16, permille);
       c.text(barX + barW + 8, r.y + (r.h - c.textHeight(TS_SMALL)) / 2, buf, TS_SMALL, true);
 
-      const TRect d = delRect(i);
+      const TRect d = delRect(i, _deckCount);
       c.drawRect(d.x, d.y, d.w, d.h, 1, true);
       c.textInBox(d.x, d.y, d.w, d.h, "x", TS_MED, true);
     }
 
-    // This half of the screen is the only place in Toybox where captions,
-    // buttons, a rule and a numbered list all stack in one column, and it is
-    // the only place that broke when the same layout was drawn with the
-    // reader's UI faces -- half again as tall as this firmware's, so a caption
-    // that cleared the button below it by 8 px landed 4 px inside it. Below,
-    // every step is measured from the text that precedes it and floored at the
-    // spacing this panel was drawn with: identical here, and it still fits when
-    // the glyphs grow.
-    const int capH = c.textHeight(TS_MED);
-    const auto below = [](int measured, int floorY) { return measured > floorY ? measured : floorY; };
+    // A rule and a count close the list off, so the room left under it reads as
+    // space for more decks rather than as a hole in the middle of the screen.
+    if (_deckCount > 0) {
+      int totalCards = 0;
+      for (int i = 0; i < _deckCount; i++) totalCards += _decks[i].cards;
+      const int y = listBottom(_deckCount) + 6;
+      if (y + capH + 10 < IMPORT_BTN.y) {
+        c.drawLine(PANEL_X, y, PANEL_X + IMPORT_BTN.w, y, 1, true);
+        snprintf(buf, sizeof(buf), "%d deck%s   %d cards", _deckCount,
+                 _deckCount == 1 ? "" : "s", totalCards);
+        c.text(PANEL_X, y + 8, buf, TS_MED, true);
+      }
+    }
 
+    // The caption hangs off the button beneath it rather than the one above:
+    // it labels the import flow, and the gap that has to survive is the one
+    // that would otherwise be an overlap when a taller face is used.
     c.button(IMPORT_BTN.x, IMPORT_BTN.y, IMPORT_BTN.w, IMPORT_BTN.h, "IMPORT", true, TS_LARGE);
-    // Hung off the button beneath it rather than the one above: this caption
-    // labels the import flow, and the gap that has to survive is the one that
-    // would otherwise be an overlap.
-    c.text(PANEL_X, MODE_BTN.y - capH - 2, "scan a QR with your phone", TS_MED, true);
-    c.button(MODE_BTN.x, MODE_BTN.y, MODE_BTN.w, MODE_BTN.h,
-             _srs ? "SPACED REPEAT" : "JUST FLIP", _srs, TS_MED);
+    c.text(PANEL_X, SRS_BTN.y - capH - 6, "scan a QR with your phone", TS_MED, true);
 
-    int y = MODE_BTN.y + MODE_BTN.h + 6;
-    c.text(PANEL_X, y, _srs ? "hard cards come back" : "shuffle and flip", TS_MED, true);
-
-    y = below(y + capH + 4, 632);
-    c.drawLine(PANEL_X, y, c.width() - 20, y, 1, true);
-    y += 8;
-    c.text(PANEL_X, y, "HOW IT WORKS", TS_MED, true);
-
-    y = below(y + capH + 2, 666);
-    const int step = capH + 2 > 26 ? capH + 2 : 26;
-    const char* steps[4] = {"1  tap IMPORT", "2  scan to join wifi",
-                            "3  page opens on phone", "4  paste or upload cards"};
-    for (int i = 0; i < 4; i++) c.text(PANEL_X, y + i * step, steps[i], TS_MED, true);
-
-    int totalCards = 0;
-    for (int i = 0; i < _deckCount; i++) totalCards += _decks[i].cards;
-    snprintf(buf, sizeof(buf), "%d decks  %d cards", _deckCount, totalCards);
-    c.text(PANEL_X, below(y + 3 * step + capH + 4, 770), buf, TS_MED, true);
+    c.button(SRS_BTN.x, SRS_BTN.y, SRS_BTN.w, SRS_BTN.h, "SPACED REPEAT", _srs, TS_MED);
+    c.button(FLIP_BTN.x, FLIP_BTN.y, FLIP_BTN.w, FLIP_BTN.h, "JUST FLIP", !_srs, TS_MED);
+    c.text(PANEL_X, SRS_BTN.y + SRS_BTN.h + 8,
+           _srs ? "hard cards come back until you know them" : "shuffle and flip, nothing kept",
+           TS_MED, true);
   }
 
   void tapDecks(int x, int y) {
     using namespace fcui;
     for (int i = 0; i < _deckCount; i++) {
-      if (delRect(i).hit(x, y)) {
+      if (delRect(i, _deckCount).hit(x, y)) {
         fcard::deleteDeck(_decks[i].name);
         refreshDeckList();
         host().beep(2);
         host().refresh(true);
         return;
       }
-      if (rowRect(i).hit(x, y)) return startStudy(i);
+      if (rowRect(i, _deckCount).hit(x, y)) return startStudy(i);
     }
     if (IMPORT_BTN.hit(x, y)) return openImport();
-    if (MODE_BTN.hit(x, y)) {
-      _srs = !_srs;
+    if (SRS_BTN.hit(x, y) || FLIP_BTN.hit(x, y)) {
+      const bool want = SRS_BTN.hit(x, y);
+      if (want == _srs) return;
+      _srs = want;
       prefs().putBool("fc_srs", _srs);
       host().beep(1);
       host().refresh(false);
@@ -509,13 +551,17 @@ class FlashTool : public ToolApp {
   void renderImportDone(ToolsCanvas& c) {
     using namespace fcui;
     char buf[64];
+    // A confirmation is read once and then dismissed, so it is laid out as one
+    // block sitting above its button rather than as a paragraph pinned to the
+    // top of an otherwise empty panel.
     snprintf(buf, sizeof(buf), "%d", _net.count());
-    tdraw::seg7Centered(c, c.width() / 2, 150, 120, buf, true);
-    c.textCentered(c.width() / 2, 310, "cards added to", TS_LARGE, true, true);
+    tdraw::seg7Centered(c, c.width() / 2, 200, 140, buf, true);
+    c.textCentered(c.width() / 2, 372, "cards added to", TS_LARGE, true, true);
     snprintf(buf, sizeof(buf), "%s", _net.deckName());
-    c.textCentered(c.width() / 2, 352, buf, TS_MED, true, true);
-    c.textCentered(c.width() / 2, 408, "send more from the same page,", TS_MED, true);
-    c.textCentered(c.width() / 2, 434, "or tap DONE", TS_MED, true);
+    c.textCentered(c.width() / 2, 414, buf, TS_LARGE, true, true);
+    decor::ornament(c, c.width() / 2, 472, 300, true);
+    c.textCentered(c.width() / 2, 500, "send more from the same page,", TS_MED, true);
+    c.textCentered(c.width() / 2, 528, "or tap DONE", TS_MED, true);
     c.button(DONE_BTN.x, DONE_BTN.y, DONE_BTN.w, DONE_BTN.h, "DONE", true, TS_LARGE);
   }
 
@@ -533,6 +579,7 @@ class FlashTool : public ToolApp {
   bool _srs = true;
 
   fcard::DeckInfo _decks[fcard::MAX_DECKS] = {};
+  bool _help = false;
   int _deckCount = 0;
 
   char _deckName[fcard::NAME_LEN + 1] = {};

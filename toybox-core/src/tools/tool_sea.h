@@ -264,13 +264,18 @@ class SeaTool : public ToolApp {
     char buf[48];
 
     if (p == Phase::Hosting) {
+      // The code is the whole content of this screen and someone is reading it
+      // out across a room, so it gets the size that implies. Everything else
+      // here is a caption to it.
       c.textCentered(c.width() / 2, 76, "YOUR GAME CODE", TS_MED, true);
       snprintf(buf, sizeof(buf), "%04u", _duel.myCode());
-      tdraw::seg7Centered(c, c.width() / 2, 130, 130, buf, true);
-      c.textCentered(c.width() / 2, 330, "Tell the other player", TS_MED, true);
-      c.textCentered(c.width() / 2, 358, "this number, then have", TS_MED, true);
-      c.textCentered(c.width() / 2, 386, "them tap JOIN A GAME", TS_MED, true);
-      c.textCentered(c.width() / 2, 448, "waiting for a player...", TS_MED, true, true);
+      tdraw::seg7Centered(c, c.width() / 2, 120, 160, buf, true);
+      c.textCentered(c.width() / 2, 340, "Tell the other player", TS_MED, true);
+      c.textCentered(c.width() / 2, 368, "this number, then have", TS_MED, true);
+      c.textCentered(c.width() / 2, 396, "them tap JOIN A GAME", TS_MED, true);
+      decor::ornament(c, c.width() / 2, 452, 300, true);
+      c.textCentered(c.width() / 2, 476, "waiting for a player...", TS_MED, true, true);
+      c.textCentered(c.width() / 2, 516, "keep both devices in the same room", TS_SMALL, true);
     } else if (p == Phase::Browsing || p == Phase::Joining) {
       c.textCentered(c.width() / 2, 76, "GAMES NEARBY", TS_MED, true);
       const int n = _duel.foundCount();

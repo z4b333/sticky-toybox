@@ -200,14 +200,22 @@ class TimerTool : public ToolApp {
     c.button(SW_RESET.x, SW_RESET.y, SW_RESET.w, SW_RESET.h, "RESET", false);
     c.button(SW_LAP.x, SW_LAP.y, SW_LAP.w, SW_LAP.h, "LAP", false);
 
-    char buf[24], t[16];
-    for (int i = 0; i < _lapN; i++) {
-      formatMs(t, sizeof(t), _laps[i]);
-      snprintf(buf, sizeof(buf), "lap %d   %s", i + 1, t);
-      c.text(60 + (i / 3) * 200, 400 + (i % 3) * 30, buf, TS_MED, true);
-    }
+    // The caption belongs to the buttons it explains, not to the bottom of the
+    // panel: it used to sit 250 px below the last lap with nothing in between.
     if (_running && swElapsed() > 60000u)
-      c.textCentered(c.width() / 2, 618, "the display steps every 10s", TS_MED, true);
+      c.textCentered(c.width() / 2, SW_START.y + SW_START.h + 12, "the display steps every 10s",
+                     TS_MED, true);
+
+    if (_lapN > 0) {
+      c.drawLine(40, 412, 440, 412, 1, true);
+      c.text(40, 422, "LAPS", TS_MED, true);
+      char buf[24], t[16];
+      for (int i = 0; i < _lapN; i++) {
+        formatMs(t, sizeof(t), _laps[i]);
+        snprintf(buf, sizeof(buf), "%d   %s", i + 1, t);
+        c.text(56, 464 + i * 44, buf, TS_LARGE, true);
+      }
+    }
   }
 
   void tapStopwatch(int x, int y) {

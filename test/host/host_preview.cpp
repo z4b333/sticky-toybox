@@ -456,6 +456,14 @@ int main() {
   // below are the same on every run.
   hostReseed(42);
 
+  // The settings guard above erases every score, including the guess
+  // distribution. Put one back so the end-of-game screen renders its chart:
+  // with nothing to chart it now draws nothing at all, which is the point of
+  // the change but not the picture worth keeping.
+  prefs.putInt("w_d3", 4);
+  prefs.putInt("w_d4", 5);
+  prefs.putInt("w_d5", 1);
+
   setScreen("help_wordle");
   toybox.open(true, 0);
   g_dumpEnabled = false;
@@ -579,7 +587,21 @@ int main() {
   toybox.open(false, 2);
     quietTap(20 + 112 + 52, 372 + 26);  // 25 min preset (row 1, col 1)
   g_dumpEnabled = true;
-  toybox.onTap(40 + 100, 444 + 33);  // START
+  tapRect(timerui::CD_START);
+
+  // The other half of the same tool. It had never been rendered here, so the
+  // lap list below the clock had never been looked at at all.
+  setScreen("tool_timer_stopwatch");
+  g_dumpEnabled = false;
+  tapRect(timerui::MODE_SW);
+  tapRect(timerui::SW_START);
+  for (int k = 0; k < 3; k++) {
+    delay(37500);  // the mock clock only moves when something asks it to
+    tapRect(timerui::SW_LAP);
+  }
+  delay(12000);
+  g_dumpEnabled = true;
+  stickyHost.refresh(false);  // the stopwatch repaints on its own every 10s
 
   setScreen("tool_random");
   g_dumpEnabled = false;
@@ -672,11 +694,14 @@ int main() {
     free(deck);
   }
 
-  setScreen("tool_flash_decks");
+  setScreen("help_flashcards");
   toybox.open(false, 5);
 
+  setScreen("tool_flash_decks");
+  tapRect(help::OK_BTN);
+
   setScreen("tool_flash_front");
-  toybox.onTap(20 + 180, 56 + 20);  // open the first deck
+  tapRect(fcui::rowRect(0, 3));  // open the first deck
 
   setScreen("tool_flash_back");
   toybox.onTap(240, 220);  // tap the card to reveal
@@ -685,7 +710,7 @@ int main() {
   g_dumpEnabled = false;
   quietTap(0, 0);  // back to the deck list
   g_dumpEnabled = true;
-  toybox.onTap(20 + 220, 448 + 36);  // IMPORT
+  tapRect(fcui::IMPORT_BTN);
 
   setScreen("tool_flash_import_alt");
   tapRect(fcui::ALT_BTN);  // "page didn't open?" -> link QR
@@ -697,6 +722,20 @@ int main() {
   toybox.tick();
   g_dumpEnabled = true;
   toybox.tick();  // stub reports the deck arrived
+
+  // Deleting the last deck is the only way to see an empty list: the sample
+  // deck is recreated on enter(), not on every paint. It had never been drawn.
+  setScreen("tool_flash_empty");
+  g_dumpEnabled = false;
+  tapRect(fcui::DONE_BTN);
+  {
+    using namespace fcard;
+    DeckInfo d[MAX_DECKS];
+    for (int n = listDecks(d, MAX_DECKS); n > 0; n = listDecks(d, MAX_DECKS))
+      tapRect(fcui::delRect(0, n));
+  }
+  g_dumpEnabled = true;
+  stickyHost.refresh(true);
 
   // --- battleship (solo) --------------------------------------------------
   setScreen("help_ships");
@@ -930,8 +969,23 @@ int main() {
     }
     toybox.goHub();
   }
+
+  // ...and the rules card no longer traps you inside a game. It used to sit in
+  // front of "< HUB", so the only way out of a game you had just opened was to
+  // find and press a button on the card first.
+  for (int g = 0; g < 4; g++) {
+    static const char* kKeys[4] = {"h_wrd", "h_non", "h_g20", "h_xo"};
+    prefs.remove(kKeys[g]);  // put the card back up
+    toybox.open(true, g);
+    toybox.onTap(BACK_W / 2, TOPBAR_H / 2);
+    if (toybox.hostInApp()) {
+      printf("BACK FAIL: game %d's rules card swallowed the back tap\n", g);
+      abort();
+    }
+    help::suppress(prefs, kKeys[g] + 2);  // leave it as the guards below expect
+  }
   g_dumpEnabled = true;
-  printf("back button ok (answers below the bar, y<%d, on 9 tools)\n", BAR_TOUCH_H);
+  printf("back button ok (below the bar on 9 tools, past the rules card on 4 games)\n");
 
   // The rules card is only safe to dismiss for ever because the "?" brings it
   // back. Check the whole loop: it blocks the game underneath, it stays gone
@@ -1084,23 +1138,26 @@ int main() {
       quietTap(0, 0);  // out of notes, back to hub
       g_dumpEnabled = true;
       setScreen("tool_flash_intl_front");
+      g_dumpEnabled = false;
       toybox.open(false, 5);
-      FlashTool* ft = static_cast<FlashTool*>(toybox.hostActive());
-      (void)ft;
-      // the new deck's row: decks are listed in tfs order; tap each row until a
-      // study screen appears with a non-latin front. Simpler: row 0.
-      // Find the row whose name is "hanzi" by probing the four rows.
-      for (int row = 0; row < 4; row++) {
-        g_dumpEnabled = false;
-        toybox.onTap(20 + 180, 56 + row * 46 + 18);
-        g_dumpEnabled = true;
-        if (strcmp(toybox.activeTitle(), "hanzi") == 0) break;
-        quietTap(0, 0);  // back to the deck list
+      tapRect(help::OK_BTN);  // every open raises the rules card
+      // Decks are listed in filesystem order, so find "hanzi" by opening rows
+      // until the title matches. rowRect knows how tall a row is at this count.
+      {
+        using namespace fcard;
+        DeckInfo d[MAX_DECKS];
+        const int n = listDecks(d, MAX_DECKS);
+        for (int row = 0; row < n; row++) {
+          tapRect(fcui::rowRect(row, n));
+          if (strcmp(toybox.activeTitle(), "hanzi") == 0) break;
+          toybox.onTap(0, 0);  // back to the deck list
+        }
       }
       if (strcmp(toybox.activeTitle(), "hanzi") != 0) {
         printf("INTL FAIL: could not open the CJK deck\n");
         abort();
       }
+      g_dumpEnabled = true;
       stickyHost.refresh(true);
       setScreen("tool_flash_intl_back");
       toybox.onTap(240, 300);  // flip
@@ -1168,7 +1225,8 @@ int main() {
     // above leaves the how-to-play card armed, and a card swallows the taps
     // this guard is trying to make.
     help::suppress(prefs, "g20");
-    toybox.open(true, 2);  // 2048
+    setScreen("g2048_resumed");  // this open() paints, so give the frame its own name
+    toybox.open(true, 2);        // 2048
     g_dumpEnabled = false;
     toybox.onSwipe(-1, 0);
     toybox.onSwipe(0, -1);

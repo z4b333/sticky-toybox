@@ -244,6 +244,14 @@ void NonogramApp::onWin() {
 }
 
 void NonogramApp::onTap(int x, int y) {
+  // Back comes before the rules card, not after it. A card that swallows
+  // "< HUB" leaves the only way out of the app behind a button you have to
+  // find first, and the sudoku and battleship screens never did that.
+  if (host().isBackTap(x, y)) {
+    host().goHub();
+    return;
+  }
+
   if (host().isHelpTap(x, y)) {
     _help = !_help;
     host().beep(1);
@@ -257,11 +265,6 @@ void NonogramApp::onTap(int x, int y) {
     _help = false;
     host().beep(1);
     host().refresh(true);
-    return;
-  }
-
-  if (host().isBackTap(x, y)) {
-    host().goHub();
     return;
   }
 

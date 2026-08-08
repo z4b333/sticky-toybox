@@ -186,7 +186,7 @@ void WordleApp::render(ToolsCanvas& c) {
            prefs().getInt("w_streak", 0));
   c.text(16, PANEL_Y + 40, buf, TS_MED, true);
 
-  int maxd = 1;
+  int maxd = 0;
   int dist[6];
   for (int i = 0; i < 6; i++) {
     char key[12];
@@ -194,6 +194,10 @@ void WordleApp::render(ToolsCanvas& c) {
     dist[i] = prefs().getInt(key, 0);
     maxd = max(maxd, dist[i]);
   }
+  // Nothing won yet means six identical stubs with a 0 beside each, which is
+  // six rows of noise on the screen you are looking at because you just lost.
+  // The chart earns its space once there is a bar in it.
+  if (maxd == 0) return;
   for (int i = 0; i < 6; i++) {
     const int y = PANEL_Y + 72 + i * 20;
     snprintf(buf, sizeof(buf), "%d", i + 1);
@@ -302,6 +306,14 @@ void WordleApp::keyPressed(char c) {
 }
 
 void WordleApp::onTap(int x, int y) {
+  // Back comes before the rules card, not after it. A card that swallows
+  // "< HUB" leaves the only way out of the app behind a button you have to
+  // find first, and the sudoku and battleship screens never did that.
+  if (host().isBackTap(x, y)) {
+    host().goHub();
+    return;
+  }
+
   if (host().isHelpTap(x, y)) {
     _help = !_help;
     host().beep(1);
@@ -315,11 +327,6 @@ void WordleApp::onTap(int x, int y) {
     _help = false;
     host().beep(1);
     host().refresh(true);
-    return;
-  }
-
-  if (host().isBackTap(x, y)) {
-    host().goHub();
     return;
   }
 
