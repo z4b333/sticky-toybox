@@ -82,6 +82,31 @@ bool bandHit(int x, int y, int headTop, int rowTop, int col, bool firstRow, bool
 }
 }  // namespace
 
+namespace {
+// A small outlined cell with a fill proportional to charge, and a nub on the
+// right. Drawn only when a gauge answered: on a device without one, an empty
+// battery outline would be a lie.
+void drawBattery(const ToolsHost& host, ToolsCanvas& c) {
+  const int pct = host.batteryPercent();
+  if (pct < 0) return;
+  const int w = 34, h = 16, x = c.width() - 20 - w, y = 768;
+  c.drawRect(x, y, w, h, 2, true);
+  c.fillRect(x + w, y + 5, 3, 6, true);           // the nub
+  const int fill = ((w - 6) * (pct < 0 ? 0 : pct > 100 ? 100 : pct)) / 100;
+  if (fill > 0) c.fillRect(x + 3, y + 3, fill, h - 6, true);
+  if (host.charging()) {
+    // A bolt over the cell, so charging reads at a glance even at 100%.
+    decor::triangle(c, x + w / 2 + 3, y - 2, x + w / 2 - 4, y + h / 2 + 1,
+                    x + w / 2 + 2, y + h / 2 + 1, true);
+    decor::triangle(c, x + w / 2 - 3, y + h + 2, x + w / 2 + 4, y + h / 2 - 1,
+                    x + w / 2 - 2, y + h / 2 - 1, true);
+  }
+  char buf[8];
+  snprintf(buf, sizeof(buf), "%d%%", pct);
+  c.text(x - 6 - c.textWidth(buf, TS_SMALL), y + 1, buf, TS_SMALL, true);
+}
+}  // namespace
+
 void HubScreen::render(ToolsHost& host, ToolsCanvas& c) {
 
   c.textTrackedCentered(SCREEN_W / 2, 12, "TOYBOX", TS_HUGE, true, false, 3);
@@ -92,6 +117,7 @@ void HubScreen::render(ToolsHost& host, ToolsCanvas& c) {
     c.textTrackedCentered(SCREEN_W / 2, 360, "every app is hidden", TS_LARGE, true, false, 2);
     c.textCentered(SCREEN_W / 2, 400, "tap the gear to bring some back", TS_MED, true);
     c.text(20, 770, "hold OK 2s = power off", TS_SMALL, true);
+  drawBattery(host, c);
     return;
   }
 
@@ -116,6 +142,7 @@ void HubScreen::render(ToolsHost& host, ToolsCanvas& c) {
   });
 
   c.text(20, 770, "hold OK 2s = power off", TS_SMALL, true);
+  drawBattery(host, c);
 }
 
 HubScreen::Tap HubScreen::hit(const ToolsHost& host, int x, int y) const {

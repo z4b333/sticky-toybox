@@ -92,15 +92,16 @@ void Touch::poll(TouchEvent& ev) {
       int px = rawY, py = rawX;
       px = (PANEL_W - 1) - constrain(px, 0, PANEL_W - 1);
       py = (PANEL_H - 1) - constrain(py, 0, PANEL_H - 1);
-#ifdef TOYBOX_PORTRAIT
       // Inverse of the display transform in epd.cpp, so a tap lands on the
-      // control the user actually sees.
-      const int x = py;
-      const int y = PANEL_W - 1 - px;
-#else
-      const int x = px;
-      const int y = py;
-#endif
+      // control the user actually sees. Kept case-for-case with drawPixel:
+      // if one changes, the other has to.
+      int x, y;
+      switch (_rot) {
+        case 1: x = px; y = py; break;
+        case 2: x = PANEL_H - 1 - py; y = px; break;
+        case 3: x = PANEL_W - 1 - px; y = PANEL_H - 1 - py; break;
+        default: x = py; y = PANEL_W - 1 - px; break;
+      }
       if (!_down) {
         _down = true;
         _downX = x;

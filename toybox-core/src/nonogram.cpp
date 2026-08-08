@@ -33,7 +33,14 @@ void NonogramApp::newPuzzle(int n) {
   _hintsUsed = 0;
   _startMs = millis();
 
-  if (_n == 5) {
+  layoutFor(_n);
+  saveState();
+}
+
+// Grid geometry for a board size. Pulled out of newPuzzle so a restored board
+// gets the same numbers without regenerating anything.
+void NonogramApp::layoutFor(int n) {
+  if (n == 5) {
     _cellPx = 60;
     _gridX = 150;
     _gridY = 170;
@@ -50,11 +57,63 @@ bool NonogramApp::hasRecord() {
   return false;
 }
 
+// A 10x10 grid is twenty minutes of work; losing it to a trip back to the hub
+// is the kind of thing that stops someone opening the app again. The board, the
+// solution and the elapsed time are written out whenever a square changes.
+// NEW 5x5 / NEW 10x10 always generate.
+void NonogramApp::saveState() {
+  struct Saved {
+    uint8_t sol[MAXN][MAXN], cell[MAXN][MAXN];
+    int32_t n, hints, elapsed;
+    uint8_t fillMode, won, pad[2];
+  } s;
+  memset(&s, 0, sizeof(s));
+  memcpy(s.sol, _sol, sizeof(s.sol));
+  memcpy(s.cell, _cell, sizeof(s.cell));
+  s.n = _n;
+  s.hints = _hintsUsed;
+  // Freeze the running clock: on the way back in the stopwatch restarts from
+  // here, so time spent away from the puzzle is not charged to it.
+  s.elapsed = (int32_t)(_elapsed + (_startMs ? millis() - _startMs : 0));
+  s.fillMode = _fillMode ? 1 : 0;
+  s.won = _won ? 1 : 0;
+  prefs().putBytes("n_state", &s, sizeof(s));
+}
+
+bool NonogramApp::loadState() {
+  struct Saved {
+    uint8_t sol[MAXN][MAXN], cell[MAXN][MAXN];
+    int32_t n, hints, elapsed;
+    uint8_t fillMode, won, pad[2];
+  } s;
+  if (prefs().getBytesLength("n_state") != sizeof(s)) return false;
+  if (prefs().getBytes("n_state", &s, sizeof(s)) != sizeof(s)) return false;
+  if (s.won) return false;             // a solved grid has nothing left to do
+  if (s.n != 5 && s.n != 10) return false;
+  bool any = false;
+  for (int r = 0; r < s.n; r++)
+    for (int col = 0; col < s.n; col++)
+      if (s.cell[r][col]) any = true;
+  if (!any) return false;              // an untouched grid: generate a fresh one
+
+  _n = s.n;
+  memcpy(_sol, s.sol, sizeof(_sol));
+  memcpy(_cell, s.cell, sizeof(_cell));
+  _hintsUsed = s.hints;
+  _elapsed = (uint32_t)s.elapsed;
+  _fillMode = s.fillMode != 0;
+  _won = false;
+  _startMs = millis();
+  nono::cluesFromSolution(_sol, _n, _clues);   // cheaper to recompute than to store
+  layoutFor(_n);
+  return true;
+}
+
 void NonogramApp::enter(ToolsHost& h) {
   ToolApp::enter(h);
   _armedClear = false;
   _help = !help::suppressed(prefs(), "non");
-  newPuzzle(_n ? _n : 10);
+  if (!loadState()) newPuzzle(_n ? _n : 10);
 }
 
 bool NonogramApp::checkWin() {
@@ -265,6 +324,7 @@ void NonogramApp::onTap(int x, int y) {
     if (checkWin()) {
       onWin();
     } else {
+      saveState();
       host().refresh(false);
     }
   }

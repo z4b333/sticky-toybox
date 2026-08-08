@@ -45,6 +45,20 @@ The original Thai readme is at [docs/README.th.md](docs/README.th.md).
 The gear icon on the hub opens settings, where you can hide apps, turn sound
 on or off, restore the how-to-play cards, and reset stats.
 
+**Device behaviour**
+
+- 2048, Sudoku and Nonogram remember where you were. Leaving to the hub or
+  powering off keeps the board; NEW always starts fresh.
+- The battery level shows on the hub. Below 3% the device shuts down cleanly
+  rather than risking a half-written screen.
+- It sleeps by itself after five idle minutes, keeping the pinned note on
+  screen. A running timer holds it awake.
+- The pinned note follows the accelerometer, so it stays readable whichever
+  way the magnet ends up. Everything else stays portrait.
+- The sleeping note's footer shows the time and room temperature. The clock
+  is set automatically the first time you save a note from your phone, since
+  the device has no network time.
+
 ## Building
 
 The project uses [PlatformIO](https://platformio.org).
@@ -62,8 +76,9 @@ the prebuilt image directly:
 esptool --chip esp32s3 write_flash 0x0 docs/firmware/toybox-full.bin
 ```
 
-The partition table (`partitions_toybox.csv`) has one 4 MB app slot and an
-11.9 MB LittleFS filesystem for notes, decks and font packs. There is no OTA.
+The partition table (`partitions_toybox.csv`) has one 4 MB app slot, a
+partition for each optional language pack, and a 4.7 MB LittleFS filesystem
+for notes and decks. There is no OTA.
 
 Before running on real hardware for the first time, read
 [docs/BRINGUP.md](docs/BRINGUP.md).
@@ -89,7 +104,7 @@ cd test/host
 g++ -std=gnu++17 -O2 -w -DTOYBOX_HOST -I . -I mock -I ../../src \
   -I ../../toybox-core/src -I ../../lib/QRCode/src \
   host_preview.cpp ../../lib/QRCode/src/qrcode.c ../../src/gfx.cpp \
-  ../../src/fonts_intl.cpp ../../src/sticky_host.cpp \
+  ../../src/fonts_intl.cpp ../../src/sensors.cpp ../../src/sticky_host.cpp \
   ../../toybox-core/src/toybox.cpp ../../toybox-core/src/hub.cpp \
   ../../toybox-core/src/settings.cpp ../../toybox-core/src/wordle.cpp \
   ../../toybox-core/src/nonogram.cpp ../../toybox-core/src/game2048.cpp \
@@ -120,7 +135,7 @@ Some scripts have a minimum size for readability: Thai never renders below
 ## Project layout
 
 ```
-src/            hardware layer: display, touch, buzzer, power, main loop
+src/            hardware layer: display, touch, buzzer, sensors, power, loop
 toybox-core/    all apps and screens, hardware independent
 tools/          font generators and the Thai rendering study
 test/host/      logic tests and the screen preview harness

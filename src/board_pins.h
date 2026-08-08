@@ -36,6 +36,14 @@ constexpr int PIN_BTN_OK   = 4;   // shared with power button
 // --- Buzzer ------------------------------------------------------------------
 constexpr int PIN_BUZZER = 48;    // LEDC-driven
 
+// --- Sensor I2C bus (Wire1) ---------------------------------------------------
+// BQ27220 fuel gauge (0x55), PCF8563 RTC (0x51), SHT40 (0x44), LSM6DS3TR-C
+// (0x6A) all share this bus. GPIO0 is a strapping pin; the bus starts after
+// boot, which is safe.
+constexpr int PIN_SENS_SDA = 1;
+constexpr int PIN_SENS_SCL = 0;
+constexpr int PIN_CHARGE_STATE = 40;  // from the BQ25616 charger
+
 // --- Display geometry --------------------------------------------------------
 // The panel itself is always 800x480 landscape; PANEL_* describe the hardware.
 constexpr int PANEL_W = 800;

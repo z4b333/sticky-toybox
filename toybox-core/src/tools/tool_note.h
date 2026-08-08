@@ -43,6 +43,13 @@ inline TRect delRect(int i) {
 }
 }  // namespace nui
 
+// The clock and thermometer live in the firmware, not in the core, so the
+// pinned screen asks for a formatted line rather than reading any chip itself.
+// A host with no RTC leaves this empty and the footer simply omits it.
+using PinnedStatusFn = int (*)(char* out, int cap);
+inline PinnedStatusFn g_pinnedStatus = nullptr;
+inline void setPinnedStatus(PinnedStatusFn fn) { g_pinnedStatus = fn; }
+
 // The one button on the live pinned screen. Bottom-left, out of the way of the
 // note itself, which owns the rest of the panel.
 inline constexpr TRect PINNED_HUB{20, 748, 110, 44};
@@ -84,7 +91,13 @@ inline bool drawPinnedFullScreen(ToolsCanvas& c, bool live = false) {
     // readable size and hangs from the same bottom margin either way.
     const TSize nsz = scriptFloor(name, TS_SMALL);
     c.text(34, c.height() - 22 - c.textHeight(nsz), name, nsz, true);
-    const char* hint = "press power to wake";
+    // The sleeping panel is the one that stays in view for hours, so it is the
+    // one worth spending the footer on: the time it was last touched, and how
+    // warm the room is. Falls back to the wake hint when the device has no
+    // clock, or has one that has never been set.
+    char status[40];
+    const int n = g_pinnedStatus ? g_pinnedStatus(status, sizeof(status)) : 0;
+    const char* hint = n > 0 ? status : "press power to wake";
     c.text(c.width() - 34 - c.textWidth(hint, TS_SMALL), c.height() - 34, hint, TS_SMALL,
            true);
   }

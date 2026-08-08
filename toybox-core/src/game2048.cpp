@@ -129,6 +129,7 @@ bool G2048App::move(int dir) {
   _score += gained;
   spawn();
   if (_score > prefs().getInt("t_best", 0)) prefs().putInt("t_best", _score);
+  saveState();
   int maxTile = 0;
   for (int i = 0; i < 16; i++) maxTile = max(maxTile, tileValue(_b[i / 4][i % 4]));
   if (maxTile > prefs().getInt("t_tile", 0)) prefs().putInt("t_tile", maxTile);
@@ -215,11 +216,62 @@ void G2048App::render(ToolsCanvas& c) {
   }
 }
 
+// A half-finished 2048 board is worth keeping: the game is long, and leaving to
+// answer the door should not cost it. The board, the score and the undo slot go
+// into NVS as one blob whenever the position changes, and come back on the way
+// in. NEW GAME still starts from nothing -- restoring is what happens when you
+// did not ask for anything.
+void G2048App::saveState() {
+  struct Saved {
+    uint8_t b[4][4], prev[4][4];
+    int32_t score, prevScore;
+    uint8_t canUndo, over, reached, pad[2];
+  } s;
+  memcpy(s.b, _b, sizeof(s.b));
+  memcpy(s.prev, _prevB, sizeof(s.prev));
+  s.score = _score;
+  s.prevScore = _prevScore;
+  s.canUndo = _canUndo;
+  s.over = _over;
+  s.reached = _reached2048;
+  s.pad[0] = s.pad[1] = 0;
+  prefs().putBytes("t_state", &s, sizeof(s));
+}
+
+bool G2048App::loadState() {
+  struct Saved {
+    uint8_t b[4][4], prev[4][4];
+    int32_t score, prevScore;
+    uint8_t canUndo, over, reached, pad[2];
+  } s;
+  if (prefs().getBytesLength("t_state") != sizeof(s)) return false;
+  if (prefs().getBytes("t_state", &s, sizeof(s)) != sizeof(s)) return false;
+  bool any = false;
+  for (int r = 0; r < 4; r++)
+    for (int col = 0; col < 4; col++)
+      if (s.b[r][col]) any = true;
+  if (!any) return false;  // an empty board is not worth restoring
+  memcpy(_b, s.b, sizeof(_b));
+  memcpy(_prevB, s.prev, sizeof(_prevB));
+  _score = s.score;
+  _prevScore = s.prevScore;
+  _canUndo = s.canUndo != 0;
+  _over = s.over != 0;
+  _reached2048 = s.reached != 0;
+  _cheered = _reached2048;  // do not re-celebrate a milestone from last session
+  // Nothing gets called out on a restored board: the dashed edge and the merge
+  // flash mean "this changed just now", and nothing did.
+  _newCell = -1;
+  memset(_merged, 0, sizeof(_merged));
+  _blinkUntil = 0;
+  return true;
+}
+
 void G2048App::enter(ToolsHost& h) {
   ToolApp::enter(h);
   _armedClear = false;
   _help = !help::suppressed(prefs(), "g20");
-  newGame();
+  if (!loadState()) newGame();
 }
 
 // The merge flash lives for one beat and then the board settles. Doing it this
@@ -298,6 +350,7 @@ void G2048App::onTap(int x, int y) {
   if (inRect(x, y, BTN_NEW.x, BTN_NEW.y, BTN_NEW.w, BTN_NEW.h)) {
     host().beep(1);
     newGame();
+    saveState();  // the fresh board is now the one to come back to
     host().refresh(true);
     return;
   }

@@ -65,12 +65,16 @@ bool Epd::begin() {
 }
 void Epd::clear(bool white) { memset(_fb, white ? 0xFF : 0x00, EPD_BUF_SIZE); }
 void Epd::drawPixel(int x, int y, uint8_t color) {
-  if (x < 0 || y < 0 || x >= EPD_W || y >= EPD_H) return;
-#ifdef TOYBOX_PORTRAIT
-  const int px = PANEL_W - 1 - y, py = x;
-#else
-  const int px = x, py = y;
-#endif
+  // Mirrors the device mapping exactly, rotation included -- the auto-rotate
+  // guard below turns the panel and expects the pixels to follow.
+  if (x < 0 || y < 0 || x >= logicalW() || y >= logicalH()) return;
+  int px, py;
+  switch (rotation()) {
+    case 1: px = x; py = y; break;
+    case 2: px = y; py = PANEL_H - 1 - x; break;
+    case 3: px = PANEL_W - 1 - x; py = PANEL_H - 1 - y; break;
+    default: px = PANEL_W - 1 - y; py = x; break;
+  }
   uint8_t* p = &_fb[(uint32_t)py * EPD_WB + (px >> 3)];
   const uint8_t mask = 0x80 >> (px & 7);
   if (color)
@@ -1099,6 +1103,73 @@ int main() {
     } else {
       printf("font pack SKIPPED (no /tmp/packs/ko_full.tfp -- run make_font_pack.py)\n");
     }
+  }
+
+  // --- resume, rotation, battery -------------------------------------------
+  // Three device-shaped behaviours that only the host can exercise cheaply.
+  {
+    // Resume: play a few moves, leave to the hub (which destroys the app),
+    // come back, and the board has to be the one we left. The help gate test
+    // above leaves the how-to-play card armed, and a card swallows the taps
+    // this guard is trying to make.
+    help::suppress(prefs, "g20");
+    toybox.open(true, 2);  // 2048
+    g_dumpEnabled = false;
+    toybox.onSwipe(-1, 0);
+    toybox.onSwipe(0, -1);
+    toybox.onSwipe(1, 0);
+    const int scoreBefore = prefs.getInt("t_best", 0);
+    uint8_t before[16];
+    memcpy(before, static_cast<G2048App*>(toybox.hostActive())->hostBoard(), 16);
+    toybox.goHub();
+    toybox.open(true, 2);
+    const uint8_t* after = static_cast<G2048App*>(toybox.hostActive())->hostBoard();
+    if (memcmp(before, after, 16) != 0) {
+      printf("RESUME FAIL: the 2048 board did not come back\n");
+      abort();
+    }
+    // ...and NEW GAME still means new.
+    toybox.onTap(40 + 90, 660 + 30);
+    const uint8_t* fresh = static_cast<G2048App*>(toybox.hostActive())->hostBoard();
+    int tiles = 0;
+    for (int i = 0; i < 16; i++)
+      if (fresh[i]) tiles++;
+    if (tiles > 2) {
+      printf("RESUME FAIL: NEW GAME resumed instead of starting over\n");
+      abort();
+    }
+    toybox.goHub();
+    g_dumpEnabled = true;
+    (void)scoreBefore;
+    printf("resume ok (2048 board survives a trip to the hub, NEW still resets)\n");
+  }
+
+  {
+    // Auto-rotate: the pinned note is the one screen that turns. Render it in
+    // each of the four orientations and confirm the panel actually fills --
+    // a wrong transform clips to a corner or draws nothing at all.
+    note::setPinned("shopping");
+    for (int rot = 0; rot < 4; rot++) {
+      epd.setRotation(rot);
+      epd.clear();
+      char name[8];
+      snprintf(name, sizeof(name), "rot%d", rot);
+      setScreen(name);
+      if (!drawPinnedFullScreen(stickyHost.sharedCanvas(), true)) {
+        printf("ROTATE FAIL: nothing drawn at rotation %d\n", rot);
+        abort();
+      }
+      epd.displayFull();
+      // Count ink: a broken transform lands most pixels outside the clip.
+      int ink = 0;
+      for (uint32_t i = 0; i < EPD_BUF_SIZE; i++) ink += __builtin_popcount((uint8_t)~epd.fb()[i]);
+      if (ink < 2000) {
+        printf("ROTATE FAIL: rotation %d drew only %d px\n", rot, ink);
+        abort();
+      }
+    }
+    epd.setRotation(0);
+    printf("rotate ok (pinned note fills the panel at all four angles)\n");
   }
 
   if (gfx::g_overflowCount) {

@@ -47,7 +47,10 @@ class SudokuTool : public ToolApp {
     _help = !help::suppressed(prefs(), "sud");
     _level = (sud::Level)prefs().getInt("sd_lvl", sud::EASY);
     if (_level > sud::HARD) _level = sud::EASY;
-    if (!_started) newPuzzle();
+    // _started only survives while the tool object lives, and it is destroyed
+    // on the way back to the hub. The saved grid is what carries a half-solved
+    // puzzle across that, and across a power cycle.
+    if (!_started && !loadState()) newPuzzle();
   }
 
   void render(ToolsCanvas& c) override {
@@ -215,6 +218,7 @@ class SudokuTool : public ToolApp {
       _grid[_sel] = v;
       host().beep(v ? 0 : 1);
       judge();
+      saveState();
       host().refresh(_solved);
       return;
     }
@@ -265,6 +269,46 @@ class SudokuTool : public ToolApp {
     _wrong = 0;
     _solved = false;
     _started = true;
+    saveState();
+  }
+
+  // A generated puzzle takes real work to produce and longer still to solve, so
+  // it is written out whenever a digit changes. NEW always generates instead.
+  void saveState() {
+    struct Saved {
+      uint8_t grid[sud::CELLS];
+      uint8_t solution[sud::CELLS];
+      uint8_t given[sud::CELLS];
+      uint8_t level, solved, pad[2];
+    } s;
+    memcpy(s.grid, _grid, sizeof(s.grid));
+    memcpy(s.solution, _solution, sizeof(s.solution));
+    for (int i = 0; i < sud::CELLS; i++) s.given[i] = _given[i] ? 1 : 0;
+    s.level = (uint8_t)_level;
+    s.solved = _solved ? 1 : 0;
+    s.pad[0] = s.pad[1] = 0;
+    prefs().putBytes("sd_state", &s, sizeof(s));
+  }
+
+  bool loadState() {
+    struct Saved {
+      uint8_t grid[sud::CELLS];
+      uint8_t solution[sud::CELLS];
+      uint8_t given[sud::CELLS];
+      uint8_t level, solved, pad[2];
+    } s;
+    if (prefs().getBytesLength("sd_state") != sizeof(s)) return false;
+    if (prefs().getBytes("sd_state", &s, sizeof(s)) != sizeof(s)) return false;
+    if (s.solved) return false;  // a finished board is not worth coming back to
+    memcpy(_grid, s.grid, sizeof(_grid));
+    memcpy(_solution, s.solution, sizeof(_solution));
+    for (int i = 0; i < sud::CELLS; i++) _given[i] = s.given[i] != 0;
+    _level = (sud::Level)(s.level <= sud::HARD ? s.level : sud::EASY);
+    _solved = false;
+    _started = true;
+    _sel = -1;
+    _wrong = 0;
+    return true;
   }
 
   uint8_t _grid[sud::CELLS] = {};

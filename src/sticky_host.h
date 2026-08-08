@@ -10,12 +10,16 @@
 #include "buzzer.h"
 #include "chrome.h"
 #include "gfx.h"
+#include "sensors.h"
 #include "toybox.h"
 
 class StickyCanvas : public ToolsCanvas {
  public:
-  int width() const override { return EPD_W; }
-  int height() const override { return EPD_H; }
+  // Asked of the panel rather than fixed, so the pinned note reflows into the
+  // full landscape when the device is turned on its side. Every app screen
+  // runs at rotation 0, where these are the familiar 480x800.
+  int width() const override { return epd.logicalW(); }
+  int height() const override { return epd.logicalH(); }
   void clear() override { epd.clear(); }
   void fillRect(int x, int y, int w, int h, bool black) override {
     epd.fillRect(x, y, w, h, black ? 0 : 1);
@@ -73,6 +77,8 @@ class StickyHost : public ToolsHost {
   bool isHelpTap(int x, int y) const override { return tappedHelp(x, y, EPD_W); }
   bool isBackTap(int x, int y) const override { return tappedBack(x, y); }
   int contentTop() const override { return TOPBAR_H + 4; }
+  int batteryPercent() const override { return sensors::batteryPercent(); }
+  bool charging() const override { return sensors::charging(); }
   bool soundOn() const override { return buzzer::enabled(); }
   void setSoundOn(bool on) override;
 

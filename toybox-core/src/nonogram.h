@@ -30,6 +30,9 @@ class NonogramApp : public ToolApp {
   static constexpr int MAXG = nono::MAXG;
 
   void newPuzzle(int n);
+  void saveState();
+  bool loadState();
+  void layoutFor(int n);
   bool checkWin();
   void giveHint();
   void onWin();

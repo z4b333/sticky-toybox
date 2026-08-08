@@ -175,7 +175,9 @@ int drawText(int x, int y, const char* s, int scale, uint8_t color, bool bold, i
 #ifdef TOYBOX_HOST
   {
     const int w = textWidth(s, scale, bold, spacing);
-    if (s[0] && (x < 0 || x + w > EPD_W)) noteOverflow(x, w, scale, s);
+    // Against the live panel width, not the portrait constant: the pinned note
+    // rotates, and text that fits an 800 px landscape is not an overflow.
+    if (s[0] && (x < 0 || x + w > epd.logicalW())) noteOverflow(x, w, scale, s);
   }
 #endif
   const UiFont* f = faceFor(scale, bold);

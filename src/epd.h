@@ -6,6 +6,8 @@
 #pragma once
 #include <Arduino.h>
 
+#include "board_pins.h"
+
 class Epd {
  public:
   // Allocates the 48 KB framebuffer + 48 KB shadow (previous frame).
@@ -14,6 +16,16 @@ class Epd {
   // Drawing state
   uint8_t* fb() { return _fb; }
   void clear(bool white = true);
+
+  // Runtime rotation of the logical coordinate space, for the pinned note
+  // following the accelerometer. 0 = portrait (the default every app assumes),
+  // 1/3 = the two landscapes, 2 = portrait upside down. Logical width and
+  // height swap for the landscape pair; everything drawn through drawPixel
+  // rotates with it.
+  void setRotation(int r) { _rot = r & 3; }
+  int rotation() const { return _rot; }
+  int logicalW() const { return (_rot & 1) ? PANEL_W : PANEL_H; }
+  int logicalH() const { return (_rot & 1) ? PANEL_H : PANEL_W; }
 
   // Pixel helpers (x: 0..799, y: 0..479); color: 0 = black, 1 = white
   void drawPixel(int x, int y, uint8_t color);
@@ -38,6 +50,11 @@ class Epd {
   int partialCount() const { return _partialsSinceFull; }
 
   static constexpr int FULL_EVERY = 40;
+
+ private:
+  int _rot = 0;
+
+ public:
 
  private:
   void writeCmd(uint8_t c);

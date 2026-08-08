@@ -165,6 +165,12 @@ class ToolsHost {
   virtual bool canExit() const { return false; }
   virtual void exit() {}
 
+  // Battery, as a percentage, or -1 when the host has no gauge (or none
+  // answered on the bus). The hub is the only screen that shows it; every
+  // other screen would rather spend the pixels on its own content.
+  virtual int batteryPercent() const { return -1; }
+  virtual bool charging() const { return false; }
+
   // Whether the device beeps at all. It belongs to the host: the reader has its
   // own idea about sound, and the standalone firmware keeps it in its own NVS.
   virtual bool soundOn() const { return true; }

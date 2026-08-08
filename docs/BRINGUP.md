@@ -48,13 +48,42 @@ Tap every tile on the hub and check the right app opens.
 - `touch: NOT FOUND`: the GT911 controller has two possible addresses
   (0x5D and 0x14) and a power enable on GPIO42. Try the alternate address.
 
-## 4. Sound, buttons, battery
+## 4. Sound, buttons, sleep
 
 - Taps should click when sound is on.
 - Holding the power button for two seconds should show the goodbye screen
   and power off. A short press should wake it again.
 - If the device goes back to sleep immediately after waking, the button
   polarity is likely wrong (OK button, GPIO4, active low).
+- Leave it untouched for five minutes. It should go to sleep on its own,
+  keeping whatever was on the screen. A running timer correctly prevents
+  this, so test with the hub showing.
+
+## 5b. Sensors
+
+The four chips on the sensor bus (fuel gauge 0x55, RTC 0x51, temperature
+0x44, accelerometer 0x6A) are probed at boot. The serial log prints which
+answered:
+
+```
+sensors: gauge 1 rtc 1 sht 1 imu 1
+```
+
+A zero means that chip did not respond, and its feature turns itself off.
+Nothing hangs; the device works without any of them.
+
+- **Gauge 0**: no battery icon on the hub, and no low-battery shutdown.
+  Check the bus wiring before assuming the chip is missing.
+- **Battery icon reads full while unplugged, or the charging bolt is
+  backwards**: the CHARGE_STATE polarity (GPIO40) is a guess. Flip the
+  comparison in `sensors.cpp`.
+- **RTC 0 or the clock shows nothing**: the clock is only set when you save
+  a note from your phone. Write one note, then check the pinned screen
+  footer.
+- **IMU 0, or the note rotates the wrong way**: the accelerometer axis to
+  screen rotation mapping in `sensors.cpp` is unverified. Turn the device
+  slowly through all four positions and note which way it goes, then adjust
+  the comparisons in `orientation()`.
 
 ## 5. Storage
 

@@ -5,6 +5,10 @@ class G2048App : public ToolApp {
  public:
   const char* title() const override { return "2048"; }
   void enter(ToolsHost& h) override;
+#ifdef TOYBOX_HOST
+  // The resume guard needs to compare boards across a destroy and rebuild.
+  const uint8_t* hostBoard() const { return &_b[0][0]; }
+#endif
   void render(ToolsCanvas& c) override;
   void onTap(int x, int y) override;
   void onSwipe(int dx, int dy) override;
@@ -28,6 +32,8 @@ class G2048App : public ToolApp {
   bool _armedClear = false;  // CLEAR RECORD has been tapped once
 
   void newGame();
+  void saveState();
+  bool loadState();
   void spawn();
   bool move(int dir);  // 0 left, 1 right, 2 up, 3 down; returns true if changed
   bool anyMoves() const;

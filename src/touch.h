@@ -19,6 +19,9 @@ class Touch {
   // Poll; fills ev when a gesture completed this cycle. Call frequently.
   void poll(TouchEvent& ev);
   bool ok() const { return _addr != 0; }
+  // Must track Epd::setRotation, or a tap lands where the pixel used to be.
+  // Only the pinned note rotates; every app screen stays at 0.
+  void setRotation(int r) { _rot = r & 3; }
 
  private:
   bool readReg(uint16_t reg, uint8_t* buf, uint8_t len);
@@ -27,6 +30,7 @@ class Touch {
   bool probe();
 
   uint8_t _addr = 0;
+  int _rot = 0;
   bool _down = false;
   int _downX = 0, _downY = 0;
   int _lastX = 0, _lastY = 0;

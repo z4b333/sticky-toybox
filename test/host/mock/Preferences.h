@@ -9,6 +9,7 @@ class Preferences {
   std::map<std::string, uint32_t> uints;
   std::map<std::string, bool> bools;
   std::map<std::string, std::string> strs;
+  std::map<std::string, std::string> blobs;
 
  public:
   bool begin(const char*, bool) { return true; }
@@ -28,6 +29,23 @@ class Preferences {
     return it == bools.end() ? d : it->second;
   }
   void putBool(const char* k, bool v) { bools[k] = v; }
+
+  // Blobs, for the saved game boards. Same contract as the ESP32 version: a
+  // length of 0 means the key is absent, and a short read returns 0.
+  size_t putBytes(const char* k, const void* v, size_t n) {
+    blobs[k] = std::string((const char*)v, n);
+    return n;
+  }
+  size_t getBytesLength(const char* k) {
+    auto it = blobs.find(k);
+    return it == blobs.end() ? 0 : it->second.size();
+  }
+  size_t getBytes(const char* k, void* out, size_t max) {
+    auto it = blobs.find(k);
+    if (it == blobs.end() || it->second.size() > max) return 0;
+    memcpy(out, it->second.data(), it->second.size());
+    return it->second.size();
+  }
   size_t getString(const char* k, char* out, size_t max) {
     auto it = strs.find(k);
     if (it == strs.end() || max == 0) {

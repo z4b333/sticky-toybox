@@ -11,6 +11,12 @@
 
 namespace nweb {
 
+// Set by the firmware if it has a real-time clock. Takes milliseconds since the
+// Unix epoch, already shifted to the phone's local time.
+using SetClockFn = void (*)(int64_t localEpochMs);
+inline SetClockFn g_setClock = nullptr;
+inline void setClockHook(SetClockFn fn) { g_setClock = fn; }
+
 #ifdef TOYBOX_HOST
 
 class NoteServer {
@@ -100,6 +106,10 @@ class NoteServer {
     WebServer& s = _portal.server();
     const String name = s.hasArg("name") ? s.arg("name") : String("note");
     const String data = s.hasArg("data") ? s.arg("data") : String();
+    // The phone posts its local clock alongside the note. The device has no
+    // network time and no way to ask the user, so this is the one moment it can
+    // learn what time it is -- free, and exactly when someone is already here.
+    if (s.hasArg("t") && nweb::g_setClock) nweb::g_setClock(atoll(s.arg("t").c_str()));
     char clean[note::NAME_LEN + 1];
     note::sanitizeName(name.c_str(), clean);
     note::save(clean, data.c_str(), data.length());
@@ -261,7 +271,8 @@ pick.addEventListener('change',function(){
 
 document.getElementById('send').addEventListener('click',function(){
  var b=this;b.disabled=true;b.textContent='Sending...';
- var body='name='+encodeURIComponent(nameI.value||'note')+'&data='+encodeURIComponent(t.value);
+ var body='name='+encodeURIComponent(nameI.value||'note')+'&data='+encodeURIComponent(t.value)
+   +'&t='+(Date.now()-new Date().getTimezoneOffset()*60000);
  fetch('/save',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
   .then(function(){b.disabled=false;b.textContent='Send to device';
    ok.textContent='Saved. It is on the screen now — keep editing and send again any time.';

@@ -165,15 +165,16 @@ void Epd::clear(bool white) { memset(_fb, white ? 0xFF : 0x00, EPD_BUF_SIZE); }
 // blitted pixel by pixel through this function, so its characters turn with
 // everything else and no separate rotated text path is needed.
 void Epd::drawPixel(int x, int y, uint8_t color) {
-  if (x < 0 || y < 0 || x >= EPD_W || y >= EPD_H) return;
-#ifdef TOYBOX_PORTRAIT
-  // Quarter turn: logical (x, y) -> panel (PANEL_W-1-y, x).
-  const int px = PANEL_W - 1 - y;
-  const int py = x;
-#else
-  const int px = x;
-  const int py = y;
-#endif
+  if (x < 0 || y < 0 || x >= logicalW() || y >= logicalH()) return;
+  // Rotation 0 is the quarter turn every layout assumes: logical (x, y) ->
+  // panel (PANEL_W-1-y, x). The other three compose a flip or identity on top.
+  int px, py;
+  switch (_rot) {
+    case 1: px = x; py = y; break;                            // landscape A
+    case 2: px = y; py = PANEL_H - 1 - x; break;              // portrait, flipped
+    case 3: px = PANEL_W - 1 - x; py = PANEL_H - 1 - y; break;// landscape B
+    default: px = PANEL_W - 1 - y; py = x; break;             // portrait
+  }
   uint8_t* p = &_fb[(uint32_t)py * EPD_WB + (px >> 3)];
   const uint8_t mask = 0x80 >> (px & 7);
   if (color)
@@ -185,7 +186,7 @@ void Epd::drawPixel(int x, int y, uint8_t color) {
 void Epd::fillRect(int x, int y, int w, int h, uint8_t color) {
   if (w <= 0 || h <= 0) return;
   const int x1 = max(0, x), y1 = max(0, y);
-  const int x2 = min(EPD_W, x + w), y2 = min(EPD_H, y + h);
+  const int x2 = min(logicalW(), x + w), y2 = min(logicalH(), y + h);
 #ifdef TOYBOX_PORTRAIT
   for (int yy = y1; yy < y2; yy++)
     for (int xx = x1; xx < x2; xx++) drawPixel(xx, yy, color);
