@@ -14,6 +14,12 @@ whether touch is mapped correctly until you trust what is on the screen.
 Set aside an hour. Nothing here is difficult, but rushing past a failed step
 makes the next three impossible to interpret.
 
+There is a tickable version of all this at
+[checklist.html](https://z4b333.github.io/sticky-toybox/checklist.html), meant
+for a phone held next to the device. It produces a report you can paste back
+when something needs looking at. It keeps nothing between page loads, so copy
+the report out before you close it.
+
 ## What you need
 
 A USB-C cable that carries data. A charge-only cable will power the device and

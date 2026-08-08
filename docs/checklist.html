@@ -1,0 +1,367 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Toybox · First boot checklist</title>
+<meta name="description" content="Work through the first boot of a reTerminal Sticky running Toybox, and produce a report.">
+<style>
+  :root {
+    --bg: #fafafa;
+    --fg: #18181b;
+    --muted: #71717a;
+    --line: #e4e4e7;
+    --pass: #16a34a;
+    --fail: #dc2626;
+  }
+  * { box-sizing: border-box; margin: 0; -webkit-tap-highlight-color: transparent; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 16px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    padding-bottom: 96px;
+  }
+  main { max-width: 480px; margin: 0 auto; padding: 32px 20px 0; }
+
+  h1 { font-size: 28px; font-weight: 650; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); margin: 6px 0 28px; font-size: 15px; }
+
+  h2 {
+    font-size: 13px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--muted);
+    margin: 36px 0 4px; padding-top: 20px; border-top: 1px solid var(--line);
+  }
+  h2:first-of-type { border-top: 0; padding-top: 0; }
+  .lede { color: var(--muted); font-size: 14px; margin-bottom: 14px; }
+
+  .item {
+    border: 1px solid var(--line); border-radius: 12px; background: #fff;
+    padding: 12px 14px; margin-bottom: 10px;
+  }
+  .item.pass { border-color: var(--pass); }
+  .item.fail { border-color: var(--fail); }
+  .item .label { font-weight: 500; }
+  .item .hint { color: var(--muted); font-size: 14px; margin-top: 4px; }
+  .item .why { color: var(--muted); font-size: 14px; margin-top: 6px; display: none; }
+  .item.fail .why { display: block; }
+
+  .marks { display: flex; gap: 8px; margin-top: 10px; }
+  .marks button {
+    flex: 1; font: inherit; font-size: 14px; font-weight: 550;
+    padding: 9px 0; border-radius: 9px; border: 1px solid var(--line);
+    background: #fff; color: var(--muted); cursor: pointer;
+  }
+  .item.pass .marks .p { background: var(--pass); border-color: var(--pass); color: #fff; }
+  .item.fail .marks .f { background: var(--fail); border-color: var(--fail); color: #fff; }
+  .item.skip .marks .s { background: var(--fg); border-color: var(--fg); color: #fff; }
+
+  textarea {
+    width: 100%; margin-top: 10px; font: inherit; font-size: 14px;
+    border: 1px solid var(--line); border-radius: 9px; padding: 9px 10px;
+    background: #fff; color: var(--fg); resize: vertical; min-height: 62px;
+  }
+  textarea::placeholder { color: #a1a1aa; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13.5px; }
+
+  .bar {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    background: rgba(250,250,250,0.94);
+    backdrop-filter: blur(8px);
+    border-top: 1px solid var(--line);
+    padding: 12px 20px calc(12px + env(safe-area-inset-bottom));
+  }
+  .bar .inner { max-width: 480px; margin: 0 auto; display: flex; gap: 10px; align-items: center; }
+  .count { font-size: 14px; color: var(--muted); flex: 1; }
+  .count b { color: var(--fg); font-weight: 600; }
+  .bar button {
+    font: inherit; font-size: 15px; font-weight: 550; padding: 11px 16px;
+    border-radius: 10px; border: 0; background: var(--fg); color: #fff; cursor: pointer;
+  }
+  .bar button.ghost { background: #fff; color: var(--fg); border: 1px solid var(--line); }
+
+  dialog {
+    border: 0; border-radius: 14px; padding: 0; width: min(560px, 92vw);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.2);
+  }
+  dialog .pad { padding: 18px; }
+  dialog textarea { min-height: 46vh; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
+  dialog .row { display: flex; gap: 10px; margin-top: 12px; }
+  dialog button { flex: 1; font: inherit; font-weight: 550; padding: 11px 0; border-radius: 10px; border: 1px solid var(--line); background: #fff; cursor: pointer; }
+  dialog button.primary { background: var(--fg); color: #fff; border-color: var(--fg); }
+  ::backdrop { background: rgba(0,0,0,0.4); }
+</style>
+</head>
+<body>
+<main>
+  <h1>First boot</h1>
+  <p class="sub">Work down the list with the device in front of you. Nothing is saved
+  anywhere, so copy the report out before you close this page.</p>
+  <div id="list"></div>
+</main>
+
+<div class="bar">
+  <div class="inner">
+    <div class="count" id="count"></div>
+    <button class="ghost" id="reset">Reset</button>
+    <button id="report">Report</button>
+  </div>
+</div>
+
+<dialog id="dlg">
+  <div class="pad">
+    <textarea id="out" readonly></textarea>
+    <div class="row">
+      <button id="copy" class="primary">Copy</button>
+      <button id="close">Close</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+// The checklist itself. `why` is shown only when something is marked failed:
+// the reason to have it here rather than in a separate document is that the
+// moment you need it is the moment you are holding a device that just did
+// something wrong.
+var SECTIONS = [
+  { title: 'Before flashing', lede: 'Prove the hardware and the cable before changing anything on it.',
+    items: [
+      { id: 'vendor', label: 'It powers on with the firmware it shipped with',
+        hint: 'Thirty seconds. Note which way up the image is and whether touch responds.',
+        why: 'If it does nothing now, the problem is not software and nothing below will help.' },
+      { id: 'port', label: 'A serial port appears when plugged into the PC',
+        hint: 'Windows: Device Manager → Ports → USB-SERIAL CH34x. Mac/Linux: ls /dev/tty.*',
+        why: 'Almost always the cable (must carry data) or the CH343 driver on Windows. Not the board.' },
+    ] },
+
+  { title: 'Flashing', lede: 'Browser installer, or esptool from the command line.',
+    items: [
+      { id: 'flash', label: 'Firmware written without errors',
+        hint: 'Web installer, or esptool --chip esp32s3 write_flash 0x0 toybox-full.bin',
+        why: 'If esptool sits at "Connecting..." the board is not entering download mode by itself.' },
+      { id: 'packs', label: 'Language packs installed (optional)',
+        hint: 'Skip this unless you want rare Chinese, Korean or Japanese characters. They can be added later.',
+        skippable: true },
+    ] },
+
+  { title: 'Service screen', lede: 'Hold either side button through power-on. Do this before looking at the hub.',
+    items: [
+      { id: 'svc', label: 'The SERVICE screen appears',
+        hint: 'Keep the button held until something is drawn — it is read a second or two in.',
+        why: 'If the panel is blank, check the panel power rail (GPIO47) and the SPI pins.' },
+      { id: 'report', label: 'Report block copied down', note: true,
+        hint: 'Type the five lines here — touch, sensors, battery, psram, fonts. This answers most questions on its own.',
+        placeholder: 'touch    found at 0x5D\nsensors  gauge 1  clock 1  temp 1  tilt 1\nbattery  …\npsram    …\nfonts    …' },
+    ] },
+
+  { title: 'Display', lede: 'Fix the screen before the touch. The touch correction sits on top of this one.',
+    items: [
+      { id: 'dtop', label: 'The black SERVICE bar is at the top',
+        hint: 'If it is at the bottom and the list runs upward, set SCREEN UPSIDE DOWN to YES.' },
+      { id: 'dmirror', label: 'The text reads normally, not as a mirror image',
+        hint: 'If it is mirrored, set SCREEN MIRRORED LEFT/RIGHT to YES.' },
+    ] },
+
+  { title: 'Touch', lede: 'TOUCH TEST draws a cross where the firmware thinks your finger was. Do the swap first — it changes what the flips mean.',
+    items: [
+      { id: 'taxis', label: 'Dragging down moves the cross down, not sideways',
+        hint: 'Sideways means TOUCH: SWAP X AND Y.' },
+      { id: 'tlr', label: 'Touching the left edge puts the cross on the left',
+        hint: 'Otherwise TOUCH: FLIP LEFT/RIGHT.' },
+      { id: 'tud', label: 'Touching the top puts the cross at the top',
+        hint: 'Otherwise TOUCH: FLIP UP/DOWN.' },
+      { id: 'tcorners', label: 'All four corners land under the finger',
+        hint: 'An inverted axis looks fine in the middle of the screen and is obviously wrong at the edges.' },
+      { id: 'saved', label: 'Corrections saved', note: true,
+        hint: 'Hold OK for two seconds. Write down which five you ended up with — that tells me what the defaults should become.',
+        placeholder: 'screen mirrored: no\nscreen upside down: no\ntouch swap: yes\ntouch flip L/R: yes\ntouch flip U/D: yes' },
+    ] },
+
+  { title: 'The hub', lede: 'It should restart straight into TOYBOX with thirteen tiles.',
+    items: [
+      { id: 'tiles', label: 'Every tile opens the app it names',
+        hint: 'Thirteen of them, in three groups.' },
+      { id: 'back', label: 'The HUB chevron gets you back from every app' },
+      { id: 'sound', label: 'Taps click when sound is on' },
+      { id: 'gear', label: 'Settings hides an app and the hub reflows without it' },
+      { id: 'game', label: 'A full game finishes and updates its record',
+        hint: 'XO is the quickest.' },
+      { id: 'ghost', label: 'Ghosting clears on the full refresh',
+        hint: 'Light ghosting after partial refreshes is normal; a full refresh happens every 40.' },
+    ] },
+
+  { title: 'Power and sleep', lede: 'The unplug test is last on purpose.',
+    items: [
+      { id: 'off', label: 'Holding power for two seconds shows the goodbye screen and switches off',
+        hint: 'The image should stay on the panel with no power at all.' },
+      { id: 'wake', label: 'A short press wakes it again',
+        why: 'Going straight back to sleep means the button polarity is wrong (OK is GPIO4, expected active low).' },
+      { id: 'idle', label: 'It sleeps by itself after five idle minutes' },
+      { id: 'hold', label: 'A running countdown timer keeps it awake',
+        hint: 'The more interesting half of the test.' },
+      { id: 'latch', label: 'It survives the USB cable being unplugged',
+        hint: 'The power latch test. GPIO45 and GPIO46 are a guess.',
+        why: 'If it died the instant the cable came out, that is the latch. Plug back in, it will return, and tell me.' },
+    ] },
+
+  { title: 'Phone side', lede: 'Notes, flashcards and the picker all pair the same way.',
+    items: [
+      { id: 'qr', label: 'The QR code joins the phone and the editor page opens' },
+      { id: 'note', label: 'A note saved on the phone appears on the device' },
+      { id: 'tick', label: 'Ticking a checkbox on the device sticks' },
+      { id: 'clock', label: 'The pinned note shows time and temperature once asleep',
+        hint: 'The clock is set from your phone the first time you save a note.' },
+      { id: 'rot', label: 'The pinned note turns the right way when the device is turned',
+        why: 'The accelerometer axis mapping is unverified. Note which way it actually goes.' },
+    ] },
+
+  { title: 'Judgement calls', lede: 'Decided from previews on a PC. Only a real screen settles these — answer in the box.',
+    items: [
+      { id: 'calls', label: 'Notes on the four open questions', note: true, skippable: true,
+        hint: 'Korean at 16px readable? 2048 merge blink — merge or glitch? Missing-character box visible at arm’s length? Single die at 200px — right or absurd?',
+        placeholder: 'korean 16px:\n2048 blink:\nmissing box:\ndice size:' },
+      { id: 'other', label: 'Anything else that looked wrong', note: true, skippable: true,
+        placeholder: '' },
+    ] },
+];
+
+var state = {};   // id -> 'pass' | 'fail' | 'skip'
+var notes = {};   // id -> string
+
+function el(tag, cls, text) {
+  var n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text) n.textContent = text;
+  return n;
+}
+
+function build() {
+  var list = document.getElementById('list');
+  list.innerHTML = '';
+  SECTIONS.forEach(function (sec) {
+    list.appendChild(el('h2', null, sec.title));
+    if (sec.lede) list.appendChild(el('p', 'lede', sec.lede));
+    sec.items.forEach(function (it) {
+      var box = el('div', 'item');
+      box.id = 'i_' + it.id;
+      box.appendChild(el('div', 'label', it.label));
+      if (it.hint) box.appendChild(el('div', 'hint', it.hint));
+      if (it.why) box.appendChild(el('div', 'why', it.why));
+
+      if (it.note) {
+        var ta = el('textarea');
+        ta.placeholder = it.placeholder || '';
+        ta.value = notes[it.id] || '';
+        ta.addEventListener('input', function () {
+          notes[it.id] = ta.value;
+          // A box with something in it counts as done; that is what "answered"
+          // means for a question whose answer is prose.
+          state[it.id] = ta.value.trim() ? 'pass' : undefined;
+          paint();
+        });
+        box.appendChild(ta);
+      }
+
+      var marks = el('div', 'marks');
+      [['p', 'pass', 'Pass'], ['f', 'fail', 'Fail'], ['s', 'skip', 'Skip']].forEach(function (m) {
+        var b = el('button', m[0], m[2]);
+        b.addEventListener('click', function () {
+          state[it.id] = (state[it.id] === m[1]) ? undefined : m[1];
+          paint();
+        });
+        marks.appendChild(b);
+      });
+      box.appendChild(marks);
+      list.appendChild(box);
+    });
+  });
+  paint();
+}
+
+function paint() {
+  var done = 0, total = 0, failed = 0;
+  SECTIONS.forEach(function (sec) {
+    sec.items.forEach(function (it) {
+      total++;
+      var s = state[it.id];
+      if (s) done++;
+      if (s === 'fail') failed++;
+      var box = document.getElementById('i_' + it.id);
+      box.className = 'item' + (s ? ' ' + s : '');
+    });
+  });
+  var c = document.getElementById('count');
+  // Kept short enough to stay on one line on a narrow phone: a bar that grows
+  // a second row as you work is a bar that covers the thing you are reading.
+  c.innerHTML = '<b>' + done + '</b>/' + total +
+    (failed ? ' · <b>' + failed + '</b> failed' : ' checked');
+}
+
+// The report is the point of the page: what passed, what did not, and the two
+// blocks of prose that say what the board actually is.
+function buildReport() {
+  var out = ['# Toybox first boot', ''];
+  var d = new Date();
+  out.push(d.toISOString().slice(0, 16).replace('T', ' '), '');
+
+  var fails = [];
+  SECTIONS.forEach(function (sec) {
+    var lines = [];
+    sec.items.forEach(function (it) {
+      var s = state[it.id];
+      var mark = s === 'pass' ? '[x]' : s === 'fail' ? '[!]' : s === 'skip' ? '[-]' : '[ ]';
+      lines.push(mark + ' ' + it.label);
+      if (it.note && (notes[it.id] || '').trim()) {
+        notes[it.id].trim().split('\n').forEach(function (l) { lines.push('      ' + l); });
+      }
+      if (s === 'fail') fails.push(it.label);
+    });
+    out.push('## ' + sec.title, '');
+    out.push.apply(out, lines);
+    out.push('');
+  });
+
+  if (fails.length) {
+    out.push('## Failed', '');
+    fails.forEach(function (f) { out.push('- ' + f); });
+    out.push('');
+  } else {
+    out.push('Nothing marked failed.', '');
+  }
+  return out.join('\n');
+}
+
+document.getElementById('report').addEventListener('click', function () {
+  document.getElementById('out').value = buildReport();
+  document.getElementById('dlg').showModal();
+});
+document.getElementById('close').addEventListener('click', function () {
+  document.getElementById('dlg').close();
+});
+document.getElementById('copy').addEventListener('click', function () {
+  var ta = document.getElementById('out');
+  ta.removeAttribute('readonly');
+  ta.select();
+  ta.setSelectionRange(0, 999999);
+  var ok = false;
+  try { ok = document.execCommand('copy'); } catch (e) {}
+  ta.setAttribute('readonly', '');
+  if (navigator.clipboard && !ok) navigator.clipboard.writeText(ta.value);
+  this.textContent = 'Copied';
+  var self = this;
+  setTimeout(function () { self.textContent = 'Copy'; }, 1400);
+});
+document.getElementById('reset').addEventListener('click', function () {
+  if (!confirm('Clear every tick and note?')) return;
+  state = {};
+  notes = {};
+  build();
+  window.scrollTo(0, 0);
+});
+
+build();
+</script>
+</body>
+</html>
