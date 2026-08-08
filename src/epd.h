@@ -23,6 +23,15 @@ class Epd {
   // height swap for the landscape pair; everything drawn through drawPixel
   // rotates with it.
   void setRotation(int r) { _rot = r & 3; }
+
+  // Board correction, set once at boot from what the service screen saved.
+  // The SSD1677's scan-direction bits are a guess taken from vendor demo code;
+  // if they are wrong for a board revision the image comes out mirrored or
+  // upside down, and these two flips cover every way that can happen. Applied
+  // last, in panel space, so nothing above them has to know.
+  void setPanelFlip(bool fx, bool fy) { _flipX = fx; _flipY = fy; }
+  bool panelFlipX() const { return _flipX; }
+  bool panelFlipY() const { return _flipY; }
   int rotation() const { return _rot; }
   int logicalW() const { return (_rot & 1) ? PANEL_W : PANEL_H; }
   int logicalH() const { return (_rot & 1) ? PANEL_H : PANEL_W; }
@@ -53,6 +62,7 @@ class Epd {
 
  private:
   int _rot = 0;
+  bool _flipX = false, _flipY = false;
 
  public:
 

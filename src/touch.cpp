@@ -88,10 +88,19 @@ void Touch::poll(TouchEvent& ev) {
       // coords at byte 0 (Sticky quirk)
       const uint16_t rawX = pt[0] | (pt[1] << 8);
       const uint16_t rawY = pt[2] | (pt[3] << 8);
-      // swap axes (portrait digitizer), then flip both to panel-native landscape
-      int px = rawY, py = rawX;
-      px = (PANEL_W - 1) - constrain(px, 0, PANEL_W - 1);
-      py = (PANEL_H - 1) - constrain(py, 0, PANEL_H - 1);
+      // Swap axes (portrait digitizer), then flip to panel-native landscape.
+      // All three are adjustable from the service screen: they were read off
+      // vendor bring-up notes, not measured on a board.
+      int px = _swap ? rawY : rawX;
+      int py = _swap ? rawX : rawY;
+      px = constrain(px, 0, PANEL_W - 1);
+      py = constrain(py, 0, PANEL_H - 1);
+      if (_tfx) px = (PANEL_W - 1) - px;
+      if (_tfy) py = (PANEL_H - 1) - py;
+      // Undo whatever correction the panel needed, so once the image is the
+      // right way round the taps follow it without a second adjustment.
+      if (_pfx) px = PANEL_W - 1 - px;
+      if (_pfy) py = PANEL_H - 1 - py;
       // Inverse of the display transform in epd.cpp, so a tap lands on the
       // control the user actually sees. Kept case-for-case with drawPixel:
       // if one changes, the other has to.

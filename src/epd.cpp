@@ -175,6 +175,9 @@ void Epd::drawPixel(int x, int y, uint8_t color) {
     case 3: px = PANEL_W - 1 - x; py = PANEL_H - 1 - y; break;// landscape B
     default: px = PANEL_W - 1 - y; py = x; break;             // portrait
   }
+  // Board correction last, in panel space (see setPanelFlip).
+  if (_flipX) px = PANEL_W - 1 - px;
+  if (_flipY) py = PANEL_H - 1 - py;
   uint8_t* p = &_fb[(uint32_t)py * EPD_WB + (px >> 3)];
   const uint8_t mask = 0x80 >> (px & 7);
   if (color)

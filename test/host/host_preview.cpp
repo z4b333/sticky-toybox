@@ -14,6 +14,7 @@
 #include "epd.h"
 #include "gfx.h"
 #include "game2048.h"
+#include "service_ui.h"
 #include "sticky_host.h"
 #include "toybox.h"
 #include "nonogram.h"
@@ -90,6 +91,8 @@ void Epd::drawPixel(int x, int y, uint8_t color) {
     case 3: px = PANEL_W - 1 - x; py = PANEL_H - 1 - y; break;
     default: px = PANEL_W - 1 - y; py = x; break;
   }
+  if (panelFlipX()) px = PANEL_W - 1 - px;
+  if (panelFlipY()) py = PANEL_H - 1 - py;
   uint8_t* p = &_fb[(uint32_t)py * EPD_WB + (px >> 3)];
   const uint8_t mask = 0x80 >> (px & 7);
   if (color)
@@ -1283,6 +1286,60 @@ int main() {
     }
     epd.setRotation(0);
     printf("rotate ok (pinned note fills the panel at all four angles)\n");
+  }
+
+  // --- the service screen ---------------------------------------------------
+  // The one screen that has to work when the display or the touch mapping is
+  // wrong, so it is drawn here like any other and its text is held to the same
+  // width rule.
+  {
+    svc::Report r;
+    r.touchOk = true;
+    r.touchAddr = 0x5D;
+    r.gauge = r.rtc = r.sht = true;
+    r.imu = false;
+    r.battMv = 3987;
+    r.fontFaces = 3;
+    r.psramKb = 8192;
+    r.version = "toybox  Aug  8 2026  11:04:22";
+    const svc::Config cfg;
+
+    setScreen("service");
+    epd.setRotation(0);
+    epd.clear();
+    svc::render(stickyHost.sharedCanvas(), r, cfg, 0, false, 0, 0);
+    epd.displayFull();
+
+    setScreen("service_touch_test");
+    epd.clear();
+    svc::render(stickyHost.sharedCanvas(), r, cfg, svc::ROW_TEST, true, 300, 470);
+    epd.displayFull();
+  }
+
+  // The corrections that screen writes have to actually move pixels, one axis
+  // each. A flip that quietly does nothing would look like a wrong panel.
+  {
+    auto black = [](int px, int py) {
+      return (epd.fb()[(uint32_t)py * EPD_WB + (px >> 3)] & (0x80 >> (px & 7))) == 0;
+    };
+    g_dumpEnabled = false;
+    epd.setRotation(0);
+    for (int m = 0; m < 4; m++) {
+      epd.setPanelFlip(m & 1, m & 2);
+      epd.clear();
+      epd.drawPixel(0, 0, 0);  // logical top-left, black
+      int px = PANEL_W - 1, py = 0;  // where rotation 0 puts it, before flips
+      if (m & 1) px = PANEL_W - 1 - px;
+      if (m & 2) py = PANEL_H - 1 - py;
+      if (!black(px, py)) {
+        printf("FLIP FAIL: flipX=%d flipY=%d did not reach panel (%d,%d)\n", m & 1, (m & 2) >> 1,
+               px, py);
+        abort();
+      }
+    }
+    epd.setPanelFlip(false, false);
+    g_dumpEnabled = true;
+    printf("panel flips ok (all four corners reachable from the service screen)\n");
   }
 
   screenPaintCheck();  // the last screen has nothing after it to catch it

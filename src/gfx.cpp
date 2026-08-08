@@ -339,6 +339,11 @@ bool registerPack(char* blob, size_t len) {
 }
 }  // namespace
 
+namespace {
+int g_loadedFaces = 0;
+}
+int loadedFaceCount() { return g_loadedFaces; }
+
 int loadFontPacks() {
 #ifndef TOYBOX_HOST
   // Raw pack partitions, written directly by the web installer. Memory-mapped,
@@ -388,6 +393,7 @@ int loadFontPacks() {
       free(blob);
     }
   }
+  g_loadedFaces = g_packFaceCount;
   return g_packFaceCount;
 }
 

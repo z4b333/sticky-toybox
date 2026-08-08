@@ -32,6 +32,9 @@ void drawButton(int x, int y, int w, int h, const char* label, int scale, bool f
 // tools/make_font_pack.py). Safe to call again after an install; packs already
 // loaded are kept. Returns how many faces are live.
 int loadFontPacks();
+// How many faces the last call found, for the service screen to report without
+// mapping the partitions a second time.
+int loadedFaceCount();
 
 #ifdef TOYBOX_HOST
 // Host-only text-overflow log, drained by the preview harness.

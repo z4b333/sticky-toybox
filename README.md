@@ -87,7 +87,9 @@ partition for each optional language pack, and a 4.7 MB LittleFS filesystem
 for notes and decks. There is no OTA.
 
 Before running on real hardware for the first time, read
-[docs/BRINGUP.md](docs/BRINGUP.md).
+[docs/BRINGUP.md](docs/BRINGUP.md). Hold either side button while the device
+powers on to reach the service screen, which reports what answered on each bus
+and can correct the display and touch orientation without rebuilding anything.
 
 ## Testing
 
@@ -158,7 +160,8 @@ about 110 lines. See [docs/PORTING.md](docs/PORTING.md).
 
 - Nothing has been tested on real hardware yet. Display orientation and touch
   mapping come from community bring-up notes. If the image is mirrored or
-  flipped on your device, see the notes in `epd.cpp` and `touch.cpp`.
+  flipped on your device, or taps land in the wrong place, hold a side button
+  at power-on and correct it from the service screen.
 - Thai line breaking works at character-cluster level, not word level, so a
   line can break in the middle of a word.
 - Characters above U+FFFF (such as emoji) are not supported.

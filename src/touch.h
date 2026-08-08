@@ -19,9 +19,21 @@ class Touch {
   // Poll; fills ev when a gesture completed this cycle. Call frequently.
   void poll(TouchEvent& ev);
   bool ok() const { return _addr != 0; }
+  uint8_t address() const { return _addr; }
   // Must track Epd::setRotation, or a tap lands where the pixel used to be.
   // Only the pinned note rotates; every app screen stays at 0.
   void setRotation(int r) { _rot = r & 3; }
+
+  // Board corrections, set once at boot from what the service screen saved.
+  // The digitizer's own orientation (swap, then two flips) is the guess from
+  // the vendor notes; the panel pair is whatever correction the display needed,
+  // undone here so a tap still lands on the pixel the user is looking at.
+  void setMapping(bool swapXY, bool flipX, bool flipY) {
+    _swap = swapXY;
+    _tfx = flipX;
+    _tfy = flipY;
+  }
+  void setPanelFlip(bool fx, bool fy) { _pfx = fx; _pfy = fy; }
 
  private:
   bool readReg(uint16_t reg, uint8_t* buf, uint8_t len);
@@ -31,6 +43,8 @@ class Touch {
 
   uint8_t _addr = 0;
   int _rot = 0;
+  bool _swap = true, _tfx = true, _tfy = true;
+  bool _pfx = false, _pfy = false;
   bool _down = false;
   int _downX = 0, _downY = 0;
   int _lastX = 0, _lastY = 0;

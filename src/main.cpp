@@ -14,6 +14,7 @@
 #include "epd.h"
 #include "gfx.h"
 #include "sensors.h"
+#include "service.h"
 #include "sticky_host.h"
 #include "tools/tool_note.h"
 #include "touch.h"
@@ -184,6 +185,11 @@ void setup() {
     Serial.println("EPD alloc failed");
     while (true) delay(1000);
   }
+
+  // Whatever the service screen last saved about this particular board, before
+  // the first pixel is drawn or the first tap is read.
+  svc::apply(svc::load());
+
   touch.begin();
   Serial.printf("touch: %s\n", touch.ok() ? "ok" : "NOT FOUND");
   sensors::begin();
@@ -191,6 +197,17 @@ void setup() {
   // Full-coverage font packs, if any have been installed (see gfx.h). Loaded
   // before the first paint so a pinned Chinese note wakes up whole.
   Serial.printf("font packs: %d faces\n", gfx::loadFontPacks());
+
+  // Hold UP through power-on to correct the display and touch mapping. This is
+  // the one screen that has to work when nothing else does, so it comes before
+  // the shell starts and it is driven by buttons alone.
+  // Also entered on its own when the touch controller did not answer: the
+  // shell is unusable without it, and a device sitting on a hub it will never
+  // respond to tells you nothing about why.
+  if (svc::requested() || !touch.ok()) {
+    Serial.println("service mode");
+    svc::run();  // never returns
+  }
 
   // The core draws the pinned footer and the notes portal receives the phone's
   // clock; neither knows what hardware is underneath, so the firmware hands

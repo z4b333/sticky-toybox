@@ -6,6 +6,31 @@ touch mapping) come from vendor demo code and community notes rather than
 from testing on real hardware. Go through this list in order the first time
 you flash a device. Early items need to work before later ones can be tested.
 
+## The service screen
+
+Hold either of the two side buttons (UP or DOWN) while the device powers on.
+It also opens by itself if the touch controller does not answer, since the
+rest of the firmware is unusable in that case.
+
+This screen is driven entirely by the three physical buttons, so it works
+with touch completely broken. It shows what answered on each bus at boot,
+and it can correct the two guesses most likely to be wrong:
+
+- **SCREEN MIRRORED LEFT/RIGHT** and **SCREEN UPSIDE DOWN** fix the panel.
+  Between them they reach every way the scan direction can come out wrong.
+- **TOUCH: SWAP X AND Y**, **FLIP LEFT/RIGHT** and **FLIP UP/DOWN** fix the
+  digitizer. These three reach all eight orientations it can be in.
+- **TOUCH TEST** draws a cross wherever you touch. If the cross lands under
+  your finger in all four corners, the mapping is right.
+
+UP and DOWN move the highlighted row, OK changes it, and holding OK saves
+and restarts. What you save is applied on every boot from then on, so
+nothing has to be rebuilt or reflashed.
+
+Fix the screen before the touch: the touch correction is applied on top of
+the panel one, so it only makes sense once you can see what you are aiming
+at.
+
 ## 0. Before flashing
 
 - Work on USB power for the first session.
@@ -32,9 +57,9 @@ The hub should appear within about two seconds.
   Note the display shares its SPI bus with the SD card slot. If the display
   works until the SD card is used, lower the display clock to 10 MHz (see
   the note in `platformio.ini`).
-- Mirrored or upside-down image: adjust the scan direction bits in
-  `epd.cpp` (command 0x01). Fix the display before touching anything else,
-  because touch is mapped to match the display.
+- Mirrored or upside-down image: fix it from the service screen above, not
+  in the source. If you would rather change the default for every device,
+  the scan direction bits are in `epd.cpp` (command 0x01).
 - Light ghosting after partial refreshes is normal. The firmware does a
   full refresh every 40 partial ones.
 
@@ -42,9 +67,11 @@ The hub should appear within about two seconds.
 
 Tap every tile on the hub and check the right app opens.
 
-- Taps land on the wrong tile: the touch orientation mapping in `touch.cpp`
-  is wrong for this panel. With the display confirmed correct, flip one
-  axis at a time.
+- Taps land on the wrong tile: use TOUCH TEST on the service screen. With
+  the display already confirmed correct, change one of the three touch rows
+  at a time and watch where the cross lands. The defaults there are the
+  values in `touch.cpp`, so once you find the right combination you can make
+  it the built-in default if you want to.
 - `touch: NOT FOUND`: the GT911 controller has two possible addresses
   (0x5D and 0x14) and a power enable on GPIO42. Try the alternate address.
 
