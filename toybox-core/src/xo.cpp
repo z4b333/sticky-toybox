@@ -49,7 +49,16 @@ void XoApp::newGame() {
 }
 
 void XoApp::recordResult(int result) {
-  if (_foe == FOE_HUMAN) return;  // pass-and-play is nobody's record
+  if (_foe == FOE_HUMAN) {
+    // Nothing is written to NVS here; the tally lives only until you leave.
+    if (result > 0)
+      _sitX++;
+    else if (result < 0)
+      _sitO++;
+    else
+      _sitD++;
+    return;
+  }
   int streak = prefs().getInt("x_strk", 0);
   if (result > 0) {
     prefs().putInt("x_w", prefs().getInt("x_w", 0) + 1);
@@ -178,7 +187,11 @@ void XoApp::render(ToolsCanvas& c) {
 
   // --- record ----------------------------------------------------------
   if (_foe == FOE_HUMAN) {
-    c.textCentered(SCREEN_W / 2, 706, "pass the device each turn", TS_MED, true);
+    c.text(20, 706, "pass the device each turn", TS_MED, true);
+    if (_sitX + _sitO + _sitD > 0) {
+      snprintf(buf, sizeof(buf), "this sitting   X %d   O %d   drew %d", _sitX, _sitO, _sitD);
+      c.text(20, 732, buf, TS_MED, true);
+    }
   } else {
     const int w = prefs().getInt("x_w", 0), l = prefs().getInt("x_l", 0);
     const int d = prefs().getInt("x_d", 0);
@@ -195,6 +208,7 @@ void XoApp::render(ToolsCanvas& c) {
 void XoApp::enter(ToolsHost& h) {
   ToolApp::enter(h);
   _armedClear = false;
+  _sitX = _sitO = _sitD = 0;
   _help = !help::suppressed(prefs(), "xo");
   _rule = (Rule)prefs().getInt("x_rule", RULE_CLASSIC);
   _foe = (Foe)prefs().getInt("x_foe", FOE_HARD);

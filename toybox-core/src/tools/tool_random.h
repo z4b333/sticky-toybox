@@ -21,9 +21,11 @@ inline constexpr TRect MAX_UP{398, STEP_Y, STEP, STEP};
 inline constexpr TRect UNIQUE{40, 560, 180, 62};
 inline constexpr TRect DRAW_NUM{240, 560, 200, 62};
 
-inline constexpr TRect CARD_BOX{140, 112, 200, 280};
-inline constexpr TRect DRAW_CARD{40, 548, 200, 66};
-inline constexpr TRect SHUFFLE{260, 548, 180, 66};
+// A drawn card should look like a card across a table, so the box keeps the
+// 2.5 x 3.5 proportion of a real one and takes the height the screen has.
+inline constexpr TRect CARD_BOX{110, 112, 260, 364};
+inline constexpr TRect DRAW_CARD{40, 650, 200, 66};
+inline constexpr TRect SHUFFLE{260, 650, 180, 66};
 
 inline TRect presetRect(int i) {
   return TRect{PRESET_X0 + i * (PRESET_W + PRESET_GAP), PRESET_Y, PRESET_W, PRESET_H};
@@ -218,7 +220,7 @@ class RandomTool : public ToolApp {
       const char* rn = tdraw::rankName(rank);
       c.text(b.x + 14, b.y + 12, rn, TS_LARGE, true, true);
       tdraw::suit(c, suitIdx, b.x + 26, b.y + 66, 26, true);
-      tdraw::suit(c, suitIdx, b.x + b.w / 2, b.y + b.h / 2, 96, true);
+      tdraw::suit(c, suitIdx, b.x + b.w / 2, b.y + b.h / 2, 120, true);
       const int rw = c.textWidth(rn, TS_LARGE, true);
       c.text(b.x + b.w - 14 - rw, b.y + b.h - 12 - c.textHeight(TS_LARGE), rn, TS_LARGE, true,
              true);
@@ -227,23 +229,25 @@ class RandomTool : public ToolApp {
 
     char buf[32];
     snprintf(buf, sizeof(buf), "%d", 52 - _dealt);
-    c.text(40, 420, "CARDS LEFT", TS_MED, true);
-    tdraw::seg7Text(c, 40, 450, 76, buf, true);
+    c.text(40, 505, "CARDS LEFT", TS_MED, true);
+    tdraw::seg7Text(c, 40, 535, 76, buf, true);
+
+    // The cards already out, beside the count rather than squeezed into one
+    // line under the buttons. Drawn as rank and suit so they read like cards.
+    if (_dealt > 1) {
+      c.text(270, 505, "BEFORE THAT", TS_MED, true);
+      const int mid = c.textHeight(TS_MED) / 2;
+      int y = 535;
+      for (int i = _dealt - 2; i >= 0 && i > _dealt - 5; i--, y += 28) {
+        const int card = _deck[i];
+        c.text(270, y, tdraw::rankName(card % 13), TS_MED, true);
+        tdraw::suit(c, card / 13, 300, y + mid, 18, true);
+      }
+    }
 
     c.button(DRAW_CARD.x, DRAW_CARD.y, DRAW_CARD.w, DRAW_CARD.h, "DRAW", _dealt < 52,
              TS_LARGE);
     c.button(SHUFFLE.x, SHUFFLE.y, SHUFFLE.w, SHUFFLE.h, "SHUFFLE", false);
-
-    if (_dealt > 1) {
-      char line[100] = "recent: ";
-      for (int i = _dealt - 2; i >= 0 && i > _dealt - 8; i--) {
-        const int card = _deck[i];
-        char n[10];
-        snprintf(n, sizeof(n), "%s%c ", tdraw::rankName(card % 13), suitLetter(card / 13));
-        strncat(line, n, sizeof(line) - strlen(line) - 1);
-      }
-      c.textCentered(c.width() / 2, 636, line, TS_MED, true);
-    }
   }
 
   void tapCards(int x, int y) {
@@ -260,8 +264,6 @@ class RandomTool : public ToolApp {
       host().refresh(true);
     }
   }
-
-  static char suitLetter(int idx) { return "SHDC"[idx]; }
 
   void shuffleDeck() {
     for (int i = 0; i < 52; i++) _deck[i] = i;

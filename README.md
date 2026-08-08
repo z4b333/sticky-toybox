@@ -31,6 +31,8 @@ The original Thai readme is at [docs/README.th.md](docs/README.th.md).
   rule keeps only three marks per side on the board. Placing a fourth removes
   your oldest one, so the game never ends in a full-board draw. Hard mode
   never loses. This is verified by a test that searches the entire game tree.
+  Two-player games keep a running tally for as long as you stay in the app,
+  which is not saved — sharing one device is not a record of form.
 
 **Tools**
 
@@ -75,6 +77,10 @@ the prebuilt image directly:
 ```
 esptool --chip esp32s3 write_flash 0x0 docs/firmware/toybox-full.bin
 ```
+
+`tools/make_image.sh` rebuilds that image. It merges the bootloader, the
+partition table and the app into one file, because the web flasher writes a
+single file to offset 0.
 
 The partition table (`partitions_toybox.csv`) has one 4 MB app slot, a
 partition for each optional language pack, and a 4.7 MB LittleFS filesystem

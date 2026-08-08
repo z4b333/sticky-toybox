@@ -50,22 +50,34 @@ inline void render(ToolsCanvas& c, const Text& t) {
   c.textCentered(c.width() / 2, 46, "HOW TO PLAY", TS_LARGE, true, true);
   decor::ornament(c, c.width() / 2, 80, 300, true);
 
+  // The buttons are pinned to the bottom where the thumb is, so the emblem and
+  // the rules are centred in what is left rather than pushed against the top.
+  // A six-line card and an eleven-line one then sit the same way on the panel
+  // instead of one of them leaving a hole above GOT IT.
+  constexpr int TOP = 96, ICON = 76, ICON_GAP = 20, LINE = 34;
+  int lines = 0;
+  for (int i = 0; i < MAX_LINES && t.lines[i]; i++) lines++;
+
+  const int blockH = (t.icon >= 0 ? ICON + ICON_GAP : 0) + lines * LINE;
+  int y = TOP + (OK_BTN.y - 16 - TOP - blockH) / 2;
+  if (y < TOP) y = TOP;
+
   // The game's own hub icon, big, above its rules -- so the card that opens
   // every game still looks like that particular game.
   if (t.icon >= 0) {
     if (t.game)
-      gicons::draw(c, t.icon, c.width() / 2, 130, 76);
+      gicons::draw(c, t.icon, c.width() / 2, y + ICON / 2, ICON);
     else
-      ticons::draw(c, t.icon, c.width() / 2, 130, 76);
+      ticons::draw(c, t.icon, c.width() / 2, y + ICON / 2, ICON);
+    y += ICON + ICON_GAP;
   }
 
   // The rules read at the next size up now that the face is proportional: the
   // same 26-character lines that filled the panel in the old pixel font take
   // barely half of it, and rules are the one screen you actually read.
-  int y = t.icon >= 0 ? 186 : 118;
-  for (int i = 0; i < MAX_LINES && t.lines[i]; i++) {
+  for (int i = 0; i < lines; i++) {
     if (t.lines[i][0]) c.text(34, y, t.lines[i], TS_LARGE, true);
-    y += 34;  // blank entries are deliberate paragraph breaks
+    y += LINE;  // blank entries are deliberate paragraph breaks
   }
 
   c.button(OK_BTN.x, OK_BTN.y, OK_BTN.w, OK_BTN.h, "GOT IT", true, TS_LARGE);

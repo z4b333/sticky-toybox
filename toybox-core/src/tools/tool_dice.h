@@ -51,15 +51,31 @@ class DiceTool : public ToolApp {
     const int sides = SIDES[_typeIdx];
 
     // --- dice faces --------------------------------------------------------
-    constexpr int CELL = 110, GAP = 10, GX = 65, GY = 382;
+    // The faces get whatever room is left between the formula and the total,
+    // so one die is drawn large and six are drawn small rather than one die
+    // sitting in the corner of a grid built for six. The band never moves, so
+    // the total below it never moves either.
+    constexpr int BAND_Y = 372, BAND_H = 248, GAP = 10, MAX_CELL = 200;
+    const int n = _rolled > 0 ? _rolled : _count;
+    const int cols = n < 3 ? n : 3;
+    const int rows = (n + 2) / 3;
+    int cell = (440 - (cols - 1) * GAP) / cols;
+    const int fits = (BAND_H - (rows - 1) * GAP) / rows;
+    if (fits < cell) cell = fits;
+    if (cell > MAX_CELL) cell = MAX_CELL;
+    const int gw = cols * cell + (cols - 1) * GAP;
+    const int gh = rows * cell + (rows - 1) * GAP;
+    const int GX = (480 - gw) / 2;
+    const int GY = BAND_Y + (BAND_H - gh) / 2;
+
     if (_rolled == 0) {
-      c.drawRect(GX, GY, 3 * CELL + 2 * GAP, 2 * CELL + GAP, 1, true);
-      c.textInBox(GX, GY, 3 * CELL + 2 * GAP, 2 * CELL + GAP, "tap ROLL", TS_LARGE, true);
+      c.drawRect(GX, GY, gw, gh, 1, true);
+      c.textInBox(GX, GY, gw, gh, "tap ROLL", TS_LARGE, true);
     }
     for (int i = 0; i < _rolled; i++) {
-      const int x = GX + (i % 3) * (CELL + GAP);
-      const int y = GY + (i / 3) * (CELL + GAP);
-      drawDie(c, x, y, CELL, _values[i], sides);
+      const int x = GX + (i % cols) * (cell + GAP);
+      const int y = GY + (i / cols) * (cell + GAP);
+      drawDie(c, x, y, cell, _values[i], sides);
     }
 
     // --- total -------------------------------------------------------------
@@ -192,14 +208,16 @@ class DiceTool : public ToolApp {
       tdraw::fillRound(c, x, y, size, size, r, true);
     } else {
       tdraw::roundRect(c, x, y, size, size, r, 3, true);
-      if (value == 1) tdraw::roundRect(c, x + 7, y + 7, size - 14, size - 14, r - 4, 1, true);
+      const int in = size / 16;
+      if (value == 1)
+        tdraw::roundRect(c, x + in, y + in, size - 2 * in, size - 2 * in, r - in, 1, true);
     }
     if (sides == 6) {
       tdraw::dicePips(c, x, y, size, value, crit);
     } else {
       char buf[4];
       snprintf(buf, sizeof(buf), "%d", value);
-      const int h = 56;
+      const int h = size / 2;
       tdraw::seg7Centered(c, x + size / 2, y + (size - h) / 2, h, buf, !crit);
     }
   }

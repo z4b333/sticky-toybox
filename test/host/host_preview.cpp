@@ -21,6 +21,7 @@
 #include "tools/tool_flash.h"
 #include "tools/tool_note.h"
 #include "tools/tool_picker.h"
+#include "tools/tool_random.h"
 #include "tools/tool_sea.h"
 #include "tools/tool_sudoku.h"
 #include "touch.h"
@@ -34,8 +35,20 @@ Epd epd;
 static const char* g_dumpName = "frame";
 // Naming the screen also tags any text overflow found while drawing it, so a
 // clipped string is reported against the screen it actually belongs to.
+// A named screen that never paints means the tap meant to reach it landed on
+// empty panel. Without this the run just writes one file fewer and renumbers
+// everything after it, which reads like a diff rather than a failure.
+static bool g_screenPainted = true;
+static void screenPaintCheck() {
+  if (g_screenPainted) return;
+  printf("PREVIEW FAIL: \"%s\" never painted -- a guard tapped empty panel\n", g_dumpName);
+  fflush(stdout);
+  abort();
+}
 static void setScreen(const char* n) {
+  screenPaintCheck();
   g_dumpName = n;
+  g_screenPainted = false;
   gfx::g_overflowScreen = n;
 }
 static int g_dumpCounter = 0;
@@ -134,6 +147,7 @@ void Epd::drawCircle(int cx, int cy, int r, uint8_t color, int thickness) {
 }
 static void dumpFrame(const uint8_t* fb) {
   if (!g_dumpEnabled) return;
+  g_screenPainted = true;
   char name[128];
   snprintf(name, sizeof(name), "preview_%02d_%s.pgm", g_dumpCounter++, g_dumpName);
   FILE* f = fopen(name, "wb");
@@ -563,11 +577,14 @@ int main() {
 
   setScreen("tool_card");
   g_dumpEnabled = false;
-  quietTap(250 + 95, 50 + 24);  // CARD mode
-  quietTap(40 + 100, 548 + 33);
-  quietTap(40 + 100, 548 + 33);
+  quietTap(randui::MODE_CARD.x + randui::MODE_CARD.w / 2,
+           randui::MODE_CARD.y + randui::MODE_CARD.h / 2);  // CARD mode
+  quietTap(randui::DRAW_CARD.x + randui::DRAW_CARD.w / 2,
+           randui::DRAW_CARD.y + randui::DRAW_CARD.h / 2);
+  quietTap(randui::DRAW_CARD.x + randui::DRAW_CARD.w / 2,
+           randui::DRAW_CARD.y + randui::DRAW_CARD.h / 2);
   g_dumpEnabled = true;
-  toybox.onTap(40 + 100, 548 + 33);  // DRAW CARD
+  tapRect(randui::DRAW_CARD);  // DRAW
 
   // Picker: type items on the portrait keyboard (KEY_W 44, rows 340/404/468).
   setScreen("tool_picker_kb");
@@ -712,9 +729,10 @@ int main() {
   setScreen("tool_sea_pair");
   g_dumpEnabled = false;
   toybox.open(false, 7);
-  toybox.onTap(240, 316 + 46);  // TWO DEVICES
+  tapRect(help::OK_BTN);     // reopening brings the rules card back
+  tapRect(seaui::DUEL_BTN);  // TWO DEVICES
   g_dumpEnabled = true;
-  toybox.onTap(240, 150 + 42);  // HOST A GAME
+  tapRect(seaui::HOST_BTN);  // HOST A GAME
 
   // --- sudoku -------------------------------------------------------------
   // Which cells are givens depends on the generated puzzle, so rather than
@@ -1171,6 +1189,8 @@ int main() {
     epd.setRotation(0);
     printf("rotate ok (pinned note fills the panel at all four angles)\n");
   }
+
+  screenPaintCheck();  // the last screen has nothing after it to catch it
 
   if (gfx::g_overflowCount) {
     printf("\n%d TEXT OVERFLOW(S) -- these are clipped at the panel edge:\n",

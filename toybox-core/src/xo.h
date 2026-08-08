@@ -33,6 +33,11 @@ class XoApp : public ToolApp {
   int _plies = 0;       // THREE has no natural end; cap the chase
   Rule _rule = RULE_CLASSIC;
   Foe _foe = FOE_HARD;
+
+  // Pass-and-play keeps no permanent record -- two people sharing one device
+  // are not a run of form. It does keep a count for as long as they are sitting
+  // there, which is the thing they actually argue about.
+  int _sitX = 0, _sitO = 0, _sitD = 0;
 };
 
 extern XoApp xoApp;
