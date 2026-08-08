@@ -45,7 +45,9 @@ The original Thai readme is at [docs/README.th.md](docs/README.th.md).
   the device is off. E-paper keeps its image without power.
 
 The gear icon on the hub opens settings, where you can hide apps, turn sound
-on or off, restore the how-to-play cards, and reset stats.
+on or off, restore the how-to-play cards, and reset stats. A second page there
+covers the lock screen — the panel keeps its image with the power off, so that
+is the screen the device spends most of its life showing.
 
 **Device behaviour**
 
@@ -57,9 +59,14 @@ on or off, restore the how-to-play cards, and reset stats.
   screen. A running timer holds it awake.
 - The pinned note follows the accelerometer, so it stays readable whichever
   way the magnet ends up. Everything else stays portrait.
-- The sleeping note's footer shows the time and room temperature. The clock
-  is set automatically the first time you save a note from your phone, since
-  the device has no network time.
+- The sleeping note's footer shows the time, room temperature and battery, each
+  of which can be turned off. The clock is set automatically the first time you
+  save a note from your phone, since the device has no network time.
+- With nothing pinned it shows a clock and the date instead. A panel that holds
+  an image without power makes a better clock than a goodbye card, so that is
+  the default; a goodbye card and a blank panel are the other choices.
+- Sleep timing, where the power button wakes to, and whether the note follows
+  the accelerometer are all settings rather than fixed behaviour.
 
 ## Building
 

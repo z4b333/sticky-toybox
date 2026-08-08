@@ -4,6 +4,7 @@
 // can tap), and the pairing screen that puts the editor on your phone.
 #pragma once
 #include "flash_qr.h"
+#include "lockscreen.h"
 #include "note_md.h"
 #include "note_store.h"
 #include "note_web.h"
@@ -43,12 +44,6 @@ inline TRect delRect(int i) {
 }
 }  // namespace nui
 
-// The clock and thermometer live in the firmware, not in the core, so the
-// pinned screen asks for a formatted line rather than reading any chip itself.
-// A host with no RTC leaves this empty and the footer simply omits it.
-using PinnedStatusFn = int (*)(char* out, int cap);
-inline PinnedStatusFn g_pinnedStatus = nullptr;
-inline void setPinnedStatus(PinnedStatusFn fn) { g_pinnedStatus = fn; }
 
 // The one button on the live pinned screen. Bottom-left, out of the way of the
 // note itself, which owns the rest of the panel.
@@ -95,8 +90,8 @@ inline bool drawPinnedFullScreen(ToolsCanvas& c, bool live = false) {
     // one worth spending the footer on: the time it was last touched, and how
     // warm the room is. Falls back to the wake hint when the device has no
     // clock, or has one that has never been set.
-    char status[40];
-    const int n = g_pinnedStatus ? g_pinnedStatus(status, sizeof(status)) : 0;
+    char status[48];
+    const int n = lock::footer(status, sizeof(status), lock::config(), lock::read());
     const char* hint = n > 0 ? status : "press power to wake";
     c.text(c.width() - 34 - c.textWidth(hint, TS_SMALL), c.height() - 34, hint, TS_SMALL,
            true);

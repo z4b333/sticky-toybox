@@ -17,6 +17,8 @@
 #include "service_ui.h"
 #include "sticky_host.h"
 #include "toybox.h"
+#include "settings.h"
+#include "tools/lockscreen.h"
 #include "nonogram.h"
 #include "tools/note_store.h"
 #include "tools/tool_dice.h"
@@ -200,6 +202,21 @@ bool Touch::probe() { return false; }
 // --- Glue ---------------------------------------------------------------------
 Preferences prefs;
 
+// Stands in for the clock, thermometer and fuel gauge, so the sleeping screens
+// render with something in them rather than with every optional part missing.
+static void hostLockInfo(lock::Info& i) {
+  i.haveClock = true;
+  i.hour = 9;
+  i.minute = 41;
+  i.day = 9;
+  i.month = 8;
+  i.year = 2026;
+  i.haveTemp = true;
+  i.tempDeciC = 214;
+  i.haveBattery = true;
+  i.batteryPct = 84;
+}
+
 // The hub draws twelve borderless tiles in a 3-wide grid; this walks the same
 // geometry and asserts each tap lands on the app that is drawn there. The order
 // is the hub's own slot table: four games, battleship, then the seven tools.
@@ -313,6 +330,8 @@ int main() {
   epd.begin();
   prefs.begin("toybox", false);
   toybox.begin(stickyHost);
+  lock::apply(prefs);
+  lock::setInfoHook(hostLockInfo);
   prefs.putInt("w_games", 12);
   prefs.putInt("w_wins", 10);
   prefs.putInt("w_streak", 4);
@@ -400,7 +419,7 @@ int main() {
   g_dumpEnabled = false;
   for (auto rc : {setRow(0, 92, 0), setRow(0, 92, 2), setRow(1, 92, 1), setRow(1, 340, 2)})
     toybox.onTap(rc.first, rc.second);
-  toybox.onTap(240, 586);  // SOUND
+  tapRect(setui::actionRect(setui::ACT_SOUND));
   if (appvis::shown() != 9 || buzzer::enabled()) {
     printf("SETTINGS FAIL: taps did not land (%d shown, sound %d)\n", appvis::shown(),
            (int)buzzer::enabled());
@@ -408,7 +427,37 @@ int main() {
   }
   setScreen("settings_edited");
   g_dumpEnabled = true;
-  toybox.onTap(240, 722);  // RESET, first tap: arms and asks
+  tapRect(setui::actionRect(setui::ACT_RESET));  // first tap: arms and asks
+
+  // The lock screen page, reached by the button on the settings screen.
+  setScreen("settings_lock");
+  tapRect(setui::actionRect(setui::ACT_LOCK));
+  if (!toybox.hostInSettings()) {
+    printf("LOCK FAIL: the lock screen page did not open\n");
+    abort();
+  }
+  {
+    // Every row has to cycle and land back where it started, or a setting can
+    // be moved into a state it cannot be moved out of.
+    g_dumpEnabled = false;
+    for (int r = 0; r < setui::LR_COUNT; r++) {
+      const lock::Config before = lock::config();
+      const int steps = (r == setui::LR_SLEEP) ? lock::SLEEP_COUNT : (r == setui::LR_EMPTY ? 3 : 2);
+      for (int k = 0; k < steps; k++) tapRect(setui::lockRect(r));
+      if (memcmp(&before, &lock::config(), sizeof(lock::Config)) != 0) {
+        printf("LOCK FAIL: row %d did not return to where it started\n", r);
+        abort();
+      }
+    }
+    // ...and back goes up one page rather than out of settings altogether.
+    toybox.onTap(BACK_W / 2, TOPBAR_H / 2);
+    if (!toybox.hostInSettings()) {
+      printf("LOCK FAIL: back left settings instead of returning to it\n");
+      abort();
+    }
+    g_dumpEnabled = true;
+    printf("lock screen ok (%d rows cycle, back goes up one page)\n", setui::LR_COUNT);
+  }
 
   setScreen("hub_hidden");
   toybox.goHub();
@@ -419,9 +468,9 @@ int main() {
   g_dumpEnabled = false;
   prefs.putBool("h_wrd", true);
   toybox.onTap(EPD_W - 40, 28);  // the routing walk left us on the hub: go back in
-  toybox.onTap(240, 654);        // SHOW HOW TO PLAY AGAIN
-  toybox.onTap(240, 722);  // RESET, armed again
-  toybox.onTap(240, 722);  // ...and confirmed
+  tapRect(setui::actionRect(setui::ACT_CARDS));
+  tapRect(setui::actionRect(setui::ACT_RESET));  // armed again
+  tapRect(setui::actionRect(setui::ACT_RESET));  // ...and confirmed
   // Cleared means gone, not zeroed: a sentinel default proves the key itself
   // was removed, so a fresh device and a reset one read identically.
   if (prefs.getInt("w_games", -1) != -1 || prefs.getUInt("c_heads", 99) != 99 ||
@@ -892,6 +941,21 @@ int main() {
   // What the panel keeps once the device powers down.
   // Asleep: the note and nothing else. Awake: the same note, with the footer
   // saying what a finger and the button will do.
+  // The panel with no note on it, which is what most devices show most of the
+  // time. Both halves: with a clock set, and with an RTC that has never been.
+  setScreen("lockscreen_clock");
+  epd.clear();
+  lock::drawClock(stickyHost.sharedCanvas(), lock::config(), lock::read());
+  epd.displayFull();
+
+  setScreen("lockscreen_no_clock");
+  {
+    const lock::Info none;
+    epd.clear();
+    lock::drawClock(stickyHost.sharedCanvas(), lock::config(), none);
+    epd.displayFull();
+  }
+
   setScreen("lockscreen");
   epd.clear();
   drawPinnedFullScreen(stickyHost.sharedCanvas());

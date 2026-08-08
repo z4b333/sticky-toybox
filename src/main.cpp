@@ -16,6 +16,7 @@
 #include "sensors.h"
 #include "service.h"
 #include "sticky_host.h"
+#include "tools/lockscreen.h"
 #include "tools/tool_note.h"
 #include "touch.h"
 
@@ -36,7 +37,6 @@ bool g_pinnedMode = false;
 // counts as use pushes this forward; when it runs out we take the same route as
 // a held power button, so the panel keeps whatever was on it.
 uint32_t g_lastActivity = 0;
-constexpr uint32_t IDLE_SLEEP_MS = 5 * 60 * 1000;
 
 // Below this the gauge is close enough to empty that a panel refresh can brown
 // out mid-write, which is how e-paper ends up with half a frame on it for ever.
@@ -45,28 +45,31 @@ uint32_t g_lastBatteryCheck = 0;
 
 void noteActivity() { g_lastActivity = millis(); }
 
-// --- the sleeping panel's footer ----------------------------------------------
-// The pinned note is what stays in view for hours, so its footer is worth
-// spending on: the time the device last went to sleep, and how warm the room
-// is. Both are optional -- an unset clock or an absent sensor just shortens the
-// line, and with neither the core falls back to its wake hint.
-int pinnedStatus(char* out, int cap) {
-  char timePart[16] = {};
+// --- what the lock screens ask the hardware for -------------------------------
+// The core decides what the sleeping panel looks like; this is the only thing
+// it cannot work out for itself. Anything absent stays absent -- an unset clock
+// or a missing sensor shortens the line rather than filling it with zeroes.
+void fillLockInfo(lock::Info& out) {
   sensors::Clock c;
-  if (sensors::readClock(c)) snprintf(timePart, sizeof(timePart), "%02d:%02d", c.hour, c.minute);
-
-  char tempPart[16] = {};
+  if (sensors::readClock(c)) {
+    out.haveClock = true;
+    out.hour = c.hour;
+    out.minute = c.minute;
+    out.day = c.day;
+    out.month = c.month;
+    out.year = c.year;
+  }
   int deci, rh;
   if (sensors::readClimate(deci, rh)) {
-    // One decimal is more precision than a room deserves; the whole degree
-    // reads faster from across the kitchen.
-    snprintf(tempPart, sizeof(tempPart), "%d\xc2\xb0" "C", (deci + (deci < 0 ? -5 : 5)) / 10);
+    out.haveTemp = true;
+    out.tempDeciC = deci;
   }
-
-  if (timePart[0] && tempPart[0]) return snprintf(out, cap, "%s  ·  %s", timePart, tempPart);
-  if (timePart[0]) return snprintf(out, cap, "%s", timePart);
-  if (tempPart[0]) return snprintf(out, cap, "%s", tempPart);
-  return 0;
+  const int pct = sensors::batteryPercent();
+  if (pct >= 0) {
+    out.haveBattery = true;
+    out.batteryPct = pct;
+    out.charging = sensors::charging();
+  }
 }
 
 void setClockFromPhone(int64_t localEpochMs) {
@@ -81,7 +84,7 @@ void setClockFromPhone(int64_t localEpochMs) {
 int g_pinnedRotation = 0;
 
 void applyPinnedRotation() {
-  if (!sensors::imuPresent()) return;
+  if (!lock::config().autoRotate || !sensors::imuPresent()) return;
   const int want = sensors::orientation();
   if (want == g_pinnedRotation) return;
   g_pinnedRotation = want;
@@ -105,13 +108,22 @@ void powerOff(bool lowBattery = false) {
   // you stick on the fridge.
   ToolsCanvas& c = stickyHost.sharedCanvas();
   if (lowBattery) {
-    // The one case that overrides the pinned note: if the panel just says
+    // The one case that overrides everything else: if the panel just says
     // "shopping list" the owner has no idea why it stopped responding.
     c.textTrackedCentered(EPD_W / 2, 300, "BATTERY EMPTY", TS_LARGE, true, true, 3);
     c.textCentered(EPD_W / 2, 350, "plug in the USB-C cable to wake it", TS_MED, true);
   } else if (!drawPinnedFullScreen(c)) {
-    c.textTrackedCentered(EPD_W / 2, 200, "GOODBYE!", TS_HUGE, true, true, 4);
-    c.textCentered(EPD_W / 2, 260, "press the power button to play again", TS_MED, true);
+    // Nothing pinned: whatever the lock screen settings asked for. A panel that
+    // holds an image with no power is a better clock than it is a goodbye card,
+    // which is why that is the default.
+    switch (lock::config().empty) {
+      case lock::EMPTY_BLANK: break;  // a device that looks off, because it is
+      case lock::EMPTY_GOODBYE:
+        c.textTrackedCentered(EPD_W / 2, 200, "GOODBYE!", TS_HUGE, true, true, 4);
+        c.textCentered(EPD_W / 2, 260, "press the power button to play again", TS_MED, true);
+        break;
+      default: lock::drawClock(c, lock::config(), lock::read()); break;
+    }
   }
   epd.displayFull();
   epd.deepSleep();
@@ -150,7 +162,9 @@ void handleIdleSleep() {
     noteActivity();
     return;
   }
-  if (millis() - g_lastActivity > IDLE_SLEEP_MS) powerOff();
+  const uint32_t idle = lock::sleepMs(lock::config());
+  if (idle == 0) return;  // "never": the setting says stay awake
+  if (millis() - g_lastActivity > idle) powerOff();
 }
 
 void handleLowBattery() {
@@ -212,7 +226,8 @@ void setup() {
   // The core draws the pinned footer and the notes portal receives the phone's
   // clock; neither knows what hardware is underneath, so the firmware hands
   // them the two functions that do.
-  setPinnedStatus(pinnedStatus);
+  lock::apply(prefs);
+  lock::setInfoHook(fillLockInfo);
   nweb::setClockHook(setClockFromPhone);
 
   toybox.begin(stickyHost);
@@ -222,8 +237,10 @@ void setup() {
   while (digitalRead(PIN_BTN_OK) == LOW) delay(10);
   noteActivity();
 
+  // Waking goes to whichever the settings say. With a note pinned the note is
+  // usually the thing you came back to, but not everyone agrees, so it asks.
   char pinned[note::NAME_LEN + 1];
-  if (note::getPinned(pinned)) {
+  if (note::getPinned(pinned) && lock::config().wake == lock::WAKE_NOTE) {
     g_pinnedMode = true;
     showPinned();
   } else {

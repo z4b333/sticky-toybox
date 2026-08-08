@@ -95,6 +95,13 @@ void Toybox::onTap(int x, int y) {
 
   if (_where == Where::Settings) {
     if (_host->isBackTap(x, y)) {
+      // Settings gets first refusal: it has a second page, and back there means
+      // up one rather than out.
+      if (_settings.back()) {
+        _host->beep(1);
+        _host->refresh(true);
+        return;
+      }
       appvis::save(_host->prefs());
       _host->beep(1);
       goHub();
