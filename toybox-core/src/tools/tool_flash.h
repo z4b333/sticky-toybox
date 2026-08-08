@@ -65,8 +65,11 @@ inline TRect rowRect(int i, int n) {
   return TRect{LIST_X, LIST_Y + i * h, LIST_W, h - 6};
 }
 inline TRect delRect(int i, int n) {
+  // Capped: on a tall row a full-height delete key is a stripe down the side,
+  // and a bigger target for the one tap nobody wants to make by accident.
   const int h = rowH(n);
-  return TRect{LIST_X + LIST_W - DEL_W - 4, LIST_Y + i * h + 3, DEL_W, h - 12};
+  const int dh = (h - 12) > 40 ? 40 : (h - 12);
+  return TRect{LIST_X + LIST_W - DEL_W - 4, LIST_Y + i * h + 6, DEL_W, dh};
 }
 inline int listBottom(int n) { return LIST_Y + n * rowH(n); }
 }  // namespace fcui
@@ -178,23 +181,31 @@ class FlashTool : public ToolApp {
 
     for (int i = 0; i < _deckCount; i++) {
       const TRect r = rowRect(i, _deckCount);
-      c.drawRect(r.x, r.y, r.w, r.h, 2, true);
-      const TSize nsz = scriptFloor(_decks[i].name, TS_MED);
-      c.text(r.x + 10, r.y + (r.h - c.textHeight(nsz)) / 2, _decks[i].name, nsz, true);
-
-      // mastery bar + count, right-aligned before the delete button
-      snprintf(buf, sizeof(buf), "%d/%d", _decks[i].mastered, _decks[i].cards);
-      const int tw = c.textWidth(buf, TS_SMALL);
-      const int barW = 90;
-      const int barX = r.x + r.w - DEL_W - 14 - tw - 8 - barW;
+      const TRect d = delRect(i, _deckCount);
       const int permille =
           _decks[i].cards ? (_decks[i].mastered * 1000) / _decks[i].cards : 0;
-      tdraw::progressBar(c, barX, r.y + (r.h - 16) / 2, barW, 16, permille);
-      c.text(barX + barW + 8, r.y + (r.h - c.textHeight(TS_SMALL)) / 2, buf, TS_SMALL, true);
 
-      const TRect d = delRect(i, _deckCount);
-      c.drawRect(d.x, d.y, d.w, d.h, 1, true);
+      // A rule between rows rather than a box around each one. Every deck used
+      // to be drawn as a button, which put three heavy outlines above IMPORT
+      // and made the list compete with the thing you actually press.
+      const TSize nsz = scriptFloor(_decks[i].name, TS_MED);
+      c.text(r.x + 6, r.y + 4, _decks[i].name, nsz, true);
+      snprintf(buf, sizeof(buf), "%d/%d", _decks[i].mastered, _decks[i].cards);
+      const int tw = c.textWidth(buf, TS_SMALL);
+      c.text(r.x + r.w - DEL_W - 12 - tw, r.y + 6, buf, TS_SMALL, true);
+      // The bar goes under the name, if the name leaves room for it. A host
+      // with a taller face (the CrossPoint port's is half again as tall) would
+      // otherwise push it through the row's own separator; there the count on
+      // the right says the same thing in less space.
+      const int barY = r.y + 8 + c.textHeight(nsz) + 4;
+      if (barY + 8 <= r.y + r.h)
+        tdraw::progressBar(c, r.x + 6, barY, r.w - DEL_W - 20, 8, permille);
       c.textInBox(d.x, d.y, d.w, d.h, "x", TS_MED, true);
+
+      // Only between rows: the last one is closed by the summary rule below,
+      // and two lines four pixels apart read as a mistake.
+      if (i + 1 < _deckCount)
+        c.drawLine(r.x, r.y + r.h + 2, r.x + r.w, r.y + r.h + 2, 1, true);
     }
 
     // A rule and a count close the list off, so the room left under it reads as
