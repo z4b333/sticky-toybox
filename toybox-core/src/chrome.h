@@ -14,14 +14,34 @@ constexpr int TOPBAR_H = 40;
 constexpr int BACK_W = 110;
 constexpr int HELP_W = 56;
 
+// The two corner buttons are tapped more than anything else and sit where a
+// thumb is least accurate, so their touch areas reach ten pixels below the bar
+// they are drawn in. Nothing is drawn there; it is depth you cannot see.
+//
+// 50 is the ceiling, not a preference: several screens put their first row of
+// controls at y=50, and a control inside this zone would become unreachable
+// rather than merely hard to hit, because the back tap is tested first. The
+// preview harness holds that line with static assertions.
+constexpr int BAR_TOUCH_H = 50;
+
 inline void drawTopBar(ToolsCanvas& c, const char* title, bool withHelp = false) {
   const int w = c.width();
   c.fillRect(0, 0, w, TOPBAR_H, false);
   c.fillRect(0, TOPBAR_H - 2, w, 2, true);
-  c.button(6, 4, BACK_W - 12, TOPBAR_H - 10, "< HUB", false, TS_MED);
+  // A chevron and the word, with no box around either. The bar is the only
+  // chrome on the screen and the same two controls sit in the same two corners
+  // on every screen, so a drawn button is a frame around something already
+  // learned. The chevron does the work a box was doing: it is the one mark
+  // people read as "back" without being told.
+  const int cy = TOPBAR_H / 2 - 1;
+  c.drawLine(22, cy, 32, cy - 9, 3, true);
+  c.drawLine(22, cy, 32, cy + 9, 3, true);
+  c.text(40, (TOPBAR_H - c.textHeight(TS_MED)) / 2, "HUB", TS_MED, true);
+
   // Only drawn where something is actually behind it, so a "?" always means
   // "there are rules here" rather than sometimes doing nothing.
-  if (withHelp) c.button(w - HELP_W + 6, 4, HELP_W - 12, TOPBAR_H - 10, "?", false, TS_MED);
+  if (withHelp)
+    c.textCentered(w - HELP_W / 2, (TOPBAR_H - c.textHeight(TS_MED)) / 2, "?", TS_MED, true);
 
   // Keep the centred title clear of the back button on the narrow portrait bar.
   // A Thai title cannot take the shrink-to-small escape -- below TS_LARGE it is
@@ -46,9 +66,9 @@ inline void drawTopBar(ToolsCanvas& c, const char* title, bool withHelp = false)
       decor::diamond(c, w / 2 + side * (half + 14), TOPBAR_H / 2 - 1, 4, true);
 }
 
-inline bool tappedBack(int x, int y) { return tHit(x, y, 0, 0, BACK_W, TOPBAR_H); }
+inline bool tappedBack(int x, int y) { return tHit(x, y, 0, 0, BACK_W, BAR_TOUCH_H); }
 inline bool tappedHelp(int x, int y, int screenW) {
-  return tHit(x, y, screenW - HELP_W, 0, HELP_W, TOPBAR_H);
+  return tHit(x, y, screenW - HELP_W, 0, HELP_W, BAR_TOUCH_H);
 }
 
 inline bool inRect(int px, int py, int x, int y, int w, int h) {

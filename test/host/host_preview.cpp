@@ -18,10 +18,12 @@
 #include "toybox.h"
 #include "nonogram.h"
 #include "tools/note_store.h"
+#include "tools/tool_dice.h"
 #include "tools/tool_flash.h"
 #include "tools/tool_note.h"
 #include "tools/tool_picker.h"
 #include "tools/tool_random.h"
+#include "tools/tool_timer.h"
 #include "tools/tool_sea.h"
 #include "tools/tool_sudoku.h"
 #include "touch.h"
@@ -286,6 +288,16 @@ static void checkHubRouting(const char* label) {
   g_dumpEnabled = true;
   printf("hub routing ok (%s: %d tiles, edges, headings, gaps, gear)\n", label, shown);
 }
+
+// The corner buttons' touch areas reach below the bar they are drawn in, and
+// the back tap is tested before anything a tool owns. A control that creeps up
+// into that zone does not become hard to hit -- it stops responding at all, and
+// nothing on screen explains why. These are the screens whose first row sits
+// closest to the bar; they are the ones that would hit it first.
+static_assert(diceui::TYPE_Y0 >= BAR_TOUCH_H, "dice type row is inside the back button");
+static_assert(randui::MODE_NUM.y >= BAR_TOUCH_H, "random mode row is inside the back button");
+static_assert(timerui::MODE_CD.y >= BAR_TOUCH_H, "timer mode row is inside the back button");
+static_assert(nui::BODY.y >= BAR_TOUCH_H, "the note body is inside the back button");
 
 // Tap a tool without emitting a frame for every intermediate state.
 static void quietTap(int x, int y) {
@@ -895,6 +907,31 @@ int main() {
   toybox.goHub();  // going home twice must be harmless
   g_dumpEnabled = true;
   printf("tool lifecycle ok (%d opens)\n", 3 * 9);
+
+  // The corner buttons are drawn inside a 40px bar but answer to 50, and the
+  // extra ten pixels are the whole point of the change -- a guard that only
+  // tapped the middle of the bar would pass with them removed.
+  g_dumpEnabled = false;
+  for (int t = 0; t < 9; t++) {
+    for (const int y : {2, TOPBAR_H - 1, TOPBAR_H, BAR_TOUCH_H - 1}) {
+      toybox.open(false, t);
+      toybox.onTap(BACK_W / 2, y);
+      if (toybox.hostInApp()) {
+        printf("BACK FAIL: tool %d ignored a tap at y=%d\n", t, y);
+        abort();
+      }
+    }
+    // ...and the row below it still belongs to the tool.
+    toybox.open(false, t);
+    toybox.onTap(BACK_W / 2, BAR_TOUCH_H);
+    if (!toybox.hostInApp()) {
+      printf("BACK FAIL: tool %d lost the row under the bar (y=%d)\n", t, BAR_TOUCH_H);
+      abort();
+    }
+    toybox.goHub();
+  }
+  g_dumpEnabled = true;
+  printf("back button ok (answers below the bar, y<%d, on 9 tools)\n", BAR_TOUCH_H);
 
   // The rules card is only safe to dismiss for ever because the "?" brings it
   // back. Check the whole loop: it blocks the game underneath, it stays gone
