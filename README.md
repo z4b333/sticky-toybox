@@ -156,6 +156,13 @@ prebuilt/       flashable firmware image
 it can be embedded in other firmware. The CrossPoint Reader port does this in
 about 110 lines. See [docs/PORTING.md](docs/PORTING.md).
 
+## Licence
+
+MIT for the project's own code (see [LICENSE](LICENSE)). The vendored QR code
+library and the glyph tables generated from third-party fonts have their own
+terms, recorded in [THIRD-PARTY.md](THIRD-PARTY.md) — including one question
+about the Thai face that is not settled.
+
 ## Known limitations
 
 - Nothing has been tested on real hardware yet. Display orientation and touch

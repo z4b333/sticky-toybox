@@ -1,7 +1,7 @@
 .pio/
-test/host/preview
-test/host/preview_cp
-test/host/preview_cp_asan
+# Every host build, however it was named. Naming them one at a time is how
+# preview_dbg -- a 2.7 MB compiled binary -- ended up committed.
+test/host/preview*
 test/host/test_logic
 test/host/*.pgm
 __pycache__/

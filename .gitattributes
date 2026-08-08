@@ -1,0 +1,17 @@
+# Two of the largest files here are tables, not code. Without this, GitHub
+# reports the repository as 95% C++ on the strength of a glyph table, buries
+# the Python and HTML that is actually written by hand, and tries to render a
+# ten megabyte diff when the fonts are rebuilt.
+src/fonts_intl.cpp        linguist-generated=true
+src/fonts_intl.h          linguist-generated=true
+test/host/fonts_cp.h      linguist-generated=true
+toybox-core/src/wordlist.h linguist-generated=true
+
+# Vendored so the project builds offline; not this project's code.
+lib/QRCode/**             linguist-vendored=true
+
+# Flashable images and font packs. Binary, and not worth a diff attempt.
+docs/firmware/*.bin       binary
+docs/firmware/*.tfp       binary
+prebuilt/*.bin            binary
+docs/screens/*.png        binary linguist-generated=true
