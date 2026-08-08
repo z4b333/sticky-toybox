@@ -64,7 +64,12 @@ is the screen the device spends most of its life showing.
   save a note from your phone, since the device has no network time.
 - With nothing pinned it shows a clock and the date instead. A panel that holds
   an image without power makes a better clock than a goodbye card, so that is
-  the default; a goodbye card and a blank panel are the other choices.
+  the default; a picture, a goodbye card and a blank panel are the other choices.
+- A picture can be sent from the notes page on your phone. The browser crops,
+  greyscales and dithers it, and shows you the result before it goes, because a
+  photograph at one bit per pixel is either striking or mud and there is no way
+  to tell but to look. What reaches the device is 48 KB of packed bits rather
+  than a photo, so nothing on it has to decode anything.
 - Sleep timing, where the power button wakes to, and whether the note follows
   the accelerometer are all settings rather than fixed behaviour.
 

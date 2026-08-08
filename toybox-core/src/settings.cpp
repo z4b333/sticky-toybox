@@ -3,6 +3,7 @@
 #include "applist.h"
 #include "appvis.h"
 #include "record.h"
+#include "tools/lock_image.h"
 #include "tools/tool_icons.h"
 
 namespace {
@@ -116,6 +117,9 @@ namespace {
 const char* emptyLabel(uint8_t e) {
   switch (e) {
     case lock::EMPTY_CLOCK: return "a clock";
+    // Says so plainly when there is nothing to show: a setting that names a
+    // picture the device does not have is a setting that looks broken.
+    case lock::EMPTY_PICTURE: return lockimg::have() ? "a picture" : "a picture (none sent)";
     case lock::EMPTY_GOODBYE: return "goodbye card";
     default: return "nothing";
   }
@@ -185,7 +189,7 @@ bool SettingsScreen::tapLock(ToolsHost& host, int x, int y) {
     if (!lockRect(i).hit(x, y)) continue;
     switch (i) {
       case LR_SLEEP: _lock.sleepIdx = (_lock.sleepIdx + 1) % lock::SLEEP_COUNT; break;
-      case LR_EMPTY: _lock.empty = (_lock.empty + 1) % 3; break;
+      case LR_EMPTY: _lock.empty = (_lock.empty + 1) % lock::EMPTY_COUNT; break;
       case LR_WAKE: _lock.wake = _lock.wake == lock::WAKE_HUB ? lock::WAKE_NOTE : lock::WAKE_HUB; break;
       case LR_ROTATE: _lock.autoRotate = !_lock.autoRotate; break;
       case LR_TIME: _lock.showTime = !_lock.showTime; break;

@@ -32,6 +32,10 @@ inline bool write(const char* path, const char* data, size_t len) {
   return true;
 }
 inline bool remove(const char* path) { return hostFs().erase(path) > 0; }
+inline size_t size(const char* path) {
+  auto it = hostFs().find(path);
+  return it == hostFs().end() ? 0 : it->second.size();
+}
 
 // Reads a whole file into a fresh buffer the caller frees. For the multi-
 // megabyte font packs, which must not pass through String.
@@ -99,6 +103,17 @@ inline bool write(const char* path, const char* data, size_t len) {
 inline bool remove(const char* path) {
   if (!begin()) return false;
   return LittleFS.remove(path);
+}
+
+// Length without reading the contents -- the lock screen picture is 48 KB and
+// only ever needs its size checked before a settings label is drawn.
+inline size_t size(const char* path) {
+  if (!begin()) return 0;
+  File f = LittleFS.open(path, "r");
+  if (!f) return 0;
+  const size_t n = f.size();
+  f.close();
+  return n;
 }
 
 // Reads a whole file into one allocation the caller frees. Prefers PSRAM: a

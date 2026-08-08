@@ -18,6 +18,7 @@
 #include "sticky_host.h"
 #include "toybox.h"
 #include "settings.h"
+#include "tools/lock_image.h"
 #include "tools/lockscreen.h"
 #include "nonogram.h"
 #include "tools/note_store.h"
@@ -442,7 +443,8 @@ int main() {
     g_dumpEnabled = false;
     for (int r = 0; r < setui::LR_COUNT; r++) {
       const lock::Config before = lock::config();
-      const int steps = (r == setui::LR_SLEEP) ? lock::SLEEP_COUNT : (r == setui::LR_EMPTY ? 3 : 2);
+      const int steps = (r == setui::LR_SLEEP) ? lock::SLEEP_COUNT
+                      : (r == setui::LR_EMPTY ? lock::EMPTY_COUNT : 2);
       for (int k = 0; k < steps; k++) tapRect(setui::lockRect(r));
       if (memcmp(&before, &lock::config(), sizeof(lock::Config)) != 0) {
         printf("LOCK FAIL: row %d did not return to where it started\n", r);
@@ -943,6 +945,46 @@ int main() {
   // saying what a finger and the button will do.
   // The panel with no note on it, which is what most devices show most of the
   // time. Both halves: with a clock set, and with an RTC that has never been.
+  // A picture on the lock screen. The phone does the dithering; this stands in
+  // for what it would send, so the blit and the file format are exercised.
+  setScreen("lockscreen_picture");
+  {
+    static uint8_t img[lockimg::FILE_SIZE];
+    img[0] = 'T'; img[1] = 'B'; img[2] = 'I'; img[3] = '1';
+    img[4] = lockimg::W & 255; img[5] = lockimg::W >> 8;
+    img[6] = lockimg::H & 255; img[7] = lockimg::H >> 8;
+    // An ordered-dither sphere: enough grey to prove the blit draws tone rather
+    // than blocks, and cheap enough to write here.
+    static const int bayer[4][4] = {{0, 8, 2, 10}, {12, 4, 14, 6},
+                                    {3, 11, 1, 9}, {15, 7, 13, 5}};
+    for (int y = 0; y < lockimg::H; y++) {
+      for (int x = 0; x < lockimg::W; x++) {
+        const float dx = (x - 240) / 210.0f, dy = (y - 400) / 210.0f;
+        const float r2 = dx * dx + dy * dy;
+        float v = r2 > 1.0f ? 0.92f : 0.15f + 0.8f * (1.0f - r2) * (1.0f - r2);
+        if (r2 > 1.0f && ((x / 40 + y / 40) & 1)) v = 0.80f;
+        const int level = (int)(v * 16.0f);
+        if (level > bayer[y & 3][x & 3])
+          img[lockimg::HEADER + (size_t)y * lockimg::STRIDE + (x >> 3)] |= (0x80 >> (x & 7));
+      }
+    }
+    tfs::write(lockimg::PATH, (const char*)img, sizeof(img));
+    epd.clear();
+    if (!lockimg::draw(stickyHost.sharedCanvas())) {
+      printf("PICTURE FAIL: a stored lock screen picture did not draw\n");
+      abort();
+    }
+    epd.displayFull();
+    // ...and a file the wrong length has to be refused rather than drawn as
+    // half a picture and half whatever was in memory.
+    tfs::write(lockimg::PATH, (const char*)img, 1000);
+    if (lockimg::have() || lockimg::draw(stickyHost.sharedCanvas())) {
+      printf("PICTURE FAIL: a truncated picture was accepted\n");
+      abort();
+    }
+    tfs::remove(lockimg::PATH);
+  }
+
   setScreen("lockscreen_clock");
   epd.clear();
   lock::drawClock(stickyHost.sharedCanvas(), lock::config(), lock::read());

@@ -19,7 +19,8 @@
 
 namespace lock {
 
-enum Empty : uint8_t { EMPTY_CLOCK = 0, EMPTY_GOODBYE = 1, EMPTY_BLANK = 2 };
+enum Empty : uint8_t { EMPTY_CLOCK = 0, EMPTY_PICTURE = 1, EMPTY_GOODBYE = 2, EMPTY_BLANK = 3 };
+inline constexpr int EMPTY_COUNT = 4;
 enum Wake : uint8_t { WAKE_NOTE = 0, WAKE_HUB = 1 };
 
 // Zero is never. Five minutes suits a magnet on a fridge; a device sitting on a
@@ -43,7 +44,7 @@ inline Config load(Preferences& p) {
   c.sleepIdx = (uint8_t)p.getInt("ls_sleep", 2);
   if (c.sleepIdx >= SLEEP_COUNT) c.sleepIdx = 2;
   c.empty = (uint8_t)p.getInt("ls_empty", EMPTY_CLOCK);
-  if (c.empty > EMPTY_BLANK) c.empty = EMPTY_CLOCK;
+  if (c.empty >= EMPTY_COUNT) c.empty = EMPTY_CLOCK;
   c.showTime = p.getBool("ls_time", true);
   c.showTemp = p.getBool("ls_temp", true);
   c.showBattery = p.getBool("ls_batt", true);

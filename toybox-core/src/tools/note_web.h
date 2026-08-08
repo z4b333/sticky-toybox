@@ -6,6 +6,7 @@
 // key works in the text area, and on iOS/Android with a downloaded language pack
 // it runs on-device, which matters because this access point has no internet.
 #pragma once
+#include "lock_image.h"
 #include "note_store.h"
 #include "portal.h"
 
@@ -35,6 +36,7 @@ class NoteServer {
   const char* password() const { return _portal.password(); }
   const char* url() const { return _portal.url(); }
   String wifiPayload() const { return _portal.wifiPayload(); }
+  bool pictureStored() const { return lockimg::have(); }
   void fakeResult(const char* n, int b) {
     strncpy(_last, n, note::NAME_LEN);
     _bytes = b;
@@ -61,6 +63,20 @@ class NoteServer {
     _portal.on("/notes", HTTP_GET, [this] { listNotes(); });
     _portal.on("/note", HTTP_GET, [this] { getNote(); });
     _portal.on("/save", HTTP_POST, [this] { saveNote(); });
+    // The picture arrives as a multipart upload rather than a form field: it is
+    // 48 KB of packed bits and full of zero bytes, and an Arduino String would
+    // stop at the first one.
+    _portal.server().on(
+        "/pic", HTTP_POST, [this] { _portal.server().send(200, "text/plain", _picOk ? "ok" : "bad"); },
+        [this] { receivePicture(); });
+    _portal.on("/pic", HTTP_DELETE, [this] {
+      lockimg::remove();
+      _portal.server().send(200, "text/plain", "ok");
+    });
+    _portal.on("/picture", HTTP_GET, [this] { sendPicturePage(); });
+    _portal.on("/picstat", HTTP_GET, [this] {
+      _portal.server().send(200, "text/plain", lockimg::have() ? "1" : "0");
+    });
     return true;
   }
   void stop() { _portal.end(); }
@@ -68,6 +84,7 @@ class NoteServer {
 
   bool received() const { return _received; }
   void clearReceived() { _received = false; }
+  bool pictureStored() const { return lockimg::have(); }
   const char* lastName() const { return _last; }
   int lastBytes() const { return _bytes; }
   const char* ssid() const { return _portal.ssid(); }
@@ -77,6 +94,33 @@ class NoteServer {
 
  private:
   void sendPage();
+  void sendPicturePage();
+
+  // Streamed straight to the filesystem as it arrives. Buffering 48 KB in RAM
+  // while WiFi is up is exactly the allocation this device cannot spare.
+  void receivePicture() {
+    HTTPUpload& up = _portal.server().upload();
+    if (up.status == UPLOAD_FILE_START) {
+      _picOk = false;
+      _picLen = 0;
+      tfs::begin();
+      _picFile = LittleFS.open(lockimg::PATH, "w");
+    } else if (up.status == UPLOAD_FILE_WRITE) {
+      if (_picFile) {
+        _picFile.write(up.buf, up.currentSize);
+        _picLen += up.currentSize;
+      }
+    } else if (up.status == UPLOAD_FILE_END) {
+      if (_picFile) _picFile.close();
+      // A half-arrived picture is worse than none: it would draw as a photo
+      // that turns to noise partway down the panel.
+      _picOk = (_picLen == lockimg::FILE_SIZE);
+      if (!_picOk) lockimg::remove();
+    } else {
+      if (_picFile) _picFile.close();
+      lockimg::remove();
+    }
+  }
 
   void listNotes() {
     note::Info infos[note::MAX_NOTES];
@@ -123,6 +167,9 @@ class NoteServer {
 
   portal::Portal _portal;
   bool _received = false;
+  bool _picOk = false;
+  uint32_t _picLen = 0;
+  File _picFile;
   int _bytes = 0;
   char _last[note::NAME_LEN + 1] = {};
 };
@@ -171,6 +218,8 @@ font-style:normal;text-align:center;line-height:13px;font-size:12px}
 font-size:15px;display:none}
 </style></head><body>
 <h1>Notes on your Toybox</h1>
+<p class="hint" style="margin:-6px 0 12px"><a href="/picture" style="color:#111">Put a
+picture on the lock screen instead &rsaquo;</a></p>
 
 <div class="row">
 <select id="pick"><option value="">+ new note</option></select>
@@ -286,6 +335,175 @@ document.getElementById('send').addEventListener('click',function(){
 upd();
 </script></body></html>)HTML";
   _portal.server().send_P(200, "text/html", kPage);
+}
+
+// The lock screen picture page.
+//
+// Everything that turns a photograph into something a one-bit panel can show
+// happens here, in the phone's browser: it already decodes JPEG, PNG and the
+// HEIC that iPhone photos actually are, and it can put the dithered result in
+// front of you before it is sent. That last part is the whole argument. A badly
+// chosen photograph becomes mud at one bit per pixel and there is no way to know
+// but to look; doing this on the device would mean upload, refresh, squint,
+// repeat, at 1.7 seconds a refresh.
+//
+// What leaves the phone is 48,000 bytes of packed bits in the panel's own
+// convention, not a photograph.
+inline void NoteServer::sendPicturePage() {
+  static const char kPic[] PROGMEM = R"HTML(<!DOCTYPE html><html><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Lock screen picture</title><style>
+*{box-sizing:border-box}
+body{font:16px/1.5 system-ui,-apple-system,sans-serif;margin:0;padding:14px 14px 40px;
+background:#f5f5f3;color:#111;max-width:640px;margin-inline:auto}
+h1{font-size:20px;margin:0 0 4px}
+.hint{font-size:13px;color:#666;margin:0 0 14px}
+.seg{display:flex;gap:6px;margin:12px 0}
+.seg button{flex:1;padding:10px 4px;border:1px solid #bbb;border-radius:8px;background:#fff;
+color:#111;font:600 14px system-ui;cursor:pointer}
+.seg button.on{background:#111;color:#fff;border-color:#111}
+label.file{display:block;padding:16px;border:2px dashed #bbb;border-radius:10px;background:#fff;
+text-align:center;font-weight:600;cursor:pointer}
+label.file input{display:none}
+#wrap{margin:14px 0;display:none}
+canvas{width:100%;max-width:300px;display:block;margin:0 auto;border:1px solid #111;
+background:#fff;image-rendering:pixelated;touch-action:none}
+button.send{width:100%;padding:16px;margin-top:6px;border:0;border-radius:9px;background:#111;
+color:#fff;font:600 17px system-ui;cursor:pointer}
+button.send:disabled{background:#999}
+button.rm{width:100%;padding:12px;margin-top:8px;border:1px solid #bbb;border-radius:9px;
+background:#fff;color:#111;font:600 15px system-ui}
+#ok{display:none;margin-top:10px;padding:10px;border-radius:8px;background:#e7f3e7;font-size:14px}
+a{color:#111}
+</style></head><body>
+<h1>Lock screen picture</h1>
+<p class="hint">480 x 800, black and white. What you see below is exactly what the
+panel will show — the device is sent the finished picture, not the photo.</p>
+
+<label class="file">Choose a picture<input id="f" type="file" accept="image/*"></label>
+
+<div id="wrap">
+  <div class="seg" id="fit">
+    <button data-v="crop" class="on">Fill (crop)</button>
+    <button data-v="fit">Fit whole picture</button>
+  </div>
+  <div class="seg" id="dit">
+    <button data-v="fs" class="on">Photo</button>
+    <button data-v="atk">Crisp</button>
+    <button data-v="thr">Line art</button>
+  </div>
+  <canvas id="c" width="480" height="800"></canvas>
+  <p class="hint" id="dragh">Drag the picture to choose what is kept.</p>
+  <button class="send" id="send">Send to device</button>
+</div>
+
+<button class="rm" id="rm">Remove the picture on the device</button>
+<div id="ok"></div>
+<p class="hint"><a href="/">Back to notes</a></p>
+
+<script>
+var W=480,H=800,cv=document.getElementById('c'),cx=cv.getContext('2d');
+var img=null,mode='crop',dither='fs',offX=0,offY=0,drag=null;
+
+function seg(id,set){
+ var box=document.getElementById(id);
+ Array.prototype.forEach.call(box.querySelectorAll('button'),function(b){
+  b.addEventListener('click',function(){
+   Array.prototype.forEach.call(box.querySelectorAll('button'),function(o){o.classList.remove('on')});
+   b.classList.add('on');set(b.dataset.v);render();
+  });
+ });
+}
+seg('fit',function(v){mode=v;offX=offY=0});
+seg('dit',function(v){dither=v});
+
+document.getElementById('f').addEventListener('change',function(e){
+ var file=e.target.files[0];if(!file)return;
+ var im=new Image();
+ im.onload=function(){img=im;offX=offY=0;
+  document.getElementById('wrap').style.display='block';render()};
+ im.src=URL.createObjectURL(file);
+});
+
+// Draw the photo into 480x800 the chosen way, then reduce it to one bit.
+function render(){
+ if(!img)return;
+ cx.fillStyle='#fff';cx.fillRect(0,0,W,H);
+ var s=(mode==='crop')?Math.max(W/img.width,H/img.height):Math.min(W/img.width,H/img.height);
+ var w=img.width*s,h=img.height*s;
+ var x=(W-w)/2+offX,y=(H-h)/2+offY;
+ if(mode==='crop'){ // never let the drag pull an edge inside the panel
+  x=Math.min(0,Math.max(W-w,x));y=Math.min(0,Math.max(H-h,y));offX=x-(W-w)/2;offY=y-(H-h)/2}
+ else {x=(W-w)/2;y=(H-h)/2}
+ cx.drawImage(img,x,y,w,h);
+ document.getElementById('dragh').style.display=(mode==='crop')?'block':'none';
+
+ var d=cx.getImageData(0,0,W,H),p=d.data;
+ // Rec. 601 luma, which is what the eye does with a greyscale photograph.
+ var g=new Float32Array(W*H);
+ for(var i=0,j=0;i<p.length;i+=4,j++) g[j]=0.299*p[i]+0.587*p[i+1]+0.114*p[i+2];
+
+ if(dither==='thr'){
+  for(var k=0;k<g.length;k++) g[k]=g[k]<128?0:255;
+ } else if(dither==='fs'){
+  // Floyd-Steinberg: the smoothest gradients, slightly muddier blacks.
+  for(var yy=0;yy<H;yy++)for(var xx=0;xx<W;xx++){
+   var idx=yy*W+xx,old=g[idx],nv=old<128?0:255,er=old-nv;g[idx]=nv;
+   if(xx+1<W)g[idx+1]+=er*7/16;
+   if(yy+1<H){if(xx>0)g[idx+W-1]+=er*3/16;g[idx+W]+=er*5/16;
+    if(xx+1<W)g[idx+W+1]+=er*1/16}
+  }
+ } else {
+  // Atkinson passes on only 3/4 of the error, which keeps whites white and
+  // edges sharp -- the look people recognise as e-ink.
+  for(var yy2=0;yy2<H;yy2++)for(var xx2=0;xx2<W;xx2++){
+   var id2=yy2*W+xx2,o2=g[id2],n2=o2<128?0:255,e2=(o2-n2)/8;g[id2]=n2;
+   if(xx2+1<W)g[id2+1]+=e2;if(xx2+2<W)g[id2+2]+=e2;
+   if(yy2+1<H){if(xx2>0)g[id2+W-1]+=e2;g[id2+W]+=e2;if(xx2+1<W)g[id2+W+1]+=e2;
+    if(yy2+2<H)g[id2+2*W]+=e2}
+  }
+ }
+ for(var m=0,q=0;m<g.length;m++,q+=4){var v=g[m]<128?0:255;p[q]=p[q+1]=p[q+2]=v;p[q+3]=255}
+ cx.putImageData(d,0,0);
+}
+
+// Dragging the crop. Pointer events cover finger and mouse alike.
+cv.addEventListener('pointerdown',function(e){if(mode!=='crop')return;
+ drag={x:e.clientX,y:e.clientY,ox:offX,oy:offY};cv.setPointerCapture(e.pointerId)});
+cv.addEventListener('pointermove',function(e){if(!drag)return;
+ var k=W/cv.getBoundingClientRect().width;
+ offX=drag.ox+(e.clientX-drag.x)*k;offY=drag.oy+(e.clientY-drag.y)*k;render()});
+cv.addEventListener('pointerup',function(){drag=null});
+
+function say(t){var o=document.getElementById('ok');o.textContent=t;o.style.display='block'}
+
+document.getElementById('send').addEventListener('click',function(){
+ var b=this;b.disabled=true;b.textContent='Sending...';
+ var d=cx.getImageData(0,0,W,H).data;
+ // 8 bytes of header, then one bit a pixel, MSB first, 1 = white: the
+ // framebuffer's own layout, so the device stores what it will draw.
+ var out=new Uint8Array(8+W*H/8);
+ out[0]=84;out[1]=66;out[2]=73;out[3]=49;            // 'TBI1'
+ out[4]=W&255;out[5]=W>>8;out[6]=H&255;out[7]=H>>8;
+ for(var y=0;y<H;y++)for(var x=0;x<W;x++){
+  if(d[(y*W+x)*4]>=128) out[8+y*(W/8)+(x>>3)] |= (128>>(x&7));
+ }
+ var fd=new FormData();
+ fd.append('f',new Blob([out],{type:'application/octet-stream'}),'lock.tbi');
+ fetch('/pic',{method:'POST',body:fd}).then(function(r){return r.text()}).then(function(t){
+  b.disabled=false;b.textContent='Send to device';
+  say(t==='ok'?'Sent. Set the lock screen to "a picture" in Settings on the device.'
+             :'The device did not accept it. Try sending again.');
+ }).catch(function(){b.disabled=false;b.textContent='Send to device';
+  say('Could not reach the device. Still connected to its wifi?')});
+});
+
+document.getElementById('rm').addEventListener('click',function(){
+ fetch('/pic',{method:'DELETE'}).then(function(){say('Removed.')})
+  .catch(function(){say('Could not reach the device.')});
+});
+</script></body></html>)HTML";
+  _portal.server().send_P(200, "text/html", kPic);
 }
 
 #endif  // TOYBOX_HOST

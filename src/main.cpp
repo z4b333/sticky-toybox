@@ -16,6 +16,7 @@
 #include "sensors.h"
 #include "service.h"
 #include "sticky_host.h"
+#include "tools/lock_image.h"
 #include "tools/lockscreen.h"
 #include "tools/tool_note.h"
 #include "touch.h"
@@ -122,6 +123,11 @@ void powerOff(bool lowBattery = false) {
         c.textTrackedCentered(EPD_W / 2, 200, "GOODBYE!", TS_HUGE, true, true, 4);
         c.textCentered(EPD_W / 2, 260, "press the power button to play again", TS_MED, true);
         break;
+      // Asking for a picture that was never sent falls back to the clock rather
+      // than to an empty panel that looks like a fault.
+      case lock::EMPTY_PICTURE:
+        if (lockimg::draw(c)) break;
+        // fall through
       default: lock::drawClock(c, lock::config(), lock::read()); break;
     }
   }
