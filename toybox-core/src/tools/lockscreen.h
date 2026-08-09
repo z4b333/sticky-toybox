@@ -47,6 +47,10 @@ struct Config {
   bool showTemp = true;
   bool showBattery = true;
   bool autoRotate = true;
+  // Which way up a pinned note rests when it is not following the device.
+  // Chosen at the moment of pinning, where you can see the note the size it
+  // will be rather than guessing from a settings row.
+  uint8_t pinRotation = 0;
   uint8_t wake = WAKE_NOTE;
 };
 
@@ -56,6 +60,7 @@ inline Config load(Preferences& p) {
   if (c.sleepIdx >= SLEEP_COUNT) c.sleepIdx = 2;
   c.empty = (uint8_t)p.getInt("ls_empty", EMPTY_GOODBYE);
   if (c.empty < EMPTY_FIRST || c.empty > EMPTY_LAST) c.empty = EMPTY_GOODBYE;
+  c.pinRotation = (uint8_t)(p.getInt("ls_pinrot", 0) & 3);
   c.showTime = p.getBool("ls_time", true);
   c.showTemp = p.getBool("ls_temp", true);
   c.showBattery = p.getBool("ls_batt", true);
@@ -72,6 +77,7 @@ inline void save(Preferences& p, const Config& c) {
   p.putBool("ls_temp", c.showTemp);
   p.putBool("ls_batt", c.showBattery);
   p.putBool("ls_rot", c.autoRotate);
+  p.putInt("ls_pinrot", c.pinRotation);
   p.putInt("ls_wake", c.wake);
 }
 
@@ -82,6 +88,21 @@ inline Config g_config;
 inline const Config& config() { return g_config; }
 inline void setConfig(const Config& c) { g_config = c; }
 inline void apply(Preferences& p) { g_config = load(p); }
+
+// Which way up the sleeping note should be drawn. Following the device wins
+// when it is switched on and there is an accelerometer to follow; otherwise the
+// angle chosen when the note was pinned.
+inline uint8_t restRotation(const Config& c, bool haveImu, int fromImu) {
+  if (c.autoRotate && haveImu) return (uint8_t)(fromImu & 3);
+  return (uint8_t)(c.pinRotation & 3);
+}
+
+// Records the angle a note was pinned at. Kept in the live config as well as
+// NVS, so the next paint uses it rather than the next boot.
+inline void setPinRotation(Preferences& p, uint8_t rot) {
+  g_config.pinRotation = (uint8_t)(rot & 3);
+  p.putInt("ls_pinrot", g_config.pinRotation);
+}
 
 inline uint32_t sleepMs(const Config& c) {
   return (uint32_t)SLEEP_MINUTES[c.sleepIdx] * 60u * 1000u;

@@ -102,8 +102,13 @@ void setClockFromPhone(int64_t localEpochMs) {
 int g_pinnedRotation = 0;
 
 void applyPinnedRotation() {
-  if (!lock::config().autoRotate || !sensors::imuPresent()) return;
-  const int want = sensors::orientation();
+  // Following the device when that is switched on, and otherwise the angle the
+  // note was pinned at. Both go through the same path, so a note that does not
+  // follow the device is not a note with no orientation -- it is a note with a
+  // chosen one.
+  const bool imu = sensors::imuPresent();
+  if (!lock::config().autoRotate && g_pinnedRotation == lock::config().pinRotation) return;
+  const int want = lock::restRotation(lock::config(), imu, imu ? sensors::orientation() : 0);
   if (want == g_pinnedRotation) return;
   g_pinnedRotation = want;
   epd.setRotation(want);
@@ -113,7 +118,17 @@ void applyPinnedRotation() {
   epd.displayFull();  // a quarter turn changes every pixel; partial would smear
 }
 
+// The angle a sleeping or woken note should be drawn at: the device's, if it is
+// set to follow, otherwise the one chosen when it was pinned.
+int restRotation() {
+  const bool imu = sensors::imuPresent();
+  return lock::restRotation(lock::config(), imu, imu ? sensors::orientation() : 0);
+}
+
 void showPinned() {
+  g_pinnedRotation = restRotation();
+  epd.setRotation(g_pinnedRotation);
+  touch.setRotation(g_pinnedRotation);
   epd.clear();
   drawPinnedFullScreen(stickyHost.sharedCanvas(), true);
   epd.displayFull();
@@ -125,6 +140,17 @@ void powerOff(bool lowBattery = false) {
   // on the panel instead of a goodbye card — that is the whole point of a note
   // you stick on the fridge.
   ToolsCanvas& c = stickyHost.sharedCanvas();
+  // A pinned note goes down at its resting angle whatever the device was doing
+  // a moment ago -- powering off from the middle of a game must not leave the
+  // note sideways for the next eight hours. Everything else is portrait.
+  {
+    char pin[note::NAME_LEN + 1];
+    const bool pinned = !lowBattery && note::getPinned(pin);
+    const int rot = pinned ? restRotation() : 0;
+    epd.setRotation(rot);
+    touch.setRotation(rot);
+    epd.clear();
+  }
   if (lowBattery) {
     // The one case that overrides everything else: if the panel just says
     // "shopping list" the owner has no idea why it stopped responding.
@@ -360,8 +386,12 @@ void loop() {
 
   if (g_pinnedMode) {
     if (ev.tapped) {
-      if (PINNED_HUB.hit(ev.x, ev.y)) {
-        // Apps are portrait-only; put the panel back before the hub draws.
+      if (PINNED_HUB.hit(ev.x, ev.y) || PINNED_UNPIN.hit(ev.x, ev.y)) {
+        // Unpinning from here rather than from the notes list, because this is
+        // the screen you are looking at when you decide you are done with a
+        // note. Either way the panel goes back to portrait first: apps are
+        // portrait-only, and the hub is what both buttons end up at.
+        if (PINNED_UNPIN.hit(ev.x, ev.y)) note::setPinned("");
         g_pinnedMode = false;
         g_pinnedRotation = 0;
         epd.setRotation(0);

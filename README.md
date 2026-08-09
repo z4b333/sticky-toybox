@@ -40,7 +40,9 @@ and Vietnamese. The Thai readme is at [docs/README.th.md](docs/README.th.md).
 
 - **Notes.** Write or dictate them on your phone, then read them and tick
   checkboxes on the device. Pin one and it becomes the screen the device shows
-  when it is off.
+  when it is off — pinning asks which way up you want it, with the note drawn
+  full size so you are choosing the thing you are looking at rather than
+  guessing from a settings row.
 - **Flashcards** with spaced repetition, imported from your phone. The two side
   buttons grade a card without reaching up to the panel: DOWN reveals the
   answer and then takes it as known, UP sends it back to be asked again.
@@ -56,7 +58,8 @@ and Vietnamese. The Thai readme is at [docs/README.th.md](docs/README.th.md).
 - It sleeps by itself after five idle minutes, keeping the pinned note on
   screen. A running timer holds it awake.
 - The pinned note follows the accelerometer, so it stays readable whichever way
-  the magnet ends up. Everything else stays portrait.
+  the magnet ends up. Turn that off and it rests at the angle you pinned it at
+  instead. Everything else stays portrait.
 - The sleeping note's footer shows the time, room temperature and battery, each
   of which can be turned off. The clock is set from your phone the first time
   you save a note, since the device has no network time.

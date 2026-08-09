@@ -30,6 +30,18 @@ inline constexpr TRect EDIT_BTN{190, 716, 150, 50};
 inline constexpr TRect PINNOW_BTN{60, 320, 360, 120};
 inline constexpr TRect KEEP_BTN{60, 540, 360, 120};
 
+// the "which way up" step, drawn over the note itself at whatever rotation is
+// being tried. Anchored to the bottom-left and bottom-right of the *rotated*
+// canvas rather than to fixed numbers, because the canvas is 480x800 at two of
+// the four angles and 800x480 at the other two.
+inline constexpr int ORIENT_H = 60, ORIENT_M = 20;
+inline TRect turnRect(int w, int h) {
+  return TRect{ORIENT_M, h - ORIENT_H - ORIENT_M, 200, ORIENT_H};
+}
+inline TRect keepRect(int w, int h) {
+  return TRect{w - 200 - ORIENT_M, h - ORIENT_H - ORIENT_M, 200, ORIENT_H};
+}
+
 // pairing
 inline constexpr int QR_X = 110, QR_Y = 140, QR_SIZE = 260;
 // The way out sits in the bottom band on every screen that has one. White space
@@ -45,9 +57,15 @@ inline TRect delRect(int i) {
 }  // namespace nui
 
 
-// The one button on the live pinned screen. Bottom-left, out of the way of the
+// The two buttons on the live pinned screen. Bottom-left, out of the way of the
 // note itself, which owns the rest of the panel.
+//
+// UNPIN is here because this is the screen you are looking at when you decide
+// you are finished with a note. Sending someone to the notes list to find the
+// note they are already reading, to press a button that says the opposite of
+// what they want, is the kind of path that gets designed and never walked.
 inline constexpr TRect PINNED_HUB{20, 748, 110, 44};
+inline constexpr TRect PINNED_UNPIN{144, 748, 140, 44};
 
 // Paints the pinned note edge to edge, with no app chrome — this is what stays
 // on the panel after the device powers down, and also what you see the moment
@@ -75,6 +93,8 @@ inline bool drawPinnedFullScreen(ToolsCanvas& c, bool live = false) {
     // The note's own heading already names it, so the footer spends its width on
     // the two things a hand can do instead.
     c.button(PINNED_HUB.x, PINNED_HUB.y, PINNED_HUB.w, PINNED_HUB.h, "HUB", false, TS_MED);
+    c.button(PINNED_UNPIN.x, PINNED_UNPIN.y, PINNED_UNPIN.w, PINNED_UNPIN.h, "UNPIN", false,
+             TS_MED);
     const char* hint = "tap a line to tick or cross it";
     c.text(c.width() - 34 - c.textWidth(hint, TS_SMALL), c.height() - 46, hint, TS_SMALL,
            true);
@@ -146,6 +166,7 @@ class NoteTool : public ToolApp {
   const char* title() const override {
     switch (_screen) {
       case Screen::View: return _name;
+      case Screen::Orient: return "WHICH WAY UP";
       case Screen::Pair: return "NOTES";
       default: return "NOTES";
     }
@@ -186,6 +207,10 @@ class NoteTool : public ToolApp {
   }
 
   void render(ToolsCanvas& c) override {
+    // The orientation step owns the whole panel: it is showing the note the
+    // size and shape it will be asleep, and a top bar in the app's own
+    // orientation would be a lie sitting on top of it.
+    if (_screen == Screen::Orient) return renderOrient(c);
     host().topBar(title());
     switch (_screen) {
       case Screen::List: renderList(c); break;
@@ -195,6 +220,9 @@ class NoteTool : public ToolApp {
   }
 
   void onTap(int x, int y) override {
+    // No back button here: the only ways out are the two buttons on it, and
+    // both leave the panel the right way up again.
+    if (_screen == Screen::Orient) return tapOrient(x, y);
     if (host().isBackTap(x, y)) {
       if (_screen == Screen::View) {
         closeNote();
@@ -225,7 +253,7 @@ class NoteTool : public ToolApp {
 #endif
 
  private:
-  enum class Screen : uint8_t { List, View, Pair };
+  enum class Screen : uint8_t { List, View, Pair, Orient };
 
   // --- list --------------------------------------------------------------
   void refreshList() { _count = note::list(_infos, note::MAX_NOTES); }
@@ -365,10 +393,19 @@ class NoteTool : public ToolApp {
   void tapView(int x, int y) {
     using namespace nui;
     if (PIN_BTN.hit(x, y)) {
-      note::setPinned(note::isPinned(_name) ? "" : _name);
-      host().beep(1);
-      host().refresh(false);
-      return;
+      // Unpinning is just unpinning. Pinning asks which way up, the same way
+      // the phone's prompt does -- it is the same decision and it deserves the
+      // same screen rather than a different answer depending on which door you
+      // came through.
+      if (note::isPinned(_name)) {
+        note::setPinned("");
+        host().beep(1);
+        host().refresh(false);
+        return;
+      }
+      note::setPinned(_name);
+      _returnTo = Screen::View;
+      return openOrient();
     }
     if (EDIT_BTN.hit(x, y)) {
       free(_buf);
@@ -496,12 +533,69 @@ class NoteTool : public ToolApp {
     c.button(DONE_BTN.x, DONE_BTN.y, DONE_BTN.w, DONE_BTN.h, "DONE", true, TS_LARGE);
   }
 
+  // --- which way up ------------------------------------------------------
+  // Shown once, at the moment of pinning, because that is the only moment the
+  // question has an obvious answer: the note is in front of you and the magnet
+  // is about to go somewhere. Asking it from a settings row later would mean
+  // choosing an angle for a note you cannot see.
+  void openOrient() {
+    _screen = Screen::Orient;
+    _wasScreen = _returnTo;
+    _orient = lock::config().pinRotation & 3;
+    host().setCanvasRotation(_orient);
+    host().beep(1);
+    host().refresh(true);
+  }
+
+  void closeOrient(bool save) {
+    if (save) lock::setPinRotation(prefs(), (uint8_t)_orient);
+    host().setCanvasRotation(0);  // apps are portrait; put the panel back
+    _screen = _wasScreen;
+    _returnTo = Screen::Pair;
+    _answered = true;
+    host().beep(1);
+    host().refresh(true);
+  }
+
+  void renderOrient(ToolsCanvas& c) {
+    using namespace nui;
+    // The note itself, edge to edge, exactly as it will be with the power off.
+    // A thumbnail would answer a different question.
+    if (!drawPinnedFullScreen(c)) {
+      c.textCentered(c.width() / 2, c.height() / 2, "nothing pinned", TS_LARGE, true);
+    }
+    const TRect t = turnRect(c.width(), c.height());
+    const TRect k = keepRect(c.width(), c.height());
+    // Painted over the note rather than beside it: there is no beside. White
+    // boxes first, so a dense note does not swallow its own way out.
+    c.fillRect(t.x - 6, t.y - 6, (k.x + k.w) - (t.x - 6) + 6, t.h + 12, false);
+    c.button(t.x, t.y, t.w, t.h, "TURN", false, TS_LARGE);
+    c.button(k.x, k.y, k.w, k.h, "THIS WAY UP", true, TS_LARGE);
+  }
+
+  void tapOrient(int x, int y) {
+    using namespace nui;
+    if (turnRect(canvas().width(), canvas().height()).hit(x, y)) {
+      _orient = (_orient + 1) & 3;
+      host().setCanvasRotation(_orient);
+      host().beep(0);
+      // A quarter turn changes every pixel, so this cannot be a partial update.
+      host().refresh(true);
+      return;
+    }
+    if (keepRect(canvas().width(), canvas().height()).hit(x, y)) closeOrient(true);
+  }
+
   void tapPair(int x, int y) {
     using namespace nui;
     if (_got && !_answered) {  // the prompt owns the screen until it is answered
-      if (PINNOW_BTN.hit(x, y) || KEEP_BTN.hit(x, y)) {
-        _pinnedIt = PINNOW_BTN.hit(x, y);
-        if (_pinnedIt) note::setPinned(_gotName);
+      if (PINNOW_BTN.hit(x, y)) {
+        note::setPinned(_gotName);
+        _pinnedIt = true;
+        return openOrient();
+      }
+      if (KEEP_BTN.hit(x, y)) {
+        _pinnedIt = false;
         _answered = true;
         host().beep(1);
         host().refresh(true);
@@ -517,6 +611,11 @@ class NoteTool : public ToolApp {
   }
 
   // --- state -------------------------------------------------------------
+  int _orient = 0;  // the angle being tried on the which-way-up step
+  // Which screen the which-way-up step came from, and so where it goes back to:
+  // the phone prompt, or the note you were reading when you pinned it.
+  Screen _returnTo = Screen::Pair;
+  Screen _wasScreen = Screen::Pair;
   static constexpr int kMaxHits = 24;
   static constexpr int kMaxPages = 12;
 

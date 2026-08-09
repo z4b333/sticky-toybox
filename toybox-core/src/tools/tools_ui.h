@@ -167,6 +167,13 @@ class ToolsHost {
   // has to do the cropping and dithering either way, and one pairing screen is
   // easier to keep honest than two. A host with no notes tool leaves this be.
   virtual void goPairPicture() {}
+  // Turn the whole canvas a quarter at a time, 0..3, the way the sleeping note
+  // turns when the device is. An app that asks for this gets a canvas whose
+  // width and height have swapped, and taps arrive in the same rotated space,
+  // so a screen laid out against width()/height() keeps working. A host with a
+  // fixed screen ignores it and reports 0.
+  virtual void setCanvasRotation(int r) { (void)r; }
+  virtual int canvasRotation() const { return 0; }
   virtual void topBar(const char* title, bool withHelp = false) = 0;
   // A tool with no rules card leaves this false and no "?" is drawn.
   virtual bool isHelpTap(int x, int y) const { return false; }

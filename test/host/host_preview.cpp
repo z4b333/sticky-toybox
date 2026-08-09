@@ -1062,8 +1062,69 @@ int main() {
   g_dumpEnabled = true;
   toybox.tick();
 
+  // SHOW ON SCREEN now goes through the which-way-up step rather than straight
+  // to the confirmation. The note is drawn edge to edge at the angle being
+  // tried, so what you are looking at is the thing you are choosing.
+  setScreen("tool_note_orient");
+  tapRect(nui::PINNOW_BTN);
+
+  {
+    // TURN has to move the canvas, and the buttons have to follow it into
+    // landscape -- they are placed against width() and height(), which swap.
+    // A step whose own way out was off the panel at two of the four angles
+    // would be a trap you could only escape by pulling the power.
+    if (stickyHost.canvasRotation() != 0) {
+      printf("ORIENT FAIL: opened at rotation %d, not 0\n", stickyHost.canvasRotation());
+      abort();
+    }
+    for (int r = 1; r <= 3; r++) {
+      const int w = stickyHost.canvas().width(), h = stickyHost.canvas().height();
+      tapRect(nui::turnRect(w, h));
+      if (stickyHost.canvasRotation() != r) {
+        printf("ORIENT FAIL: TURN went from %d to %d\n", r - 1, stickyHost.canvasRotation());
+        abort();
+      }
+    }
+    setScreen("tool_note_orient_turned");
+    epd.clear();
+    toybox.render(stickyHost.sharedCanvas());
+    epd.displayFull();
+
+    // Keeping it saves the angle and puts the panel back to portrait, because
+    // every other screen in the firmware is drawn portrait.
+    const int w = stickyHost.canvas().width(), h = stickyHost.canvas().height();
+    tapRect(nui::keepRect(w, h));
+    if (stickyHost.canvasRotation() != 0) {
+      printf("ORIENT FAIL: left the panel at rotation %d\n", stickyHost.canvasRotation());
+      abort();
+    }
+    if (lock::config().pinRotation != 3) {
+      printf("ORIENT FAIL: saved %d, chose 3\n", lock::config().pinRotation);
+      abort();
+    }
+    // ...and that is the angle the sleeping note is drawn at, once the note is
+    // no longer following the device.
+    lock::Config cfg = lock::config();
+    cfg.autoRotate = false;
+    lock::setConfig(cfg);
+    if (lock::restRotation(lock::config(), true, 1) != 3) {
+      printf("ORIENT FAIL: a note that does not follow the device ignored its angle\n");
+      abort();
+    }
+    cfg.autoRotate = true;
+    lock::setConfig(cfg);
+    if (lock::restRotation(lock::config(), true, 1) != 1) {
+      printf("ORIENT FAIL: a note that follows the device ignored the device\n");
+      abort();
+    }
+    lock::setPinRotation(prefs, 0);
+    printf("orient ok (turns, saves, and rests at what it saved)\n");
+  }
+
   setScreen("tool_note_pinned");
-  tapRect(nui::PINNOW_BTN);  // SHOW ON SCREEN
+  epd.clear();
+  toybox.render(stickyHost.sharedCanvas());
+  epd.displayFull();
 
   // What the panel keeps once the device powers down.
   // Asleep: the note and nothing else. Awake: the same note, with the footer
@@ -1152,7 +1213,26 @@ int main() {
     epd.clear();
     drawPinnedFullScreen(stickyHost.sharedCanvas(), true);
     epd.displayFull();
-    printf("pinned screen ok (wakes to the note, taps edit it)\n");
+
+    // The two buttons on the woken note must not be inside the text. A tap
+    // meant for UNPIN that ticks a line instead is worse than a tap that does
+    // nothing, because it edits the note on its way past.
+    for (const TRect& b : {PINNED_HUB, PINNED_UNPIN}) {
+      String was;
+      note::load("shopping", was);
+      tapPinnedFullScreen(stickyHost.sharedCanvas(), b.x + b.w / 2, b.y + b.h / 2);
+      String now;
+      note::load("shopping", now);
+      if (strcmp(was.c_str(), now.c_str()) != 0) {
+        printf("PINNED FAIL: a button on the woken note edited the note under it\n");
+        abort();
+      }
+    }
+    if (PINNED_HUB.hit(PINNED_UNPIN.x + 1, PINNED_UNPIN.y + 1)) {
+      printf("PINNED FAIL: HUB and UNPIN overlap\n");
+      abort();
+    }
+    printf("pinned screen ok (wakes to the note, taps edit it, buttons do not)\n");
   }
 
   g_dumpEnabled = false;

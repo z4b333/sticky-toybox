@@ -154,7 +154,11 @@ const char* rowHint(int i) {
       // What the picture is for is said by the chip above it.
       return lockimg::have() ? "one is stored" : "none sent yet";
     case setui::LR_WAKE: return "where the power button takes you";
-    case setui::LR_ROTATE: return "only the pinned note turns; apps stay portrait";
+    case setui::LR_ROTATE:
+      // When it is off, say what happens instead -- otherwise the note simply
+      // stops turning and it looks like the angle came from nowhere.
+      return lock::config().autoRotate ? "only the pinned note turns; apps stay portrait"
+                                       : "the note rests at the angle it was pinned at";
     default: return nullptr;
   }
 }
