@@ -10,6 +10,14 @@ from here.
 QR code generator. MIT, copyright 2017. Vendored so the project builds without
 a network. The full notice is at the top of `lib/QRCode/src/qrcode.h`.
 
+It carries one local change. `qrcode_initBytes` upstream does not check that
+the payload fits the version it is given: it pads by subtracting the encoded
+length from the capacity, which underflows when the data is too long, and then
+writes through the error-correction region. The symbol draws, the call reports
+success, and nothing decodes it. One line now rejects the version instead. See
+the comment at the change, and the guard in `test/host/host_preview.cpp` that
+holds it.
+
 ## Glyph data
 
 The bitmap tables in `src/fonts_intl.cpp`, `test/host/fonts_cp.h` and the

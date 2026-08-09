@@ -802,6 +802,19 @@ int8_t qrcode_initBytes(QRCode *qrcode, uint8_t *modules, uint8_t version, uint8
     int8_t mode = encodeDataCodewords(&codewords, data, length, version);
     
     if (mode < 0) { return -1; }
+
+    // Upstream never checks that the payload fits the version it was handed: it
+    // pads with `(dataCapacity * 8) - bitOffsetOrWidth`, which underflows when
+    // the data is too long, gets clamped to 4, and then writes straight through
+    // the error-correction region. The result is a symbol that draws, returns
+    // success, and cannot be decoded by anything.
+    //
+    // That made every caller's version search meaningless -- it accepted the
+    // first version it tried -- so the wifi pairing code, 37 bytes against
+    // version 2's 28, was unreadable on the bench while the shorter URL code
+    // beside it worked. Refusing the version here is what makes the search a
+    // search.
+    if (codewords.bitOffsetOrWidth > (uint32_t)dataCapacity * 8) { return -1; }
     qrcode->mode = mode;
     
     // Add terminator and pad up to a byte if applicable

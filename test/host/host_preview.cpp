@@ -1448,6 +1448,75 @@ int main() {
     printf("panel flips ok (all four corners reachable from the service screen)\n");
   }
 
+  // A QR code that is wrong is indistinguishable, to the eye, from one that is
+  // right: both are a square of speckle. The vendored encoder used to draw a
+  // symbol for any payload at any version and report success, so the pairing
+  // code -- 37 bytes asked to fit version 2's 28 -- came out unreadable and
+  // nobody could see it. This is the check that noticing does not depend on
+  // someone standing in front of the panel with a phone.
+  {
+    g_dumpEnabled = false;
+    static uint8_t qrbuf[420];
+    QRCode qr;
+    auto fits = [&](uint8_t v, const char* t) {
+      return qrcode_initText(&qr, qrbuf, v, ECC_MEDIUM, t) == 0;
+    };
+
+    // The payloads the pairing screens actually draw, at their longest: the
+    // SSID and key are fixed-width, so this is the wifi string byte for byte.
+    struct { const char* what; const char* text; } cases[] = {
+      {"wifi", "WIFI:T:WPA;S:TOYBOX-4F2A;P:58204617;;"},
+      {"url", "http://192.168.4.1"},
+    };
+
+    for (const auto& c : cases) {
+      const int drawn = fqr::draw(stickyHost.sharedCanvas(), nui::QR_X, nui::QR_Y,
+                                  nui::QR_SIZE, c.text);
+      if (drawn == 0) {
+        printf("QR FAIL: the %s payload does not fit any version we will draw\n", c.what);
+        abort();
+      }
+      // Which version the encoder settles on is checked against the spec rather
+      // than against itself: byte-mode capacity at ECC level M, straight out of
+      // the QR standard. Asking the library whether it agrees with the library
+      // is how a broken one passes.
+      static const int CAP_M[10] = {14, 26, 42, 62, 84, 106, 122, 152, 180, 213};
+      const int len = (int)strlen(c.text);
+      int want = 1;
+      while (want <= 10 && CAP_M[want - 1] < len) want++;
+
+      uint8_t v = 1;
+      for (; v <= fqr::MAX_VERSION; v++)
+        if (fits(v, c.text)) break;
+      if (v != want) {
+        printf("QR FAIL: %s is %d bytes -- needs v%d, encoder accepted v%d\n", c.what, len,
+               want, v);
+        abort();
+      }
+      // 5 px is 0.54 mm at 235 DPI. Below that a phone camera at arm's length
+      // is reading noise, valid symbol or not.
+      const int n = v * 4 + 17;
+      const int scale = nui::QR_SIZE / (n + 8);
+      if (scale < 5) {
+        printf("QR FAIL: %s is v%d, %d px per module -- too fine to scan\n", c.what, v, scale);
+        abort();
+      }
+      printf("qr %s ok (v%d, %d px per module, %.2f mm)\n", c.what, v, scale,
+             scale * 25.4 / 235.0);
+    }
+
+    // And the refusal itself, directly: version 2 holds 28 bytes, so 37 must
+    // come back as a failure rather than as a drawn square of nonsense. If this
+    // line ever passes a re-vendored copy of the library, the check upstream
+    // has been lost again.
+    if (fits(2, cases[0].text)) {
+      printf("QR FAIL: the encoder accepted 37 bytes into version 2\n");
+      abort();
+    }
+    epd.clear();
+    g_dumpEnabled = true;
+  }
+
   screenPaintCheck();  // the last screen has nothing after it to catch it
 
   if (gfx::g_overflowCount) {
