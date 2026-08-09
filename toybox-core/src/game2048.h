@@ -12,7 +12,6 @@ class G2048App : public ToolApp {
   void render(ToolsCanvas& c) override;
   void onTap(int x, int y) override;
   void onSwipe(int dx, int dy) override;
-  void tick() override;
 
  private:
 #ifdef TOYBOX_HOST
@@ -48,7 +47,6 @@ class G2048App : public ToolApp {
   // soon as the next move starts.
   int8_t _newCell = -1;
   bool _merged[16] = {};
-  uint32_t _blinkUntil = 0;
   bool _over = false;
   bool _reached2048 = false, _cheered = false;
 };

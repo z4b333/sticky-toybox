@@ -259,9 +259,6 @@ look and tell me what you think.
 Is Korean readable at 16 px, or should it move up to 24 like Thai? That is a
 one-line change.
 
-Does the 2048 merge blink read as a merge with real refresh timing, or as a
-glitch?
-
 Is the hollow box drawn for a missing character visible at arm's length?
 
 Do the dice look right at 200 px for a single die, or absurd?

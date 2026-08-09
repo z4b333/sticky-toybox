@@ -565,12 +565,12 @@ int main() {
   toybox.onSwipe(-120, 10);
   g_dumpEnabled = true;
   setScreen("g2048_merge");
-  toybox.onSwipe(10, -120);   // merged tiles flash, the new one is dashed
+  toybox.onSwipe(10, -120);  // a wedge marks what merged, the new tile is dashed
 
-  // ...and a beat later the flash clears on its own.
+  // ...and the next move clears the mark, because it belongs to the move that
+  // made it rather than to a timer.
   setScreen("g2048");
-  delay(500);
-  toybox.tick();
+  toybox.onSwipe(10, 120);
 
   setScreen("g2048_win");
   static_cast<G2048App*>(toybox.hostActive())->hostSetOver(true);

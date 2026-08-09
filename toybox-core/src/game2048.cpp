@@ -48,7 +48,6 @@ void G2048App::newGame() {
   memset(_b, 0, sizeof(_b));
   memset(_merged, 0, sizeof(_merged));
   _newCell = -1;
-  _blinkUntil = 0;
   _score = 0;
   _over = false;
   _canUndo = false;
@@ -169,11 +168,8 @@ void G2048App::render(ToolsCanvas& c) {
       }
       const int idx = r * 4 + col;
       const bool isNew = (idx == _newCell);
-      // While the flash is up, a tile that just merged is drawn in the opposite
-      // style to its neighbours. Inverting rather than adding a marker means it
-      // reads at a glance whatever its value, and costs no extra space.
-      const bool flash = _blinkUntil != 0 && _merged[idx];
-      const bool solid = (e >= 7) != flash;  // 128+ is normally solid
+      const bool justMerged = _merged[idx];
+      const bool solid = (e >= 7);  // 128+ is solid, and only ever means that
 
       const int v = tileValue(e);
       snprintf(buf, sizeof(buf), "%d", v);
@@ -189,6 +185,19 @@ void G2048App::render(ToolsCanvas& c) {
           c.drawRect(x, y, TILE, TILE, t, true);
         const TSize sc = (v >= 100) ? TS_LARGE : TS_HUGE;
         c.textCentered(x + TILE / 2, y + (TILE - c.textHeight(sc)) / 2, buf, sc, true);
+      }
+
+      // A wedge in the top-left corner on whatever just merged, drawn in the
+      // opposite colour to the tile it sits on so it reads on both. It stays
+      // until the next move rather than blinking: on this panel every change
+      // costs a visible refresh, so what happened has to be in how the board is
+      // drawn rather than in it changing. A mark also cannot be missed while a
+      // finger is still on the glass.
+      if (justMerged) {
+        // 26 px is 2.8 mm on this panel: enough to catch the eye from the arm's
+        // length a fridge is read at, without crowding the digit beside it.
+        for (int k = 0; k < 26; k++)
+          c.fillRect(x + 3, y + 3 + k, 26 - k, 1, !solid);
       }
     }
   }
@@ -263,7 +272,6 @@ bool G2048App::loadState() {
   // flash mean "this changed just now", and nothing did.
   _newCell = -1;
   memset(_merged, 0, sizeof(_merged));
-  _blinkUntil = 0;
   return true;
 }
 
@@ -274,25 +282,10 @@ void G2048App::enter(ToolsHost& h) {
   if (!loadState()) newGame();
 }
 
-// The merge flash lives for one beat and then the board settles. Doing it this
-// way round -- highlight first, plain a moment later -- keeps the swipe feeling
-// immediate; blinking the other way would put an e-ink refresh between the
-// gesture and its result.
-constexpr uint32_t BLINK_MS = 450;
-
-void G2048App::tick() {
-  if (!_blinkUntil || millis() < _blinkUntil) return;
-  _blinkUntil = 0;
-  host().refresh(false);
-}
-
 void G2048App::onSwipe(int dx, int dy) {
   if (_over) return;
   const int dir = (abs(dx) >= abs(dy)) ? (dx > 0 ? 1 : 0) : (dy > 0 ? 3 : 2);
   if (move(dir)) {
-    bool anyMerge = false;
-    for (int i = 0; i < 16; i++) anyMerge = anyMerge || _merged[i];
-    _blinkUntil = anyMerge ? millis() + BLINK_MS : 0;
     if (_reached2048 && !_cheered) {
       host().beep(3);
       host().refresh(false);

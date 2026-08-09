@@ -22,7 +22,10 @@ The original Thai readme is at [docs/README.th.md](docs/README.th.md).
 - **Nonogram** – 5×5 and 10×10 picture puzzles. Every generated puzzle is
   checked to be solvable by logic alone. Timed, with best times.
 - **2048** – swipe to merge, with undo. New tiles get a dashed border and
-  merged tiles blink once, so you can see what changed after each move.
+  merged ones a wedge in the corner, so you can see what changed after each
+  move. Both marks last until the next move rather than flashing: on e-paper
+  every change costs a visible refresh, so what happened is in how the board is
+  drawn rather than in it changing.
 - **Sudoku** – three difficulties. Every puzzle is generated with exactly one
   solution.
 - **Battleship** – play against the device, or between two devices over
