@@ -188,6 +188,12 @@ class ToolsHost {
   // own idea about sound, and the standalone firmware keeps it in its own NVS.
   virtual bool soundOn() const { return true; }
   virtual void setSoundOn(bool on) { (void)on; }
+  // How loud, 0 = silent up to 3 = as loud as the hardware goes. A host that
+  // only has a switch answers through the switch and loses nothing: the
+  // settings screen offers whatever range it is given.
+  virtual int soundLevel() const { return soundOn() ? 3 : 0; }
+  virtual void setSoundLevel(int lv) { setSoundOn(lv > 0); }
+  virtual int soundLevels() const { return 2; }
   // Y coordinate where a tool's own content may start (below the top bar).
   virtual int contentTop() const = 0;
 };

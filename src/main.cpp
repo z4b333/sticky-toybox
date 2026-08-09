@@ -237,7 +237,10 @@ void setup() {
 
   prefs.begin("toybox", false);
   buzzer::begin();
-  buzzer::setEnabled(prefs.getBool("sound", true));
+  // Volume if this device has ever been told one, otherwise whatever the
+  // on/off switch was set to before volume existed.
+  buzzer::setLevel((buzzer::Level)prefs.getInt(
+      "sound_lv", prefs.getBool("sound", true) ? (int)buzzer::Level::High : 0));
 
   if (!epd.begin()) {
     TB_LOG("EPD alloc failed\n");

@@ -50,8 +50,11 @@ The original Thai readme is at [docs/README.th.md](docs/README.th.md).
   on the device. A note can be pinned so it stays on the screen even when
   the device is off. E-paper keeps its image without power.
 
-The gear icon on the hub opens settings, where you can hide apps, turn sound
-on or off, restore the how-to-play cards, and reset stats. A second page there
+The gear icon on the hub opens settings, where you can hide apps, set the beep
+volume — high, medium, low or mute — restore the how-to-play cards, and reset
+stats. Volume is the buzzer's duty cycle rather than an amplifier: a piezo
+driven by a square wave is loudest at half duty, and narrower pulses excite it
+less. A second page there
 covers the lock screen — the panel keeps its image with the power off, so that
 is the screen the device spends most of its life showing. It shows the stored
 picture as a thumbnail, and tapping that row hands over to the notes tool's

@@ -51,6 +51,18 @@ void checkbox(ToolsCanvas& c, int x, int y, bool on) {
   c.drawLine(x + 12, y + 20, x + 22, y + 8, 3, false);
 }
 
+// A host with only a switch reports two levels and gets the two words it can
+// mean; one with a real volume gets four.
+const char* soundLabel(const ToolsHost& host) {
+  if (host.soundLevels() <= 2) return host.soundOn() ? "SOUND: ON" : "SOUND: OFF";
+  switch (host.soundLevel()) {
+    case 0: return "SOUND: MUTE";
+    case 1: return "SOUND: LOW";
+    case 2: return "SOUND: MEDIUM";
+    default: return "SOUND: HIGH";
+  }
+}
+
 const char* nameOf(const applist::Item& it) {
   return it.game ? gicons::NAMES[it.idx] : ticons::NAMES[it.idx];
 }
@@ -98,7 +110,7 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
   using namespace setui;
   const TRect s0 = actionRect(ACT_SOUND), s1 = actionRect(ACT_LOCK);
   const TRect s2 = actionRect(ACT_CARDS), s3 = actionRect(ACT_RESET);
-  c.button(s0.x, s0.y, s0.w, s0.h, host.soundOn() ? "SOUND: ON" : "SOUND: OFF", false, TS_MED);
+  c.button(s0.x, s0.y, s0.w, s0.h, soundLabel(host), false, TS_MED);
   c.button(s1.x, s1.y, s1.w, s1.h, "LOCK SCREEN...", false, TS_MED);
   c.button(s2.x, s2.y, s2.w, s2.h, "SHOW HOW TO PLAY AGAIN", false, TS_MED);
   c.button(s3.x, s3.y, s3.w, s3.h,
@@ -289,7 +301,11 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
   }
 
   if (actionRect(ACT_SOUND).hit(x, y)) {
-    host.setSoundOn(!host.soundOn());
+    // Down through the levels and round again, loudest first, so a device
+    // whose owner wants it quiet gets there in one tap rather than three.
+    const int n = host.soundLevels();
+    host.setSoundLevel((host.soundLevel() + n - 1) % n);
+    host.beep(0);  // at the level just chosen, which is the only useful preview
     host.beep(1);
     return true;
   }

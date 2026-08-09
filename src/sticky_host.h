@@ -86,6 +86,9 @@ class StickyHost : public ToolsHost {
   bool charging() const override { return sensors::charging(); }
   bool soundOn() const override { return buzzer::enabled(); }
   void setSoundOn(bool on) override;
+  int soundLevel() const override { return (int)buzzer::level(); }
+  void setSoundLevel(int lv) override;
+  int soundLevels() const override { return buzzer::LEVEL_COUNT; }
 
   ToolsCanvas& sharedCanvas() { return _canvas; }
 

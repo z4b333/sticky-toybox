@@ -174,10 +174,12 @@ void Epd::deepSleep() {}
 
 // --- Mock buzzer / touch ------------------------------------------------------
 namespace buzzer {
-static bool g_soundOn = true;
+static uint8_t g_soundLevel = 3;
 void begin() {}
-void setEnabled(bool on) { g_soundOn = on; }
-bool enabled() { return g_soundOn; }
+void setLevel(Level lv) { g_soundLevel = (uint8_t)lv; }
+Level level() { return (Level)g_soundLevel; }
+void setEnabled(bool on) { g_soundLevel = on ? 3 : 0; }
+bool enabled() { return g_soundLevel != 0; }
 void tap() {}
 void confirm() {}
 void error() {}
@@ -412,10 +414,28 @@ int main() {
   g_dumpEnabled = false;
   for (auto rc : {setRow(0, 92, 0), setRow(0, 92, 2), setRow(1, 92, 1), setRow(1, 340, 2)})
     toybox.onTap(rc.first, rc.second);
+  // Sound steps down a level on each tap and wraps at the bottom, so tapping it
+  // once from the top has to land on the level below the top, and tapping it
+  // as many times as there are levels has to come back to where it started.
+  const int levels = stickyHost.soundLevels();
+  const int soundWas = stickyHost.soundLevel();
   tapRect(setui::actionRect(setui::ACT_SOUND));
-  if (appvis::shown() != 9 || buzzer::enabled()) {
+  if (appvis::shown() != 9 || stickyHost.soundLevel() != soundWas - 1) {
     printf("SETTINGS FAIL: taps did not land (%d shown, sound %d)\n", appvis::shown(),
-           (int)buzzer::enabled());
+           stickyHost.soundLevel());
+    abort();
+  }
+  for (int i = 1; i < levels; i++) tapRect(setui::actionRect(setui::ACT_SOUND));
+  if (stickyHost.soundLevel() != soundWas) {
+    printf("SETTINGS FAIL: %d taps on sound landed on %d, not %d\n", levels,
+           stickyHost.soundLevel(), soundWas);
+    abort();
+  }
+  // ...and the screen below is drawn with it muted, which is the state the
+  // walk used to leave it in.
+  for (int i = 0; i < levels - 1; i++) tapRect(setui::actionRect(setui::ACT_SOUND));
+  if (stickyHost.soundLevel() != 0) {
+    printf("SETTINGS FAIL: could not reach mute\n");
     abort();
   }
   setScreen("settings_edited");
