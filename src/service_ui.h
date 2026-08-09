@@ -24,6 +24,11 @@ struct Report {
   bool touchOk = false;
   uint8_t touchAddr = 0;
   bool gauge = false, rtc = false, sht = false, imu = false;
+  // Raw accelerometer, and the rotation the mapping currently derives from it.
+  // Printed because that mapping is a guess: turn the device through four
+  // positions, read four lines, and the right answer falls out of the numbers
+  // instead of out of an argument.
+  int accelX = 0, accelY = 0, orientation = -1;
   int battMv = -1;
   int fontFaces = 0;
   uint32_t psramKb = 0;
@@ -31,7 +36,7 @@ struct Report {
 };
 
 struct Config {
-  bool flipX = false, flipY = false;      // panel
+  bool flipX = true, flipY = true;        // panel; see service.cpp load()
   bool swapXY = true, tFlipX = true, tFlipY = true;  // digitizer
 };
 
@@ -113,6 +118,13 @@ inline void render(ToolsCanvas& c, const Report& r, const Config& cfg, int sel, 
   snprintf(buf, sizeof(buf), "psram    %lu KB", (unsigned long)r.psramKb);
   c.text(MARGIN, y, buf, TS_MED, true);
   y += 26;
+
+  if (r.imu) {
+    snprintf(buf, sizeof(buf), "tilt     x %d   y %d   -> turn %d", r.accelX, r.accelY,
+             r.orientation);
+    c.text(MARGIN, y, buf, TS_MED, true);
+    y += 26;
+  }
 
   snprintf(buf, sizeof(buf), "fonts    %d extra face%s", r.fontFaces,
            r.fontFaces == 1 ? "" : "s");

@@ -49,6 +49,12 @@ bool readClimate(int& tempDeciC, int& rhPercent);
 
 // --- accelerometer (LSM6DS3TR-C) ------------------------------------------
 bool imuPresent();
+// Raw counts on the two axes orientation() uses, at +/-2 g full scale, so
+// 16384 counts is one g. The service screen shows these beside the rotation
+// they produce: which way the chip is glued down is the one thing about this
+// board no datasheet answers, and four readings from a device being turned
+// settle it in a way that guessing at signs never has.
+bool readAccel(int& ax, int& ay);
 // Which edge of the panel currently points down, as a display rotation:
 // 0 = normal portrait, 1 = 90 cw, 2 = upside down, 3 = 90 ccw.
 // Returns the last confident answer; a flat-on-the-table device keeps

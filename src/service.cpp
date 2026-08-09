@@ -31,8 +31,14 @@ constexpr uint32_t REPEAT_MS = 400;
 
 bool down(int pin) { return digitalRead(pin) == LOW; }
 
-void paint(const Report& r, const Config& cfg, int sel, bool haveCross, int cx, int cy,
+// Non-const because the tilt line has to be current: the whole point of it is
+// that you turn the device, press a button, and read what the chip now says.
+void paint(Report& r, const Config& cfg, int sel, bool haveCross, int cx, int cy,
            bool full) {
+  if (r.imu) {
+    sensors::readAccel(r.accelX, r.accelY);
+    r.orientation = sensors::orientation();
+  }
   epd.clear();
   render(stickyHost.sharedCanvas(), r, cfg, sel, haveCross, cx, cy);
   if (full)
@@ -45,8 +51,13 @@ void paint(const Report& r, const Config& cfg, int sel, bool haveCross, int cx, 
 
 Config load() {
   Config c;
-  c.flipX = prefs.getBool("hw_fx", false);
-  c.flipY = prefs.getBool("hw_fy", false);
+  // Both flips default on. The first board to run this needed the panel turned
+  // half a turn -- mirrored and upside down together -- and that is the scan
+  // direction of the panel, not a quirk of one unit, so a fresh device should
+  // come up right rather than making its owner discover it. Anything already
+  // saved still wins over these.
+  c.flipX = prefs.getBool("hw_fx", true);
+  c.flipY = prefs.getBool("hw_fy", true);
   c.swapXY = prefs.getBool("hw_tsw", true);
   c.tFlipX = prefs.getBool("hw_tfx", true);
   c.tFlipY = prefs.getBool("hw_tfy", true);

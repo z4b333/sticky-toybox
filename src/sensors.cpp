@@ -101,6 +101,7 @@ bool readClock(Clock&) { return false; }
 bool setClock(const Clock&) { return false; }
 bool setClockFromEpochMs(int64_t) { return false; }
 bool readClimate(int&, int&) { return false; }
+bool readAccel(int&, int&) { return false; }
 int orientation() { return g_orientation; }
 void hostSetOrientation(int o) { g_orientation = o; }
 
@@ -204,12 +205,18 @@ bool readClimate(int& tempDeciC, int& rhPercent) {
   return true;
 }
 
+bool readAccel(int& ax, int& ay) {
+  if (!g_imu) return false;
+  uint8_t b[4];
+  if (!readRegs(ADDR_IMU, 0x28, b, 4)) return false;  // OUTX_L_XL
+  ax = (int16_t)(b[0] | (b[1] << 8));
+  ay = (int16_t)(b[2] | (b[3] << 8));
+  return true;
+}
+
 int orientation() {
-  if (!g_imu) return g_orientation;
-  uint8_t b[6];
-  if (!readRegs(ADDR_IMU, 0x28, b, 6)) return g_orientation;  // OUTX_L_XL
-  const int16_t ax = (int16_t)(b[0] | (b[1] << 8));
-  const int16_t ay = (int16_t)(b[2] | (b[3] << 8));
+  int ax = 0, ay = 0;
+  if (!readAccel(ax, ay)) return g_orientation;
   // Only change our mind when gravity clearly favours one axis: a device flat
   // on a table, or mid-turn, keeps the previous answer instead of flickering.
   const int TH = 8000;  // ~0.5 g at +/-2 g full scale
