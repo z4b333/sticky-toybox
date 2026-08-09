@@ -36,14 +36,14 @@ inline TRect lockRect(int i) {
   return TRect{LOCK_X, y, LOCK_W, LOCK_HEIGHTS[i] - 8};
 }
 
-// The four things an empty panel can show, as chips under their heading. A
-// value that cycles on a tap hides its other three options; four chips with the
-// current one filled says what the choices are and which one is on, in the
-// space the cycling answer was using anyway.
-inline constexpr int CHIP_H = 46, CHIP_GAP = 6;
+// The things an empty panel can show, as chips under their heading. A value
+// that cycles on a tap hides its other options; chips with the current one
+// filled say what the choices are and which one is on, in the space the cycling
+// answer was using anyway.
+inline constexpr int CHIP_H = 46, CHIP_GAP = 6, CHIP_N = lock::EMPTY_COUNT;
 inline TRect chipRect(int i) {
   const TRect r = lockRect(LR_EMPTY);
-  const int w = (r.w - 3 * CHIP_GAP) / 4;
+  const int w = (r.w - (CHIP_N - 1) * CHIP_GAP) / CHIP_N;
   return TRect{r.x + i * (w + CHIP_GAP), r.y + r.h - CHIP_H, w, CHIP_H};
 }
 

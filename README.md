@@ -70,9 +70,12 @@ pairing screen, since the phone page there already has the uploader.
 - The sleeping note's footer shows the time, room temperature and battery, each
   of which can be turned off. The clock is set automatically the first time you
   save a note from your phone, since the device has no network time.
-- With nothing pinned it shows a clock and the date instead. A panel that holds
-  an image without power makes a better clock than a goodbye card, so that is
-  the default; a picture, a goodbye card and a blank panel are the other choices.
+- With nothing pinned it shows a goodbye card, or a picture, or nothing at all.
+  There used to be a clock, and it was the default — but a panel that holds its
+  last image with no power is exactly the wrong thing to put a clock on. The
+  time is drawn on the way to sleep and is wrong a minute later, then stays
+  wrong for hours. Keeping it honest would have meant waking every minute to
+  redraw, at 1.7 seconds of refresh each time, which is not a clock either.
 - A picture can be sent from the notes page on your phone. The browser crops,
   greyscales and dithers it, and shows you the result before it goes, because a
   photograph at one bit per pixel is either striking or mud and there is no way

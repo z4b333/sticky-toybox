@@ -116,7 +116,6 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
 namespace {
 const char* emptyLabel(uint8_t e) {
   switch (e) {
-    case lock::EMPTY_CLOCK: return "CLOCK";
     case lock::EMPTY_PICTURE: return "PICTURE";
     case lock::EMPTY_GOODBYE: return "GOODBYE";
     default: return "BLANK";
@@ -193,8 +192,9 @@ void SettingsScreen::renderLock(ToolsHost& host, ToolsCanvas& c) {
       // the row exists to say, and a filled chip says it from further away than
       // a word does.
       for (int k = 0; k < lock::EMPTY_COUNT; k++) {
+        const uint8_t v = (uint8_t)(lock::EMPTY_FIRST + k);
         const TRect ch = chipRect(k);
-        c.button(ch.x, ch.y, ch.w, ch.h, emptyLabel((uint8_t)k), _lock.empty == k, TS_SMALL);
+        c.button(ch.x, ch.y, ch.w, ch.h, emptyLabel(v), _lock.empty == v, TS_SMALL);
       }
     } else if (i == LR_PICTURE) {
       const TRect sr = sendRect();
@@ -233,7 +233,7 @@ bool SettingsScreen::tapLock(ToolsHost& host, int x, int y) {
   }
   for (int k = 0; k < lock::EMPTY_COUNT; k++) {
     if (!chipRect(k).hit(x, y)) continue;
-    _lock.empty = (uint8_t)k;
+    _lock.empty = (uint8_t)(lock::EMPTY_FIRST + k);
     lock::save(host.prefs(), _lock);
     lock::setConfig(_lock);
     host.beep(0);

@@ -19,8 +19,19 @@
 
 namespace lock {
 
-enum Empty : uint8_t { EMPTY_CLOCK = 0, EMPTY_PICTURE = 1, EMPTY_GOODBYE = 2, EMPTY_BLANK = 3 };
-inline constexpr int EMPTY_COUNT = 4;
+// EMPTY_CLOCK used to be 0, and it was the default. It is gone. E-paper holds
+// its last image with no power, which is exactly why it makes a poor clock: the
+// time is drawn on the way to sleep and is wrong a minute later, then stays
+// wrong for however many hours the device sits there. Keeping it would have
+// meant waking every minute to redraw, at 1.7 seconds of refresh a time, which
+// is not a clock either -- it is a battery with a countdown on it.
+//
+// The other three keep their stored numbers so a device that has already been
+// set keeps its setting. A device still set to 0 falls through to the default.
+enum Empty : uint8_t { EMPTY_PICTURE = 1, EMPTY_GOODBYE = 2, EMPTY_BLANK = 3 };
+inline constexpr uint8_t EMPTY_FIRST = EMPTY_PICTURE;
+inline constexpr uint8_t EMPTY_LAST = EMPTY_BLANK;
+inline constexpr int EMPTY_COUNT = 3;
 enum Wake : uint8_t { WAKE_NOTE = 0, WAKE_HUB = 1 };
 
 // Zero is never. Five minutes suits a magnet on a fridge; a device sitting on a
@@ -31,7 +42,7 @@ inline constexpr int SLEEP_COUNT = (int)(sizeof(SLEEP_MINUTES) / sizeof(SLEEP_MI
 
 struct Config {
   uint8_t sleepIdx = 2;  // index into SLEEP_MINUTES; 5 minutes
-  uint8_t empty = EMPTY_CLOCK;
+  uint8_t empty = EMPTY_GOODBYE;
   bool showTime = true;
   bool showTemp = true;
   bool showBattery = true;
@@ -43,8 +54,8 @@ inline Config load(Preferences& p) {
   Config c;
   c.sleepIdx = (uint8_t)p.getInt("ls_sleep", 2);
   if (c.sleepIdx >= SLEEP_COUNT) c.sleepIdx = 2;
-  c.empty = (uint8_t)p.getInt("ls_empty", EMPTY_CLOCK);
-  if (c.empty >= EMPTY_COUNT) c.empty = EMPTY_CLOCK;
+  c.empty = (uint8_t)p.getInt("ls_empty", EMPTY_GOODBYE);
+  if (c.empty < EMPTY_FIRST || c.empty > EMPTY_LAST) c.empty = EMPTY_GOODBYE;
   c.showTime = p.getBool("ls_time", true);
   c.showTemp = p.getBool("ls_temp", true);
   c.showBattery = p.getBool("ls_batt", true);
@@ -129,61 +140,6 @@ inline int footer(char* out, int cap, const Config& cfg, const Info& in) {
   if (cfg.showTemp && in.haveTemp) add("%d\xc2\xb0" "C", roundedC(in.tempDeciC));
   if (cfg.showBattery && in.haveBattery && in.batteryPct >= 0) add("%d%%", in.batteryPct);
   return n;
-}
-
-inline const char* MONTHS[12] = {"January", "February", "March",     "April",   "May",
-                                 "June",    "July",     "August",    "September",
-                                 "October", "November", "December"};
-inline const char* DAYS[7] = {"Sunday", "Monday", "Tuesday", "Wednesday",
-                              "Thursday", "Friday", "Saturday"};
-
-// Sakamoto's method. The RTC counts a date but not a weekday, and a lock screen
-// that says only the number is a worse clock than the one on the wall.
-inline int weekday(int y, int m, int d) {
-  static const int t[12] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
-  if (m < 1 || m > 12) return 0;
-  if (m < 3) y -= 1;
-  return (y + y / 4 - y / 100 + y / 400 + t[m - 1] + d) % 7;
-}
-
-// --- the panel with no note on it ---------------------------------------------
-
-// Drawn edge to edge, no chrome. This is a device that holds an image with the
-// power off, so with nothing pinned the best thing it can be is a clock.
-inline void drawClock(ToolsCanvas& c, const Config& cfg, const Info& in) {
-  const int W = c.width(), H = c.height();
-  char buf[64];
-
-  if (!in.haveClock) {
-    // No RTC, or one that has never been set. Saying nothing is better than
-    // showing 00:00 as though it meant something.
-    c.textTrackedCentered(W / 2, H / 2 - 60, "TOYBOX", TS_HUGE, true, true, 6);
-    decor::ornament(c, W / 2, H / 2 + 10, 300, true);
-    c.textCentered(W / 2, H / 2 + 40, "press power to wake", TS_MED, true);
-    return;
-  }
-
-  // 130 px digits are as large as four of them plus a colon fit across a 480 px
-  // panel, and at 235 DPI that is 14 mm -- readable from the other side of a
-  // room, which is where a fridge is read from.
-  snprintf(buf, sizeof(buf), "%02d:%02d", in.hour, in.minute);
-  tdraw::seg7Centered(c, W / 2, 250, 130, buf, true);
-
-  snprintf(buf, sizeof(buf), "%s %d %s", DAYS[weekday(in.year, in.month, in.day)], in.day,
-           MONTHS[(in.month >= 1 && in.month <= 12) ? in.month - 1 : 0]);
-  c.textCentered(W / 2, 430, buf, TS_LARGE, true, true);
-
-  // Everything under the rule is optional, and the rule only earns its place if
-  // something is left to sit beneath it.
-  char line[48];
-  Config sub = cfg;
-  sub.showTime = false;  // the time is the point of the screen above
-  if (footer(line, sizeof(line), sub, in) > 0) {
-    decor::ornament(c, W / 2, 494, 300, true);
-    c.textCentered(W / 2, 524, line, TS_LARGE, true);
-  }
-
-  c.textCentered(W / 2, H - 60, "press power to wake", TS_SMALL, true);
 }
 
 }  // namespace lock

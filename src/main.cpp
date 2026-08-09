@@ -130,21 +130,18 @@ void powerOff(bool lowBattery = false) {
     c.textTrackedCentered(EPD_W / 2, 300, "BATTERY EMPTY", TS_LARGE, true, true, 3);
     c.textCentered(EPD_W / 2, 350, "plug in the USB-C cable to wake it", TS_MED, true);
   } else if (!drawPinnedFullScreen(c)) {
-    // Nothing pinned: whatever the lock screen settings asked for. A panel that
-    // holds an image with no power is a better clock than it is a goodbye card,
-    // which is why that is the default.
+    // Nothing pinned: whatever the lock screen settings asked for.
     switch (lock::config().empty) {
       case lock::EMPTY_BLANK: break;  // a device that looks off, because it is
-      case lock::EMPTY_GOODBYE:
-        c.textTrackedCentered(EPD_W / 2, 200, "GOODBYE!", TS_HUGE, true, true, 4);
-        c.textCentered(EPD_W / 2, 260, "press the power button to play again", TS_MED, true);
-        break;
-      // Asking for a picture that was never sent falls back to the clock rather
+      // Asking for a picture that was never sent falls back to the card rather
       // than to an empty panel that looks like a fault.
       case lock::EMPTY_PICTURE:
         if (lockimg::draw(c)) break;
         // fall through
-      default: lock::drawClock(c, lock::config(), lock::read()); break;
+      default:
+        c.textTrackedCentered(EPD_W / 2, 200, "GOODBYE!", TS_HUGE, true, true, 4);
+        c.textCentered(EPD_W / 2, 260, "press the power button to play again", TS_MED, true);
+        break;
     }
   }
   epd.displayFull();

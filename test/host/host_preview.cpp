@@ -453,12 +453,14 @@ int main() {
       const uint8_t was = lock::config().empty;
       for (int k = 0; k < lock::EMPTY_COUNT; k++) {
         tapRect(setui::chipRect(k));
-        if (lock::config().empty != k) {
-          printf("LOCK FAIL: chip %d set the empty screen to %d\n", k, lock::config().empty);
+        const uint8_t want = (uint8_t)(lock::EMPTY_FIRST + k);
+        if (lock::config().empty != want) {
+          printf("LOCK FAIL: chip %d set the empty screen to %d, wanted %d\n", k,
+                 lock::config().empty, want);
           abort();
         }
       }
-      tapRect(setui::chipRect(was));
+      tapRect(setui::chipRect(was - lock::EMPTY_FIRST));
     }
 
     // The picture row is the one that goes somewhere: it hands over to the
@@ -1100,19 +1102,6 @@ int main() {
       abort();
     }
     tfs::remove(lockimg::PATH);
-  }
-
-  setScreen("lockscreen_clock");
-  epd.clear();
-  lock::drawClock(stickyHost.sharedCanvas(), lock::config(), lock::read());
-  epd.displayFull();
-
-  setScreen("lockscreen_no_clock");
-  {
-    const lock::Info none;
-    epd.clear();
-    lock::drawClock(stickyHost.sharedCanvas(), lock::config(), none);
-    epd.displayFull();
   }
 
   setScreen("lockscreen");
