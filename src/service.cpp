@@ -83,7 +83,11 @@ void run() {
   r.battMv = sensors::batteryMillivolts();
   r.fontFaces = gfx::loadedFaceCount();
   r.psramKb = (uint32_t)(ESP.getPsramSize() / 1024);
+#ifdef TB_VERSION
+  r.version = "toybox " TB_VERSION "  ·  " TB_DATE;
+#else
   r.version = "toybox  " __DATE__ " " __TIME__;
+#endif
 
   Config cfg = load();
   apply(cfg);

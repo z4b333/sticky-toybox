@@ -60,6 +60,21 @@
     color: var(--muted);
     margin-bottom: 48px;
   }
+  /* What you are about to write, stated before you write it. */
+  .ver {
+    font-size: 13px;
+    color: var(--muted);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin: 0 0 12px;
+    background: #fff;
+  }
+  .ver b { color: var(--fg); font-weight: 600; }
+  .ver code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+  }
   .steps {
     border-top: 1px solid var(--line);
     padding-top: 24px;
@@ -135,6 +150,8 @@
     </label>
   </div>
 
+  <p class="ver" id="ver">checking which version is here&hellip;</p>
+
   <div class="install">
     <esp-web-install-button manifest="manifest.json"></esp-web-install-button>
   </div>
@@ -184,8 +201,14 @@
   // partition. The combined manifest is generated here and served as a blob.
   var OFFSETS = { zh: 0x410000, ko: 0x840000, ja: 0xa90000 };
   var lastUrl = null;
+
+  // Appended to every firmware URL. A new build has a new commit, so it has a
+  // new URL, so the browser cannot hand ESP Web Tools a copy of the last one --
+  // which is a mistake you only notice after flashing and seeing no change.
+  var bust = '';
+
   function updateManifest() {
-    var parts = [{ path: new URL('firmware/toybox-full.bin', location.href).href, offset: 0 }];
+    var parts = [{ path: new URL('firmware/toybox-full.bin' + bust, location.href).href, offset: 0 }];
     document.querySelectorAll('input[name="pack"]:checked').forEach(function (c) {
       parts.push({
         path: new URL('firmware/' + c.value + '_full.tfp', location.href).href,
@@ -207,6 +230,27 @@
     c.addEventListener('change', updateManifest);
   });
   updateManifest();
+
+  // Written next to the image by tools/make_image.sh. Fetched with no-store so
+  // this line describes the firmware on the server rather than one from an
+  // earlier visit. The same version string is on the device's service screen,
+  // so the two can be compared after installing.
+  fetch('firmware/version.json', { cache: 'no-store' })
+    .then(function (r) { return r.json(); })
+    .then(function (v) {
+      bust = '?v=' + encodeURIComponent(v.commit);
+      updateManifest();
+      var mb = (v.bytes / 1048576).toFixed(2);
+      document.getElementById('ver').innerHTML =
+        'About to install <b>' + v.version + '</b> &middot; built ' + v.date +
+        '<br>' + mb + ' MB &middot; sha256 <code>' + v.sha256 + '&hellip;</code>' +
+        '<br>Hold a side button at power-on afterwards: the service screen shows ' +
+        'the same version, so you can check it took.';
+    })
+    .catch(function () {
+      document.getElementById('ver').textContent =
+        'Could not read the version file, so I cannot say which build this is.';
+    });
 </script>
 <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
 </body>
