@@ -506,6 +506,56 @@ int main() {
     printf("lock screen ok (%d rows cycle, back goes up one page)\n", setui::LR_COUNT);
   }
 
+  // The battery icon, which had never been rendered here at all: it is drawn
+  // only when a gauge answers, and the harness answers with no gauge, so it
+  // went to hardware unlooked at.
+  {
+    g_dumpEnabled = false;
+    auto blackAt = [](int lx, int ly) {
+      int px, py;
+      epdMapPixel(epd.rotation(), epd.panelFlipX(), epd.panelFlipY(), lx, ly, px, py);
+      return (epd.fb()[(uint32_t)py * EPD_WB + (px >> 3)] & (0x80 >> (px & 7))) == 0;
+    };
+    // Where drawBattery puts the cell. Kept here rather than exported, because
+    // a guard that reads the numbers out of the drawing code proves only that
+    // the code agrees with itself.
+    const int W = 34, H = 16, X = EPD_W - 20 - W, Y = 768;
+    int worst = 0, worstPct = -1;
+    for (int pct : {0, 25, 50, 89, 100}) {
+      sensors::hostSetBattery(pct, false);
+      toybox.goHub();
+      epd.clear();
+      toybox.render(stickyHost.sharedCanvas());
+      // Ink across the middle of the cell, between the two side borders.
+      int ink = 0;
+      const int mid = Y + H / 2;
+      for (int x = X + 2; x < X + W - 2; x++)
+        if (blackAt(x, mid)) ink++;
+      const int inner = W - 4;
+      const int want = (inner * pct) / 100;
+      const int off = ink > want ? ink - want : want - ink;
+      if (off > worst) { worst = off; worstPct = pct; }
+    }
+    // Four pixels of slack for borders and rounding. More than that and the
+    // bar is not saying what the number beside it says.
+    if (worst > 4) {
+      printf("BATTERY FAIL: at %d%% the bar is %d px off what it should be\n", worstPct, worst);
+      abort();
+    }
+    sensors::hostSetBattery(89, false);
+    toybox.goHub();
+    g_dumpEnabled = true;
+    setScreen("hub_battery");
+    epd.clear();
+    toybox.render(stickyHost.sharedCanvas());
+    epd.displayFull();
+    g_dumpEnabled = false;
+    sensors::hostSetBattery(-1, false);
+    toybox.goHub();
+    g_dumpEnabled = true;
+    printf("battery icon ok (the bar matches the number)\n");
+  }
+
   setScreen("hub_hidden");
   toybox.goHub();
   checkHubRouting("four hidden");

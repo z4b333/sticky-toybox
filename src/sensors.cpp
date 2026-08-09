@@ -19,6 +19,10 @@ constexpr uint8_t ADDR_IMU = 0x6A;     // LSM6DS3TR-C, SA0 low
 
 bool g_gauge = false, g_rtc = false, g_sht = false, g_imu = false;
 int g_orientation = 0;
+#ifdef TOYBOX_HOST
+int g_hostBattery = -1;
+bool g_hostCharging = false;
+#endif
 
 #ifndef TOYBOX_HOST
 
@@ -93,9 +97,16 @@ bool imuPresent() { return g_imu; }
 
 // The host harness runs with every sensor absent, plus setters the tests use
 // to fake presence where a guard needs it.
-int batteryPercent() { return -1; }
+// The battery icon is only drawn when a gauge answers, so with every sensor
+// absent the harness never rendered it at all -- which is how it reached
+// hardware unlooked at. These let a guard put a number on it.
+int batteryPercent() { return g_hostBattery; }
 int batteryMillivolts() { return -1; }
-bool charging() { return false; }
+bool charging() { return g_hostCharging; }
+void hostSetBattery(int pct, bool chg) {
+  g_hostBattery = pct;
+  g_hostCharging = chg;
+}
 bool clockValid() { return false; }
 bool readClock(Clock&) { return false; }
 bool setClock(const Clock&) { return false; }

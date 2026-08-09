@@ -21,6 +21,11 @@ void begin();
 // --- battery (BQ27220) ---------------------------------------------------
 bool batteryPresent();
 int batteryPercent();      // 0..100, or -1 when absent
+#ifdef TOYBOX_HOST
+// Harness only: pretend a gauge answered, so the screens that draw one can be
+// rendered and checked.
+void hostSetBattery(int pct, bool charging);
+#endif
 int batteryMillivolts();   // or -1
 bool charging();           // CHARGE_STATE pin from the charger, gauge or not
 
