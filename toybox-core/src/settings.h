@@ -13,9 +13,34 @@ inline TRect actionRect(int i) { return TRect{BTN_X, BTN_Y0 + i * BTN_STEP, BTN_
 enum Action : int { ACT_SOUND, ACT_LOCK, ACT_CARDS, ACT_RESET, ACT_COUNT };
 
 // The lock screen page: one row per setting, each cycling through its choices.
-inline constexpr int LOCK_Y0 = 92, LOCK_H = 88, LOCK_X = 16, LOCK_W = SCREEN_W - 32;
+// 80 rather than 88 because the picture row made eight of them; at 88 the last
+// one would have sat under the caption along the bottom.
+inline constexpr int LOCK_Y0 = 92, LOCK_H = 80, LOCK_X = 16, LOCK_W = SCREEN_W - 32;
 inline TRect lockRect(int i) { return TRect{LOCK_X, LOCK_Y0 + i * LOCK_H, LOCK_W, LOCK_H - 8}; }
-enum LockRow : int { LR_SLEEP, LR_EMPTY, LR_WAKE, LR_ROTATE, LR_TIME, LR_TEMP, LR_BATT, LR_COUNT };
+enum LockRow : int {
+  LR_SLEEP,
+  LR_EMPTY,
+  LR_PICTURE,  // sits under the row that can ask for a picture
+  LR_WAKE,
+  LR_ROTATE,
+  LR_TIME,
+  LR_TEMP,
+  LR_BATT,
+  LR_COUNT
+};
+// The picture row carries a thumbnail and its own delete key, so it is the one
+// row with parts rather than a single tap target. The thumbnail keeps the
+// panel's 3:5 proportion; anything else would misrepresent the picture.
+inline constexpr int THUMB_H = LOCK_H - 20;
+inline constexpr int THUMB_W = THUMB_H * 3 / 5;
+inline TRect thumbRect() {
+  const TRect r = lockRect(LR_PICTURE);
+  return TRect{r.x + r.w - THUMB_W - 4, r.y + (r.h - THUMB_H) / 2, THUMB_W, THUMB_H};
+}
+inline TRect picDelRect() {
+  const TRect t = thumbRect();
+  return TRect{t.x - 52, t.y + (t.h - 40) / 2, 40, 40};
+}
 }  // namespace setui
 
 class SettingsScreen {

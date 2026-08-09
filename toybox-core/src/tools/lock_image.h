@@ -68,4 +68,40 @@ inline bool draw(ToolsCanvas& c) {
   return true;
 }
 
+// A thumbnail for the settings row, so you can tell which picture is loaded
+// without powering the device off to look at it.
+//
+// Each destination pixel takes the majority of the source block it covers
+// rather than one sample from it: at this reduction a nearest-neighbour sample
+// of a dithered image is a field of noise, because dithering is exactly the
+// business of hiding tone in pixel-level variation. Averaging puts the tone
+// back. Halftoning the average would be better still and is not worth the code
+// for a thumbnail three millimetres wide.
+inline bool drawThumb(ToolsCanvas& c, int x, int y, int w, int h) {
+  if (w <= 0 || h <= 0) return false;
+  size_t len = 0;
+  char* buf = tfs::readAlloc(PATH, len);
+  if (!buf) return false;
+  if (len != FILE_SIZE) {
+    free(buf);
+    return false;
+  }
+  const uint8_t* bits = (const uint8_t*)buf + HEADER;
+  for (int ty = 0; ty < h; ty++) {
+    const int sy0 = (int)((int64_t)ty * H / h), sy1 = (int)((int64_t)(ty + 1) * H / h);
+    for (int tx = 0; tx < w; tx++) {
+      const int sx0 = (int)((int64_t)tx * W / w), sx1 = (int)((int64_t)(tx + 1) * W / w);
+      int ink = 0, total = 0;
+      for (int sy = sy0; sy < sy1; sy++) {
+        const uint8_t* row = bits + (size_t)sy * STRIDE;
+        for (int sx = sx0; sx < sx1; sx++, total++)
+          if (!(row[sx >> 3] & (0x80 >> (sx & 7)))) ink++;
+      }
+      if (total > 0 && ink * 2 >= total) c.fillRect(x + tx, y + ty, 1, 1, true);
+    }
+  }
+  free(buf);
+  return true;
+}
+
 }  // namespace lockimg

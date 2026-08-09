@@ -31,6 +31,9 @@ class Toybox {
   // Opens an app by its place in the two icon tables, the same coordinates the
   // hub and the visibility mask use.
   void open(bool game, int idx);
+  // Opens the notes tool at its pairing screen. Settings uses this for the lock
+  // screen picture; see ToolsHost::goPairPicture.
+  void openPairPicture();
 
   const char* activeTitle() const { return _active ? _active->title() : "TOYBOX"; }
 

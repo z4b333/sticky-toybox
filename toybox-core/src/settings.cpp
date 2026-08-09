@@ -128,6 +128,7 @@ const char* rowName(int i) {
   switch (i) {
     case setui::LR_SLEEP: return "SLEEP AFTER";
     case setui::LR_EMPTY: return "WITH NO NOTE PINNED";
+    case setui::LR_PICTURE: return "THE PICTURE";
     case setui::LR_WAKE: return "WAKE TO";
     case setui::LR_ROTATE: return "TURN WITH THE DEVICE";
     case setui::LR_TIME: return "SHOW THE TIME";
@@ -139,22 +140,35 @@ const char* rowHint(int i) {
   switch (i) {
     case setui::LR_SLEEP: return "the panel keeps its image with the power off";
     case setui::LR_EMPTY: return "what is on the panel when nothing is pinned";
+    case setui::LR_PICTURE:
+      return lockimg::have() ? "tap to send a different one from your phone"
+                             : "tap to send one from your phone";
     case setui::LR_WAKE: return "where the power button takes you";
     case setui::LR_ROTATE: return "only the pinned note turns; apps stay portrait";
     default: return nullptr;
   }
 }
+// Only for the rows that carry a value. The four yes/no rows answer nullptr and
+// draw a checkbox instead: "yes" and "no" set in 32 px bold made four rows shout
+// their state at you, and a tick is the same answer in a form the eye can skip.
 const char* rowValue(int i, const lock::Config& c) {
   switch (i) {
     case setui::LR_SLEEP: return lock::sleepLabel(c);
     case setui::LR_EMPTY: return emptyLabel(c.empty);
     case setui::LR_WAKE: return c.wake == lock::WAKE_HUB ? "the hub" : "the note";
-    case setui::LR_ROTATE: return c.autoRotate ? "yes" : "no";
-    case setui::LR_TIME: return c.showTime ? "yes" : "no";
-    case setui::LR_TEMP: return c.showTemp ? "yes" : "no";
-    default: return c.showBattery ? "yes" : "no";
+    default: return nullptr;
   }
 }
+// The other four.
+bool rowChecked(int i, const lock::Config& c) {
+  switch (i) {
+    case setui::LR_ROTATE: return c.autoRotate;
+    case setui::LR_TIME: return c.showTime;
+    case setui::LR_TEMP: return c.showTemp;
+    default: return c.showBattery;
+  }
+}
+bool rowIsCheck(int i) { return i >= setui::LR_ROTATE; }
 }  // namespace
 
 void SettingsScreen::renderLock(ToolsHost& host, ToolsCanvas& c) {
@@ -174,10 +188,25 @@ void SettingsScreen::renderLock(ToolsHost& host, ToolsCanvas& c) {
     c.text(r.x + 4, nameY, rowName(i), TS_MED, true);
     if (hint) c.text(r.x + 4, nameY + c.textHeight(TS_MED) + 6, hint, TS_SMALL, true);
 
-    const char* v = rowValue(i, _lock);
-    const int vw = c.textWidth(v, TS_LARGE, true);
-    c.text(r.x + r.w - 4 - vw, r.y + (r.h - c.textHeight(TS_LARGE)) / 2, v, TS_LARGE, true,
-           true);
+    if (rowIsCheck(i)) {
+      checkbox(c, r.x + r.w - 4 - BOX, r.y + (r.h - BOX) / 2, rowChecked(i, _lock));
+    } else if (i == LR_PICTURE) {
+      // The picture answers for itself. An empty frame says "none yet" more
+      // plainly than the words would, and at the panel's own proportion it is
+      // obvious what the frame is a frame of.
+      const TRect t = thumbRect();
+      c.drawRect(t.x - 1, t.y - 1, t.w + 2, t.h + 2, 1, true);
+      if (lockimg::drawThumb(c, t.x, t.y, t.w, t.h)) {
+        const TRect d = picDelRect();
+        c.drawRect(d.x, d.y, d.w, d.h, 1, true);
+        c.textInBox(d.x, d.y, d.w, d.h, "x", TS_MED, true);
+      }
+    } else {
+      const char* v = rowValue(i, _lock);
+      const int vw = c.textWidth(v, TS_LARGE, true);
+      c.text(r.x + r.w - 4 - vw, r.y + (r.h - c.textHeight(TS_LARGE)) / 2, v, TS_LARGE, true,
+             true);
+    }
   }
 
   c.textCentered(SCREEN_W / 2, 776, _note ? _note : "tap a row to change it", TS_SMALL, true);
@@ -185,8 +214,23 @@ void SettingsScreen::renderLock(ToolsHost& host, ToolsCanvas& c) {
 
 bool SettingsScreen::tapLock(ToolsHost& host, int x, int y) {
   using namespace setui;
+  // The delete key first: it sits inside the picture row, and a row-sized hit
+  // test would swallow it and go off to the pairing screen instead.
+  if (lockimg::have() && picDelRect().hit(x, y)) {
+    lockimg::remove();
+    host.beep(2);
+    return true;
+  }
+
   for (int i = 0; i < LR_COUNT; i++) {
     if (!lockRect(i).hit(x, y)) continue;
+    if (i == LR_PICTURE) {
+      // Settings has no web server of its own, so this hands over to the notes
+      // tool's pairing screen, whose phone page already carries the uploader.
+      host.beep(1);
+      host.goPairPicture();
+      return false;  // the shell repaints when the tool opens
+    }
     switch (i) {
       case LR_SLEEP: _lock.sleepIdx = (_lock.sleepIdx + 1) % lock::SLEEP_COUNT; break;
       case LR_EMPTY: _lock.empty = (_lock.empty + 1) % lock::EMPTY_COUNT; break;

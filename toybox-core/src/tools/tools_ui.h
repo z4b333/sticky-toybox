@@ -156,6 +156,12 @@ class ToolsHost {
   virtual void refresh(bool full = false) = 0;
   virtual void beep(uint8_t kind) = 0;  // 0 tap, 1 confirm, 2 reject, 3 alarm
   virtual void goHub() = 0;
+  // Opens the notes tool straight into its pairing screen, where the phone's
+  // page carries the picture uploader. The settings screen uses this for the
+  // lock screen picture rather than growing a second web server: the browser
+  // has to do the cropping and dithering either way, and one pairing screen is
+  // easier to keep honest than two. A host with no notes tool leaves this be.
+  virtual void goPairPicture() {}
   virtual void topBar(const char* title, bool withHelp = false) = 0;
   // A tool with no rules card leaves this false and no "?" is drawn.
   virtual bool isHelpTap(int x, int y) const { return false; }
@@ -192,6 +198,9 @@ class ToolApp {
   virtual void onSwipe(int dx, int dy) { (void)dx; (void)dy; }
   virtual void tick() {}                       // ~50 Hz, for running timers
   virtual bool wantsTick() const { return false; }
+  // Open somewhere other than the front page. Only the notes tool answers, and
+  // only for pairing; everything else opens where it always does.
+  virtual bool openPairing() { return false; }
 
  protected:
   ToolsHost* _host = nullptr;

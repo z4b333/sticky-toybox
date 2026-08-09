@@ -50,7 +50,9 @@ The original Thai readme is at [docs/README.th.md](docs/README.th.md).
 The gear icon on the hub opens settings, where you can hide apps, turn sound
 on or off, restore the how-to-play cards, and reset stats. A second page there
 covers the lock screen — the panel keeps its image with the power off, so that
-is the screen the device spends most of its life showing.
+is the screen the device spends most of its life showing. It shows the stored
+picture as a thumbnail, and tapping that row hands over to the notes tool's
+pairing screen, since the phone page there already has the uploader.
 
 **Device behaviour**
 

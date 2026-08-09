@@ -434,6 +434,7 @@ int main() {
     // be moved into a state it cannot be moved out of.
     g_dumpEnabled = false;
     for (int r = 0; r < setui::LR_COUNT; r++) {
+      if (r == setui::LR_PICTURE) continue;  // leaves the page; checked below
       const lock::Config before = lock::config();
       const int steps = (r == setui::LR_SLEEP) ? lock::SLEEP_COUNT
                       : (r == setui::LR_EMPTY ? lock::EMPTY_COUNT : 2);
@@ -443,6 +444,19 @@ int main() {
         abort();
       }
     }
+
+    // The picture row is the one that goes somewhere: it hands over to the
+    // notes tool's pairing screen, because that is where the phone page with
+    // the uploader lives. Settings has no web server and should not grow one.
+    tapRect(setui::lockRect(setui::LR_PICTURE));
+    if (!toybox.hostInApp() || strcmp(toybox.activeTitle(), "NOTES") != 0) {
+      printf("LOCK FAIL: the picture row did not open the notes pairing\n");
+      abort();
+    }
+    toybox.goHub();
+    toybox.onTap(EPD_W - 40, 28);  // back into settings...
+    tapRect(setui::actionRect(setui::ACT_LOCK));  // ...and back to the lock page
+
     // ...and back goes up one page rather than out of settings altogether.
     toybox.onTap(BACK_W / 2, TOPBAR_H / 2);
     if (!toybox.hostInSettings()) {
@@ -967,6 +981,40 @@ int main() {
       abort();
     }
     epd.displayFull();
+
+    // The settings row's thumbnail, with something in it. Drawn here rather
+    // than beside the other settings screens because that is where a picture
+    // exists to draw -- and a thumbnail that renders as an empty frame when a
+    // picture is stored would otherwise look exactly like no picture at all.
+    g_dumpEnabled = false;  // the walk in refreshes on every step
+    toybox.goHub();
+    toybox.onTap(EPD_W - 40, 28);                 // the gear
+    tapRect(setui::actionRect(setui::ACT_LOCK));  // into the lock page
+    g_dumpEnabled = true;
+    setScreen("settings_lock_picture");
+    epd.clear();
+    toybox.render(stickyHost.sharedCanvas());
+    epd.displayFull();
+    {
+      // Logical coordinates through the same mapping the driver uses, rather
+      // than an assumption about where rotation 0 puts things.
+      auto blackAt = [](int lx, int ly) {
+        int px, py;
+        epdMapPixel(epd.rotation(), epd.panelFlipX(), epd.panelFlipY(), lx, ly, px, py);
+        return (epd.fb()[(uint32_t)py * EPD_WB + (px >> 3)] & (0x80 >> (px & 7))) == 0;
+      };
+      const TRect t = setui::thumbRect();
+      int ink = 0;
+      for (int yy = t.y; yy < t.y + t.h; yy++)
+        for (int xx = t.x; xx < t.x + t.w; xx++)
+          if (blackAt(xx, yy)) ink++;
+      // A thumbnail of a dithered sphere that comes back all white or all black
+      // is a decimation bug, not a picture.
+      if (ink < t.w * t.h / 10 || ink > t.w * t.h * 9 / 10) {
+        printf("PICTURE FAIL: the settings thumbnail is %d of %d px inked\n", ink, t.w * t.h);
+        abort();
+      }
+    }
     // ...and a file the wrong length has to be refused rather than drawn as
     // half a picture and half whatever was in memory.
     tfs::write(lockimg::PATH, (const char*)img, 1000);

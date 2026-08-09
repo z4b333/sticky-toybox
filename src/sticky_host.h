@@ -77,6 +77,7 @@ class StickyHost : public ToolsHost {
   }
   void beep(uint8_t kind) override;
   void goHub() override { toybox.goHub(); }
+  void goPairPicture() override { toybox.openPairPicture(); }
   void topBar(const char* t, bool withHelp) override { drawTopBar(_canvas, t, withHelp); }
   bool isHelpTap(int x, int y) const override { return tappedHelp(x, y, EPD_W); }
   bool isBackTap(int x, int y) const override { return tappedBack(x, y); }

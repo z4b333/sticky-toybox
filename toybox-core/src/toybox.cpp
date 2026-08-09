@@ -71,6 +71,17 @@ void Toybox::open(bool game, int idx) {
   _host->refresh(true);
 }
 
+void Toybox::openPairPicture() {
+  // Notes is tool 6. If it will not build -- which here means the allocation
+  // failed -- staying in settings is better than a blank screen, and the row
+  // the user just tapped is still on the panel to try again.
+  if (!build(false, 6)) return;
+  _where = Where::App;
+  _active->enter(*_host);
+  _active->openPairing();
+  _host->refresh(true);
+}
+
 void Toybox::goHub() {
   release();
   _where = Where::Hub;

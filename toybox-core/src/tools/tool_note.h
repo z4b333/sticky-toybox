@@ -161,6 +161,13 @@ class NoteTool : public ToolApp {
 
   bool wantsTick() const override { return _screen == Screen::Pair; }
 
+  // Settings sends people here for the lock screen picture: the phone's page
+  // carries the uploader, and there is no reason for a second one.
+  bool openPairing() override {
+    openPair();
+    return true;
+  }
+
   void tick() override {
     if (_screen != Screen::Pair) return;
     _net.loop();
