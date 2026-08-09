@@ -28,7 +28,12 @@ from fontTools.ttLib import TTFont, TTCollection
 DEJAVU = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
 LOMA = '/usr/share/fonts/opentype/tlwg/Loma.otf'
 NOTO = '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc'
-THR = 140
+# Ink is any pixel whose coverage reaches this, so a LOWER number thickens the
+# glyph -- the opposite direction to make_fonts.py, which tests darkness on a
+# white ground rather than coverage. 80 here is the same weight as 176 there
+# (255 - 176 = 79), so Thai and CJK come out matching the Latin beside them
+# instead of a shade lighter, which is what 140 was doing.
+THR = 80
 BASIC = ImageFont.Layout.BASIC
 SIZES = [16, 24, 32]  # the content boxes; 12 px CJK/Thai is not legible ink
 

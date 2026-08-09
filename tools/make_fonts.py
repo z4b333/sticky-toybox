@@ -12,7 +12,14 @@ from PIL import Image, ImageDraw, ImageFont
 import sys
 
 FIRST, LAST = 32, 126
-THRESH = 140  # coverage above this counts as ink
+# Ink is any pixel darker than this on a white ground, so a higher number pulls
+# more of the antialiased edge into the glyph and thickens every stroke without
+# changing the typeface or moving a single layout.
+#
+# 140 was chosen on a monitor. On the panel it reads thin: e-paper renders a
+# one-pixel stroke lighter than a backlit screen does. 176 is as far as this can
+# go before the counters in a, e and o start to close at 12 px.
+THRESH = 176
 
 FACES = {
     'REG': '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
