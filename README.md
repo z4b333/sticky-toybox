@@ -92,7 +92,8 @@ that is running, so you can check it against what the installer said it was
 writing, and it asks whether the screen came up the right way round. If it did
 not, hold either side button while the device powers on. That reaches the
 service screen, which reports what the board answered on each bus and can
-correct the display and touch orientation if your unit disagrees with mine. [docs/BRINGUP.md](docs/BRINGUP.md) walks through it, and
+correct the display and touch orientation if your unit disagrees with mine.
+[docs/BRINGUP.md](docs/BRINGUP.md) walks through it, and
 [checklist.html](https://z4b333.github.io/sticky-toybox/checklist.html) is the
 same thing as a tickable page for a phone.
 
