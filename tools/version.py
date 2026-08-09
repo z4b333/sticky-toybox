@@ -18,7 +18,10 @@ def git(*args, fallback="unknown"):
 
 commit = git("rev-parse", "--short=7", "HEAD")
 # A tag when the commit has one, otherwise the nearest tag and how far past it.
-describe = git("describe", "--tags", "--dirty", "--always", fallback=commit)
+# No --dirty: building regenerates the tracked firmware images, so every
+# release would be marked dirty by its own output. The commit identifies the
+# source, which is the thing worth identifying.
+describe = git("describe", "--tags", "--always", fallback=commit)
 date = git("log", "-1", "--format=%cd", "--date=format:%d %b %Y", fallback="")
 
 env.Append(CPPDEFINES=[
