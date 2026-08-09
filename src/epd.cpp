@@ -120,9 +120,16 @@ void Epd::initController() {
   const uint8_t booster[5] = {0xAE, 0xC7, 0xC3, 0xC0, 0x80};
   writeData(booster, 5);
 
+  // The controller is told about the panel, never about the logical canvas.
+  // EPD_W/EPD_H are the portrait space the apps draw in (480x800); the panel
+  // and the framebuffer are both 800x480, and drawPixel is what bridges them.
+  // Handing the portrait numbers to the controller made a row 60 bytes wide
+  // where the framebuffer supplies 100, so every row spilled into the next and
+  // the image repeated down the panel, while the 320 columns never declared
+  // showed whatever was already in RAM.
   writeCmd(CMD_OUTPUT_CTRL);
-  writeData((EPD_H - 1) % 256);
-  writeData((EPD_H - 1) / 256);
+  writeData((PANEL_H - 1) % 256);
+  writeData((PANEL_H - 1) / 256);
   writeData(0x02);  // scan config (SM interlaced), no TB flip
 
   writeCmd(CMD_BORDER);
@@ -140,12 +147,12 @@ void Epd::setRamAreaFull() {
   writeCmd(CMD_RAM_X_RANGE);
   writeData(0x00);
   writeData(0x00);
-  writeData((EPD_W - 1) % 256);
-  writeData((EPD_W - 1) / 256);
+  writeData((PANEL_W - 1) % 256);
+  writeData((PANEL_W - 1) / 256);
 
   writeCmd(CMD_RAM_Y_RANGE);
-  writeData((EPD_H - 1) % 256);
-  writeData((EPD_H - 1) / 256);
+  writeData((PANEL_H - 1) % 256);
+  writeData((PANEL_H - 1) / 256);
   writeData(0x00);
   writeData(0x00);
 
@@ -154,8 +161,8 @@ void Epd::setRamAreaFull() {
   writeData(0x00);
 
   writeCmd(CMD_RAM_Y_CNT);
-  writeData((EPD_H - 1) % 256);
-  writeData((EPD_H - 1) / 256);
+  writeData((PANEL_H - 1) % 256);
+  writeData((PANEL_H - 1) / 256);
 }
 
 void Epd::clear(bool white) { memset(_fb, white ? 0xFF : 0x00, EPD_BUF_SIZE); }
