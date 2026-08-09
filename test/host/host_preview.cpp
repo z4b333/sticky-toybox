@@ -84,18 +84,10 @@ bool Epd::begin() {
 }
 void Epd::clear(bool white) { memset(_fb, white ? 0xFF : 0x00, EPD_BUF_SIZE); }
 void Epd::drawPixel(int x, int y, uint8_t color) {
-  // Mirrors the device mapping exactly, rotation included -- the auto-rotate
-  // guard below turns the panel and expects the pixels to follow.
+  // Not a copy of the device mapping -- the same function. See epd.h.
   if (x < 0 || y < 0 || x >= logicalW() || y >= logicalH()) return;
   int px, py;
-  switch (rotation()) {
-    case 1: px = x; py = y; break;
-    case 2: px = y; py = PANEL_H - 1 - x; break;
-    case 3: px = PANEL_W - 1 - x; py = PANEL_H - 1 - y; break;
-    default: px = PANEL_W - 1 - y; py = x; break;
-  }
-  if (panelFlipX()) px = PANEL_W - 1 - px;
-  if (panelFlipY()) py = PANEL_H - 1 - py;
+  epdMapPixel(rotation(), panelFlipX(), panelFlipY(), x, y, px, py);
   uint8_t* p = &_fb[(uint32_t)py * EPD_WB + (px >> 3)];
   const uint8_t mask = 0x80 >> (px & 7);
   if (color)
@@ -1392,6 +1384,67 @@ int main() {
     }
     epd.setRotation(0);
     printf("rotate ok (pinned note fills the panel at all four angles)\n");
+  }
+
+  {
+    // Filling the panel is not the same as facing the right way. Rotations 1
+    // and 3 were transposed for the whole life of this project: both landscapes
+    // came out 180 degrees from where they belonged, portrait was untouched,
+    // and the guard above passed every time because ink is ink.
+    //
+    // What actually defines the rotations is where the content's up direction
+    // ends up on the device. Rotation 1 means the device has been turned a
+    // quarter turn anticlockwise, so the image turns a quarter clockwise to stay
+    // upright -- and content-up then lies along the device's right-hand side,
+    // which at rotation 0 is where content-right lies. That single equality
+    // fixes the handedness; the rest follows by quarter turns.
+    g_dumpEnabled = false;
+    auto dir = [](int rot, bool wantUp) {
+      // Panel-space direction of the content's up (or right) axis, as a unit
+      // step. Two points through the real transform, so this measures the code
+      // rather than restating it.
+      epd.setRotation(rot);
+      const int w = epd.logicalW(), h = epd.logicalH();
+      auto panel = [&](int x, int y) {
+        epd.clear(false);  // all black
+        epd.drawPixel(x, y, 1);  // one white pixel
+        for (int py = 0; py < PANEL_H; py++)
+          for (int px = 0; px < PANEL_W; px++)
+            if (epd.fb()[(uint32_t)py * EPD_WB + (px >> 3)] & (0x80 >> (px & 7)))
+              return std::make_pair(px, py);
+        return std::make_pair(-1, -1);
+      };
+      // "up" is from the bottom-left corner to the top-left; "right" is from
+      // the top-left to the top-right.
+      const auto a = wantUp ? panel(0, h - 1) : panel(0, 0);
+      const auto b = wantUp ? panel(0, 0) : panel(w - 1, 0);
+      const int dx = b.first - a.first, dy = b.second - a.second;
+      return std::make_pair(dx == 0 ? 0 : (dx > 0 ? 1 : -1), dy == 0 ? 0 : (dy > 0 ? 1 : -1));
+    };
+
+    const auto deviceRight = dir(0, false);  // content-right at rotation 0
+    const auto deviceUp = dir(0, true);      // content-up at rotation 0
+    const std::pair<int, int> deviceLeft{-deviceRight.first, -deviceRight.second};
+    const std::pair<int, int> deviceDown{-deviceUp.first, -deviceUp.second};
+
+    struct { int rot; std::pair<int, int> want; const char* what; } expect[] = {
+      {1, deviceRight, "the device's right (quarter turn cw)"},
+      {2, deviceDown, "the device's bottom (half turn)"},
+      {3, deviceLeft, "the device's left (quarter turn ccw)"},
+    };
+    for (const auto& e : expect) {
+      const auto got = dir(e.rot, true);
+      if (got != e.want) {
+        printf("ROTATE FAIL: at rotation %d the content points to (%d,%d) in panel space,\n"
+               "             but it has to point to %s, which is (%d,%d)\n",
+               e.rot, got.first, got.second, e.what, e.want.first, e.want.second);
+        abort();
+      }
+    }
+    epd.setRotation(0);
+    epd.clear();
+    g_dumpEnabled = true;
+    printf("rotate ok (each quarter turn faces the way its number says)\n");
   }
 
   // --- the service screen ---------------------------------------------------

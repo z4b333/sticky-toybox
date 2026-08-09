@@ -106,9 +106,9 @@ void Touch::poll(TouchEvent& ev) {
       // if one changes, the other has to.
       int x, y;
       switch (_rot) {
-        case 1: x = px; y = py; break;
+        case 1: x = PANEL_W - 1 - px; y = PANEL_H - 1 - py; break;
         case 2: x = PANEL_H - 1 - py; y = px; break;
-        case 3: x = PANEL_W - 1 - px; y = PANEL_H - 1 - py; break;
+        case 3: x = px; y = py; break;
         default: x = py; y = PANEL_W - 1 - px; break;
       }
       if (!_down) {

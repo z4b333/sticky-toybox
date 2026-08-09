@@ -173,18 +173,8 @@ void Epd::clear(bool white) { memset(_fb, white ? 0xFF : 0x00, EPD_BUF_SIZE); }
 // everything else and no separate rotated text path is needed.
 void Epd::drawPixel(int x, int y, uint8_t color) {
   if (x < 0 || y < 0 || x >= logicalW() || y >= logicalH()) return;
-  // Rotation 0 is the quarter turn every layout assumes: logical (x, y) ->
-  // panel (PANEL_W-1-y, x). The other three compose a flip or identity on top.
   int px, py;
-  switch (_rot) {
-    case 1: px = x; py = y; break;                            // landscape A
-    case 2: px = y; py = PANEL_H - 1 - x; break;              // portrait, flipped
-    case 3: px = PANEL_W - 1 - x; py = PANEL_H - 1 - y; break;// landscape B
-    default: px = PANEL_W - 1 - y; py = x; break;             // portrait
-  }
-  // Board correction last, in panel space (see setPanelFlip).
-  if (_flipX) px = PANEL_W - 1 - px;
-  if (_flipY) py = PANEL_H - 1 - py;
+  epdMapPixel(_rot, _flipX, _flipY, x, y, px, py);
   uint8_t* p = &_fb[(uint32_t)py * EPD_WB + (px >> 3)];
   const uint8_t mask = 0x80 >> (px & 7);
   if (color)

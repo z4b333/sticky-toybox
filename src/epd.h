@@ -8,6 +8,30 @@
 
 #include "board_pins.h"
 
+// Where a logical pixel lands on the panel. This lives in the header, and both
+// the driver and the preview harness call it, because they used to each keep a
+// copy and the copies drifted twice: once losing the board flips entirely, and
+// once keeping the two landscape rotations transposed after the driver was
+// fixed. A guard cannot catch a mistake in code it is not running.
+//
+// Rotation 0 is the quarter turn every layout assumes: logical (x, y) ->
+// panel (PANEL_W-1-y, x). The other three compose a flip or identity on top.
+// 1 means the device has been turned a quarter turn anticlockwise, so the image
+// turns a quarter clockwise to stay upright -- which puts the content's up
+// direction along the device's right-hand side. 3 is the mirror of that. The
+// board correction is applied last, in panel space, so nothing above it has to
+// know which way the panel was wired.
+inline void epdMapPixel(int rot, bool flipX, bool flipY, int x, int y, int& px, int& py) {
+  switch (rot & 3) {
+    case 1: px = PANEL_W - 1 - x; py = PANEL_H - 1 - y; break;  // quarter turn cw
+    case 2: px = y; py = PANEL_H - 1 - x; break;                // portrait, flipped
+    case 3: px = x; py = y; break;                              // quarter turn ccw
+    default: px = PANEL_W - 1 - y; py = x; break;               // portrait
+  }
+  if (flipX) px = PANEL_W - 1 - px;
+  if (flipY) py = PANEL_H - 1 - py;
+}
+
 class Epd {
  public:
   // Allocates the 48 KB framebuffer + 48 KB shadow (previous frame).
