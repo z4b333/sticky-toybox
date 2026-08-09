@@ -65,7 +65,7 @@ inline TRect delRect(int i) {
 // note they are already reading, to press a button that says the opposite of
 // what they want, is the kind of path that gets designed and never walked.
 inline constexpr TRect PINNED_HUB{20, 748, 110, 44};
-inline constexpr TRect PINNED_UNPIN{144, 748, 140, 44};
+inline constexpr TRect PINNED_UNPIN{144, 748, 120, 44};
 
 // Paints the pinned note edge to edge, with no app chrome — this is what stays
 // on the panel after the device powers down, and also what you see the moment
@@ -95,10 +95,12 @@ inline bool drawPinnedFullScreen(ToolsCanvas& c, bool live = false) {
     c.button(PINNED_HUB.x, PINNED_HUB.y, PINNED_HUB.w, PINNED_HUB.h, "HUB", false, TS_MED);
     c.button(PINNED_UNPIN.x, PINNED_UNPIN.y, PINNED_UNPIN.w, PINNED_UNPIN.h, "UNPIN", false,
              TS_MED);
-    const char* hint = "tap a line to tick or cross it";
+    // Shorter than they were, because the buttons now take the left half of
+    // this band and text that ran under them was unreadable in both directions.
+    const char* hint = "tap a line to tick";
     c.text(c.width() - 34 - c.textWidth(hint, TS_SMALL), c.height() - 46, hint, TS_SMALL,
            true);
-    const char* lock = "press power to put it back";
+    const char* lock = "power puts it back";
     c.text(c.width() - 34 - c.textWidth(lock, TS_SMALL), c.height() - 26, lock, TS_SMALL,
            true);
   } else {

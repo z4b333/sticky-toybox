@@ -1232,6 +1232,20 @@ int main() {
       printf("PINNED FAIL: HUB and UNPIN overlap\n");
       abort();
     }
+    // ...and neither does the hint text beside them. Two things drawn over each
+    // other are legible as neither, and nothing about the render says so.
+    {
+      ToolsCanvas& c = stickyHost.sharedCanvas();
+      const int right = PINNED_UNPIN.x + PINNED_UNPIN.w;
+      for (const char* t : {"tap a line to tick", "power puts it back"}) {
+        const int left = c.width() - 34 - c.textWidth(t, TS_SMALL);
+        if (left < right + 8) {
+          printf("PINNED FAIL: \"%s\" starts at %d, over a button ending at %d\n", t, left,
+                 right);
+          abort();
+        }
+      }
+    }
     printf("pinned screen ok (wakes to the note, taps edit it, buttons do not)\n");
   }
 
