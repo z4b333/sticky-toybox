@@ -49,7 +49,8 @@ and Vietnamese. The Thai readme is at [docs/README.th.md](docs/README.th.md).
 - **A list picker.** Type the list on the device or send it from your phone; it
   keeps whatever script it was written in.
 - **Coin flip, dice** (D4 to D20, with modifiers), **random number, card draw.**
-- **A countdown timer and stopwatch.**
+- **A countdown timer and stopwatch.** The countdown adjusts by a minute, half
+  a minute or five seconds, while it is running as well as before it starts.
 
 ## How it behaves
 

@@ -18,6 +18,17 @@ inline constexpr TRect CD_START{40, 444, 200, 66};
 inline constexpr TRect CD_RESET{260, 444, 180, 66};
 inline constexpr TRect CD_MINUS{40, 524, 200, 56};
 inline constexpr TRect CD_PLUS{260, 524, 180, 56};
+// Seconds, on their own row under the minutes. Five is the difference between
+// a soft-boiled egg and a hard one; thirty is the tea nobody agrees about. The
+// minute buttons above cannot express either without twelve taps.
+//
+// They sit on the preset grid's column edges, so the whole lower half of the
+// screen lines up on one set of verticals.
+inline constexpr int SEC_W = 104, SEC_H = 56, SEC_GAP = 8, SEC_Y = 588;
+inline constexpr int SEC_DELTA[4] = {-30, -5, 5, 30};
+inline TRect secRect(int i) {
+  return TRect{PRESET_X0 + i * (SEC_W + SEC_GAP), SEC_Y, SEC_W, SEC_H};
+}
 
 // stopwatch
 inline constexpr TRect SW_START{40, 300, 190, 66};
@@ -39,7 +50,7 @@ class TimerTool : public ToolApp {
     ToolApp::enter(h);
     _stopwatch = false;
     _setSec = prefs().getInt("t_set", 5 * 60);
-    if (_setSec < 60 || _setSec > 99 * 60) _setSec = 5 * 60;
+    if (_setSec < 5 || _setSec > 99 * 60) _setSec = 5 * 60;
     _remainMs = (uint32_t)_setSec * 1000u;
     _running = false;
     _finished = false;
@@ -135,8 +146,15 @@ class TimerTool : public ToolApp {
     c.button(CD_MINUS.x, CD_MINUS.y, CD_MINUS.w, CD_MINUS.h, "-1 MIN", false);
     c.button(CD_PLUS.x, CD_PLUS.y, CD_PLUS.w, CD_PLUS.h, "+1 MIN", false);
 
+    char sbuf[8];
+    for (int i = 0; i < 4; i++) {
+      const TRect r = secRect(i);
+      snprintf(sbuf, sizeof(sbuf), "%+ds", SEC_DELTA[i]);
+      c.button(r.x, r.y, r.w, r.h, sbuf, false);
+    }
+
     if (_running && remainMs() > 61000u)
-      c.textCentered(c.width() / 2, 598, "the display steps every 10s", TS_MED, true);
+      c.textCentered(c.width() / 2, 672, "the display steps every 10s", TS_MED, true);
   }
 
   void tapCountdown(int x, int y) {
@@ -173,23 +191,30 @@ class TimerTool : public ToolApp {
       host().refresh(true);
       return;
     }
-    if (CD_MINUS.hit(x, y) || CD_PLUS.hit(x, y)) {
-      const int delta = CD_PLUS.hit(x, y) ? 60 : -60;
-      _setSec += delta;
-      if (_setSec < 60) _setSec = 60;
-      if (_setSec > 99 * 60) _setSec = 99 * 60;
-      prefs().putInt("t_set", _setSec);
-      if (_running) {
-        // Adjust the live deadline instead of restarting the countdown.
-        const uint32_t left = remainMs();
-        const long adjusted = (long)left + delta * 1000L;
-        _endMs = millis() + (uint32_t)(adjusted < 0 ? 0 : adjusted);
-      } else {
-        _remainMs = (uint32_t)_setSec * 1000u;
-      }
-      host().beep(0);
-      host().refresh(false);
+    if (CD_MINUS.hit(x, y)) return adjust(-60);
+    if (CD_PLUS.hit(x, y)) return adjust(60);
+    for (int i = 0; i < 4; i++)
+      if (secRect(i).hit(x, y)) return adjust(SEC_DELTA[i]);
+  }
+
+  void adjust(int deltaSec) {
+    _setSec += deltaSec;
+    // Five seconds is a sensible floor now that five-second steps exist: one
+    // second of countdown is a stopwatch with extra steps, and the tool has one
+    // of those already.
+    if (_setSec < 5) _setSec = 5;
+    if (_setSec > 99 * 60) _setSec = 99 * 60;
+    prefs().putInt("t_set", _setSec);
+    if (_running) {
+      // Adjust the live deadline instead of restarting the countdown.
+      const uint32_t left = remainMs();
+      const long adjusted = (long)left + deltaSec * 1000L;
+      _endMs = millis() + (uint32_t)(adjusted < 0 ? 0 : adjusted);
+    } else {
+      _remainMs = (uint32_t)_setSec * 1000u;
     }
+    host().beep(0);
+    host().refresh(false);
   }
 
   // --- stopwatch ---------------------------------------------------------
