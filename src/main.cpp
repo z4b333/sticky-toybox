@@ -20,6 +20,7 @@
 #include "tools/lockscreen.h"
 #include "tools/tool_note.h"
 #include "touch.h"
+#include "welcome.h"
 
 Preferences prefs;
 
@@ -308,6 +309,34 @@ void setup() {
   while (digitalRead(PIN_BTN_OK) == LOW && millis() - releaseWait < 2000) delay(10);
   if (digitalRead(PIN_BTN_OK) == LOW) TB_LOG("warning: OK button reads held at boot\n");
   noteActivity();
+
+  // A device that has just been flashed says so, and asks whether its screen
+  // came up the right way round -- the one thing that goes wrong on a fresh
+  // board and the one thing a new owner has no way to guess is fixable.
+  //
+  // Bounded, and any button also dismisses it: this sits between the panel and
+  // the hub, and a welcome screen that could not be got past would be a worse
+  // bug than the one it exists to catch.
+  if (welcome::pending(prefs)) {
+    const bool updated = prefs.isKey("welcome");
+    ToolsCanvas& c = stickyHost.sharedCanvas();
+    epd.clear();
+    welcome::render(c, updated);
+    epd.displayFull();
+    buzzer::confirm();
+    const uint32_t shown = millis();
+    for (;;) {
+      TouchEvent ev;
+      touch.poll(ev);
+      if (ev.tapped) break;
+      if (digitalRead(PIN_BTN_UP) == LOW || digitalRead(PIN_BTN_DOWN) == LOW) break;
+      if (millis() - shown > 120000) break;
+      delay(20);
+    }
+    welcome::markSeen(prefs);
+    buzzer::tap();
+    noteActivity();
+  }
 
   // Waking goes to whichever the settings say. With a note pinned the note is
   // usually the thing you came back to, but not everyone agrees, so it asks.

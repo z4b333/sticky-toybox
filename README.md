@@ -87,10 +87,12 @@ Language packs are optional. Common Chinese characters, Korean and Japanese
 already work without them; the packs only add the rare ones, and they can be
 added or removed later without touching the firmware.
 
-The first time you run it, hold either side button while it powers on. That
-reaches the service screen, which reports what the board answered on each bus
-and can correct the display and touch orientation if your unit disagrees with
-mine. [docs/BRINGUP.md](docs/BRINGUP.md) walks through it, and
+The first boot after any flash opens with a welcome screen: it names the build
+that is running, so you can check it against what the installer said it was
+writing, and it asks whether the screen came up the right way round. If it did
+not, hold either side button while the device powers on. That reaches the
+service screen, which reports what the board answered on each bus and can
+correct the display and touch orientation if your unit disagrees with mine. [docs/BRINGUP.md](docs/BRINGUP.md) walks through it, and
 [checklist.html](https://z4b333.github.io/sticky-toybox/checklist.html) is the
 same thing as a tickable page for a phone.
 

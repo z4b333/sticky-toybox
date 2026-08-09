@@ -15,6 +15,7 @@
 #include "gfx.h"
 #include "game2048.h"
 #include "service_ui.h"
+#include "welcome.h"
 #include "sticky_host.h"
 #include "toybox.h"
 #include "settings.h"
@@ -1579,6 +1580,46 @@ int main() {
     epd.clear();
     g_dumpEnabled = true;
     printf("rotate ok (each quarter turn faces the way its number says)\n");
+  }
+
+  // --- the welcome screen ---------------------------------------------------
+  // Both halves: a device that has just been flashed for the first time, and
+  // one that has just been updated. They differ by one line, and that line is
+  // the difference between a greeting and amnesia.
+  {
+    setScreen("welcome");
+    epd.setRotation(0);
+    epd.clear();
+    welcome::render(stickyHost.sharedCanvas(), false);
+    epd.displayFull();
+
+    setScreen("welcome_updated");
+    epd.clear();
+    welcome::render(stickyHost.sharedCanvas(), true);
+    epd.displayFull();
+
+    // It is shown when the stored version is not this one, and not shown after
+    // it has been marked. A welcome that came back every boot would be the kind
+    // of bug nobody reports and everybody resents.
+    g_dumpEnabled = false;
+    prefs.remove("welcome");
+    if (!welcome::pending(prefs)) {
+      printf("WELCOME FAIL: a device that has never seen it is not offered it\n");
+      abort();
+    }
+    welcome::markSeen(prefs);
+    if (welcome::pending(prefs)) {
+      printf("WELCOME FAIL: it comes back after being seen\n");
+      abort();
+    }
+    prefs.putString("welcome", "v0.0-something-else");
+    if (!welcome::pending(prefs)) {
+      printf("WELCOME FAIL: an updated device is not offered it\n");
+      abort();
+    }
+    welcome::markSeen(prefs);
+    g_dumpEnabled = true;
+    printf("welcome ok (once per version, and only once)\n");
   }
 
   // --- the service screen ---------------------------------------------------

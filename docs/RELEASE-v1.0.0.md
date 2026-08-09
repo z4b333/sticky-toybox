@@ -18,10 +18,12 @@ Flash it from Chrome or Edge at
 or write `toybox-full.bin` to offset 0 with esptool. The page now tells you
 which build it is about to write, so you can check afterwards that it landed.
 
-The first time you run it, hold either side button while it powers on. That
-reaches the service screen, which reports what the board answered on each bus
-and can correct the display and touch orientation if your unit disagrees with
-mine.
+The first boot after a flash opens with a welcome screen naming the build that
+is running, so the installer page, that screen and the service screen all say
+the same string and you can tell the write took. It also asks whether the
+screen came up the right way round; if it did not, hold either side button
+while the device powers on to reach the service screen, which can correct the
+display and touch orientation.
 
 ## What bring-up fixed
 
