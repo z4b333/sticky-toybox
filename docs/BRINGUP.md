@@ -218,9 +218,13 @@ forces a full refresh every 40 partial ones, which is what clears it.
 
 ## Step 7 — power, buttons and sleep
 
-Hold the power button for two seconds. You should get a goodbye screen and the
-device should switch off, leaving that image on the panel — e-paper keeps its
-last frame with no power at all. A short press should bring it back.
+Hold the power button for two seconds. The device should draw its lock screen
+and switch off, leaving that image on the panel — e-paper keeps its last frame
+with no power at all. Which image that is comes from settings: a pinned note if
+you have one, otherwise the clock, and a picture, a goodbye card or a blank
+panel are the other choices. A clock is the default, because a panel that holds
+an image without power makes a better clock than a goodbye card. A short press
+should bring it back.
 
 If it goes straight back to sleep after waking, the button polarity is wrong
 (OK is GPIO4, expected active low).

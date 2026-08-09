@@ -194,8 +194,8 @@ var SECTIONS = [
 
   { title: 'Power and sleep', lede: 'The unplug test is last on purpose.',
     items: [
-      { id: 'off', label: 'Holding power for two seconds shows the goodbye screen and switches off',
-        hint: 'The image should stay on the panel with no power at all.' },
+      { id: 'off', label: 'Holding power for two seconds draws the lock screen and switches off',
+        hint: 'Whichever lock screen is set: a pinned note if you have one, otherwise the clock, a picture, a goodbye card or a blank panel. Settings decides. The image should stay on the panel with no power at all.' },
       { id: 'wake', label: 'A short press wakes it again',
         why: 'Going straight back to sleep means the button polarity is wrong (OK is GPIO4, expected active low).' },
       { id: 'idle', label: 'It sleeps by itself after five idle minutes' },
@@ -208,7 +208,10 @@ var SECTIONS = [
 
   { title: 'Phone side', lede: 'Notes, flashcards and the picker all pair the same way.',
     items: [
-      { id: 'qr', label: 'The QR code joins the phone and the editor page opens' },
+      { id: 'qrscan', label: 'The phone camera reads the QR code at all',
+        why: 'If it will not scan, say so rather than joining by hand — a symbol that draws but does not decode is an encoding bug, not a camera one.' },
+      { id: 'qr', label: 'Scanning it joins the wifi and the editor page opens by itself',
+        hint: 'If it joins but no page appears, use PAGE DIDN\'T OPEN? and tell me — that is captive-portal detection, a separate thing.' },
       { id: 'note', label: 'A note saved on the phone appears on the device' },
       { id: 'tick', label: 'Ticking a checkbox on the device sticks' },
       { id: 'clock', label: 'The pinned note shows time and temperature once asleep',
