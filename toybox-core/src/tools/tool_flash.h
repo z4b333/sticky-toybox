@@ -100,6 +100,39 @@ class FlashTool : public ToolApp {
   // The import screen must service HTTP while it is open.
   bool wantsTick() const override { return _screen == Screen::Import; }
 
+  // The side buttons, on the study screen only. DOWN always moves forward --
+  // reveal the answer, then take the card as known -- and UP is the one that
+  // says you did not. Studying is the one thing on this device anybody does for
+  // twenty minutes at a stretch, and reaching up to the panel for every card is
+  // the part that makes you stop.
+  //
+  // On the front of a card UP does nothing: there is nothing yet to admit you
+  // could not remember. In JUST FLIP mode there is no grading at all, so UP
+  // turns the card back over -- the same word at a smaller scale.
+  bool onButton(SideBtn b) override {
+    if (_screen != Screen::Study) return false;
+    if (_pos >= _qLen) {
+      if (b == SideBtn::Down) restart();
+      return b == SideBtn::Down;
+    }
+    if (!_flipped) {
+      if (b == SideBtn::Down) reveal();
+      return b == SideBtn::Down;
+    }
+    if (_srs) {
+      if (b == SideBtn::Up)
+        gradeAgain();
+      else
+        gradeGood();
+      return true;
+    }
+    if (b == SideBtn::Down)
+      advance(0);
+    else
+      unreveal();
+    return true;
+  }
+
   void tick() override {
     if (_screen != Screen::Import) return;
     _net.loop();
@@ -323,12 +356,20 @@ class FlashTool : public ToolApp {
     if (!_flipped) {
       // Sat in the band the buttons will occupy, so the answer appears where the
       // eye is already waiting rather than somewhere new.
-      c.textInBox(NEXT_BTN.x, ACT_Y, NEXT_BTN.w, ACT_H, "tap the card to reveal", TS_MED, true);
+      c.textInBox(NEXT_BTN.x, ACT_Y, NEXT_BTN.w, ACT_H, "tap the card, or press DOWN", TS_MED,
+                  true);
     } else if (_srs) {
       c.button(AGAIN_BTN.x, AGAIN_BTN.y, AGAIN_BTN.w, AGAIN_BTN.h, "AGAIN", false, TS_LARGE);
       c.button(GOOD_BTN.x, GOOD_BTN.y, GOOD_BTN.w, GOOD_BTN.h, "GOT IT", true, TS_LARGE);
+      // Which side button does which, over the button it does -- in the gap
+      // between the card and the buttons, not under them, where the count and
+      // the box number already are. Smallest size on the screen: it is a thing
+      // to learn on the first card and never read again.
+      c.textInBox(AGAIN_BTN.x, ACT_Y - 30, AGAIN_BTN.w, 26, "side UP", TS_SMALL, true);
+      c.textInBox(GOOD_BTN.x, ACT_Y - 30, GOOD_BTN.w, 26, "side DOWN", TS_SMALL, true);
     } else {
       c.button(NEXT_BTN.x, NEXT_BTN.y, NEXT_BTN.w, NEXT_BTN.h, "NEXT", true, TS_LARGE);
+      c.textInBox(NEXT_BTN.x, ACT_Y - 30, NEXT_BTN.w, 26, "side DOWN", TS_SMALL, true);
     }
 
     // Where you are in the deck is the least urgent thing here, so it takes the
@@ -360,58 +401,78 @@ class FlashTool : public ToolApp {
     c.button(DECKS_BTN.x, DECKS_BTN.y, DECKS_BTN.w, DECKS_BTN.h, "DECKS", false, TS_LARGE);
   }
 
+  // --- the things the study screen can do --------------------------------
+  // Named, because the buttons down the side reach them too, and a hit test is
+  // not something a button can call.
+  void restart() {
+    buildQueue();
+    _pos = 0;
+    _flipped = false;
+    host().beep(1);
+    host().refresh(true);
+  }
+
+  void backToDecks() {
+    saveProgress();
+    releaseCards();
+    _screen = Screen::Decks;
+    refreshDeckList();
+    host().beep(1);
+    host().refresh(true);
+  }
+
+  void reveal() {
+    _flipped = true;
+    host().beep(0);
+    host().refresh(true);
+  }
+
+  void unreveal() {
+    _flipped = false;
+    host().beep(0);
+    host().refresh(true);
+  }
+
+  void gradeAgain() {
+    fcard::Card& card = _cards[_queue[_pos]];
+    card.box = 0;
+    // Re-queue it a few cards later so it comes back this session.
+    if (_qLen < fcard::MAX_CARDS) {
+      const uint16_t idx = _queue[_pos];
+      const int insertAt = (_pos + 4 < _qLen) ? _pos + 4 : _qLen;
+      for (int i = _qLen; i > insertAt; i--) _queue[i] = _queue[i - 1];
+      _queue[insertAt] = idx;
+      _qLen++;
+    }
+    advance(2);
+  }
+
+  void gradeGood() {
+    fcard::Card& card = _cards[_queue[_pos]];
+    if (card.box < fcard::MAX_BOX) card.box++;
+    advance(1);
+  }
+
   void tapStudy(int x, int y) {
     using namespace fcui;
     if (_pos >= _qLen) {
-      if (RESTART_BTN.hit(x, y)) {
-        buildQueue();
-        _pos = 0;
-        _flipped = false;
-        host().beep(1);
-        host().refresh(true);
-      } else if (DECKS_BTN.hit(x, y)) {
-        saveProgress();
-        releaseCards();
-        _screen = Screen::Decks;
-        refreshDeckList();
-        host().beep(1);
-        host().refresh(true);
-      }
+      if (RESTART_BTN.hit(x, y))
+        restart();
+      else if (DECKS_BTN.hit(x, y))
+        backToDecks();
       return;
     }
 
     if (!_flipped) {
-      if (CARD_BOX.hit(x, y)) {
-        _flipped = true;
-        host().beep(0);
-        host().refresh(true);
-      }
+      if (CARD_BOX.hit(x, y)) reveal();
       return;
     }
 
-    fcard::Card& card = _cards[_queue[_pos]];
     if (_srs) {
-      if (AGAIN_BTN.hit(x, y)) {
-        card.box = 0;
-        // Re-queue it a few cards later so it comes back this session.
-        if (_qLen < fcard::MAX_CARDS) {
-          const uint16_t idx = _queue[_pos];
-          const int insertAt = (_pos + 4 < _qLen) ? _pos + 4 : _qLen;
-          for (int i = _qLen; i > insertAt; i--) _queue[i] = _queue[i - 1];
-          _queue[insertAt] = idx;
-          _qLen++;
-        }
-        advance(2);
-        return;
-      }
-      if (GOOD_BTN.hit(x, y)) {
-        if (card.box < fcard::MAX_BOX) card.box++;
-        advance(1);
-        return;
-      }
+      if (AGAIN_BTN.hit(x, y)) return gradeAgain();
+      if (GOOD_BTN.hit(x, y)) return gradeGood();
     } else if (NEXT_BTN.hit(x, y)) {
       advance(0);
-      return;
     }
   }
 

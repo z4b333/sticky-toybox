@@ -815,6 +815,53 @@ int main() {
   setScreen("tool_flash_back");
   toybox.onTap(240, 220);  // tap the card to reveal
 
+  {
+    // The side buttons have to reach the same three actions the panel does, and
+    // reach nothing at all anywhere else. A button that quietly graded a card
+    // from the deck list would be the worst kind of bug: silent, and it moves
+    // something you cannot see.
+    g_dumpEnabled = false;
+    const int paintsBefore = g_paintCount;
+    if (!toybox.onButton(SideBtn::Down)) {  // the card is revealed: GOT IT
+      printf("BUTTON FAIL: DOWN did nothing on a revealed card\n");
+      abort();
+    }
+    if (toybox.onButton(SideBtn::Up)) {  // now on the front of the next card
+      printf("BUTTON FAIL: UP graded a card that had not been revealed\n");
+      abort();
+    }
+    if (!toybox.onButton(SideBtn::Down)) {  // reveal it
+      printf("BUTTON FAIL: DOWN did not reveal the next card\n");
+      abort();
+    }
+    if (!toybox.onButton(SideBtn::Up)) {  // AGAIN
+      printf("BUTTON FAIL: UP did not send a revealed card back\n");
+      abort();
+    }
+    if (g_paintCount <= paintsBefore) {
+      printf("BUTTON FAIL: three button presses and nothing repainted\n");
+      abort();
+    }
+    quietTap(0, 0);  // back to the deck list...
+    if (toybox.onButton(SideBtn::Down) || toybox.onButton(SideBtn::Up)) {
+      printf("BUTTON FAIL: a side button did something on the deck list\n");
+      abort();
+    }
+    toybox.goHub();
+    if (toybox.onButton(SideBtn::Down)) {
+      printf("BUTTON FAIL: a side button did something on the hub\n");
+      abort();
+    }
+    // ...and back to where the walk was, so the screens below are unchanged.
+    // Opening the tool raises its rules card again -- dismissed, not
+    // suppressed, is the state the walk left it in.
+    toybox.open(false, 5);
+    tapRect(help::OK_BTN);
+    tapRect(fcui::rowRect(0, 3));
+    g_dumpEnabled = true;
+    printf("side buttons ok (grade a card, and nothing anywhere else)\n");
+  }
+
   setScreen("tool_flash_import");
   g_dumpEnabled = false;
   quietTap(0, 0);  // back to the deck list

@@ -21,6 +21,9 @@ class Toybox {
   void render(ToolsCanvas& c);
   void onTap(int x, int y);
   void onSwipe(int dx, int dy);
+  // A side button press, offered to the open app. False means nothing wanted
+  // it, and the caller can do whatever it would have done otherwise.
+  bool onButton(SideBtn b);
   void tick();
   bool wantsTick() const;
 

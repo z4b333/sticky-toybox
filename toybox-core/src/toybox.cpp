@@ -138,6 +138,10 @@ void Toybox::onTap(int x, int y) {
   open(t.game, t.idx);
 }
 
+bool Toybox::onButton(SideBtn b) {
+  return (_where == Where::App && _active) ? _active->onButton(b) : false;
+}
+
 void Toybox::onSwipe(int dx, int dy) {
   if (_where == Where::App && _active) _active->onSwipe(dx, dy);
 }

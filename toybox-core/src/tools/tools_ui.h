@@ -146,6 +146,10 @@ class ToolsCanvas {
   }
 };
 
+// The two buttons down the side of the device, named for what is written on
+// them rather than for what any one app does with them.
+enum class SideBtn : uint8_t { Up, Down };
+
 // Everything a tool app needs from the firmware it is embedded in.
 class ToolsHost {
  public:
@@ -199,6 +203,15 @@ class ToolApp {
   virtual void onSwipe(int dx, int dy) { (void)dx; (void)dy; }
   virtual void tick() {}                       // ~50 Hz, for running timers
   virtual bool wantsTick() const { return false; }
+  // The two side buttons, for an app that has something for them to do. Only
+  // flashcards does: a hand holding the device can grade a card without the
+  // other hand coming up to the panel. Everything else leaves these alone, and
+  // an app that does not answer true lets the button mean nothing rather than
+  // something it did not intend.
+  virtual bool onButton(SideBtn b) {
+    (void)b;
+    return false;
+  }
   // Open somewhere other than the front page. Only the notes tool answers, and
   // only for pairing; everything else opens where it always does.
   virtual bool openPairing() { return false; }

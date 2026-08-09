@@ -176,6 +176,28 @@ void handlePowerButton() {
   if (wasDown && held > 40 && g_pinnedMode) powerOff();
 }
 
+// The two side buttons, offered to whatever app is open. Only flashcards wants
+// them; everything else answers false and the press does nothing at all, which
+// is better than inventing a meaning for it.
+//
+// Edge-triggered, and deliberately not repeating on hold: these grade cards, and
+// a held button that graded ten of them would be a disaster you could not undo.
+// 30 ms is longer than any contact bounces for and shorter than any deliberate
+// press, and the panel takes 300 ms to repaint anyway.
+void handleSideButtons() {
+  static bool upWas = false, downWas = false;
+  static uint32_t lastEdge = 0;
+  const bool upNow = digitalRead(PIN_BTN_UP) == LOW;
+  const bool downNow = digitalRead(PIN_BTN_DOWN) == LOW;
+  const bool pressed = (upNow && !upWas) || (downNow && !downWas);
+  upWas = upNow;
+  downWas = downNow;
+  if (!pressed || millis() - lastEdge < 30) return;
+  lastEdge = millis();
+  noteActivity();  // a button is a person, whether or not an app wanted it
+  toybox.onButton(upNow ? SideBtn::Up : SideBtn::Down);
+}
+
 // Sleeping while a timer is counting down would be a bug, not a saving, so a
 // tool that wants ticks holds the device awake — the same rule the CrossPoint
 // port uses for the reader's sleep timer.
@@ -338,6 +360,7 @@ void loop() {
     toybox.onSwipe(ev.dx, ev.dy);
   if (toybox.wantsTick()) toybox.tick();
 
+  handleSideButtons();
   handlePowerButton();
   handleLowBattery();
   handleIdleSleep();

@@ -43,7 +43,9 @@ The original Thai readme is at [docs/README.th.md](docs/README.th.md).
 - A list picker. Type the list on the device or send it from your phone; a
   list sent from a phone keeps whatever script it was written in.
 - A countdown timer and stopwatch.
-- Flashcards with spaced repetition. Decks are imported from your phone.
+- Flashcards with spaced repetition. Decks are imported from your phone. The
+  two side buttons grade a card without reaching up to the panel: DOWN reveals
+  the answer and then takes it as known, UP sends it back to be asked again.
 - Notes. Write or dictate them on your phone, then read and tick checkboxes
   on the device. A note can be pinned so it stays on the screen even when
   the device is off. E-paper keeps its image without power.
