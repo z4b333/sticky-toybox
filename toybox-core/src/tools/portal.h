@@ -53,8 +53,20 @@ class Portal {
  public:
   using Handler = std::function<void()>;
 
+  ~Portal() { end(); }
+
   bool begin() {
     if (_running) return true;
+
+    // The captive-portal DNS server is built only once WiFi is up, and torn
+    // down before it goes away again. It owns an AsyncUDP, whose destructor
+    // reaches into lwIP; destroying one that was never started asserts inside
+    // FreeRTOS on a mutex that does not exist. Every tool with a pairing screen
+    // owns a portal, so as a member by value this crashed on the way back to
+    // the hub from Notes, Flashcards or the picker unless you had happened to
+    // use the phone first.
+    if (!_dns) _dns = new DNSServer();
+    if (!_dns) return false;
 
     uint8_t mac[6] = {};
     WiFi.softAPmacAddress(mac);
@@ -68,25 +80,33 @@ class Portal {
     delay(200);
     _ip = WiFi.softAPIP();
 
-    _dns.setErrorReplyCode(DNSReplyCode::NoError);
-    _dns.start(53, "*", _ip);  // every lookup resolves here -> captive portal
+    _dns->setErrorReplyCode(DNSReplyCode::NoError);
+    _dns->start(53, "*", _ip);  // every lookup resolves here -> captive portal
     _server.begin();
     _running = true;
     return true;
   }
 
   void end() {
-    if (!_running) return;
+    if (!_running) {
+      // Nothing ran, but a DNS server may still have been built by a begin()
+      // that failed later; it has to go while the stack is still up.
+      delete _dns;
+      _dns = nullptr;
+      return;
+    }
     _server.stop();
-    _dns.stop();
+    _dns->stop();
+    delete _dns;
+    _dns = nullptr;
     WiFi.softAPdisconnect(true);
     WiFi.mode(WIFI_OFF);
     _running = false;
   }
 
   void loop() {
-    if (!_running) return;
-    _dns.processNextRequest();
+    if (!_running || !_dns) return;
+    _dns->processNextRequest();
     _server.handleClient();
   }
 
@@ -117,7 +137,7 @@ class Portal {
 
  private:
   WebServer _server{80};
-  DNSServer _dns;
+  DNSServer* _dns = nullptr;
   IPAddress _ip;
   bool _running = false;
   char _ssid[20] = {}, _pass[12] = {};
