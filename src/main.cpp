@@ -24,6 +24,22 @@
 Preferences prefs;
 
 namespace {
+// --- talking to the outside ---------------------------------------------------
+// The build points Serial at the S3's own USB, but this board reaches the PC
+// through a CH34x on UART0. Which one a given board actually presents is not
+// something that can be settled from here, so boot messages go to both and
+// whichever is listening hears them. An empty console is then evidence about
+// the device rather than about the wiring.
+#if ARDUINO_USB_CDC_ON_BOOT
+#define TB_LOG(...)          \
+  do {                       \
+    Serial.printf(__VA_ARGS__);  \
+    Serial0.printf(__VA_ARGS__); \
+  } while (0)
+#else
+#define TB_LOG(...) Serial.printf(__VA_ARGS__)
+#endif
+
 uint32_t g_okDownSince = 0;
 
 // With a note pinned, waking goes straight to that note rather than to the hub:
@@ -192,6 +208,9 @@ void setup() {
   digitalWrite(PIN_PWR_LOCK, HIGH);
 
   Serial.begin(115200);
+#if ARDUINO_USB_CDC_ON_BOOT
+  Serial0.begin(115200);
+#endif
 
   pinMode(PIN_BTN_UP, INPUT_PULLUP);
   pinMode(PIN_BTN_DOWN, INPUT_PULLUP);
@@ -202,21 +221,41 @@ void setup() {
   buzzer::setEnabled(prefs.getBool("sound", true));
 
   if (!epd.begin()) {
-    Serial.println("EPD alloc failed");
-    while (true) delay(1000);
+    TB_LOG("EPD alloc failed\n");
+    // Nothing can be drawn without a framebuffer, so say it with the one output
+    // that does not depend on the panel.
+    for (;;) {
+      buzzer::error();
+      delay(2000);
+    }
   }
 
   // Whatever the service screen last saved about this particular board, before
   // the first pixel is drawn or the first tap is read.
   svc::apply(svc::load());
 
+  // Paint something the instant the panel can paint, before touch, sensors,
+  // fonts or buttons are asked for anything. Everything after this point can
+  // fail or hang; if it does, this screen is still there saying how far it got,
+  // and "the panel works" stops being the last thing you find out.
+  {
+    ToolsCanvas& c = stickyHost.sharedCanvas();
+    epd.clear();
+    c.textTrackedCentered(EPD_W / 2, 330, "TOYBOX", TS_HUGE, true, true, 6);
+    c.textCentered(EPD_W / 2, 390, "starting", TS_MED, true);
+    c.textCentered(EPD_W / 2, 740, "hold a side button for the service screen", TS_SMALL,
+                   true);
+    epd.displayFull();
+    TB_LOG("panel ok\n");
+  }
+
   touch.begin();
-  Serial.printf("touch: %s\n", touch.ok() ? "ok" : "NOT FOUND");
+  TB_LOG("touch: %s\n", touch.ok() ? "ok" : "NOT FOUND");
   sensors::begin();
 
   // Full-coverage font packs, if any have been installed (see gfx.h). Loaded
   // before the first paint so a pinned Chinese note wakes up whole.
-  Serial.printf("font packs: %d faces\n", gfx::loadFontPacks());
+  TB_LOG("font packs: %d faces\n", gfx::loadFontPacks());
 
   // Hold UP through power-on to correct the display and touch mapping. This is
   // the one screen that has to work when nothing else does, so it comes before
@@ -225,7 +264,7 @@ void setup() {
   // shell is unusable without it, and a device sitting on a hub it will never
   // respond to tells you nothing about why.
   if (svc::requested() || !touch.ok()) {
-    Serial.println("service mode");
+    TB_LOG("service mode\n");
     svc::run();  // never returns
   }
 
@@ -239,8 +278,13 @@ void setup() {
   toybox.begin(stickyHost);
 
   // Wait for the button that woke us to come back up, or the first loop would
-  // read it as a fresh press and put the device straight back to sleep.
-  while (digitalRead(PIN_BTN_OK) == LOW) delay(10);
+  // read it as a fresh press and put the device straight back to sleep. Bounded,
+  // because this is the last thing before the first real paint and the pin is
+  // one of the unverified guesses: a pin that reads low for ever used to mean a
+  // blank panel and a device that looked dead.
+  const uint32_t releaseWait = millis();
+  while (digitalRead(PIN_BTN_OK) == LOW && millis() - releaseWait < 2000) delay(10);
+  if (digitalRead(PIN_BTN_OK) == LOW) TB_LOG("warning: OK button reads held at boot\n");
   noteActivity();
 
   // Waking goes to whichever the settings say. With a note pinned the note is
@@ -252,6 +296,10 @@ void setup() {
   } else {
     stickyHost.refresh(true);
   }
+  // One note when setup finishes, so a board with a dead panel can still say it
+  // got all the way here.
+  buzzer::confirm();
+  TB_LOG("ready\n");
 }
 
 void loop() {

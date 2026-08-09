@@ -91,6 +91,21 @@ RTS, and whether this one does is not something I can confirm from here. If
 esptool sits at "Connecting..." and gives up, that is the thing to look into —
 check Seeed's own flashing notes for the Sticky.
 
+## Step 1b — what a working boot looks like
+
+The panel paints **TOYBOX / starting** within about two seconds of power-on,
+before touch, the sensors, the fonts or the buttons are asked for anything.
+Then it goes to the hub, or to the pinned note, and the buzzer gives one short
+note when it is fully up.
+
+That screen exists to split "nothing happened" into two very different
+problems. If you see it, the framebuffer, the SPI bus, the panel rail and the
+display driver are all working, and whatever went wrong went wrong later. If
+you do not see it, none of that is proven yet.
+
+A blank white panel is indistinguishable from a device that is switched off, so
+press the power button once before concluding anything.
+
 ## Step 2 — go to the service screen first, not the hub
 
 **Hold either side button (UP or DOWN) while the device powers on, and keep
