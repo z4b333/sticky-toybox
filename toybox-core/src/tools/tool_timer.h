@@ -16,18 +16,19 @@ inline constexpr int PRESET_X0 = 20, PRESET_Y0 = 312, PRESET_Y1 = 372;
 inline constexpr int PRESET_MIN[8] = {1, 3, 5, 10, 15, 25, 30, 60};
 inline constexpr TRect CD_START{40, 444, 200, 66};
 inline constexpr TRect CD_RESET{260, 444, 180, 66};
-inline constexpr TRect CD_MINUS{40, 524, 200, 56};
-inline constexpr TRect CD_PLUS{260, 524, 180, 56};
-// Seconds, on their own row under the minutes. Five is the difference between
-// a soft-boiled egg and a hard one; thirty is the tea nobody agrees about. The
-// minute buttons above cannot express either without twelve taps.
+// One row for every adjustment, minutes and seconds together, reading as a
+// number line: negatives left, positives right, and the jump grows the further
+// out you go. Splitting them over two rows made the seconds look like a
+// different kind of control from the minutes when they are the same control at
+// a different scale.
 //
-// They sit on the preset grid's column edges, so the whole lower half of the
-// screen lines up on one set of verticals.
-inline constexpr int SEC_W = 104, SEC_H = 56, SEC_GAP = 8, SEC_Y = 588;
-inline constexpr int SEC_DELTA[4] = {-30, -5, 5, 30};
-inline TRect secRect(int i) {
-  return TRect{PRESET_X0 + i * (SEC_W + SEC_GAP), SEC_Y, SEC_W, SEC_H};
+// Six buttons across 440 px is 68 wide, which is 7.3 mm on this panel -- narrow
+// for a thumb -- so they are taller than the rows above to make up for it.
+inline constexpr int ADJ_W = 68, ADJ_H = 64, ADJ_GAP = 6, ADJ_X0 = 21, ADJ_Y = 528;
+inline constexpr int ADJ_DELTA[6] = {-60, -30, -5, 5, 30, 60};
+inline constexpr const char* ADJ_LABEL[6] = {"-1m", "-30s", "-5s", "+5s", "+30s", "+1m"};
+inline TRect adjRect(int i) {
+  return TRect{ADJ_X0 + i * (ADJ_W + ADJ_GAP), ADJ_Y, ADJ_W, ADJ_H};
 }
 
 // stopwatch
@@ -143,18 +144,13 @@ class TimerTool : public ToolApp {
     c.button(CD_START.x, CD_START.y, CD_START.w, CD_START.h, _running ? "PAUSE" : "START",
              true, TS_LARGE);
     c.button(CD_RESET.x, CD_RESET.y, CD_RESET.w, CD_RESET.h, "RESET", false);
-    c.button(CD_MINUS.x, CD_MINUS.y, CD_MINUS.w, CD_MINUS.h, "-1 MIN", false);
-    c.button(CD_PLUS.x, CD_PLUS.y, CD_PLUS.w, CD_PLUS.h, "+1 MIN", false);
-
-    char sbuf[8];
-    for (int i = 0; i < 4; i++) {
-      const TRect r = secRect(i);
-      snprintf(sbuf, sizeof(sbuf), "%+ds", SEC_DELTA[i]);
-      c.button(r.x, r.y, r.w, r.h, sbuf, false);
+    for (int i = 0; i < 6; i++) {
+      const TRect r = adjRect(i);
+      c.button(r.x, r.y, r.w, r.h, ADJ_LABEL[i], false);
     }
 
     if (_running && remainMs() > 61000u)
-      c.textCentered(c.width() / 2, 672, "the display steps every 10s", TS_MED, true);
+      c.textCentered(c.width() / 2, 620, "the display steps every 10s", TS_MED, true);
   }
 
   void tapCountdown(int x, int y) {
@@ -191,10 +187,8 @@ class TimerTool : public ToolApp {
       host().refresh(true);
       return;
     }
-    if (CD_MINUS.hit(x, y)) return adjust(-60);
-    if (CD_PLUS.hit(x, y)) return adjust(60);
-    for (int i = 0; i < 4; i++)
-      if (secRect(i).hit(x, y)) return adjust(SEC_DELTA[i]);
+    for (int i = 0; i < 6; i++)
+      if (adjRect(i).hit(x, y)) return adjust(ADJ_DELTA[i]);
   }
 
   void adjust(int deltaSec) {
