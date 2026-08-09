@@ -15,20 +15,21 @@
 // Text size buckets. Each host maps these onto whatever fonts it has.
 enum TSize : uint8_t { TS_SMALL = 0, TS_MED = 1, TS_LARGE = 2, TS_HUGE = 3 };
 
-// The smallest size a string is still readable at, given its script. Thai needs
-// about 24 px because its two storeys of marks eat the line box; han and hangul
-// need about 16. Latin goes as small as the layout likes.
+// The smallest size a string is still readable at, given its script.
 //
-// Those are the same pixel counts as before, but they now sit one step lower on
-// the scale: when the whole scale moved up, TS_MED became the 24 px that Thai
-// wanted and TS_SMALL became the 16 that CJK wanted. So Thai only gets bumped
-// out of the smallest size, and CJK is no longer bumped at all -- multilingual
-// text now sits at the size the layout asked for instead of standing a step
-// taller than the Latin beside it.
+// Thai floors one step above whatever it was asked for. This is not about the
+// line box -- it is about what fills the box. A Thai line has to leave room for
+// two storeys of marks above the letters and one below, so the base letters
+// occupy maybe half the height that Latin does in the same box, and Thai set at
+// the same nominal size reads visibly smaller beside it. Standing it a step
+// taller is what makes the two look the same size.
+//
+// Han and hangul fill their box the way Latin does, so they only need the box
+// not to be tiny -- which, since the scale moved up, TS_SMALL no longer is.
 inline TSize scriptFloor(const char* s, TSize sz) {
-  if (sz >= TS_MED || !s) return sz;
+  if (sz >= TS_LARGE || !s) return sz;
   for (const char* p = s; *p;) {
-    if (uni::thai(uni::next(p))) return TS_MED;
+    if (uni::thai(uni::next(p))) return sz < TS_MED ? TS_MED : TS_LARGE;
   }
   return sz;
 }

@@ -34,7 +34,10 @@ class ListServer {
   // Preview scaffolding: pretend a phone posted a list after a few polls.
   void loop() {
     if (++_ticks != 3 || !_receive) return;
-    _count = _receive(String("Ana\nBen\nChandra\nDiego\nEmi\n"));
+    // Not all Latin: the list used to be folded down to ASCII on its way in,
+    // so a Thai list reached the panel as rows of question marks. The scaffold
+    // sends what a phone actually sends.
+    _count = _receive(String("Ana\nBen\nกะเพรา\nข้าวมันไก่\nJosé\n"));
     _received = true;
   }
   bool received() const { return _received; }
@@ -179,7 +182,7 @@ fetch('/items').then(r=>r.text()).then(v=>{t.value=v;count();}).catch(count);
   // the page so the phone's warnings can never drift from what NVS accepts.
   String page(kPage);
   page.replace("__MAXI__", String(plist::MAX_ITEMS));
-  page.replace("__MAXL__", String(plist::MAX_LEN));
+  page.replace("__MAXL__", String(plist::MAX_CHARS));
   _portal.server().send(200, "text/html", page);
 }
 

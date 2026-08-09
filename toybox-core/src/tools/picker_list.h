@@ -6,27 +6,29 @@
 #pragma once
 #include <Arduino.h>
 
+#include "unicode.h"
+
 namespace plist {
 
 constexpr int MAX_ITEMS = 10;  // what the list screen can show without scrolling
-constexpr int MAX_LEN = 20;    // fits a row at TS_MED with the delete button
-constexpr size_t BLOB = (size_t)(MAX_LEN + 1) * MAX_ITEMS + 8;
+constexpr int MAX_CHARS = 20;  // fits a row at TS_MED with the delete button
+// Storage is in bytes, and a character is not a byte. Everything the firmware
+// renders lives in the BMP, so three bytes is the worst case in UTF-8 — a Thai
+// or Chinese list of twenty characters needs sixty of them.
+constexpr int MAX_BYTES = MAX_CHARS * 3;
+constexpr size_t BLOB = (size_t)(MAX_BYTES + 1) * MAX_ITEMS + 8;
 
-using Item = char[MAX_LEN + 1];
-
-// The 8x8 font is ASCII 32..126, so anything else would draw as noise. Accented
-// Latin is folded to its base letter rather than dropped — a phone keyboard
-// produces it constantly, and "Jose" is a far better outcome than "Jos" or a
-// row of boxes.
-inline char foldLatin1(uint8_t hi) {
-  static const char kFold[65] =
-      "AAAAAAECEEEEIIIIDNOOOOOxOUUUUYPs"
-      "aaaaaaeceeeeiiiidnooooo/ouuuuypy";
-  return (hi >= 0x80 && hi <= 0xBF) ? kFold[hi - 0x80] : '?';
-}
+using Item = char[MAX_BYTES + 1];
 
 // One item per line. Blank lines are skipped, ends are trimmed, over-long names
 // are cut rather than rejected, and the tail past MAX_ITEMS is dropped.
+//
+// UTF-8 passes through whole. It used to be folded down to ASCII — accented
+// Latin to its base letter, everything else to a question mark — because the
+// device drew with an 8x8 font that had nothing else in it. That font has been
+// gone a long time; notes and flashcards have rendered Thai and Chinese ever
+// since, and a Thai picker list still arrived on the panel as six rows of
+// ??????. The cut at MAX_CHARS falls on a codepoint boundary, never inside one.
 inline int fromText(const char* text, Item* items) {
   int n = 0;
   const char* p = text;
@@ -34,21 +36,28 @@ inline int fromText(const char* text, Item* items) {
     const char* eol = p;
     while (*eol && *eol != '\n' && *eol != '\r') eol++;
 
-    int len = 0;
-    char buf[MAX_LEN + 1];
-    for (const char* q = p; q < eol && len < MAX_LEN; q++) {
-      const uint8_t ch = (uint8_t)*q;
-      if (ch == 0xC3 && q + 1 < eol) {  // two-byte Latin supplement
-        buf[len++] = foldLatin1((uint8_t)*++q);
-      } else if (ch >= 0x80) {
-        // Some other multi-byte sequence: emit one marker, skip its body.
-        buf[len++] = '?';
-        while (q + 1 < eol && ((uint8_t)q[1] & 0xC0) == 0x80) q++;
-      } else if (ch >= 32 && ch < 127) {
-        buf[len++] = (char)ch;
-      } else if (ch == '\t') {
+    int len = 0, chars = 0;
+    char buf[MAX_BYTES + 1];
+    for (const char* q = p; q < eol && chars < MAX_CHARS;) {
+      const char* next = q;
+      const uint32_t cp = uni::next(next);
+      const int bytes = (int)(next - q);
+      if (len + bytes > MAX_BYTES) break;
+      if (cp >= 0x80) {
+        // Nothing above the BMP has a glyph, so an emoji would draw as blanks.
+        // Dropping it is quieter than a row of empty boxes.
+        if (cp <= 0xFFFF) {
+          for (int k = 0; k < bytes; k++) buf[len++] = q[k];
+          chars++;
+        }
+      } else if (cp >= 32 && cp < 127) {
+        buf[len++] = (char)cp;
+        chars++;
+      } else if (cp == '\t') {
         buf[len++] = ' ';
+        chars++;
       }
+      q = next;
     }
     buf[len] = 0;
     while (len > 0 && buf[len - 1] == ' ') buf[--len] = 0;

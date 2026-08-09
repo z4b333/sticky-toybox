@@ -40,7 +40,8 @@ The original Thai readme is at [docs/README.th.md](docs/README.th.md).
 **Tools**
 
 - Coin flip, dice (D4 to D20, with modifiers), random number, card draw.
-- A list picker. Type the list on the device or send it from your phone.
+- A list picker. Type the list on the device or send it from your phone; a
+  list sent from a phone keeps whatever script it was written in.
 - A countdown timer and stopwatch.
 - Flashcards with spaced repetition. Decks are imported from your phone.
 - Notes. Write or dictate them on your phone, then read and tick checkboxes
@@ -159,9 +160,10 @@ monitor, where 16 px is a comfortable size; on a 235 DPI panel it is 1.7 mm,
 about five point. Body text is now 2.6 mm, roughly seven and a half point,
 which is ordinary book size.
 
-Thai never renders below 24 px, which is now simply `TS_MED` — so multilingual
-text sits at the size the layout asked for instead of standing a step taller
-than the Latin beside it. See [docs/LANGUAGES.md](docs/LANGUAGES.md).
+Thai is always set one step larger than it was asked for, because its two
+storeys of marks leave the letters about half the height Latin gets in the same
+box. Chinese, Japanese and Korean are not, since they fill their box.
+See [docs/LANGUAGES.md](docs/LANGUAGES.md).
 
 ## Project layout
 

@@ -42,6 +42,16 @@ inline uint32_t next(const char*& p) {
   return cp;
 }
 
+// Characters, not bytes. Anywhere a length decides how big to draw something,
+// this is the length that matters: "หมูกรอบ" is seven characters and twenty-one
+// bytes, and choosing a text size from the byte count shrinks every non-Latin
+// string for no reason.
+inline int count(const char* s) {
+  int n = 0;
+  for (const char* p = s; *p; n++) next(p);
+  return n;
+}
+
 // --- Thai ---------------------------------------------------------------
 
 inline bool thai(uint32_t cp) { return cp >= 0x0E01 && cp <= 0x0E5B; }

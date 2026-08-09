@@ -12,11 +12,12 @@ inline constexpr int BTN_Y0 = 528;
 inline TRect actionRect(int i) { return TRect{BTN_X, BTN_Y0 + i * BTN_STEP, BTN_W, BTN_H}; }
 enum Action : int { ACT_SOUND, ACT_LOCK, ACT_CARDS, ACT_RESET, ACT_COUNT };
 
-// The lock screen page: one row per setting, each cycling through its choices.
-// 80 rather than 88 because the picture row made eight of them; at 88 the last
-// one would have sat under the caption along the bottom.
-inline constexpr int LOCK_Y0 = 92, LOCK_H = 80, LOCK_X = 16, LOCK_W = SCREEN_W - 32;
-inline TRect lockRect(int i) { return TRect{LOCK_X, LOCK_Y0 + i * LOCK_H, LOCK_W, LOCK_H - 8}; }
+// The lock screen page. Rows are not all the same height: most are a name, a
+// hint and an answer, but the one that chooses what an empty panel shows needs
+// a row of four choices under it, and the three footer switches need less than
+// any of them. A table of heights is easier to keep honest than a constant
+// everything has to be talked out of.
+inline constexpr int LOCK_Y0 = 92, LOCK_X = 16, LOCK_W = SCREEN_W - 32;
 enum LockRow : int {
   LR_SLEEP,
   LR_EMPTY,
@@ -28,18 +29,34 @@ enum LockRow : int {
   LR_BATT,
   LR_COUNT
 };
-// The picture row carries a thumbnail and its own delete key, so it is the one
-// row with parts rather than a single tap target. The thumbnail keeps the
-// panel's 3:5 proportion; anything else would misrepresent the picture.
-inline constexpr int THUMB_H = LOCK_H - 20;
-inline constexpr int THUMB_W = THUMB_H * 3 / 5;
-inline TRect thumbRect() {
-  const TRect r = lockRect(LR_PICTURE);
-  return TRect{r.x + r.w - THUMB_W - 4, r.y + (r.h - THUMB_H) / 2, THUMB_W, THUMB_H};
+inline constexpr int LOCK_HEIGHTS[LR_COUNT] = {76, 128, 76, 76, 76, 62, 62, 62};
+inline TRect lockRect(int i) {
+  int y = LOCK_Y0;
+  for (int k = 0; k < i; k++) y += LOCK_HEIGHTS[k];
+  return TRect{LOCK_X, y, LOCK_W, LOCK_HEIGHTS[i] - 8};
 }
-inline TRect picDelRect() {
-  const TRect t = thumbRect();
-  return TRect{t.x - 52, t.y + (t.h - 40) / 2, 40, 40};
+
+// The four things an empty panel can show, as chips under their heading. A
+// value that cycles on a tap hides its other three options; four chips with the
+// current one filled says what the choices are and which one is on, in the
+// space the cycling answer was using anyway.
+inline constexpr int CHIP_H = 46, CHIP_GAP = 6;
+inline TRect chipRect(int i) {
+  const TRect r = lockRect(LR_EMPTY);
+  const int w = (r.w - 3 * CHIP_GAP) / 4;
+  return TRect{r.x + i * (w + CHIP_GAP), r.y + r.h - CHIP_H, w, CHIP_H};
+}
+
+// The picture row's actions, right-aligned: send one, and throw the stored one
+// away. REMOVE only exists when there is something to remove.
+inline constexpr int SEND_W = 150, ACT_H2 = 46, REM_W = 46;
+inline TRect sendRect() {
+  const TRect r = lockRect(LR_PICTURE);
+  return TRect{r.x + r.w - SEND_W, r.y + (r.h - ACT_H2) / 2, SEND_W, ACT_H2};
+}
+inline TRect removeRect() {
+  const TRect s = sendRect();
+  return TRect{s.x - REM_W - 8, s.y, REM_W, ACT_H2};
 }
 }  // namespace setui
 

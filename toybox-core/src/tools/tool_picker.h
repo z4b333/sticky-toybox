@@ -13,7 +13,8 @@
 
 namespace pickui {
 inline constexpr int MAX_ITEMS = plist::MAX_ITEMS;
-inline constexpr int MAX_LEN = plist::MAX_LEN;
+inline constexpr int MAX_CHARS = plist::MAX_CHARS;
+inline constexpr int MAX_BYTES = plist::MAX_BYTES;
 
 inline constexpr int LIST_X = 20, LIST_Y = 56, LIST_W = 440, ROW_H = 38;
 inline constexpr int DEL_W = 34;
@@ -117,7 +118,7 @@ class PickerTool : public ToolApp {
     // --- result ------------------------------------------------------------
     c.drawRect(RESULT.x, RESULT.y, RESULT.w, RESULT.h, 3, true);
     if (_picked >= 0 && _picked < _count) {
-      const int len = (int)strlen(_items[_picked]);
+      const int len = uni::count(_items[_picked]);
       const TSize sz = len <= 6 ? TS_HUGE : (len <= 11 ? TS_LARGE : TS_MED);
       c.textInBox(RESULT.x, RESULT.y, RESULT.w, RESULT.h, _items[_picked], sz, true, true);
     } else {
@@ -203,7 +204,7 @@ class PickerTool : public ToolApp {
 
   void removeItem(int i) {
     for (int j = i; j < _count - 1; j++) {
-      memcpy(_items[j], _items[j + 1], pickui::MAX_LEN + 1);
+      memcpy(_items[j], _items[j + 1], pickui::MAX_BYTES + 1);
       _used[j] = _used[j + 1];
     }
     _count--;
@@ -249,7 +250,7 @@ class PickerTool : public ToolApp {
     }
     if (K_OK.hit(x, y)) {
       if (_draftLen > 0 && _count < MAX_ITEMS) {
-        memcpy(_items[_count], _draft, MAX_LEN + 1);
+        memcpy(_items[_count], _draft, MAX_BYTES + 1);
         _used[_count] = 0;
         _count++;
         save();
@@ -283,7 +284,7 @@ class PickerTool : public ToolApp {
   }
 
   void typeChar(char ch) {
-    if (_draftLen >= pickui::MAX_LEN) {
+    if (_draftLen >= pickui::MAX_CHARS) {
       host().beep(2);
       return;
     }
@@ -401,7 +402,7 @@ class PickerTool : public ToolApp {
 
   enum class Screen : uint8_t { List, Typing, Pair };
   Screen _screen = Screen::List;
-  char _draft[pickui::MAX_LEN + 1] = {};
+  char _draft[pickui::MAX_BYTES + 1] = {};
   int _draftLen = 0;
 
   pweb::ListServer _net;

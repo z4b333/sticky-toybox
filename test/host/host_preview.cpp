@@ -434,10 +434,11 @@ int main() {
     // be moved into a state it cannot be moved out of.
     g_dumpEnabled = false;
     for (int r = 0; r < setui::LR_COUNT; r++) {
-      if (r == setui::LR_PICTURE) continue;  // leaves the page; checked below
+      // Two rows are not cyclers: one is a set of chips, the other a pair of
+      // buttons. Both are checked below, by their parts.
+      if (r == setui::LR_EMPTY || r == setui::LR_PICTURE) continue;
       const lock::Config before = lock::config();
-      const int steps = (r == setui::LR_SLEEP) ? lock::SLEEP_COUNT
-                      : (r == setui::LR_EMPTY ? lock::EMPTY_COUNT : 2);
+      const int steps = (r == setui::LR_SLEEP) ? lock::SLEEP_COUNT : 2;
       for (int k = 0; k < steps; k++) tapRect(setui::lockRect(r));
       if (memcmp(&before, &lock::config(), sizeof(lock::Config)) != 0) {
         printf("LOCK FAIL: row %d did not return to where it started\n", r);
@@ -445,10 +446,25 @@ int main() {
       }
     }
 
+    // Every chip has to be reachable and has to be the one that ends up filled.
+    // A chip row where two tap targets overlap looks right and picks the wrong
+    // thing, which is the failure a screenshot will not show.
+    {
+      const uint8_t was = lock::config().empty;
+      for (int k = 0; k < lock::EMPTY_COUNT; k++) {
+        tapRect(setui::chipRect(k));
+        if (lock::config().empty != k) {
+          printf("LOCK FAIL: chip %d set the empty screen to %d\n", k, lock::config().empty);
+          abort();
+        }
+      }
+      tapRect(setui::chipRect(was));
+    }
+
     // The picture row is the one that goes somewhere: it hands over to the
     // notes tool's pairing screen, because that is where the phone page with
     // the uploader lives. Settings has no web server and should not grow one.
-    tapRect(setui::lockRect(setui::LR_PICTURE));
+    tapRect(setui::sendRect());
     if (!toybox.hostInApp() || strcmp(toybox.activeTitle(), "NOTES") != 0) {
       printf("LOCK FAIL: the picture row did not open the notes pairing\n");
       abort();
@@ -731,6 +747,39 @@ int main() {
   setScreen("tool_picker_after");
   tapRect(pickui::DONE_BTN);  // DONE -> back to the list
 
+  {
+    // What arrives from the phone has to arrive whole. This used to fold every
+    // non-ASCII codepoint to a question mark, a rule left over from an 8x8 font
+    // that has not been in the firmware for a long time, and a Thai list came
+    // out as six rows of ??????.
+    plist::Item items[plist::MAX_ITEMS] = {};
+    const int n = plist::fromText("กะเพรา\nJosé\n\u007f\nend\n", items);
+    if (n != 3 || strcmp(items[0], "กะเพรา") != 0 || strcmp(items[1], "José") != 0 ||
+        strcmp(items[2], "end") != 0) {
+      printf("PICKER FAIL: got %d items, first \"%s\" second \"%s\"\n", n, items[0], items[1]);
+      abort();
+    }
+    // ...and the cut at the length limit falls between characters, never
+    // inside one, or the panel gets a half-written glyph.
+    char longThai[256] = {};
+    for (int i = 0; i < 30; i++) strcat(longThai, "ก");
+    plist::fromText(longThai, items);
+    if (uni::count(items[0]) != plist::MAX_CHARS) {
+      printf("PICKER FAIL: a long Thai item cut to %d characters, wanted %d\n",
+             uni::count(items[0]), plist::MAX_CHARS);
+      abort();
+    }
+    for (const char* q = items[0]; *q;) {
+      const char* r = q;
+      if (uni::next(r) == 0xFFFD || r > items[0] + plist::MAX_BYTES) {
+        printf("PICKER FAIL: the cut landed inside a character\n");
+        abort();
+      }
+      q = r;
+    }
+    printf("picker text ok (UTF-8 survives, the cut falls between characters)\n");
+  }
+
   // --- flashcards --------------------------------------------------------
   {
     using namespace fcard;
@@ -995,26 +1044,7 @@ int main() {
     epd.clear();
     toybox.render(stickyHost.sharedCanvas());
     epd.displayFull();
-    {
-      // Logical coordinates through the same mapping the driver uses, rather
-      // than an assumption about where rotation 0 puts things.
-      auto blackAt = [](int lx, int ly) {
-        int px, py;
-        epdMapPixel(epd.rotation(), epd.panelFlipX(), epd.panelFlipY(), lx, ly, px, py);
-        return (epd.fb()[(uint32_t)py * EPD_WB + (px >> 3)] & (0x80 >> (px & 7))) == 0;
-      };
-      const TRect t = setui::thumbRect();
-      int ink = 0;
-      for (int yy = t.y; yy < t.y + t.h; yy++)
-        for (int xx = t.x; xx < t.x + t.w; xx++)
-          if (blackAt(xx, yy)) ink++;
-      // A thumbnail of a dithered sphere that comes back all white or all black
-      // is a decimation bug, not a picture.
-      if (ink < t.w * t.h / 10 || ink > t.w * t.h * 9 / 10) {
-        printf("PICTURE FAIL: the settings thumbnail is %d of %d px inked\n", ink, t.w * t.h);
-        abort();
-      }
-    }
+
     // ...and a file the wrong length has to be refused rather than drawn as
     // half a picture and half whatever was in memory.
     tfs::write(lockimg::PATH, (const char*)img, 1000);

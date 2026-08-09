@@ -116,12 +116,10 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
 namespace {
 const char* emptyLabel(uint8_t e) {
   switch (e) {
-    case lock::EMPTY_CLOCK: return "a clock";
-    // Says so plainly when there is nothing to show: a setting that names a
-    // picture the device does not have is a setting that looks broken.
-    case lock::EMPTY_PICTURE: return lockimg::have() ? "a picture" : "a picture (none sent)";
-    case lock::EMPTY_GOODBYE: return "goodbye card";
-    default: return "nothing";
+    case lock::EMPTY_CLOCK: return "CLOCK";
+    case lock::EMPTY_PICTURE: return "PICTURE";
+    case lock::EMPTY_GOODBYE: return "GOODBYE";
+    default: return "BLANK";
   }
 }
 const char* rowName(int i) {
@@ -141,8 +139,9 @@ const char* rowHint(int i) {
     case setui::LR_SLEEP: return "the panel keeps its image with the power off";
     case setui::LR_EMPTY: return "what is on the panel when nothing is pinned";
     case setui::LR_PICTURE:
-      return lockimg::have() ? "tap to send a different one from your phone"
-                             : "tap to send one from your phone";
+      // Short, because the buttons start where a longer line would run on.
+      // What the picture is for is said by the chip above it.
+      return lockimg::have() ? "one is stored" : "none sent yet";
     case setui::LR_WAKE: return "where the power button takes you";
     case setui::LR_ROTATE: return "only the pinned note turns; apps stay portrait";
     default: return nullptr;
@@ -154,7 +153,6 @@ const char* rowHint(int i) {
 const char* rowValue(int i, const lock::Config& c) {
   switch (i) {
     case setui::LR_SLEEP: return lock::sleepLabel(c);
-    case setui::LR_EMPTY: return emptyLabel(c.empty);
     case setui::LR_WAKE: return c.wake == lock::WAKE_HUB ? "the hub" : "the note";
     default: return nullptr;
   }
@@ -190,16 +188,21 @@ void SettingsScreen::renderLock(ToolsHost& host, ToolsCanvas& c) {
 
     if (rowIsCheck(i)) {
       checkbox(c, r.x + r.w - 4 - BOX, r.y + (r.h - BOX) / 2, rowChecked(i, _lock));
+    } else if (i == LR_EMPTY) {
+      // Four chips, the chosen one filled. Which of the four is on is the thing
+      // the row exists to say, and a filled chip says it from further away than
+      // a word does.
+      for (int k = 0; k < lock::EMPTY_COUNT; k++) {
+        const TRect ch = chipRect(k);
+        c.button(ch.x, ch.y, ch.w, ch.h, emptyLabel((uint8_t)k), _lock.empty == k, TS_SMALL);
+      }
     } else if (i == LR_PICTURE) {
-      // The picture answers for itself. An empty frame says "none yet" more
-      // plainly than the words would, and at the panel's own proportion it is
-      // obvious what the frame is a frame of.
-      const TRect t = thumbRect();
-      c.drawRect(t.x - 1, t.y - 1, t.w + 2, t.h + 2, 1, true);
-      if (lockimg::drawThumb(c, t.x, t.y, t.w, t.h)) {
-        const TRect d = picDelRect();
-        c.drawRect(d.x, d.y, d.w, d.h, 1, true);
-        c.textInBox(d.x, d.y, d.w, d.h, "x", TS_MED, true);
+      const TRect sr = sendRect();
+      c.button(sr.x, sr.y, sr.w, sr.h, lockimg::have() ? "REPLACE" : "SEND ONE", false,
+               TS_MED);
+      if (lockimg::have()) {
+        const TRect rm = removeRect();
+        c.button(rm.x, rm.y, rm.w, rm.h, "x", false, TS_MED);
       }
     } else {
       const char* v = rowValue(i, _lock);
@@ -214,26 +217,34 @@ void SettingsScreen::renderLock(ToolsHost& host, ToolsCanvas& c) {
 
 bool SettingsScreen::tapLock(ToolsHost& host, int x, int y) {
   using namespace setui;
-  // The delete key first: it sits inside the picture row, and a row-sized hit
-  // test would swallow it and go off to the pairing screen instead.
-  if (lockimg::have() && picDelRect().hit(x, y)) {
+  // The parts inside rows come first: a row-sized hit test would swallow every
+  // one of them.
+  if (lockimg::have() && removeRect().hit(x, y)) {
     lockimg::remove();
     host.beep(2);
+    return true;
+  }
+  if (sendRect().hit(x, y)) {
+    // Settings has no web server of its own, so this hands over to the notes
+    // tool's pairing screen, whose phone page already carries the uploader.
+    host.beep(1);
+    host.goPairPicture();
+    return false;  // the shell repaints when the tool opens
+  }
+  for (int k = 0; k < lock::EMPTY_COUNT; k++) {
+    if (!chipRect(k).hit(x, y)) continue;
+    _lock.empty = (uint8_t)k;
+    lock::save(host.prefs(), _lock);
+    lock::setConfig(_lock);
+    host.beep(0);
     return true;
   }
 
   for (int i = 0; i < LR_COUNT; i++) {
     if (!lockRect(i).hit(x, y)) continue;
-    if (i == LR_PICTURE) {
-      // Settings has no web server of its own, so this hands over to the notes
-      // tool's pairing screen, whose phone page already carries the uploader.
-      host.beep(1);
-      host.goPairPicture();
-      return false;  // the shell repaints when the tool opens
-    }
+    if (i == LR_EMPTY || i == LR_PICTURE) return false;  // handled above, by part
     switch (i) {
       case LR_SLEEP: _lock.sleepIdx = (_lock.sleepIdx + 1) % lock::SLEEP_COUNT; break;
-      case LR_EMPTY: _lock.empty = (_lock.empty + 1) % lock::EMPTY_COUNT; break;
       case LR_WAKE: _lock.wake = _lock.wake == lock::WAKE_HUB ? lock::WAKE_NOTE : lock::WAKE_HUB; break;
       case LR_ROTATE: _lock.autoRotate = !_lock.autoRotate; break;
       case LR_TIME: _lock.showTime = !_lock.showTime; break;
