@@ -1,209 +1,122 @@
 # Toybox
 
 Custom firmware for the [Seeed reTerminal Sticky](https://www.seeedstudio.com)
-(ESP32-S3, 3.97" 800×480 e-paper display, capacitive touch). It turns the
-device into a small touch-operated toy box: six games, a few everyday tools,
-and notes you can pin to the screen.
+— an ESP32-S3 with a 3.97" e-paper screen and a magnet on the back. It turns
+the device into a small touch-operated toy box: six games, a handful of
+everyday tools, and notes you can pin to the fridge.
 
-You can flash it from your browser, no tools needed:
-**https://z4b333.github.io/sticky-toybox/**
+**Install it from your browser, no tools needed:
+[z4b333.github.io/sticky-toybox](https://z4b333.github.io/sticky-toybox/)**
 
-Notes and flashcards support English, Thai, Chinese, Korean, Japanese and
-Vietnamese. See [docs/LANGUAGES.md](docs/LANGUAGES.md) for details.
+E-paper keeps its last image with no power at all, which is the idea the whole
+thing is built around. A pinned note stays on the screen after the device
+switches off, and stays there for as long as the magnet holds. It is a piece of
+paper you can edit from your phone.
 
-The original Thai readme is at [docs/README.th.md](docs/README.th.md).
+Notes, flashcards and lists work in English, Thai, Chinese, Korean, Japanese
+and Vietnamese. The Thai readme is at [docs/README.th.md](docs/README.th.md).
 
-## Features
+## Games
 
-**Games**
-
-- **Wordle** – 1,634 answers, 4,667 accepted guesses. Tracks win rate, streak
+- **Wordle** — 1,634 answers, 4,667 accepted guesses. Tracks win rate, streak
   and a guess chart.
-- **Nonogram** – 5×5 and 10×10 picture puzzles. Every generated puzzle is
+- **Nonogram** — 5×5 and 10×10 picture puzzles. Every generated puzzle is
   checked to be solvable by logic alone. Timed, with best times.
-- **2048** – swipe to merge, with undo. New tiles get a dashed border and
+- **2048** — swipe to merge, with undo. New tiles get a dashed border and
   merged ones a wedge in the corner, so you can see what changed after each
   move. Both marks last until the next move rather than flashing: on e-paper
   every change costs a visible refresh, so what happened is in how the board is
   drawn rather than in it changing.
-- **Sudoku** – three difficulties. Every puzzle is generated with exactly one
+- **Sudoku** — three difficulties. Every puzzle is generated with exactly one
   solution.
-- **Battleship** – play against the device, or between two devices over
+- **Battleship** — play against the device, or between two devices over
   ESP-NOW. The AI averages 40.5 shots out of 64.
-- **XO (tic-tac-toe)** – easy, hard, or two players. The optional **3 MARKS**
-  rule keeps only three marks per side on the board. Placing a fourth removes
-  your oldest one, so the game never ends in a full-board draw. Hard mode
-  never loses. This is verified by a test that searches the entire game tree.
-  Two-player games keep a running tally for as long as you stay in the app,
-  which is not saved — sharing one device is not a record of form.
+- **XO** — easy, hard, or two players. The optional **3 MARKS** rule keeps only
+  three marks per side on the board; placing a fourth removes your oldest, so
+  the game never ends in a full-board draw. Hard mode never loses, which is
+  verified by a test that searches the entire game tree.
 
-**Tools**
+## Tools
 
-- Coin flip, dice (D4 to D20, with modifiers), random number, card draw.
-- A list picker. Type the list on the device or send it from your phone; a
-  list sent from a phone keeps whatever script it was written in.
-- A countdown timer and stopwatch.
-- Flashcards with spaced repetition. Decks are imported from your phone. The
-  two side buttons grade a card without reaching up to the panel: DOWN reveals
-  the answer and then takes it as known, UP sends it back to be asked again.
-- Notes. Write or dictate them on your phone, then read and tick checkboxes
-  on the device. A note can be pinned so it stays on the screen even when
-  the device is off. E-paper keeps its image without power.
+- **Notes.** Write or dictate them on your phone, then read them and tick
+  checkboxes on the device. Pin one and it becomes the screen the device shows
+  when it is off.
+- **Flashcards** with spaced repetition, imported from your phone. The two side
+  buttons grade a card without reaching up to the panel: DOWN reveals the
+  answer and then takes it as known, UP sends it back to be asked again.
+- **A list picker.** Type the list on the device or send it from your phone; it
+  keeps whatever script it was written in.
+- **Coin flip, dice** (D4 to D20, with modifiers), **random number, card draw.**
+- **A countdown timer and stopwatch.**
 
-The gear icon on the hub opens settings, where you can hide apps, set the beep
-volume — high, medium, low or mute — restore the how-to-play cards, and reset
-stats. Volume is the buzzer's duty cycle rather than an amplifier: a piezo
-driven by a square wave is loudest at half duty, and narrower pulses excite it
-less. A second page there
-covers the lock screen — the panel keeps its image with the power off, so that
-is the screen the device spends most of its life showing. It shows the stored
-picture as a thumbnail, and tapping that row hands over to the notes tool's
-pairing screen, since the phone page there already has the uploader.
-
-**Device behaviour**
+## How it behaves
 
 - 2048, Sudoku and Nonogram remember where you were. Leaving to the hub or
   powering off keeps the board; NEW always starts fresh.
-- The battery level shows on the hub. Below 3% the device shuts down cleanly
-  rather than risking a half-written screen.
 - It sleeps by itself after five idle minutes, keeping the pinned note on
   screen. A running timer holds it awake.
-- The pinned note follows the accelerometer, so it stays readable whichever
-  way the magnet ends up. Everything else stays portrait.
+- The pinned note follows the accelerometer, so it stays readable whichever way
+  the magnet ends up. Everything else stays portrait.
 - The sleeping note's footer shows the time, room temperature and battery, each
-  of which can be turned off. The clock is set automatically the first time you
-  save a note from your phone, since the device has no network time.
-- With nothing pinned it shows a goodbye card, or a picture, or nothing at all.
-  There used to be a clock, and it was the default — but a panel that holds its
-  last image with no power is exactly the wrong thing to put a clock on. The
-  time is drawn on the way to sleep and is wrong a minute later, then stays
-  wrong for hours. Keeping it honest would have meant waking every minute to
-  redraw, at 1.7 seconds of refresh each time, which is not a clock either.
+  of which can be turned off. The clock is set from your phone the first time
+  you save a note, since the device has no network time.
+- With nothing pinned it shows a goodbye card, a picture, or nothing at all.
+  There is deliberately no clock: a panel that holds its last image with no
+  power is exactly the wrong place for one. The time would be drawn on the way
+  to sleep, wrong a minute later, and wrong for hours after that.
 - A picture can be sent from the notes page on your phone. The browser crops,
-  greyscales and dithers it, and shows you the result before it goes, because a
-  photograph at one bit per pixel is either striking or mud and there is no way
-  to tell but to look. What reaches the device is 48 KB of packed bits rather
-  than a photo, so nothing on it has to decode anything.
-- Sleep timing, where the power button wakes to, and whether the note follows
-  the accelerometer are all settings rather than fixed behaviour.
+  greyscales and dithers it, and shows you the result before it goes — a
+  photograph at one bit per pixel is either striking or mud, and there is no
+  way to tell but to look. What reaches the device is 48 KB of packed bits, so
+  nothing on it has to decode anything.
+- Below 3% battery it shuts down cleanly rather than risk a half-written
+  screen.
 
-## Building
+The gear icon opens settings: hide apps you don't use, set the beep volume,
+restore the how-to-play cards, reset stats. A second page covers the lock
+screen — sleep timing, what an empty panel shows, where the power button wakes
+to, and whether the note follows the accelerometer.
 
-The project uses [PlatformIO](https://platformio.org).
+## Getting it onto a device
 
-```
-pio run                    # build
-pio run -t upload          # flash over USB-C
-pio device monitor -b 115200
-```
+The [installer page](https://z4b333.github.io/sticky-toybox/) does everything
+from Chrome or Edge over a USB-C data cable. It tells you which build it is
+about to write, so you can check afterwards that it landed.
 
-If you don't want to install a toolchain, use the web flasher above, or flash
-the prebuilt image directly:
+Language packs are optional. Common Chinese characters, Korean and Japanese
+already work without them; the packs only add the rare ones, and they can be
+added or removed later without touching the firmware.
 
-```
-esptool --chip esp32s3 write_flash 0x0 docs/firmware/toybox-full.bin
-```
-
-`tools/make_image.sh` rebuilds that image. It merges the bootloader, the
-partition table and the app into one file, because the web flasher writes a
-single file to offset 0.
-
-The partition table (`partitions_toybox.csv`) has one 4 MB app slot, a
-partition for each optional language pack, and a 4.7 MB LittleFS filesystem
-for notes and decks. There is no OTA.
-
-Before running on real hardware for the first time, read
-[docs/BRINGUP.md](docs/BRINGUP.md). Hold either side button while the device
-powers on to reach the service screen, which reports what answered on each bus
-and can correct the display and touch orientation without rebuilding anything.
-
-## Testing
-
-Everything can be tested on a PC. There are two host-side programs in
-`test/host/`:
-
-`test_logic.cpp` covers game logic: the nonogram generator and solver, Wordle
-scoring, 2048 moves, Sudoku uniqueness, Battleship rules and its network
-protocol, and the XO game-tree proof.
-
-`host_preview.cpp` builds the firmware against a fake display, renders every
-screen to an image file, and checks the results. It verifies tap routing,
-the settings flow, note editing, the pinned screen, multilingual rendering,
-font pack loading, and that no text runs off the edge of the panel. On the
-real device, text past the edge is clipped silently. Here it fails the test
-run instead.
-
-```
-cd test/host
-g++ -std=gnu++17 -O2 -w -DTOYBOX_HOST -I . -I mock -I ../../src \
-  -I ../../toybox-core/src -I ../../lib/QRCode/src \
-  host_preview.cpp ../../lib/QRCode/src/qrcode.c ../../src/gfx.cpp \
-  ../../src/fonts_intl.cpp ../../src/sensors.cpp ../../src/sticky_host.cpp \
-  ../../toybox-core/src/toybox.cpp ../../toybox-core/src/hub.cpp \
-  ../../toybox-core/src/settings.cpp ../../toybox-core/src/wordle.cpp \
-  ../../toybox-core/src/nonogram.cpp ../../toybox-core/src/game2048.cpp \
-  ../../toybox-core/src/xo.cpp -o preview
-./preview
-```
-
-Build with `-DTOYBOX_CP_FONTS` to render all screens with the CrossPoint
-Reader's fonts instead. This checks that the shared code still lays out
-correctly under a different host's font metrics. Sample renders are in
-`docs/screens/`.
-
-## Text sizes
-
-The display is 235 DPI, so pixel sizes map directly to physical sizes:
-
-| size | box | on screen | used for |
-|---|---|---|---|
-| `TS_HUGE` | 44 px | 4.8 mm | scores and large numbers |
-| `TS_LARGE` | 32 px | 3.5 mm | primary buttons, titles |
-| `TS_MED` | 24 px | 2.6 mm | body text and captions |
-| `TS_SMALL` | 16 px | 1.7 mm | short labels only |
-
-These were 12/16/24/32 until the first person held the device and said the
-text was too small to read. They had been chosen by counting pixels on a
-monitor, where 16 px is a comfortable size; on a 235 DPI panel it is 1.7 mm,
-about five point. Body text is now 2.6 mm, roughly seven and a half point,
-which is ordinary book size.
-
-Thai is always set one step larger than it was asked for, because its two
-storeys of marks leave the letters about half the height Latin gets in the same
-box. Chinese, Japanese and Korean are not, since they fill their box.
-See [docs/LANGUAGES.md](docs/LANGUAGES.md).
-
-## Project layout
-
-```
-src/            hardware layer: display, touch, buzzer, sensors, power, loop
-toybox-core/    all apps and screens, hardware independent
-tools/          font generators and the Thai rendering study
-test/host/      logic tests and the screen preview harness
-test/web/       browser test for the phone-side picker page
-docs/           documentation, screen renders, and the web flasher page
-prebuilt/       flashable firmware image
-```
-
-`toybox-core/` only talks to two small interfaces (a canvas and a host), so
-it can be embedded in other firmware. The CrossPoint Reader port does this in
-about 110 lines. See [docs/PORTING.md](docs/PORTING.md).
-
-## Licence
-
-MIT for the project's own code (see [LICENSE](LICENSE)). The vendored QR code
-library and the glyph tables generated from third-party fonts have their own
-terms, recorded in [THIRD-PARTY.md](THIRD-PARTY.md) — including one question
-about the Thai face that is not settled.
+The first time you run it, hold either side button while it powers on. That
+reaches the service screen, which reports what the board answered on each bus
+and can correct the display and touch orientation if your unit disagrees with
+mine. [docs/BRINGUP.md](docs/BRINGUP.md) walks through it, and
+[checklist.html](https://z4b333.github.io/sticky-toybox/checklist.html) is the
+same thing as a tickable page for a phone.
 
 ## Known limitations
 
 - The board's 8 MB of PSRAM is not configured, so the service screen reports
   none. Nothing currently needs it.
-- Display orientation and touch mapping were community guesses until a device
-  arrived; the defaults are now what that board wanted. If the image is
-  mirrored or flipped on yours, or taps land in the wrong place, hold a side
-  button at power-on and correct it from the service screen.
+- The microSD slot is not used. It shares the display's SPI bus and has never
+  been exercised.
 - Thai line breaking works at character-cluster level, not word level, so a
   line can break in the middle of a word.
-- Characters above U+FFFF (such as emoji) are not supported.
+- Characters above U+FFFF, including emoji, are not supported.
+
+## Licence
+
+MIT for the project's own code — see [LICENSE](LICENSE). The vendored QR code
+library and the glyph tables generated from third-party fonts have their own
+terms, recorded in [THIRD-PARTY.md](THIRD-PARTY.md), including one question
+about the Thai face that is not settled.
+
+## Building it yourself
+
+[docs/DEVELOPING.md](docs/DEVELOPING.md) covers the build, the host-side test
+harness that renders every screen on a PC, the partition layout, and the two
+things about this board that will otherwise waste your day.
+
+`toybox-core/` is hardware-independent and talks to two small interfaces, so
+the apps can be embedded in other firmware — see
+[docs/PORTING.md](docs/PORTING.md).
