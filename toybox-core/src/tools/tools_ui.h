@@ -15,20 +15,22 @@
 // Text size buckets. Each host maps these onto whatever fonts it has.
 enum TSize : uint8_t { TS_SMALL = 0, TS_MED = 1, TS_LARGE = 2, TS_HUGE = 3 };
 
-// The smallest size a string is still readable at, given its script. Thai in a
-// 16 px box is a 9 pt face -- the two mark storeys eat the line -- so anything
-// below TS_LARGE is squint material; han and hangul hold up at 16 px on this
-// 235 DPI panel but turn to mush in a 12 px line. Latin goes as small as the
-// layout likes. Callers pass the size they want and draw what comes back.
+// The smallest size a string is still readable at, given its script. Thai needs
+// about 24 px because its two storeys of marks eat the line box; han and hangul
+// need about 16. Latin goes as small as the layout likes.
+//
+// Those are the same pixel counts as before, but they now sit one step lower on
+// the scale: when the whole scale moved up, TS_MED became the 24 px that Thai
+// wanted and TS_SMALL became the 16 that CJK wanted. So Thai only gets bumped
+// out of the smallest size, and CJK is no longer bumped at all -- multilingual
+// text now sits at the size the layout asked for instead of standing a step
+// taller than the Latin beside it.
 inline TSize scriptFloor(const char* s, TSize sz) {
-  if (sz >= TS_LARGE || !s) return sz;
-  TSize floor = sz;
+  if (sz >= TS_MED || !s) return sz;
   for (const char* p = s; *p;) {
-    const uint32_t cp = uni::next(p);
-    if (uni::thai(cp)) return sz < TS_LARGE ? TS_LARGE : sz;
-    if (uni::cjk(cp) && sz < TS_MED) floor = TS_MED;
+    if (uni::thai(uni::next(p))) return TS_MED;
   }
-  return floor;
+  return sz;
 }
 
 class ToolsCanvas {

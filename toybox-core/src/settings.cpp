@@ -92,7 +92,7 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
       c.fillRect(x, headTop + 20, COL_W, 1, true);
     }
     checkbox(c, x, rowTop + (ROW_H - BOX) / 2, appvis::visible(it.game, it.idx));
-    c.text(x + BOX + 12, rowTop + (ROW_H - 16) / 2, nameOf(it), TS_MED, true);
+    c.text(x + BOX + 12, rowTop + (ROW_H - c.textHeight(TS_MED)) / 2, nameOf(it), TS_MED, true);
   });
 
   using namespace setui;
@@ -104,7 +104,7 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
   c.button(s3.x, s3.y, s3.w, s3.h,
            _armed ? "TAP AGAIN TO ERASE SCORES" : "RESET STATS AND TALLIES", _armed, TS_MED);
 
-  c.textCentered(SCREEN_W / 2, 784, _note ? _note : "hiding an app keeps everything saved in it",
+  c.textCentered(SCREEN_W / 2, 776, _note ? _note : "hiding an app keeps everything saved in it",
                  TS_SMALL, true);
 }
 
@@ -180,7 +180,7 @@ void SettingsScreen::renderLock(ToolsHost& host, ToolsCanvas& c) {
            true);
   }
 
-  c.textCentered(SCREEN_W / 2, 784, _note ? _note : "tap a row to change it", TS_SMALL, true);
+  c.textCentered(SCREEN_W / 2, 776, _note ? _note : "tap a row to change it", TS_SMALL, true);
 }
 
 bool SettingsScreen::tapLock(ToolsHost& host, int x, int y) {

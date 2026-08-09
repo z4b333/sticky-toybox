@@ -81,13 +81,21 @@ which the firmware doesn't carry, so a line can break mid-word.
 ## Minimum sizes
 
 Small text that's readable in English can be unreadable in other scripts.
-Thai in a 16 px line comes out to a 9 pt font, which is too small. So the
-firmware enforces minimum sizes wherever your text appears:
+Thai needs about 24 px because its two storeys of marks eat the line box, and
+han and hangul need about 16. Those minimums still hold:
 
 - Thai always renders at 24 px or larger
 - Chinese, Japanese and Korean always render at 16 px or larger
-- note body lines containing Thai or CJK are bumped to 24 px for comfortable
-  reading
+
+They used to force multilingual text a step up the size scale, so a Thai
+caption stood taller than the English beside it. Since the whole scale moved
+up, `TS_MED` is the 24 px Thai wanted and `TS_SMALL` is the 16 px CJK wanted:
+the floors are still enforced, but almost nothing hits them any more.
+
+There is no 44 px international face. At 8,290 code points a face costs roughly
+its height squared, and a 44 px cut would add about 1.9 MB to a 4 MB app
+partition to make headlines larger in Chinese. `TS_HUGE` borrows the 32 px face
+and centres it in the taller line instead.
 
 File names also keep their original script. A note named รายการ stays
 รายการ in the list and in the title bar.

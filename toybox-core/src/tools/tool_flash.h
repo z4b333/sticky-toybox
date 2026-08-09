@@ -31,7 +31,10 @@ inline constexpr TRect FLIP_BTN{PANEL_X + 224, 584, 216, 54};
 // they crowd rather than running underneath IMPORT, which is what they used to
 // do past the eighth deck.
 inline constexpr int LIST_BOTTOM = 468;
-inline constexpr int ROW_MAX = 46, ROW_MIN = 34;
+// 56, not 46: a 24 px name plus the progress bar under it needs 44, and at 46
+// the bar was silently dropped on every row -- the guard below is for hosts
+// with a much taller face, not for the device's own default.
+inline constexpr int ROW_MAX = 56, ROW_MIN = 34;
 inline int rowH(int n) {
   if (n <= 0) return ROW_MAX;
   const int fits = (LIST_BOTTOM - LIST_Y) / n;
@@ -192,7 +195,11 @@ class FlashTool : public ToolApp {
       c.text(r.x + 6, r.y + 4, _decks[i].name, nsz, true);
       snprintf(buf, sizeof(buf), "%d/%d", _decks[i].mastered, _decks[i].cards);
       const int tw = c.textWidth(buf, TS_SMALL);
-      c.text(r.x + r.w - DEL_W - 12 - tw, r.y + 6, buf, TS_SMALL, true);
+      // Centred on the delete key beside it rather than on the name above it:
+      // the two sit on the same edge of the row and a few pixels of daylight
+      // between them reads as a mistake.
+      c.text(r.x + r.w - DEL_W - 12 - tw, d.y + (d.h - c.textHeight(TS_SMALL)) / 2, buf,
+             TS_SMALL, true);
       // The bar goes under the name, if the name leaves room for it. A host
       // with a taller face (the CrossPoint port's is half again as tall) would
       // otherwise push it through the row's own separator; there the count on

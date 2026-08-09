@@ -146,14 +146,20 @@ The display is 235 DPI, so pixel sizes map directly to physical sizes:
 
 | size | box | on screen | used for |
 |---|---|---|---|
-| `TS_HUGE` | 32 px | 3.4 mm | scores and large numbers |
-| `TS_LARGE` | 24 px | 2.6 mm | primary buttons, titles |
-| `TS_MED` | 16 px | 1.7 mm | body text and captions |
-| `TS_SMALL` | 12 px | 1.3 mm | short labels only |
+| `TS_HUGE` | 44 px | 4.8 mm | scores and large numbers |
+| `TS_LARGE` | 32 px | 3.5 mm | primary buttons, titles |
+| `TS_MED` | 24 px | 2.6 mm | body text and captions |
+| `TS_SMALL` | 16 px | 1.7 mm | short labels only |
 
-Some scripts have a minimum size for readability: Thai never renders below
-24 px, and Chinese, Japanese and Korean never below 16 px. See
-[docs/LANGUAGES.md](docs/LANGUAGES.md).
+These were 12/16/24/32 until the first person held the device and said the
+text was too small to read. They had been chosen by counting pixels on a
+monitor, where 16 px is a comfortable size; on a 235 DPI panel it is 1.7 mm,
+about five point. Body text is now 2.6 mm, roughly seven and a half point,
+which is ordinary book size.
+
+Thai never renders below 24 px, which is now simply `TS_MED` — so multilingual
+text sits at the size the layout asked for instead of standing a step taller
+than the Latin beside it. See [docs/LANGUAGES.md](docs/LANGUAGES.md).
 
 ## Project layout
 
@@ -180,10 +186,12 @@ about the Thai face that is not settled.
 
 ## Known limitations
 
-- Nothing has been tested on real hardware yet. Display orientation and touch
-  mapping come from community bring-up notes. If the image is mirrored or
-  flipped on your device, or taps land in the wrong place, hold a side button
-  at power-on and correct it from the service screen.
+- The board's 8 MB of PSRAM is not configured, so the service screen reports
+  none. Nothing currently needs it.
+- Display orientation and touch mapping were community guesses until a device
+  arrived; the defaults are now what that board wanted. If the image is
+  mirrored or flipped on yours, or taps land in the wrong place, hold a side
+  button at power-on and correct it from the service screen.
 - Thai line breaking works at character-cluster level, not word level, so a
   line can break in the middle of a word.
 - Characters above U+FFFF (such as emoji) are not supported.

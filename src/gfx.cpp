@@ -57,9 +57,9 @@ namespace {
 // -- and its bold was the same glyph smeared one pixel sideways.
 const UiFont* faceFor(int px, bool bold) {
   switch (px) {
-    case 12: return bold ? &FONT_12_BOLD : &FONT_12_REG;
     case 24: return bold ? &FONT_24_BOLD : &FONT_24_REG;
     case 32: return bold ? &FONT_32_BOLD : &FONT_32_REG;
+    case 44: return bold ? &FONT_44_BOLD : &FONT_44_REG;
     default: return bold ? &FONT_16_BOLD : &FONT_16_REG;
   }
 }
@@ -92,17 +92,17 @@ void blit(const UiFont* f, const FontGlyph& g, int x, int y, uint8_t color) {
 // bearings and real advances (see tools/make_fonts_intl.py). ASCII stays in the
 // UiFont tables above; the split is invisible from outside this file.
 
-// No 12 px intl face is baked -- CJK and Thai are not legible at that height.
-// TS_SMALL text that carries such characters borrows the 16 px face, nudged up
-// two so it centres on the smaller line rather than hanging below it.
+// Three intl faces cover four sizes. There is no 44 px cut: at 8,290 code
+// points a face costs about its height squared, and 44 px would add roughly
+// 1.9 MB to a 4 MB app partition to make headlines bigger in Chinese. TS_HUGE
+// borrows the 32 px face and centres it in the taller box, which is the same
+// thing every typesetter does when the size they want is not in the drawer.
 const IntlFace* intlFor(int px, int& yAdjust) {
   yAdjust = 0;
-  if (px <= 12) {
-    yAdjust = -2;
-    return &INTL_16;
-  }
   if (px <= 16) return &INTL_16;
   if (px <= 24) return &INTL_24;
+  if (px <= 32) return &INTL_32;
+  yAdjust = (px - 32) / 2;
   return &INTL_32;
 }
 

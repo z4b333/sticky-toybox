@@ -259,19 +259,23 @@ class NoteTool : public ToolApp {
     c.button(WRITE_BTN.x, WRITE_BTN.y, WRITE_BTN.w, WRITE_BTN.h, "WRITE", true, TS_LARGE);
     c.text(PANEL_X, WRITE_BTN.y + WRITE_BTN.h + 8, "type or talk on your phone", TS_MED, true);
 
+    // Body text is 24 px now, so the line pitch is 30 and the block below has
+    // one line less to spend. The dictation step lost its turnover, and the note
+    // count moved up beside the heading that follows it -- a number the list
+    // above already shows does not deserve a line of its own when the panel is
+    // this short of them.
     c.drawLine(PANEL_X, 556, c.width() - 20, 556, 1, true);
     c.text(PANEL_X, 564, "ON YOUR PHONE", TS_MED, true);
-    const char* steps[4] = {"1  tap WRITE, scan QR", "2  editor opens by itself",
-                            "3  dictate with the", "   keyboard mic key"};
-    for (int i = 0; i < 4; i++) c.text(PANEL_X, 590 + i * 26, steps[i], TS_MED, true);
+    const char* steps[3] = {"1  tap WRITE, scan QR", "2  editor opens by itself",
+                            "3  dictate with the mic key"};
+    for (int i = 0; i < 3; i++) c.text(PANEL_X, 594 + i * 30, steps[i], TS_MED, true);
 
-    c.drawLine(PANEL_X, 694, c.width() - 20, 694, 1, true);
-    c.text(PANEL_X, 700, "ON THE DEVICE", TS_MED, true);
-    c.text(PANEL_X, 726, "tap a line to tick or cross", TS_MED, true);
-    c.text(PANEL_X, 752, "a dot marks the pinned note", TS_MED, true);
-
+    c.drawLine(PANEL_X, 686, c.width() - 20, 686, 1, true);
+    c.text(PANEL_X, 694, "ON THE DEVICE", TS_MED, true);
     snprintf(buf, sizeof(buf), "%d notes", _count);
-    c.text(PANEL_X, 778, buf, TS_MED, true);
+    c.text(c.width() - 20 - c.textWidth(buf, TS_MED), 694, buf, TS_MED, true);
+    c.text(PANEL_X, 724, "tap a line to tick or cross", TS_MED, true);
+    c.text(PANEL_X, 754, "a dot marks the pinned note", TS_MED, true);
   }
 
   void tapList(int x, int y) {

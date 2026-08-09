@@ -35,7 +35,12 @@ NOTO = '/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc'
 # instead of a shade lighter, which is what 140 was doing.
 THR = 80
 BASIC = ImageFont.Layout.BASIC
-SIZES = [16, 24, 32]  # the content boxes; 12 px CJK/Thai is not legible ink
+# The content boxes. No 44 px face: at 8,290 code points a face costs roughly
+# its height squared, and 44 px would add about 1.9 MB to a 4 MB app partition
+# for the sake of headline CJK. TS_HUGE borrows the 32 px face centred in its
+# box instead -- 3.5 mm of Chinese is already large, and the alternative is not
+# fitting on the device at all.
+SIZES = [16, 24, 32]  # below ~16 px CJK/Thai is not legible ink
 
 
 # --- character sets ----------------------------------------------------------

@@ -108,7 +108,7 @@ inline void sudoku(ToolsCanvas& c, int cx, int cy, int s) {
   static const int kR[3] = {0, 1, 2}, kC[3] = {0, 2, 1};
   for (int i = 0; i < 3; i++) {
     const int w = c.textWidth(kD[i], TS_MED);
-    c.text(x0 + kC[i] * cell + (cell - w) / 2, y0 + kR[i] * cell + (cell - 16) / 2, kD[i],
+    c.text(x0 + kC[i] * cell + (cell - w) / 2, y0 + kR[i] * cell + (cell - c.textHeight(TS_MED)) / 2, kD[i],
            TS_MED, true);
   }
 }

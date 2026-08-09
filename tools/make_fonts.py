@@ -25,12 +25,18 @@ FACES = {
     'REG': '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
     'BOLD': '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
 }
-# name -> pixel height of the line box. These are the numbers the UI already
-# assumes for TS_MED / TS_LARGE / TS_HUGE, so no layout moves vertically.
-# The smallest is 12 px rather than the old 8: a real face turns to mush below
-# about 11, and 8 px was 0.9 mm on this panel -- too small to read at arm's
-# length anyway.
-SIZES = [('12', 12), ('16', 16), ('24', 24), ('32', 32)]
+# name -> pixel height of the line box, one per TSize.
+#
+# The first set of these was 12/16/24/32, chosen by counting pixels on a
+# monitor. On the panel it is 235 DPI, so 16 px of body text is 1.7 mm -- about
+# five point, smaller than a medicine label, and the first person to hold the
+# device said so immediately. Every size moves up one step: body text is now
+# 2.6 mm, roughly seven and a half point, which is ordinary book size.
+#
+# The smallest is 16 rather than 12 for the same reason it was once 12 rather
+# than 8. A face turns to mush below about eleven pixels, and anything under a
+# millimetre and a half is decoration rather than text.
+SIZES = [('16', 16), ('24', 24), ('32', 32), ('44', 44)]
 
 
 def fit(path, px):

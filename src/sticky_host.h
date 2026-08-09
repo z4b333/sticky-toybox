@@ -51,10 +51,14 @@ class StickyCanvas : public ToolsCanvas {
   // The four buckets are pixel heights now, not multipliers.
   static int scaleOf(TSize sz) {
     switch (sz) {
-      case TS_SMALL: return 12;
-      case TS_LARGE: return 24;
-      case TS_HUGE: return 32;
-      default: return 16;
+      // 235 DPI, so these are millimetres as much as pixels: 1.7, 2.6, 3.4,
+      // 4.8. The first set was 12/16/24/32, chosen by eye on a monitor, and on
+      // the panel that put body text at 1.7 mm -- about five point. Everything
+      // moved up one step the first time somebody actually held the device.
+      case TS_SMALL: return 16;
+      case TS_LARGE: return 32;
+      case TS_HUGE: return 44;
+      default: return 24;
     }
   }
 };

@@ -169,7 +169,7 @@ void NonogramApp::render(ToolsCanvas& c) {
     }
   }
   for (int r = 0; r < _n; r++) {
-    const int cy = _gridY + r * _cellPx + (_cellPx - 16) / 2;
+    const int cy = _gridY + r * _cellPx + (_cellPx - c.textHeight(TS_MED)) / 2;
     int x = _gridX - 8;
     for (int i = _clues.rowN[r] - 1; i >= 0; i--) {
       snprintf(buf, sizeof(buf), "%d", _clues.row[r][i]);
