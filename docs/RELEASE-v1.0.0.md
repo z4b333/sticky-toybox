@@ -1,6 +1,17 @@
 # Toybox v1.0.0
 
-Paste-ready notes for the GitHub release page.
+Draft notes for the GitHub release page. **Not released yet** — the build
+carrying all of this is tagged `v1.0.0-beta.1` and is being tested on the
+device first.
+
+What that testing is for: the firmware has run on hardware since the boot-loop
+fix, but a good deal of what is below has only ever been seen as a rendered
+image on a PC. The welcome screen, the which-way-up step, the side buttons in
+flashcards, the beep volume steps, the chips on the lock screen page, and a
+battery icon the harness had never drawn at all until the beta. A render proves
+the pixels are where the code puts them. It cannot tell you whether a 7 mm
+button is one a thumb can hit, whether the low volume step is audible, or
+whether the panel shows what the framebuffer holds.
 
 ---
 
