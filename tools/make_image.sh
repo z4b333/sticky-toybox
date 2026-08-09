@@ -33,7 +33,10 @@ cp "$BUILD/firmware.bin" prebuilt/toybox_full.bin
 # same string the firmware carries, so what the page says it is about to write
 # and what the service screen says afterwards can be compared directly.
 VERSION=$(git describe --tags --always 2>/dev/null || echo unknown)
-COMMIT=$(git rev-parse --short=7 HEAD 2>/dev/null || echo unknown)
+# The cache-busting key. Not a bare commit hash: at a tag that changes on every
+# rebuild, so the image committed at the tag would never match a rebuild of it.
+# `describe` already carries the hash for anything that is not a tag.
+COMMIT="$VERSION"
 DATE=$(git log -1 --format=%cd --date=format:'%d %b %Y' 2>/dev/null || echo '')
 BYTES=$(stat -c %s docs/firmware/toybox-full.bin)
 SHA=$(sha256sum docs/firmware/toybox-full.bin | cut -c1-16)

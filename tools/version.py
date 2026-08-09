@@ -18,6 +18,11 @@ def git(*args, fallback="unknown"):
 
 commit = git("rev-parse", "--short=7", "HEAD")
 # A tag when the commit has one, otherwise the nearest tag and how far past it.
+# Note that `describe` already contains the short hash for an untagged build,
+# which is why the hash is not passed into the build on its own: at a tag it
+# would be the only thing making a rebuild differ from the image committed at
+# that tag, and a release you cannot reproduce from its own tag is not much of
+# a release.
 # No --dirty: building regenerates the tracked firmware images, so every
 # release would be marked dirty by its own output. The commit identifies the
 # source, which is the thing worth identifying.
@@ -25,7 +30,6 @@ describe = git("describe", "--tags", "--always", fallback=commit)
 date = git("log", "-1", "--format=%cd", "--date=format:%d %b %Y", fallback="")
 
 env.Append(CPPDEFINES=[
-    ("TB_COMMIT", env.StringifyMacro(commit)),
     ("TB_VERSION", env.StringifyMacro(describe)),
     ("TB_DATE", env.StringifyMacro(date)),
 ])
