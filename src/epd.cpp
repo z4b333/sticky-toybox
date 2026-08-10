@@ -45,6 +45,22 @@ bool Epd::begin() {
   memset(_fb, 0xFF, EPD_BUF_SIZE);
   memset(_prev, 0xFF, EPD_BUF_SIZE);
 
+  // Deselect the SD card before anything touches this bus.
+  //
+  // The card shares SCK, MOSI and MISO with the panel, and its chip select is
+  // GPIO 8 -- which, until this line existed, was never configured at all on a
+  // normal boot. A floating CS means the card can consider itself selected
+  // while the display is being written to, and then two devices are driving one
+  // bus. With a card in the slot that produced a screen full of glitches and a
+  // card that could not be found afterwards, because it had already been
+  // clocked into a state it does not answer from.
+  //
+  // First, before SPI.begin and before the panel rail comes up. The rule on a
+  // shared bus is that every device is deselected before any of them is spoken
+  // to, and there is no moment early enough to make an exception for.
+  pinMode(PIN_SD_CS, OUTPUT);
+  digitalWrite(PIN_SD_CS, HIGH);
+
   // Panel power rail first, then SPI, then reset pulse.
   pinMode(PIN_EPD_PWR_EN, OUTPUT);
   digitalWrite(PIN_EPD_PWR_EN, HIGH);

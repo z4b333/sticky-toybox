@@ -284,6 +284,12 @@ void setup() {
   TB_LOG("reset reason %d, heap %u B, psram %u B\n", (int)esp_reset_reason(),
          (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getPsramSize());
 
+  // Before anything else that shares the display's bus. epd.begin() does this
+  // too, but it runs after the settings are read, and a card left selected
+  // through even that much is a card that has been clocked at random.
+  pinMode(PIN_SD_CS, OUTPUT);
+  digitalWrite(PIN_SD_CS, HIGH);
+
   pinMode(PIN_BTN_UP, INPUT_PULLUP);
   pinMode(PIN_BTN_DOWN, INPUT_PULLUP);
   pinMode(PIN_BTN_OK, INPUT_PULLUP);
