@@ -15,6 +15,7 @@
 #include "gfx.h"
 #include "game2048.h"
 #include "service_ui.h"
+#include "tour.h"
 #include "welcome.h"
 #include "sticky_host.h"
 #include "toybox.h"
@@ -214,23 +215,17 @@ static void hostLockInfo(lock::Info& i) {
   i.batteryPct = 84;
 }
 
-// The hub draws twelve borderless tiles in a 3-wide grid; this walks the same
-// geometry and asserts each tap lands on the app that is drawn there. The order
-// is the hub's own slot table: four games, battleship, then the seven tools.
+// The hub is now a dock and three folder pages. The walk mirrors hub.cpp's
+// geometry independently -- the applist order, the two-column folder layout,
+// the centred block -- so the two can disagree loudly rather than quietly.
 static void checkHubRouting(const char* label) {
-  // Mirrors hub.cpp's layout constants and group order.
-  const int COLS = 3, TILE_W = 140, X0 = 15, STEP_X = 155;
-  const int TOP = 58, ROW_H = 110, HEAD_H = 32, GROUP_GAP = 10;
   struct Want { bool game; int idx; };
   struct Grp { Want items[6]; int n; };
   const Grp ALL[3] = {
       {{{true, 0}, {true, 1}, {true, 2}, {true, 3}, {false, 7}, {false, 8}}, 6},
       {{{false, 0}, {false, 1}, {false, 3}, {false, 4}}, 4},
-      {{{false, 2}, {false, 5}, {false, 6}}, 3},
+      {{{false, 5}, {false, 6}, {false, 2}}, 3},
   };
-  // The hidden ones drop out and the rest close up; a group emptied entirely
-  // takes no heading and no height. Filtered here independently of hub.cpp so
-  // the two can disagree loudly rather than quietly.
   Grp G[3] = {};
   int shown = 0;
   for (int gi = 0; gi < 3; gi++)
@@ -240,8 +235,22 @@ static void checkHubRouting(const char* label) {
       G[gi].items[G[gi].n++] = w;
       shown++;
     }
-  // Every tap must open the app drawn under it. The shell is asked directly
-  // what it opened, then sent back to the hub for the next probe.
+
+  g_dumpEnabled = false;
+  toybox.goHub();
+  toybox.hostHub().goHome();
+
+  // Home answers nothing but the dock. These points cover the wallpaper, the
+  // two hint marks, and the title -- all drawn, none tappable.
+  for (auto pt : {std::pair<int,int>{240, 400}, {60, 20}, {hubui::HINT_X, hubui::HINT_GEAR_Y},
+                  {hubui::HINT_X, hubui::HINT_RESUME_Y}, {240, hubui::DOCK_Y - 2}}) {
+    toybox.onTap(pt.first, pt.second);
+    if (toybox.hostInApp() || toybox.hostInSettings() || !toybox.hostHub().atHome()) {
+      printf("HUB ROUTING FAIL: home reacted at (%d,%d)\n", pt.first, pt.second);
+      abort();
+    }
+  }
+
   auto routesTo = [&](int x, int y, const Want& w, const char* what, int gi, int ii) {
     toybox.onTap(x, y);
     const bool ok = toybox.hostInApp() && toybox.hostIsGame() == w.game &&
@@ -250,60 +259,76 @@ static void checkHubRouting(const char* label) {
       printf("HUB ROUTING FAIL group %d item %d (%s) at (%d,%d)\n", gi, ii, what, x, y);
       abort();
     }
-    toybox.goHub();
+    toybox.goHub();  // back to the folder page the app was opened from
   };
 
-  g_dumpEnabled = false;
-  int y = TOP;
   for (int gi = 0; gi < 3; gi++) {
+    // Into the folder through its third of the dock, twice over: the centre
+    // of the third and its inner corner, because the whole band is the target.
+    toybox.hostHub().goHome();
+    toybox.onTap(80 + gi * 160, hubui::DOCK_Y + hubui::DOCK_H / 2);
+    if (toybox.hostInApp() || toybox.hostHub().folder() != gi) {
+      printf("HUB ROUTING FAIL: dock third %d did not open its folder\n", gi);
+      abort();
+    }
+    toybox.hostHub().goHome();
+    toybox.onTap(gi * 160 + 2, EPD_H - 2);
+    if (toybox.hostHub().folder() != gi) {
+      printf("HUB ROUTING FAIL: dock corner of third %d missed\n", gi);
+      abort();
+    }
     if (G[gi].n == 0) continue;
-    const int contentTop = y + HEAD_H;
-    const int rows = (G[gi].n + COLS - 1) / COLS;
-    for (int ii = 0; ii < G[gi].n; ii++) {
-      const int col = ii % COLS, row = ii / COLS;
-      const int cx = X0 + col * STEP_X + TILE_W / 2;
-      const int rowTop = contentTop + row * ROW_H;
-      const Want& w = G[gi].items[ii];
-      routesTo(cx, rowTop + ROW_H / 2, w, "centre", gi, ii);
-      routesTo(cx, rowTop + 1, w, "top edge", gi, ii);
-      routesTo(cx, rowTop + ROW_H - 2, w, "bottom edge", gi, ii);
-      routesTo(X0 + col * STEP_X + 2, rowTop + ROW_H / 2, w, "left edge", gi, ii);
-      routesTo(X0 + col * STEP_X + TILE_W - 3, rowTop + ROW_H / 2, w, "right edge", gi, ii);
-      // the outer columns own the screen edge, so nothing is lost off the side
-      if (col == 0) routesTo(1, rowTop + ROW_H / 2, w, "screen left", gi, ii);
-      if (col == COLS - 1) routesTo(EPD_W - 2, rowTop + ROW_H / 2, w, "screen right", gi, ii);
-      if (row == 0) routesTo(cx, y + 2, w, "heading strip", gi, ii);
-      if (row == rows - 1)
-        routesTo(cx, rowTop + ROW_H + GROUP_GAP - 1, w, "trailing gap", gi, ii);
-    }
-    // A group that does not fill its last row leaves empty tiles. Nothing is
-    // drawn there, so nothing should open -- the one legitimately inert area.
-    for (int col = G[gi].n % COLS; col && col < COLS; col++) {
-      const int cx = X0 + col * STEP_X + TILE_W / 2;
-      const int rowTop = contentTop + (rows - 1) * ROW_H;
-      toybox.onTap(cx, rowTop + ROW_H / 2);
-      if (toybox.hostInApp() || toybox.hostInSettings()) {
-        printf("HUB ROUTING FAIL empty tile (group %d col %d) opened something\n", gi, col);
-        abort();
-      }
-    }
-    y = contentTop + rows * ROW_H + GROUP_GAP;
-  }
 
-  // The gear owns the whole top-right corner and is the one thing on this
-  // screen that no setting can take away.
-  for (const int gx : {EPD_W - 79, EPD_W - 1}) {
-    for (const int gy : {0, 57}) {
-      toybox.onTap(gx, gy);
-      if (!toybox.hostInSettings()) {
-        printf("HUB ROUTING FAIL gear at (%d,%d)\n", gx, gy);
+    // The folder's grid, mirrored from hub.cpp: two columns, centred block.
+    const int rows = (G[gi].n + 1) / 2;
+    int y0 = hubui::FOLDER_TOP +
+             ((hubui::FOLDER_BOTTOM - hubui::FOLDER_TOP) - rows * hubui::ROW_STEP) / 2;
+    if (y0 < hubui::FOLDER_TOP) y0 = hubui::FOLDER_TOP;
+    for (int ii = 0; ii < G[gi].n; ii++) {
+      const int col = ii % 2, row = ii / 2;
+      const int cx = EPD_W / 4 + col * (EPD_W / 2);
+      const int rowTop = y0 + row * hubui::ROW_STEP;
+      const Want& w = G[gi].items[ii];
+      routesTo(cx, rowTop + hubui::TILE / 2, w, "centre", gi, ii);
+      routesTo(cx, rowTop + 1, w, "top edge", gi, ii);
+      routesTo(cx, rowTop + hubui::ROW_STEP - 2, w, "bottom edge", gi, ii);
+      routesTo(col == 0 ? 1 : EPD_W / 2 + 1, rowTop + hubui::TILE / 2, w, "left edge", gi, ii);
+      routesTo(col == 0 ? EPD_W / 2 - 2 : EPD_W - 2, rowTop + hubui::TILE / 2, w, "right edge",
+               gi, ii);
+    }
+    // An odd count leaves the last right-hand cell empty; nothing may open.
+    if (G[gi].n % 2 == 1) {
+      toybox.onTap(3 * EPD_W / 4, y0 + (rows - 1) * hubui::ROW_STEP + hubui::TILE / 2);
+      if (toybox.hostInApp() || toybox.hostInSettings()) {
+        printf("HUB ROUTING FAIL: empty cell in folder %d opened something\n", gi);
         abort();
       }
-      toybox.goHub();
+    }
+    // Above and below the block is inert page, not a hidden target.
+    if (y0 - 4 > BAR_TOUCH_H) {
+      toybox.onTap(EPD_W / 2, y0 - 4);
+      if (toybox.hostInApp()) {
+        printf("HUB ROUTING FAIL: gap above folder %d grid opened something\n", gi);
+        abort();
+      }
+    }
+    const int yEnd = y0 + rows * hubui::ROW_STEP;
+    if (yEnd + 4 < EPD_H) {
+      toybox.onTap(EPD_W / 2, yEnd + 4);
+      if (toybox.hostInApp()) {
+        printf("HUB ROUTING FAIL: gap below folder %d grid opened something\n", gi);
+        abort();
+      }
+    }
+    // HOME in the corner takes the page back to the picture.
+    toybox.onTap(50, 26);
+    if (!toybox.hostHub().atHome()) {
+      printf("HUB ROUTING FAIL: HOME did not leave folder %d\n", gi);
+      abort();
     }
   }
   g_dumpEnabled = true;
-  printf("hub routing ok (%s: %d tiles, edges, headings, gaps, gear)\n", label, shown);
+  printf("hub routing ok (%s: %d tiles via 3 folders, edges, gaps, home)\n", label, shown);
 }
 
 // The corner buttons' touch areas reach below the bar they are drawn in, and
@@ -372,10 +397,60 @@ int main() {
   setScreen("hub");
   toybox.goHub();
 
-  // Grid routing: every tile centre, and the gaps between them, must resolve to
-  // the app under the finger. requestScreen is stubbed, so record what it asked
-  // for and compare against the drawing order.
+  // Grid routing: the dock, every folder tile, and the gaps, must resolve to
+  // the thing under the finger. requestScreen is stubbed, so record what it
+  // asked for and compare against the drawing order.
   checkHubRouting("all shown");
+
+  // The three folder pages, drawn as a finger would reach them.
+  {
+    static const char* kFolderShots[3] = {"hub_play", "hub_decide", "hub_study"};
+    for (int f = 0; f < 3; f++) {
+      g_dumpEnabled = false;
+      toybox.hostHub().goHome();
+      g_dumpEnabled = true;
+      setScreen(kFolderShots[f]);
+      toybox.onTap(80 + f * 160, hubui::DOCK_Y + hubui::DOCK_H / 2);
+    }
+    g_dumpEnabled = false;
+    toybox.onTap(50, 26);  // back to the picture
+    g_dumpEnabled = true;
+  }
+
+  // Carry on. Opening an app leaves a trail in NVS; resumeLast follows it,
+  // refuses a hidden app, and reports nothing to follow when there is nothing.
+  {
+    g_dumpEnabled = false;
+    toybox.onTap(80, hubui::DOCK_Y + 30);  // PLAY
+    toybox.onTap(EPD_W / 4, hubui::FOLDER_TOP +
+                     ((hubui::FOLDER_BOTTOM - hubui::FOLDER_TOP) - 3 * hubui::ROW_STEP) / 2 +
+                     hubui::TILE / 2);  // the first tile: wordle
+    if (!toybox.hostInApp() || !toybox.hostIsGame() || toybox.hostIdx() != 0) {
+      printf("RESUME FAIL: could not open wordle to leave a trail\n");
+      abort();
+    }
+    toybox.goHub();
+    toybox.hostHub().goHome();
+    if (!toybox.resumeLast() || !toybox.hostInApp() || !toybox.hostIsGame() ||
+        toybox.hostIdx() != 0) {
+      printf("RESUME FAIL: the DOWN hold did not reopen wordle\n");
+      abort();
+    }
+    toybox.goHub();
+    if (toybox.hostHub().folder() != 0) {
+      printf("RESUME FAIL: resuming did not land the hub on the app's folder\n");
+      abort();
+    }
+    appvis::set(true, 0, false);  // hide it: the trail must go cold
+    if (toybox.resumeLast()) {
+      printf("RESUME FAIL: resumed an app that settings says is hidden\n");
+      abort();
+    }
+    appvis::set(true, 0, true);
+    toybox.hostHub().goHome();
+    g_dumpEnabled = true;
+    printf("resume trail ok (follows, refuses hidden)\n");
+  }
 
   // Inside the reader the hub is one activity deep, so it grows a way out. The
   // standalone firmware never draws this, because there is nothing above it.
@@ -398,6 +473,16 @@ int main() {
       printf("EXIT FAIL: standalone hub reacted to a corner that has no button\n");
       abort();
     }
+    // The guest gear plate under the battery corner opens settings, because a
+    // guest host may have no side buttons to hold.
+    stickyHost.hostSetCanExit(true);
+    toybox.onTap(EPD_W - 55, 73);
+    if (!toybox.hostInSettings()) {
+      printf("EXIT FAIL: the guest gear plate did not open settings\n");
+      abort();
+    }
+    toybox.goHub();
+    stickyHost.hostSetCanExit(false);
     g_dumpEnabled = true;
     printf("hub exit ok (offered as a guest, absent when standalone)\n");
   }
@@ -409,7 +494,7 @@ int main() {
     return std::pair<int, int>{col ? 330 : 100, headTop + 26 + i * 52 + 26};
   };
   setScreen("settings");
-  toybox.onTap(EPD_W - 40, 28);
+  toybox.openSettings();
 
   // Hide four apps through the screen itself, so the hub below reflows around
   // exactly what a finger would have hidden.
@@ -494,7 +579,7 @@ int main() {
       abort();
     }
     toybox.goHub();
-    toybox.onTap(EPD_W - 40, 28);  // back into settings...
+    toybox.openSettings();  // back into settings...
     tapRect(setui::actionRect(setui::ACT_LOCK));  // ...and back to the lock page
 
     // ...and back goes up one page rather than out of settings altogether.
@@ -517,22 +602,22 @@ int main() {
       epdMapPixel(epd.rotation(), epd.panelFlipX(), epd.panelFlipY(), lx, ly, px, py);
       return (epd.fb()[(uint32_t)py * EPD_WB + (px >> 3)] & (0x80 >> (px & 7))) == 0;
     };
-    // Where drawBattery puts the cell. Kept here rather than exported, because
-    // a guard that reads the numbers out of the drawing code proves only that
-    // the code agrees with itself.
-    const int W = 34, H = 16, X = EPD_W - 20 - W, Y = 768;
+    // On the home screen the cell is drawn haloed -- black offsets under a
+    // white pass -- so counting black ink there measures the halo, not the
+    // bar. The cell is drawn plain instead, at a spot the harness chooses,
+    // and the expected ink is computed here from the percentage alone.
+    const int W = 36, H = 18, RIGHT = 200, TOP = 100, X = RIGHT - 4 - W;
     int worst = 0, worstPct = -1;
     for (int pct : {0, 25, 50, 89, 100}) {
       sensors::hostSetBattery(pct, false);
-      toybox.goHub();
       epd.clear();
-      toybox.render(stickyHost.sharedCanvas());
+      hubHostBattery(stickyHost.sharedCanvas(), stickyHost, RIGHT, TOP, true);
       // Ink across the middle of the cell, between the two side borders.
       int ink = 0;
-      const int mid = Y + H / 2;
-      for (int x = X + 2; x < X + W - 2; x++)
+      const int mid = TOP + H / 2;
+      for (int x = X + 4; x < X + W - 4; x++)
         if (blackAt(x, mid)) ink++;
-      const int inner = W - 4;
+      const int inner = W - 8;
       const int want = (inner * pct) / 100;
       const int off = ink > want ? ink - want : want - ink;
       if (off > worst) { worst = off; worstPct = pct; }
@@ -565,7 +650,7 @@ int main() {
   // then everything is put back so the screens below show a lived-in device.
   g_dumpEnabled = false;
   prefs.putBool("h_wrd", true);
-  toybox.onTap(EPD_W - 40, 28);  // the routing walk left us on the hub: go back in
+  toybox.openSettings();  // the routing walk left us on the hub: go back in
   tapRect(setui::actionRect(setui::ACT_CARDS));
   tapRect(setui::actionRect(setui::ACT_RESET));  // armed again
   tapRect(setui::actionRect(setui::ACT_RESET));  // ...and confirmed
@@ -1223,7 +1308,7 @@ int main() {
         if (r2 > 1.0f && ((x / 40 + y / 40) & 1)) v = 0.80f;
         const int level = (int)(v * 16.0f);
         if (level > bayer[y & 3][x & 3])
-          img[lockimg::HEADER + (size_t)y * lockimg::STRIDE + (x >> 3)] |= (0x80 >> (x & 7));
+          img[tbimg::HEADER + (size_t)y * tbimg::STRIDE + (x >> 3)] |= (0x80 >> (x & 7));
       }
     }
     tfs::write(lockimg::PATH, (const char*)img, sizeof(img));
@@ -1240,13 +1325,26 @@ int main() {
     // picture is stored would otherwise look exactly like no picture at all.
     g_dumpEnabled = false;  // the walk in refreshes on every step
     toybox.goHub();
-    toybox.onTap(EPD_W - 40, 28);                 // the gear
+    toybox.openSettings();
     tapRect(setui::actionRect(setui::ACT_LOCK));  // into the lock page
     g_dumpEnabled = true;
     setScreen("settings_lock_picture");
     epd.clear();
     toybox.render(stickyHost.sharedCanvas());
     epd.displayFull();
+
+    // The same bits as the home wallpaper, drawn under the dock and the
+    // overlays: the one screen where the halo treatment meets a real picture.
+    tfs::write(wallimg::PATH, (const char*)img, sizeof(img));
+    g_dumpEnabled = false;
+    toybox.goHub();
+    toybox.hostHub().goHome();
+    g_dumpEnabled = true;
+    setScreen("hub_wallpaper");
+    epd.clear();
+    toybox.render(stickyHost.sharedCanvas());
+    epd.displayFull();
+    tfs::remove(wallimg::PATH);
 
     // ...and a file the wrong length has to be refused rather than drawn as
     // half a picture and half whatever was in memory.
@@ -1763,6 +1861,18 @@ int main() {
     epd.clear();
     welcome::render(stickyHost.sharedCanvas(), true);
     epd.displayFull();
+
+    // The four GETTING STARTED cards that follow it. Rendered here because
+    // they are the one place the dock marks are explained, and a card whose
+    // text has drifted off the panel would teach nothing.
+    for (int card = 0; card < tour::CARDS; card++) {
+      char shot[16];
+      snprintf(shot, sizeof(shot), "tour_%d", card + 1);
+      setScreen(shot);
+      epd.clear();
+      tour::render(stickyHost.sharedCanvas(), card);
+      epd.displayFull();
+    }
 
     // It is shown when the stored version is not this one, and not shown after
     // it has been marked. A welcome that came back every boot would be the kind

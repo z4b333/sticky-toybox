@@ -21,6 +21,7 @@
 #include "tools/lockscreen.h"
 #include "tools/tool_note.h"
 #include "touch.h"
+#include "tour.h"
 #include "welcome.h"
 
 Preferences prefs;
@@ -213,22 +214,63 @@ void handlePowerButton() {
   if (wasDown && held > 40 && g_pinnedMode) powerOff();
 }
 
-// The two side buttons, offered to whatever app is open. Only flashcards wants
-// them; everything else answers false and the press does nothing at all, which
-// is better than inventing a meaning for it.
+// The two side buttons wear two hats.
 //
-// Edge-triggered, and deliberately not repeating on hold: these grade cards, and
-// a held button that graded ten of them would be a disaster you could not undo.
-// 30 ms is longer than any contact bounces for and shorter than any deliberate
-// press, and the panel takes 300 ms to repaint anyway.
+// Inside an app they are edge-triggered presses offered to whatever is open --
+// only flashcards wants them -- and deliberately not repeating on hold: these
+// grade cards, and a held button that graded ten of them would be a disaster
+// you could not undo. 30 ms is longer than any contact bounces for and shorter
+// than any deliberate press.
+//
+// On the home page they are holds, matching the two hint marks drawn level
+// with them: hold UP for settings, hold DOWN to carry on with the last app.
+// A short press there does nothing at all -- home is a picture, and the only
+// touch it answers is the dock. The hold fires while the button is still down
+// (there is no release event to wait for), so a fired flag stops it firing
+// again until both buttons are up.
+constexpr uint32_t HOLD_MS = 900;
+
 void handleSideButtons() {
   static bool upWas = false, downWas = false;
+  static uint32_t upSince = 0, downSince = 0;
+  static bool fired = false;
   static uint32_t lastEdge = 0;
   const bool upNow = digitalRead(PIN_BTN_UP) == LOW;
   const bool downNow = digitalRead(PIN_BTN_DOWN) == LOW;
+
+  if (toybox.atHubHome()) {
+    if (upNow && !upWas) upSince = millis();
+    if (downNow && !downWas) downSince = millis();
+    if (!upNow && !downNow) fired = false;
+    upWas = upNow;
+    downWas = downNow;
+    if (fired) return;
+    if (upNow && millis() - upSince >= HOLD_MS) {
+      fired = true;
+      noteActivity();
+      TB_LOG("home: UP held, opening settings\n");
+      buzzer::confirm();
+      toybox.openSettings();
+    } else if (downNow && millis() - downSince >= HOLD_MS) {
+      fired = true;
+      noteActivity();
+      if (toybox.resumeLast()) {
+        TB_LOG("home: DOWN held, carrying on\n");
+        buzzer::confirm();
+      } else {
+        // Nothing to resume. The screen does not change: a low note that says
+        // "there isn't one" reads better than a dead button or a detour.
+        TB_LOG("home: DOWN held, nothing to carry on with\n");
+        buzzer::error();
+      }
+    }
+    return;
+  }
+
   const bool pressed = (upNow && !upWas) || (downNow && !downWas);
   upWas = upNow;
   downWas = downNow;
+  fired = false;
   if (!pressed || millis() - lastEdge < 30) return;
   lastEdge = millis();
   noteActivity();  // a button is a person, whether or not an app wanted it
@@ -429,9 +471,41 @@ void setup() {
       delay(20);
     }
     TB_LOG("welcome: dismissed (%s after %lums)\n", how, (unsigned long)(millis() - shown));
-    welcome::markSeen(prefs);
     buzzer::tap();
     noteActivity();
+
+    // The tour rides the same once-per-version gate. Each card waits for a tap
+    // or a side button, bounded like the welcome was: a card that could not be
+    // got past would be a worse bug than an unlabelled icon.
+    for (int card = 0; card < tour::CARDS; card++) {
+      epd.clear();
+      tour::render(c, card);
+      epd.displayFull();
+      TB_LOG("tour: card %d of %d\n", card + 1, tour::CARDS);
+      // Wait for the buttons to come back up first, so the press that
+      // dismissed the previous card cannot page through this one too.
+      while (digitalRead(PIN_BTN_UP) == LOW || digitalRead(PIN_BTN_DOWN) == LOW) delay(20);
+      const uint32_t cardShown = millis();
+      bool skip = false;
+      for (;;) {
+        TouchEvent tev;
+        touch.poll(tev);
+        if (tev.tapped) break;
+        if (digitalRead(PIN_BTN_UP) == LOW || digitalRead(PIN_BTN_DOWN) == LOW) break;
+        if (millis() - cardShown > 120000) {
+          skip = true;
+          break;
+        }
+        delay(20);
+      }
+      buzzer::tap();
+      noteActivity();
+      if (skip) {
+        TB_LOG("tour: timed out, skipping the rest\n");
+        break;
+      }
+    }
+    welcome::markSeen(prefs);
   }
 
   // Waking goes to whichever the settings say. With a note pinned the note is

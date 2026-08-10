@@ -38,6 +38,19 @@ class Toybox {
   // screen picture; see ToolsHost::goPairPicture.
   void openPairPicture();
 
+  // The two button holds on the home screen. Settings is no longer reachable
+  // by touch on the standalone device -- the gear moved off the glass and onto
+  // the physical button beside it.
+  void openSettings();
+  // Reopens the last app that was opened, from NVS, so it survives power-off.
+  // False means there is nothing to resume (or it is hidden), and the caller
+  // owns the low beep that says so.
+  bool resumeLast();
+
+  // True only on the home page itself, not the folder pages: the holds belong
+  // to the screen with the hint marks on it.
+  bool atHubHome() const { return _where == Where::Hub && _hub.atHome(); }
+
   const char* activeTitle() const { return _active ? _active->title() : "TOYBOX"; }
 
   // True when nothing is open over the hub. A host with a physical back button
@@ -53,6 +66,7 @@ class Toybox {
   int hostIdx() const { return _activeIdx; }
   bool hostInApp() const { return _where == Where::App; }
   bool hostInSettings() const { return _where == Where::Settings; }
+  HubScreen& hostHub() { return _hub; }
 #endif
 
  private:

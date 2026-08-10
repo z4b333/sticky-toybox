@@ -58,8 +58,22 @@ void Toybox::begin(ToolsHost& h) {
   _host = &h;
   appvis::load(h.prefs());
   _where = Where::Hub;
+  _hub.goHome();
   release();
 }
+
+namespace {
+// Which folder an app lives in, for putting the hub back where an app's HUB
+// button should land. Looked up rather than remembered, so resume and a tap
+// agree.
+int folderOf(bool game, int idx) {
+  for (int g = 0; g < applist::NGROUPS; g++)
+    for (int i = 0; i < applist::GROUPS[g].n; i++)
+      if (applist::GROUPS[g].items[i].game == game && applist::GROUPS[g].items[i].idx == idx)
+        return g;
+  return 0;
+}
+}  // namespace
 
 void Toybox::open(bool game, int idx) {
   if (!build(game, idx)) {
@@ -67,8 +81,35 @@ void Toybox::open(bool game, int idx) {
     return;
   }
   _where = Where::App;
+  // Remembered for the DOWN hold on home, and read back before writing: NVS
+  // pages wear, and reopening the same app every day should cost nothing.
+  Preferences& p = _host->prefs();
+  const bool sameG = p.isKey("last_g") && p.getBool("last_g") == game;
+  const bool sameI = p.isKey("last_i") && (int)p.getInt("last_i") == idx;
+  if (!sameG) p.putBool("last_g", game);
+  if (!sameI) p.putInt("last_i", idx);
   _active->enter(*_host);
   _host->refresh(true);
+}
+
+void Toybox::openSettings() {
+  release();
+  _settings.enter();
+  _where = Where::Settings;
+  _host->refresh(true);
+}
+
+bool Toybox::resumeLast() {
+  Preferences& p = _host->prefs();
+  if (!p.isKey("last_i") || !p.isKey("last_g")) return false;
+  const bool game = p.getBool("last_g");
+  const int idx = p.getInt("last_i");
+  // An app hidden since it was last used stays hidden. Resuming it would
+  // reopen a door the settings screen says is closed.
+  if (!appvis::visible(game, idx)) return false;
+  _hub.openFolder(folderOf(game, idx));  // so HUB from the app lands sensibly
+  open(game, idx);
+  return true;
 }
 
 void Toybox::openPairPicture() {
@@ -77,6 +118,7 @@ void Toybox::openPairPicture() {
   // the user just tapped is still on the panel to try again.
   if (!build(false, 6)) return;
   _where = Where::App;
+  _hub.openFolder(2);  // notes lives in STUDY; HUB from here should land there
   _active->enter(*_host);
   _active->openPairing();
   _host->refresh(true);
@@ -125,17 +167,28 @@ void Toybox::onTap(int x, int y) {
   const HubScreen::Tap t = _hub.hit(*_host, x, y);
   if (t.kind == HubScreen::Tap::None) return;
   _host->beep(1);
-  if (t.kind == HubScreen::Tap::Exit) {
-    _host->exit();  // hands the screen back to whatever Toybox is a guest in
-    return;
+  switch (t.kind) {
+    case HubScreen::Tap::Exit:
+      _host->exit();  // hands the screen back to whatever Toybox is a guest in
+      return;
+    case HubScreen::Tap::Settings:
+      // Guest hosts only: the standalone device reaches this by holding UP.
+      _settings.enter();
+      _where = Where::Settings;
+      _host->refresh(true);
+      return;
+    case HubScreen::Tap::Folder:
+      _hub.openFolder(t.idx);
+      _host->refresh(true);
+      return;
+    case HubScreen::Tap::Home:
+      _hub.goHome();
+      _host->refresh(true);
+      return;
+    default:
+      open(t.game, t.idx);
+      return;
   }
-  if (t.kind == HubScreen::Tap::Settings) {
-    _settings.enter();
-    _where = Where::Settings;
-    _host->refresh(true);
-    return;
-  }
-  open(t.game, t.idx);
 }
 
 bool Toybox::onButton(SideBtn b) {

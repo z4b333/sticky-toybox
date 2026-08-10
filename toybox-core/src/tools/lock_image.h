@@ -16,9 +16,11 @@
 #include "tiny_fs.h"
 #include "tools_ui.h"
 
-namespace lockimg {
+// Two pictures share one format and one loader: the lock screen's and the home
+// screen's wallpaper. They differ only in path, so everything below takes the
+// path and the two namespaces at the bottom are just names for the two files.
+namespace tbimg {
 
-inline constexpr const char* PATH = "/lockimg.tbi";
 inline constexpr uint32_t MAGIC = 0x31494254;  // 'TBI1', little endian
 inline constexpr int W = 480, H = 800;
 inline constexpr int STRIDE = W / 8;                          // 60
@@ -27,17 +29,16 @@ inline constexpr uint32_t HEADER = 8;
 inline constexpr uint32_t FILE_SIZE = HEADER + BITS;
 
 // header: magic, u16 width, u16 height
-inline bool have() { return tfs::size(PATH) == FILE_SIZE; }
-
-inline void remove() { tfs::remove(PATH); }
+inline bool have(const char* path) { return tfs::size(path) == FILE_SIZE; }
 
 // Drawn through the canvas rather than blitted into the framebuffer, so the
 // panel corrections and the rotation apply to it like anything else. Nearly
-// 400,000 calls sounds extravagant; it happens once, on the way to power-off,
-// beside a refresh that takes 1.7 seconds on its own.
-inline bool draw(ToolsCanvas& c) {
+// 400,000 calls sounds extravagant; on the lock screen it happens once, on the
+// way to power-off, beside a refresh that takes 1.7 seconds on its own, and on
+// the home screen once per visit beside the same full refresh.
+inline bool draw(ToolsCanvas& c, const char* path) {
   size_t len = 0;
-  char* buf = tfs::readAlloc(PATH, len);
+  char* buf = tfs::readAlloc(path, len);
   if (!buf) return false;
   if (len != FILE_SIZE) {
     free(buf);
@@ -68,4 +69,20 @@ inline bool draw(ToolsCanvas& c) {
   return true;
 }
 
+}  // namespace tbimg
+
+namespace lockimg {
+inline constexpr const char* PATH = "/lockimg.tbi";
+inline constexpr uint32_t FILE_SIZE = tbimg::FILE_SIZE;
+inline constexpr int W = tbimg::W, H = tbimg::H;
+inline bool have() { return tbimg::have(PATH); }
+inline void remove() { tfs::remove(PATH); }
+inline bool draw(ToolsCanvas& c) { return tbimg::draw(c, PATH); }
 }  // namespace lockimg
+
+namespace wallimg {
+inline constexpr const char* PATH = "/wallimg.tbi";
+inline bool have() { return tbimg::have(PATH); }
+inline void remove() { tfs::remove(PATH); }
+inline bool draw(ToolsCanvas& c) { return tbimg::draw(c, PATH); }
+}  // namespace wallimg

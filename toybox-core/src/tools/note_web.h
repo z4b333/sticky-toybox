@@ -74,7 +74,7 @@ class NoteServer {
         "/pic", HTTP_POST, [this] { _portal.server().send(200, "text/plain", _picOk ? "ok" : "bad"); },
         [this] { receivePicture(); });
     _portal.on("/pic", HTTP_DELETE, [this] {
-      lockimg::remove();
+      tfs::remove(picPath());
       _portal.server().send(200, "text/plain", "ok");
     });
     _portal.on("/picture", HTTP_GET, [this] { sendPicturePage(); });
@@ -101,6 +101,14 @@ class NoteServer {
   void sendPage();
   void sendPicturePage();
 
+  // Where a picture upload lands: the lock screen file, or the home screen's
+  // wallpaper when the request says ?to=wall. Resolved once at the start of
+  // the upload, because the arg is the same for every chunk and asking the
+  // server again mid-stream buys nothing.
+  const char* picPath() {
+    return _portal.server().arg("to") == "wall" ? wallimg::PATH : lockimg::PATH;
+  }
+
   // Streamed straight to the filesystem as it arrives. Buffering 48 KB in RAM
   // while WiFi is up is exactly the allocation this device cannot spare.
   void receivePicture() {
@@ -108,8 +116,9 @@ class NoteServer {
     if (up.status == UPLOAD_FILE_START) {
       _picOk = false;
       _picLen = 0;
+      _picPath = picPath();
       tfs::begin();
-      _picFile = LittleFS.open(lockimg::PATH, "w");
+      _picFile = LittleFS.open(_picPath, "w");
     } else if (up.status == UPLOAD_FILE_WRITE) {
       if (_picFile) {
         _picFile.write(up.buf, up.currentSize);
@@ -119,11 +128,11 @@ class NoteServer {
       if (_picFile) _picFile.close();
       // A half-arrived picture is worse than none: it would draw as a photo
       // that turns to noise partway down the panel.
-      _picOk = (_picLen == lockimg::FILE_SIZE);
-      if (!_picOk) lockimg::remove();
+      _picOk = (_picLen == tbimg::FILE_SIZE);
+      if (!_picOk) tfs::remove(_picPath);
     } else {
       if (_picFile) _picFile.close();
-      lockimg::remove();
+      tfs::remove(_picPath);
     }
   }
 
@@ -174,6 +183,7 @@ class NoteServer {
   bool _received = false;
   bool _picOk = false;
   uint32_t _picLen = 0;
+  const char* _picPath = lockimg::PATH;
   File _picFile;
   int _bytes = 0;
   char _last[note::NAME_LEN + 1] = {};
@@ -223,8 +233,8 @@ font-style:normal;text-align:center;line-height:13px;font-size:12px}
 font-size:15px;display:none}
 </style></head><body>
 <h1>Notes on your Toybox</h1>
-<p class="hint" style="margin:-6px 0 12px"><a href="/picture" style="color:#111">Put a
-picture on the lock screen instead &rsaquo;</a></p>
+<p class="hint" style="margin:-6px 0 12px"><a href="/picture" style="color:#111">Send a
+picture instead — lock screen or home wallpaper &rsaquo;</a></p>
 
 <div class="row">
 <select id="pick"><option value="">+ new note</option></select>
@@ -357,7 +367,7 @@ upd();
 inline void NoteServer::sendPicturePage() {
   static const char kPic[] PROGMEM = R"HTML(<!DOCTYPE html><html><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Lock screen picture</title><style>
+<title>Pictures</title><style>
 *{box-sizing:border-box}
 body{font:16px/1.5 system-ui,-apple-system,sans-serif;margin:0;padding:14px 14px 40px;
 background:#f5f5f3;color:#111;max-width:640px;margin-inline:auto}
@@ -381,9 +391,14 @@ background:#fff;color:#111;font:600 15px system-ui}
 #ok{display:none;margin-top:10px;padding:10px;border-radius:8px;background:#e7f3e7;font-size:14px}
 a{color:#111}
 </style></head><body>
-<h1>Lock screen picture</h1>
+<h1>Pictures</h1>
 <p class="hint">480 x 800, black and white. What you see below is exactly what the
 panel will show — the device is sent the finished picture, not the photo.</p>
+
+<div class="seg" id="dest">
+  <button data-v="lock" class="on">Lock screen</button>
+  <button data-v="wall">Home wallpaper</button>
+</div>
 
 <label class="file">Choose a picture<input id="f" type="file" accept="image/*"></label>
 
@@ -402,13 +417,13 @@ panel will show — the device is sent the finished picture, not the photo.</p>
   <button class="send" id="send">Send to device</button>
 </div>
 
-<button class="rm" id="rm">Remove the picture on the device</button>
+<button class="rm" id="rm">Remove this picture from the device</button>
 <div id="ok"></div>
 <p class="hint"><a href="/">Back to notes</a></p>
 
 <script>
 var W=480,H=800,cv=document.getElementById('c'),cx=cv.getContext('2d');
-var img=null,mode='crop',dither='fs',offX=0,offY=0,drag=null;
+var img=null,mode='crop',dither='fs',offX=0,offY=0,drag=null,dest='lock';
 
 function seg(id,set){
  var box=document.getElementById(id);
@@ -421,6 +436,7 @@ function seg(id,set){
 }
 seg('fit',function(v){mode=v;offX=offY=0});
 seg('dit',function(v){dither=v});
+seg('dest',function(v){dest=v});
 
 document.getElementById('f').addEventListener('change',function(e){
  var file=e.target.files[0];if(!file)return;
@@ -494,17 +510,20 @@ document.getElementById('send').addEventListener('click',function(){
   if(d[(y*W+x)*4]>=128) out[8+y*(W/8)+(x>>3)] |= (128>>(x&7));
  }
  var fd=new FormData();
- fd.append('f',new Blob([out],{type:'application/octet-stream'}),'lock.tbi');
- fetch('/pic',{method:'POST',body:fd}).then(function(r){return r.text()}).then(function(t){
+ fd.append('f',new Blob([out],{type:'application/octet-stream'}),'pic.tbi');
+ var q=(dest==='wall')?'?to=wall':'';
+ fetch('/pic'+q,{method:'POST',body:fd}).then(function(r){return r.text()}).then(function(t){
   b.disabled=false;b.textContent='Send to device';
-  say(t==='ok'?'Sent. Set the lock screen to "a picture" in Settings on the device.'
-             :'The device did not accept it. Try sending again.');
+  say(t!=='ok'?'The device did not accept it. Try sending again.'
+     :dest==='wall'?'Sent. It is now behind the home screen.'
+     :'Sent. Set the lock screen to "a picture" in Settings on the device.');
  }).catch(function(){b.disabled=false;b.textContent='Send to device';
   say('Could not reach the device. Still connected to its wifi?')});
 });
 
 document.getElementById('rm').addEventListener('click',function(){
- fetch('/pic',{method:'DELETE'}).then(function(){say('Removed.')})
+ var q=(dest==='wall')?'?to=wall':'';
+ fetch('/pic'+q,{method:'DELETE'}).then(function(){say('Removed.')})
   .catch(function(){say('Could not reach the device.')});
 });
 </script></body></html>)HTML";

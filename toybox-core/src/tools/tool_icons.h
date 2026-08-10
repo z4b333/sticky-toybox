@@ -7,7 +7,7 @@ namespace ticons {
 
 inline constexpr int COUNT = 9;
 inline const char* const NAMES[COUNT] = {"COIN",  "DICE",   "TIMER", "RANDOM",
-                                         "PICKER", "STUDY", "NOTES",  "SHIPS",
+                                         "PICKER", "FLASHCARDS", "NOTES",  "SHIPS",
                                          "SUDOKU"};
 // Kept short: a hub tile is 140 px, which is about twelve characters.
 inline const char* const DESCS[COUNT] = {"heads/tails", "D4 - D20",   "countdown", "number/card",
