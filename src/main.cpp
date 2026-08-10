@@ -369,15 +369,28 @@ void setup() {
     welcome::render(c, updated);
     epd.displayFull();
     buzzer::confirm();
+    // Said out loud, because this is the one place in boot that stops and waits
+    // for a person. Without it the serial log simply ends here, and the first
+    // report back was somebody reasonably concluding the firmware had hung.
+    TB_LOG("welcome: showing %s, waiting for a tap (up to 120s)\n",
+           updated ? "the updated card" : "the first-boot card");
     const uint32_t shown = millis();
+    const char* how = "timed out";
     for (;;) {
       TouchEvent ev;
       touch.poll(ev);
-      if (ev.tapped) break;
-      if (digitalRead(PIN_BTN_UP) == LOW || digitalRead(PIN_BTN_DOWN) == LOW) break;
+      if (ev.tapped) {
+        how = "tapped";
+        break;
+      }
+      if (digitalRead(PIN_BTN_UP) == LOW || digitalRead(PIN_BTN_DOWN) == LOW) {
+        how = "button";
+        break;
+      }
       if (millis() - shown > 120000) break;
       delay(20);
     }
+    TB_LOG("welcome: dismissed (%s after %lums)\n", how, (unsigned long)(millis() - shown));
     welcome::markSeen(prefs);
     buzzer::tap();
     noteActivity();
