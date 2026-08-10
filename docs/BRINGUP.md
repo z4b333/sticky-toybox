@@ -165,6 +165,19 @@ sound setting says, because the one output that cannot report a dead display is
 the display. Check the ribbon seating and try a full power-off rather than a
 reset: the previous firmware can leave the controller in deep sleep.
 
+**TEST THE SD CARD** is the one row that does something rather than setting
+something. Nothing in the firmware uses a card yet; the row exists because the
+card shares the display's SPI bus, and whether those two can coexist decides
+whether this device can ever read books — a 480x800 page is 48 KB and internal
+flash holds about a hundred of them.
+
+Put any card in, select the row and press OK. It mounts, counts the root,
+times a 48 KB read, and then resets the display controller and asks whether it
+still answers. That last step is the point: two devices on one bus fail in a
+way where the card reads perfectly and the panel quietly stops updating, and
+"the SD works" is a different claim from "the SD works and you keep your
+screen".
+
 `touch NOT FOUND` means the GT911 did not answer at either address. Everything
 else can still be checked from this screen with the buttons, but the device is
 not usable until that is sorted — see the troubleshooting list at the end.

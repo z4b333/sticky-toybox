@@ -1815,6 +1815,33 @@ int main() {
     epd.clear();
     svc::render(stickyHost.sharedCanvas(), r, cfg, svc::ROW_TEST, true, 300, 470);
     epd.displayFull();
+
+    // The SD row, in the three states it has. Nothing on the device uses a card
+    // yet; this screen exists to answer whether one can be used at all, and a
+    // result nobody can read is not an answer.
+    setScreen("service_sd");
+    epd.clear();
+    svc::render(stickyHost.sharedCanvas(), r, cfg, svc::ROW_SD, false, 0, 0);
+    epd.displayFull();
+
+    svc::Report sdr = r;
+    sdr.sdTried = true;
+    sdr.sdMounted = true;
+    sdr.sdSizeMb = 15193;
+    sdr.sdFiles = 12;
+    sdr.sdKbPerSec = 480;
+    sdr.sdPanelOk = true;
+    setScreen("service_sd_ok");
+    epd.clear();
+    svc::render(stickyHost.sharedCanvas(), sdr, cfg, svc::ROW_SD, false, 0, 0);
+    epd.displayFull();
+
+    sdr.sdMounted = false;
+    sdr.sdFailedAt = "mount";
+    setScreen("service_sd_fail");
+    epd.clear();
+    svc::render(stickyHost.sharedCanvas(), sdr, cfg, svc::ROW_SD, false, 0, 0);
+    epd.displayFull();
   }
 
   // The corrections that screen writes have to actually move pixels, one axis

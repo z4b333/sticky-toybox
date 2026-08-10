@@ -98,6 +98,13 @@ bool Epd::probePanel() {
   return true;
 }
 
+void Epd::reinit() {
+  reset();
+  _panelOk = probePanel();
+  initController();
+  _firstPaint = true;  // the controller's RAM is gone; the next paint must be full
+}
+
 void Epd::reset() {
   digitalWrite(PIN_EPD_RST, HIGH);
   delay(20);

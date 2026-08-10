@@ -33,6 +33,14 @@ constexpr int PIN_BTN_UP   = 5;
 constexpr int PIN_BTN_DOWN = 6;
 constexpr int PIN_BTN_OK   = 4;   // shared with power button
 
+// --- microSD (shares the panel's SPI bus) -------------------------------------
+// Only the chip select is its own; clock, MOSI and MISO are the display's.
+// Sharing means every transaction has to leave CS high for the other device,
+// and it means a card that misbehaves can take the panel down with it -- which
+// is why nothing has used this yet and why the service screen tests it before
+// any app is allowed to depend on it.
+constexpr int PIN_SD_CS = 8;
+
 // --- Buzzer ------------------------------------------------------------------
 constexpr int PIN_BUZZER = 48;    // LEDC-driven
 

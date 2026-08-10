@@ -14,6 +14,7 @@
 #include "buzzer.h"
 #include "epd.h"
 #include "gfx.h"
+#include "sdcard.h"
 #include "sensors.h"
 #include "service_ui.h"
 #include "sticky_host.h"
@@ -149,6 +150,22 @@ void run() {
       if (sel == ROW_SAVE) {
         save(cfg);
         esp_restart();
+      } else if (sel == ROW_SD) {
+        // Runs on demand only. Two devices on one bus is the least-tested thing
+        // in this project, and a probe that ran at every boot would be taking
+        // that risk on behalf of somebody who only wanted to fix their screen.
+        const sdcard::Report sd = sdcard::probe();
+        r.sdTried = true;
+        r.sdMounted = sd.mounted;
+        r.sdSizeMb = sd.sizeMb;
+        r.sdFiles = sd.files;
+        r.sdKbPerSec = sd.readKbPerSec;
+        r.sdPanelOk = sd.panelSurvived;
+        r.sdFailedAt = sd.failedAt;
+        buzzer::confirm();
+        // Full, because the probe resets the controller: its RAM is gone and a
+        // differential update would be differencing against nothing.
+        paint(r, cfg, sel, haveCross, cx, cy, true);
       } else if (sel != ROW_TEST) {
         toggleRow(cfg, sel);
         apply(cfg);

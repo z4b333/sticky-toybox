@@ -33,6 +33,12 @@ struct Report {
   int battMv = -1;
   int fontFaces = 0;
   uint32_t psramKb = 0;
+  // The SD probe, which only runs when somebody asks for it on that row.
+  bool sdTried = false, sdMounted = false, sdPanelOk = false;
+  uint64_t sdSizeMb = 0;
+  int sdFiles = 0;
+  uint32_t sdKbPerSec = 0;
+  const char* sdFailedAt = "";
   const char* version = "";
 };
 
@@ -41,7 +47,17 @@ struct Config {
   bool swapXY = true, tFlipX = true, tFlipY = true;  // digitizer
 };
 
-enum Row : int { ROW_FLIP_X, ROW_FLIP_Y, ROW_SWAP, ROW_TFX, ROW_TFY, ROW_TEST, ROW_SAVE, ROWS };
+enum Row : int {
+  ROW_FLIP_X,
+  ROW_FLIP_Y,
+  ROW_SWAP,
+  ROW_TFX,
+  ROW_TFY,
+  ROW_TEST,
+  ROW_SD,
+  ROW_SAVE,
+  ROWS
+};
 
 inline const char* rowLabel(int i) {
   switch (i) {
@@ -51,6 +67,7 @@ inline const char* rowLabel(int i) {
     case ROW_TFX: return "TOUCH: FLIP LEFT/RIGHT";
     case ROW_TFY: return "TOUCH: FLIP UP/DOWN";
     case ROW_TEST: return "TOUCH TEST";
+    case ROW_SD: return "TEST THE SD CARD";
     default: return "SAVE AND RESTART";
   }
 }
@@ -76,7 +93,10 @@ inline void toggleRow(Config& c, int i) {
   }
 }
 
-inline constexpr int LIST_Y = 300, ROW_H = 56, ROW_GAP = 4;
+// Eight rows now that the SD probe is one of them: 52 rather than 56, so the
+// list still ends above the band where its results are written. A row of
+// buttons that overlaps its own output is worse than a shorter row.
+inline constexpr int LIST_Y = 284, ROW_H = 52, ROW_GAP = 4;
 inline constexpr int MARGIN = 20;
 
 // `cross` is the last touch this screen saw, in the coordinates the rest of the
@@ -168,6 +188,28 @@ inline void render(ToolsCanvas& c, const Report& r, const Config& cfg, int sel, 
     } else {
       c.textCentered(W / 2, 754, "touch anywhere - the cross should land under your finger",
                      TS_SMALL, true);
+    }
+    return;
+  }
+
+  // The SD result, while its row is selected. Nothing in the firmware uses the
+  // card yet -- this exists to answer the one question a book format depends on,
+  // and to answer it on a screen rather than in an opinion.
+  if (sel == ROW_SD) {
+    if (!r.sdTried) {
+      c.textCentered(W / 2, 740, "OK mounts a card and reads from it", TS_SMALL, true);
+      c.textCentered(W / 2, 766, "it shares the display's bus -- that is the test", TS_SMALL,
+                     true);
+    } else if (!r.sdMounted) {
+      snprintf(buf, sizeof(buf), "no card: failed at %s", r.sdFailedAt);
+      c.textCentered(W / 2, 752, buf, TS_MED, true);
+    } else {
+      snprintf(buf, sizeof(buf), "%lu MB, %d files, %lu KB/s", (unsigned long)r.sdSizeMb,
+               r.sdFiles, (unsigned long)r.sdKbPerSec);
+      c.textCentered(W / 2, 740, buf, TS_MED, true);
+      c.textCentered(W / 2, 770, r.sdPanelOk ? "read ok, panel still answers"
+                                             : "PANEL STOPPED ANSWERING",
+                     TS_MED, true, !r.sdPanelOk);
     }
     return;
   }

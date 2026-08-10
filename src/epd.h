@@ -70,6 +70,11 @@ class Epd {
   // serial log, on the service screen, and on the buzzer, because the one thing
   // you cannot use to report a broken display is the display.
   bool panelAnswered() const { return _panelOk; }
+
+  // Reset the controller and ask again, without touching the framebuffer.
+  // Used after the SD card has had the bus, which is the one situation where a
+  // panel that was answering a moment ago might not be.
+  void reinit();
   int rotation() const { return _rot; }
   int logicalW() const { return (_rot & 1) ? PANEL_W : PANEL_H; }
   int logicalH() const { return (_rot & 1) ? PANEL_H : PANEL_W; }
