@@ -32,7 +32,14 @@ Report probe() {
   digitalWrite(PIN_EPD_CS, HIGH);
   pinMode(PIN_SD_CS, OUTPUT);
   digitalWrite(PIN_SD_CS, HIGH);
-  delay(10);
+
+  // The card has no power until this line: the slot sits behind a load switch
+  // on SD_PWR_EN, and the first hardware probe failed at "mount" for exactly
+  // that reason -- right pins, right bus, no volts. 50 ms covers the card's
+  // own power-up before it is asked anything.
+  pinMode(PIN_SD_PWR, OUTPUT);
+  digitalWrite(PIN_SD_PWR, HIGH);
+  delay(50);
 
   // 10 MHz, matching what the panel is driven at. A card will usually go much
   // faster; the shared traces are what they are, and a first answer of "yes"
@@ -86,6 +93,9 @@ Report probe() {
 
   SD.end();
   digitalWrite(PIN_SD_CS, HIGH);
+  // Powered back down until the next probe. An unpowered card cannot lean on
+  // the shared bus, and it costs nothing while nothing is reading.
+  digitalWrite(PIN_SD_PWR, LOW);
 
   // ...and now the question that matters. If the card has left the panel
   // wedged, BUSY will not move for a soft reset, which is exactly the check

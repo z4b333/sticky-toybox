@@ -337,6 +337,11 @@ void setup() {
   // through even that much is a card that has been clocked at random.
   pinMode(PIN_SD_CS, OUTPUT);
   digitalWrite(PIN_SD_CS, HIGH);
+  // ...and unpowered, not just deselected. The slot sits behind a load switch;
+  // held off, an inserted card is glass and cannot touch the shared bus at all.
+  // The service screen's probe powers it up for exactly as long as it needs.
+  pinMode(PIN_SD_PWR, OUTPUT);
+  digitalWrite(PIN_SD_PWR, LOW);
 
   pinMode(PIN_BTN_UP, INPUT_PULLUP);
   pinMode(PIN_BTN_DOWN, INPUT_PULLUP);

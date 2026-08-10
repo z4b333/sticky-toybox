@@ -40,6 +40,12 @@ constexpr int PIN_BTN_OK   = 4;   // shared with power button
 // is why nothing has used this yet and why the service screen tests it before
 // any app is allowed to depend on it.
 constexpr int PIN_SD_CS = 8;
+// The slot's power is gated by a load switch: HIGH powers the card, LOW cuts
+// it (V01 schematic via the FreeInk SDK BoardConfig, SD_PWR_EN, active high).
+// This is why the first probe found no card: everything on the bus was right
+// and the card had no volts. Held LOW except while the card is actually in
+// use, which also means an inserted card cannot lean on the shared bus.
+constexpr int PIN_SD_PWR = 10;
 
 // --- Buzzer ------------------------------------------------------------------
 constexpr int PIN_BUZZER = 48;    // LEDC-driven
