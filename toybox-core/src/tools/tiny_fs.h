@@ -32,6 +32,7 @@ inline bool write(const char* path, const char* data, size_t len) {
   return true;
 }
 inline bool remove(const char* path) { return hostFs().erase(path) > 0; }
+inline bool exists(const char* path) { return hostFs().count(path) > 0; }
 inline size_t size(const char* path) {
   auto it = hostFs().find(path);
   return it == hostFs().end() ? 0 : it->second.size();
@@ -105,6 +106,16 @@ inline bool remove(const char* path) {
   return LittleFS.remove(path);
 }
 
+// Asked before opening, wherever a file is expected to be missing.
+//
+// LittleFS logs a red `open(): ... does not exist, no permits for creation` at
+// error level every time a read fails, and a normal first boot produced three
+// of them -- the fonts directory, the pinned-note marker, and nothing else.
+// They are the most alarming thing in a healthy log and they all mean "this
+// device has no notes yet". Checking first costs a directory lookup and makes
+// the log say only true things.
+inline bool exists(const char* path) { return begin() && LittleFS.exists(path); }
+
 // Length without reading the contents -- the lock screen picture is 48 KB and
 // only ever needs its size checked before a settings label is drawn.
 inline size_t size(const char* path) {
@@ -136,7 +147,7 @@ inline char* readAlloc(const char* path, size_t& len) {
 
 inline int list(const char* dir, const char* ext, char* names, int stride, int maxNames,
                 int nameLen) {
-  if (!begin()) return 0;
+  if (!begin() || !LittleFS.exists(dir)) return 0;
   File d = LittleFS.open(dir);
   if (!d || !d.isDirectory()) return 0;
   int n = 0;

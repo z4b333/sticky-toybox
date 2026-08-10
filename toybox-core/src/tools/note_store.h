@@ -118,6 +118,9 @@ inline void setPinned(const char* name) {
 
 inline bool getPinned(char* out) {
   out[0] = 0;
+  // Asked before read, because nothing pinned is the ordinary case on a new
+  // device and it should not print an error to say so.
+  if (!tfs::exists("/notes/.pin")) return false;
   String v;
   if (!tfs::read("/notes/.pin", v) || v.length() == 0) return false;
   strncpy(out, v.c_str(), NAME_LEN);

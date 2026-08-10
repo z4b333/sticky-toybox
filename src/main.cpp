@@ -8,6 +8,7 @@
 #include <Preferences.h>
 #include <driver/gpio.h>
 #include <esp_sleep.h>
+#include <esp_system.h>
 
 #include "board_pins.h"
 #include "buzzer.h"
@@ -31,15 +32,27 @@ namespace {
 // something that can be settled from here, so boot messages go to both and
 // whichever is listening hears them. An empty console is then evidence about
 // the device rather than about the wiring.
+//
+// Every line is prefixed and stamped with milliseconds since power-on. The
+// prefix is there because our output shares one UART with the ESP-IDF's, and
+// the first log a tester sent back had "esp_core_dump" and "panel ok" spliced
+// into the same word. The timestamp is there because the useful question about
+// a boot log is almost never what it says -- it is where it stopped, and how
+// long it sat there before it did.
 #if ARDUINO_USB_CDC_ON_BOOT
-#define TB_LOG(...)          \
-  do {                       \
+#define TB_OUT(...)              \
+  do {                           \
     Serial.printf(__VA_ARGS__);  \
     Serial0.printf(__VA_ARGS__); \
   } while (0)
 #else
-#define TB_LOG(...) Serial.printf(__VA_ARGS__)
+#define TB_OUT(...) Serial.printf(__VA_ARGS__)
 #endif
+#define TB_LOG(...)                          \
+  do {                                       \
+    TB_OUT("[tb %6lu] ", (unsigned long)millis()); \
+    TB_OUT(__VA_ARGS__);                     \
+  } while (0)
 
 uint32_t g_okDownSince = 0;
 
@@ -258,6 +271,19 @@ void setup() {
   Serial0.begin(115200);
 #endif
 
+  // A banner, so a console opened halfway through a session still says what is
+  // running. Everything after it is one line per stage, in the order they
+  // happen, so the log's last line is always the thing that did not finish.
+  delay(50);  // let the ROM's own boot chatter finish before writing over it
+  TB_OUT("\n");
+#ifdef TB_VERSION
+  TB_LOG("Toybox %s, built %s\n", TB_VERSION, TB_DATE);
+#else
+  TB_LOG("Toybox development build, %s %s\n", __DATE__, __TIME__);
+#endif
+  TB_LOG("reset reason %d, heap %u B, psram %u B\n", (int)esp_reset_reason(),
+         (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getPsramSize());
+
   pinMode(PIN_BTN_UP, INPUT_PULLUP);
   pinMode(PIN_BTN_DOWN, INPUT_PULLUP);
   pinMode(PIN_BTN_OK, INPUT_PULLUP);
@@ -268,6 +294,7 @@ void setup() {
   // on/off switch was set to before volume existed.
   buzzer::setLevel((buzzer::Level)prefs.getInt(
       "sound_lv", prefs.getBool("sound", true) ? (int)buzzer::Level::High : 0));
+  TB_LOG("settings loaded, sound level %d\n", (int)buzzer::level());
 
   if (!epd.begin()) {
     TB_LOG("EPD alloc failed\n");
@@ -320,6 +347,9 @@ void setup() {
   touch.begin();
   TB_LOG("touch: %s\n", touch.ok() ? "ok" : "NOT FOUND");
   sensors::begin();
+  TB_LOG("sensors: gauge %d rtc %d temp %d tilt %d\n", sensors::batteryPresent() ? 1 : 0,
+         sensors::clockPresent() ? 1 : 0, sensors::climatePresent() ? 1 : 0,
+         sensors::imuPresent() ? 1 : 0);
 
   // Full-coverage font packs, if any have been installed (see gfx.h). Loaded
   // before the first paint so a pinned Chinese note wakes up whole.
@@ -342,8 +372,10 @@ void setup() {
   lock::apply(prefs);
   lock::setInfoHook(fillLockInfo);
   nweb::setClockHook(setClockFromPhone);
+  TB_LOG("storage: %s\n", tfs::begin() ? "mounted" : "MOUNT FAILED");
 
   toybox.begin(stickyHost);
+  TB_LOG("apps ready\n");
 
   // Wait for the button that woke us to come back up, or the first loop would
   // read it as a fresh press and put the device straight back to sleep. Bounded,
@@ -400,15 +432,17 @@ void setup() {
   // usually the thing you came back to, but not everyone agrees, so it asks.
   char pinned[note::NAME_LEN + 1];
   if (note::getPinned(pinned) && lock::config().wake == lock::WAKE_NOTE) {
+    TB_LOG("opening the pinned note \"%s\"\n", pinned);
     g_pinnedMode = true;
     showPinned();
   } else {
+    TB_LOG("opening the hub\n");
     stickyHost.refresh(true);
   }
   // One note when setup finishes, so a board with a dead panel can still say it
   // got all the way here.
   buzzer::confirm();
-  TB_LOG("ready\n");
+  TB_LOG("ready -- %u B heap free\n", (unsigned)ESP.getFreeHeap());
 }
 
 void loop() {

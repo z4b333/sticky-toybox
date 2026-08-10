@@ -40,6 +40,10 @@ inline const char* built() {
 // Shown when the stored string is not the one this firmware carries: a new
 // device has nothing stored, and an updated one has the version before it.
 inline bool pending(Preferences& p) {
+  // isKey first: reading a key that is not there logs an NVS error, and on the
+  // one boot where this matters most -- the first -- it is guaranteed not to be
+  // there. A red line that means "this device is new" is a bad red line.
+  if (!p.isKey("welcome")) return true;
   char seen[40] = {};
   p.getString("welcome", seen, sizeof(seen));
   return strncmp(seen, version(), sizeof(seen) - 1) != 0;

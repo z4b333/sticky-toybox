@@ -93,6 +93,31 @@ check Seeed's own flashing notes for the Sticky.
 
 ## Step 1b — what a working boot looks like
 
+Every line the firmware prints is prefixed `[tb` and stamped with milliseconds
+since power-on, so it can be told apart from the ESP-IDF's own output on the
+same UART. A healthy first boot looks about like this:
+
+```
+[tb     52] Toybox v1.0.0-beta.3, built 10 Aug 2026
+[tb     53] reset reason 1, heap 298000 B, psram 0 B
+[tb     55] settings loaded, sound level 3
+[tb    210] panel: answered
+[tb   1980] panel: first paint sent
+[tb   2010] touch: ok
+[tb   2050] sensors: gauge 1 rtc 1 temp 1 tilt 1
+[tb   2060] font packs: 0 faces
+[tb   2210] storage: mounted
+[tb   2260] apps ready
+[tb   2280] welcome: showing the first-boot card, waiting for a tap (up to 120s)
+[tb   9120] welcome: dismissed (tapped after 6840ms)
+[tb  10900] opening the hub
+[tb  10900] ready -- 240000 B heap free
+```
+
+The last line printed is the stage that did not finish, which is the only
+question a boot log usually has to answer. A log that stops at `welcome:
+showing` is not stuck — it is waiting for you.
+
 The panel paints **TOYBOX / starting** within about two seconds of power-on,
 before touch, the sensors, the fonts or the buttons are asked for anything.
 Then it goes to the hub, or to the pinned note, and the buzzer gives one short

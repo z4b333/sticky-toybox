@@ -14,6 +14,12 @@ class Preferences {
  public:
   bool begin(const char*, bool) { return true; }
   void end() {}
+  // The real one logs an NVS error when a missing key is read, so callers ask
+  // this first. The mock has to answer the same question.
+  bool isKey(const char* k) {
+    return ints.count(k) || uints.count(k) || bools.count(k) || strs.count(k) ||
+           blobs.count(k);
+  }
   int32_t getInt(const char* k, int32_t d = 0) {
     auto it = ints.find(k);
     return it == ints.end() ? d : it->second;
