@@ -153,10 +153,19 @@
   <p class="ver" id="ver">checking which version is here&hellip;</p>
 
   <div class="install">
-    <esp-web-install-button manifest="manifest.json"></esp-web-install-button>
+    <!-- log-console opens the serial console as part of installing, rather than
+         leaving it behind a menu afterwards. The chip is in download mode while
+         it is being written and says nothing at all, so there is nothing to see
+         until it resets -- but that is exactly the moment worth catching: the
+         first boot log opens with the version that just landed, and the panel
+         line arrives a fifth of a second later. Opened by hand afterwards, the
+         first report back had already missed both. -->
+    <esp-web-install-button manifest="manifest.json" log-console></esp-web-install-button>
   </div>
   <p class="hint">Needs Chrome or Edge on a computer, and a USB-C data
-  cable. Erases the device.</p>
+  cable. Erases the device. The serial console opens by itself when the write
+  finishes, so the first boot is captured from its first line &mdash; that log
+  is the most useful thing to send if anything goes wrong.</p>
 
   <div class="steps">
     <h2>After installing</h2>
