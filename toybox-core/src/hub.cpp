@@ -22,25 +22,46 @@ static_assert(appvis::TOOLS == ticons::COUNT, "tool count out of step with appvi
 static_assert(NGROUPS == 3, "the dock draws exactly three folders");
 
 // --- the battery, small, with its number -------------------------------------
-void battery(ToolsCanvas& c, const ToolsHost& host, int right, int top, bool black) {
+// Drawn in two parts on the home screen, because the halo treatment that keeps
+// the frame readable erases the fill: the final white pass paints the bar over
+// its own black offsets, and a 99% battery comes out looking empty. So the
+// frame, nub, bolt and number take the halo, and the bar itself is laid on
+// afterwards as solid black inside a white rim -- readable over a white home,
+// a black mountain, and everything between.
+constexpr int BATT_W = 36, BATT_H = 18;
+
+void batteryFrame(ToolsCanvas& c, const ToolsHost& host, int right, int top, bool black) {
   const int pct = host.batteryPercent();
   if (pct < 0) return;  // no gauge answered: an empty outline would be a lie
-  const int w = 36, h = 18;
-  const int x = right - 4 - w;  // 4 px of nub
-  c.drawRect(x, top, w, h, 2, black);
-  c.fillRect(x + w, top + 5, 4, 8, black);
-  const int clamped = pct < 0 ? 0 : pct > 100 ? 100 : pct;
-  const int fill = ((w - 8) * clamped) / 100;
-  if (fill > 0) c.fillRect(x + 4, top + 4, fill, h - 8, black);
+  const int x = right - 4 - BATT_W;  // 4 px of nub
+  c.drawRect(x, top, BATT_W, BATT_H, 2, black);
+  c.fillRect(x + BATT_W, top + 5, 4, 8, black);
   if (host.charging()) {
-    decor::triangle(c, x + w / 2 + 3, top - 2, x + w / 2 - 4, top + h / 2 + 1,
-                    x + w / 2 + 2, top + h / 2 + 1, black);
-    decor::triangle(c, x + w / 2 - 3, top + h + 2, x + w / 2 + 4, top + h / 2 - 1,
-                    x + w / 2 - 2, top + h / 2 - 1, black);
+    decor::triangle(c, x + BATT_W / 2 + 3, top - 2, x + BATT_W / 2 - 4, top + BATT_H / 2 + 1,
+                    x + BATT_W / 2 + 2, top + BATT_H / 2 + 1, black);
+    decor::triangle(c, x + BATT_W / 2 - 3, top + BATT_H + 2, x + BATT_W / 2 + 4,
+                    top + BATT_H / 2 - 1, x + BATT_W / 2 - 2, top + BATT_H / 2 - 1, black);
   }
   char buf[8];
   snprintf(buf, sizeof(buf), "%d%%", pct);
   c.text(x - 8 - c.textWidth(buf, TS_MED), top - 3, buf, TS_MED, black);
+}
+
+void batteryFill(ToolsCanvas& c, const ToolsHost& host, int right, int top) {
+  const int pct = host.batteryPercent();
+  if (pct < 0) return;
+  const int x = right - 4 - BATT_W;
+  const int clamped = pct > 100 ? 100 : pct;
+  const int fill = ((BATT_W - 8) * clamped) / 100;
+  if (fill <= 0) return;
+  c.fillRect(x + 3, top + 3, fill + 2, BATT_H - 6, false);  // the white rim
+  c.fillRect(x + 4, top + 4, fill, BATT_H - 8, true);       // the bar
+}
+
+// The two halves together, plain, for the harness to measure.
+void battery(ToolsCanvas& c, const ToolsHost& host, int right, int top, bool black) {
+  batteryFrame(c, host, right, top, black);
+  if (black) batteryFill(c, host, right, top);
 }
 
 // --- the folder pages --------------------------------------------------------
@@ -152,7 +173,10 @@ void HubScreen::render(ToolsHost& host, ToolsCanvas& c) {
   hubmarks::haloed([&](int dx, int dy, bool black) {
     c.textTracked(18 + dx, 10 + dy, "TOYBOX", TS_LARGE, black, true, 3);
   });
-  hubmarks::haloed([&](int dx, int dy, bool black) { battery(c, host, SCREEN_W - 14 + dx, 16 + dy, black); });
+  hubmarks::haloed([&](int dx, int dy, bool black) {
+    batteryFrame(c, host, SCREEN_W - 14 + dx, 16 + dy, black);
+  });
+  batteryFill(c, host, SCREEN_W - 14, 16);
   hubmarks::haloed([&](int dx, int dy, bool black) {
     decor::gear(c, HINT_X + dx, HINT_GEAR_Y + dy, HINT_R, 8, black);
   });

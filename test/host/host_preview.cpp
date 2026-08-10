@@ -630,6 +630,7 @@ int main() {
     }
     sensors::hostSetBattery(89, false);
     toybox.goHub();
+    toybox.hostHub().goHome();
     g_dumpEnabled = true;
     setScreen("hub_battery");
     epd.clear();
@@ -644,6 +645,7 @@ int main() {
 
   setScreen("hub_hidden");
   toybox.goHub();
+  toybox.hostHub().goHome();
   checkHubRouting("four hidden");
 
   // Erasing scores and restoring the rules cards, checked rather than drawn --
