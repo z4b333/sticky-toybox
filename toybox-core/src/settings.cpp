@@ -15,7 +15,7 @@ namespace {
 // full-width 60 px button with a confirm.
 constexpr int COL_X[2] = {16, 248};
 constexpr int COL_W = 216;
-constexpr int ROW_H = 52, BOX = 28;
+constexpr int ROW_H = 46, BOX = 28;
 constexpr int HEAD_H = 26, GROUP_GAP = 14;
 constexpr int LIST_TOP = 92;
 
@@ -85,9 +85,82 @@ bool SettingsScreen::back() {
   return true;
 }
 
+// --- the wallpaper page -------------------------------------------------------
+// What is behind the home screen, and what the SD card offers to put there.
+// The list is .tbi files -- pre-converted on a PC with tools/make_tbi.py --
+// and tapping one copies it into the device, so the card can come back out.
+void SettingsScreen::enterWall(ToolsHost& host) {
+  _wallN = (int8_t)host.sdWallpapers(_wallNames, setui::WALL_MAX);
+}
+
+void SettingsScreen::renderWall(ToolsHost& host, ToolsCanvas& c) {
+  (void)host;
+  using namespace setui;
+  drawTopBar(c, "WALLPAPER");
+
+  const TRect rm = wallRemoveRect();
+  if (wallimg::have()) {
+    c.button(rm.x, rm.y, rm.w, rm.h, "REMOVE THE CURRENT ONE", false, TS_MED);
+  } else {
+    c.text(rm.x + 4, rm.y + 12, "none set - the home screen is plain", TS_MED, true);
+  }
+
+  c.textTracked(16, WALL_Y0 - 40, "ON THE SD CARD", TS_MED, true, false, 1);
+  c.fillRect(16, WALL_Y0 - 14, SCREEN_W - 32, 1, true);
+
+  if (_wallN < 0) {
+    c.textCentered(SCREEN_W / 2, 320, "no card found", TS_LARGE, true);
+    c.textCentered(SCREEN_W / 2, 364, "is one in the slot?", TS_MED, true);
+  } else if (_wallN == 0) {
+    c.textCentered(SCREEN_W / 2, 320, "no wallpapers on the card", TS_LARGE, true);
+    c.textCentered(SCREEN_W / 2, 364, "make .tbi files with tools/make_tbi.py", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, 392, "and put them in /wallpapers", TS_SMALL, true);
+  } else {
+    for (int i = 0; i < _wallN; i++) {
+      const TRect r = wallRect(i);
+      c.button(r.x, r.y, r.w, r.h, _wallNames[i], false, TS_MED);
+    }
+  }
+
+  c.textCentered(SCREEN_W / 2, 776,
+                 _note ? _note : "a chosen picture is copied in, so the card can come out",
+                 TS_SMALL, true);
+}
+
+bool SettingsScreen::tapWall(ToolsHost& host, int x, int y) {
+  using namespace setui;
+  _note = nullptr;
+  if (wallimg::have() && wallRemoveRect().hit(x, y)) {
+    wallimg::remove();
+    _note = "removed - the home screen is plain again";
+    host.beep(2);
+    return true;
+  }
+  for (int i = 0; i < _wallN; i++) {
+    if (!wallRect(i).hit(x, y)) continue;
+    if (host.sdWallpaperTake(_wallNames[i])) {
+      _note = "wallpaper set";
+      host.beep(1);
+    } else {
+      _note = "could not read it from the card";
+      host.beep(2);
+    }
+    // The card had the bus and the panel was re-initialised on the way out, so
+    // a differential repaint would difference against nothing. Refresh in full
+    // here and tell the shell not to repaint again.
+    host.refresh(true);
+    return false;
+  }
+  return false;
+}
+
 void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
   if (_page == 1) {
     renderLock(host, c);
+    return;
+  }
+  if (_page == 2) {
+    renderWall(host, c);
     return;
   }
   drawTopBar(c, "SETTINGS");
@@ -109,9 +182,11 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
 
   using namespace setui;
   const TRect s0 = actionRect(ACT_SOUND), s1 = actionRect(ACT_LOCK);
+  const TRect sw = actionRect(ACT_WALL);
   const TRect s2 = actionRect(ACT_CARDS), s3 = actionRect(ACT_RESET);
   c.button(s0.x, s0.y, s0.w, s0.h, soundLabel(host), false, TS_MED);
   c.button(s1.x, s1.y, s1.w, s1.h, "LOCK SCREEN...", false, TS_MED);
+  c.button(sw.x, sw.y, sw.w, sw.h, "WALLPAPER...", false, TS_MED);
   c.button(s2.x, s2.y, s2.w, s2.h, "SHOW HOW TO PLAY AGAIN", false, TS_MED);
   c.button(s3.x, s3.y, s3.w, s3.h,
            _armed ? "TAP AGAIN TO ERASE SCORES" : "RESET STATS AND TALLIES", _armed, TS_MED);
@@ -277,6 +352,7 @@ bool SettingsScreen::tapLock(ToolsHost& host, int x, int y) {
 
 bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
   if (_page == 1) return tapLock(host, x, y);
+  if (_page == 2) return tapWall(host, x, y);
 
   // Any tap that is not the reset takes the confirm back down, so an armed
   // button never survives long enough to be pressed by accident later.
@@ -290,6 +366,17 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
     _page = 1;
     host.beep(1);
     return true;
+  }
+
+  if (actionRect(ACT_WALL).hit(x, y)) {
+    host.beep(1);
+    enterWall(host);  // powers the card once; the page then repaints from RAM
+    _page = 2;
+    // The list read borrowed the display's bus and re-initialised the panel,
+    // so the repaint has to be full. Done here rather than by the shell,
+    // which would have done a partial.
+    host.refresh(true);
+    return false;
   }
 
   if (actionRect(ACT_RESET).hit(x, y)) {

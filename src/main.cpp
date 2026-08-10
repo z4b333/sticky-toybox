@@ -576,6 +576,20 @@ void loop() {
     toybox.onSwipe(ev.dx, ev.dy);
   if (toybox.wantsTick()) toybox.tick();
 
+  // The home screen's clock, kept honest with a partial refresh when the
+  // minute turns. Only while home is actually showing: apps own their screens,
+  // and a sleeping panel is the lock screen's business, which has no clock for
+  // exactly this reason. Costs one 0.3 s partial per minute, at most five
+  // before idle sleep.
+  if (toybox.atHubHome()) {
+    static int shownMinute = -1;
+    sensors::Clock ck;
+    if (sensors::readClock(ck)) {
+      if (shownMinute >= 0 && ck.minute != shownMinute) stickyHost.refresh(false);
+      shownMinute = ck.minute;
+    }
+  }
+
   handleSideButtons();
   handlePowerButton();
   handleLowBattery();

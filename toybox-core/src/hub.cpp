@@ -64,18 +64,22 @@ void battery(ToolsCanvas& c, const ToolsHost& host, int right, int top, bool bla
   if (black) batteryFill(c, host, right, top);
 }
 
-// --- the folder pages --------------------------------------------------------
+// --- the drawer pages --------------------------------------------------------
 // One walk of the layout, shared by drawing and by hit-testing, so the two can
-// never disagree about where a tile is. Hidden apps are dropped here and the
-// rest close up; the block of rows is centred in the space the page has.
+// never disagree about where a cell is. Hidden apps are dropped and the rest
+// close up; when some are hidden, a "+ add" ghost cell follows the last app --
+// the way back to them -- and it walks like any other cell, carrying ADD_IDX.
+constexpr uint8_t ADD_IDX = 255;
+
 //   f(item, cx, cy, col, rowTop, rowBottom)
 template <typename F>
 void walkFolder(int folder, F f) {
   const Group& grp = GROUPS[folder];
-  Item vis[6];
+  Item vis[7];
   int n = 0;
   for (int i = 0; i < grp.n; i++)
     if (appvis::visible(grp.items[i].game, grp.items[i].idx)) vis[n++] = grp.items[i];
+  if (n < grp.n) vis[n++] = Item{false, ADD_IDX};
   if (n == 0) return;
 
   const int rows = (n + 1) / 2;
@@ -92,6 +96,24 @@ void walkFolder(int folder, F f) {
   }
 }
 
+// Sentence case, the design's register: "Wordle", "Flashcards". A name of one
+// or two letters (XO) is an initialism and keeps its capitals; digits pass
+// through untouched.
+void sentence(char* out, size_t cap, const char* in) {
+  const size_t len = strlen(in);
+  if (len <= 2) {
+    strncpy(out, in, cap - 1);
+    out[cap - 1] = 0;
+    return;
+  }
+  size_t i = 0;
+  for (; in[i] && i < cap - 1; i++) {
+    const char ch = in[i];
+    out[i] = (i > 0 && ch >= 'A' && ch <= 'Z') ? (char)(ch + 32) : ch;
+  }
+  out[i] = 0;
+}
+
 int visibleCount(int folder) {
   const Group& grp = GROUPS[folder];
   int n = 0;
@@ -104,34 +126,50 @@ void renderFolder(ToolsHost& host, ToolsCanvas& c, int folder) {
   (void)host;
   const Group& grp = GROUPS[folder];
 
-  // The header: a chevron home on the left, the folder's name in the middle.
-  const int cy = 26;
-  c.drawLine(22, cy, 32, cy - 9, 3, true);
-  c.drawLine(22, cy, 32, cy + 9, 3, true);
-  c.text(40, 14, "HOME", TS_MED, true);
-  c.textTrackedCentered(SCREEN_W / 2, 10, grp.name, TS_LARGE, true, true, 2);
-  c.fillRect(16, 56, SCREEN_W - 32, 2, true);
-
+  // The header, per the design: a back arrow, the count small in the far
+  // corner, and the drawer's name big, left-aligned, in sentence case.
+  c.drawLine(24, 34, 52, 34, 3, true);
+  c.drawLine(24, 34, 36, 24, 3, true);
+  c.drawLine(24, 34, 36, 44, 3, true);
   const int n = visibleCount(folder);
-  if (n == 0) {
-    c.textTrackedCentered(SCREEN_W / 2, 360, "everything here is hidden", TS_LARGE, true, false, 1);
-    c.textCentered(SCREEN_W / 2, 404, "bring apps back in settings", TS_MED, true);
-    return;
-  }
+  char buf[16];
+  snprintf(buf, sizeof(buf), "%d apps", n);
+  c.text(SCREEN_W - 16 - c.textWidth(buf, TS_SMALL), 24, buf, TS_SMALL, true);
+  char title[16];
+  sentence(title, sizeof(title), grp.name);
+  c.text(24, 68, title, TS_HUGE, true, true);
+  c.fillRect(16, 140, SCREEN_W - 32, 2, true);
 
-  walkFolder(folder, [&c](const Item& it, int cx, int cy2, int, int, int) {
+  // Where the block of cells starts and ends, for the hairline dividers. The
+  // walk is the authority; this only records what it did.
+  int top = SCREEN_H, bottom = 0, cells = 0;
+  walkFolder(folder, [&](const Item& it, int cx, int cy2, int, int rowTop, int rowBottom) {
+    cells++;
+    if (rowTop < top) top = rowTop;
+    if (rowBottom > bottom) bottom = rowBottom;
+    if (it.idx == ADD_IDX && !it.game) {
+      c.textCentered(cx, cy2 + TILE / 2 - 14, "+ add", TS_MED, true);
+      return;
+    }
+    // A touch smaller and lower than the cell's midpoint: the timer's crown
+    // and the ship's mast reach above their nominal box, and the hairline
+    // divider runs right along the row top.
     if (it.game)
-      gicons::draw(c, it.idx, cx, cy2, TILE);
+      gicons::draw(c, it.idx, cx, cy2 + 8, TILE - 8);
     else
-      ticons::draw(c, it.idx, cx, cy2, TILE);
-    const char* name = it.game ? gicons::NAMES[it.idx] : ticons::NAMES[it.idx];
-    const TSize sz = c.textWidth(name, TS_MED) <= SCREEN_W / 2 - 24 ? TS_MED : TS_SMALL;
-    c.textCentered(cx, cy2 + TILE / 2 + 18, name, sz, true);
+      ticons::draw(c, it.idx, cx, cy2 + 8, TILE - 8);
+    char label[24];
+    sentence(label, sizeof(label), it.game ? gicons::NAMES[it.idx] : ticons::NAMES[it.idx]);
+    const TSize sz = c.textWidth(label, TS_MED) <= SCREEN_W / 2 - 24 ? TS_MED : TS_SMALL;
+    c.textCentered(cx, cy2 + TILE / 2 + 26, label, sz, true);
   });
+  if (cells == 0) return;
 
-  char buf[48];
-  snprintf(buf, sizeof(buf), "%d apps   tap HOME to go back", n);
-  c.text(16, 768, buf, TS_SMALL, true);
+  // Hairline dividers between cells, not boxes around them.
+  const int rows = (cells + 1) / 2;
+  if (cells > 1) c.fillRect(SCREEN_W / 2, top, 1, bottom - top, true);
+  for (int r = 1; r < rows; r++)
+    c.fillRect(16, top + r * ROW_STEP, SCREEN_W - 32, 1, true);
 }
 }  // namespace
 
@@ -157,26 +195,59 @@ void HubScreen::render(ToolsHost& host, ToolsCanvas& c) {
     // A blank home says how to make it not blank. Small, centred, and gone the
     // moment a picture arrives.
     c.textCentered(SCREEN_W / 2, 380, "this screen can show a picture", TS_MED, true);
-    c.textCentered(SCREEN_W / 2, 412, "settings > lock screen > send picture", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, 412, "settings > wallpaper", TS_SMALL, true);
   }
 
-  // The dock: the one part of home that answers touch.
-  c.fillRect(0, DOCK_Y, SCREEN_W, DOCK_H, false);
-  c.fillRect(0, DOCK_Y, SCREEN_W, 3, true);
+  // The dock: a hairline and three thin marks, the one part of home that
+  // answers touch. No bar behind it -- the design took the boxes away -- so
+  // everything on it is haloed against the picture.
+  hubmarks::haloed([&](int dx, int dy, bool black) {
+    c.fillRect(0, DOCK_Y + dy, SCREEN_W, 2, black);
+    (void)dx;
+  });
   for (int f = 0; f < NGROUPS; f++) {
     const int cx = (SCREEN_W / 6) + f * (SCREEN_W / 3);
-    hubmarks::folder(c, f, cx, DOCK_Y + DOCK_H / 2 + 1, DOCK_ICON, true);
+    hubmarks::haloed([&](int dx, int dy, bool black) {
+      hubmarks::folder(c, f, cx + dx, DOCK_Y + DOCK_H / 2 + 3 + dy, DOCK_ICON, black);
+    });
   }
 
-  // The overlays. On a bare white background the white strokes vanish and the
-  // black edge carries the shape alone, which still reads.
-  hubmarks::haloed([&](int dx, int dy, bool black) {
-    c.textTracked(18 + dx, 10 + dy, "TOYBOX", TS_LARGE, black, true, 3);
-  });
+  // The wordmark: each letter in its own small plate, the T and B plates
+  // filled. Plates carry their own background, so no halo is needed.
+  {
+    static const char* L[6] = {"T", "O", "Y", "B", "O", "X"};
+    static const bool FILLED[6] = {true, false, false, true, false, false};
+    for (int i = 0; i < 6; i++) {
+      const int bx = 16 + i * 30;
+      c.fillRect(bx, 14, 26, 26, FILLED[i]);
+      if (!FILLED[i]) c.drawRect(bx, 14, 26, 26, 2, true);
+      c.textInBox(bx, 14, 26, 26, L[i], TS_SMALL, !FILLED[i], true);
+    }
+  }
+
+  // Clock, percentage, cell, right-aligned in that order. The clock only
+  // exists when an RTC has been set; the loop ticks it with a partial refresh
+  // once a minute while home is showing.
   hubmarks::haloed([&](int dx, int dy, bool black) {
     batteryFrame(c, host, SCREEN_W - 14 + dx, 16 + dy, black);
   });
   batteryFill(c, host, SCREEN_W - 14, 16);
+  {
+    int hh = 0, mm = 0;
+    if (host.clockHHMM(hh, mm)) {
+      char clk[8];
+      snprintf(clk, sizeof(clk), "%02d:%02d", hh, mm);
+      int pctW = 0;
+      if (host.batteryPercent() >= 0) {
+        char pct[8];
+        snprintf(pct, sizeof(pct), "%d%%", host.batteryPercent());
+        pctW = c.textWidth(pct, TS_MED) + 8;
+      }
+      const int x = SCREEN_W - 14 - 4 - 36 - pctW - 12 - c.textWidth(clk, TS_MED);
+      hubmarks::haloed(
+          [&](int dx, int dy, bool black) { c.text(x + dx, 13 + dy, clk, TS_MED, black); });
+    }
+  }
   hubmarks::haloed([&](int dx, int dy, bool black) {
     decor::gear(c, HINT_X + dx, HINT_GEAR_Y + dy, HINT_R, 8, black);
   });
@@ -216,6 +287,10 @@ HubScreen::Tap HubScreen::hit(const ToolsHost& host, int x, int y) const {
       got = it;
     });
     if (!found) return t;
+    if (!got.game && got.idx == ADD_IDX) {
+      t.kind = Tap::Settings;  // the "+ add" cell: hidden apps live in settings
+      return t;
+    }
     t.kind = Tap::App;
     t.game = got.game;
     t.idx = got.idx;

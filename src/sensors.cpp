@@ -103,12 +103,23 @@ bool imuPresent() { return g_imu; }
 int batteryPercent() { return g_hostBattery; }
 int batteryMillivolts() { return -1; }
 bool charging() { return g_hostCharging; }
+static bool g_hostClockSet = false;
 void hostSetBattery(int pct, bool chg) {
   g_hostBattery = pct;
   g_hostCharging = chg;
 }
-bool clockValid() { return false; }
-bool readClock(Clock&) { return false; }
+bool clockValid() { return g_hostClockSet; }
+bool readClock(Clock& out) {
+  if (!g_hostClockSet) return false;
+  out = Clock{};
+  out.hour = 9;
+  out.minute = 41;   // the hour every product shot keeps
+  out.day = 10;
+  out.month = 8;
+  out.year = 2026;
+  return true;
+}
+void hostSetClock(bool on) { g_hostClockSet = on; }
 bool setClock(const Clock&) { return false; }
 bool setClockFromEpochMs(int64_t) { return false; }
 bool readClimate(int&, int&) { return false; }

@@ -25,11 +25,11 @@ inline constexpr int HINT_RESUME_Y = 282;
 inline constexpr int HINT_R = 13;  // 26 px across: the smallest size at which
                                    // the gear keeps its hole
 
-// Folder pages: two columns of big tiles under a titled header.
-inline constexpr int FOLDER_TOP = 80;      // below the header rule
-inline constexpr int FOLDER_BOTTOM = 730;  // above the footer note
+// Drawer pages: two columns of hairline-divided cells under a big title.
+inline constexpr int FOLDER_TOP = 164;     // below the title and its rule
+inline constexpr int FOLDER_BOTTOM = 796;
 inline constexpr int TILE = 104;           // icon size
-inline constexpr int ROW_STEP = 196;
+inline constexpr int ROW_STEP = 196;       // >= 190 px cells, per the design
 }  // namespace hubui
 
 #ifdef TOYBOX_HOST
@@ -42,6 +42,8 @@ class HubScreen {
  public:
   struct Tap {
     enum Kind : uint8_t { None, App, Folder, Home, Settings, Exit } kind = None;
+    // Settings is also the answer for the drawers' "+ add" cell, which exists
+    // to bring hidden apps back.
     bool game = false;
     int idx = 0;  // app index for App, folder index for Folder
   };

@@ -41,6 +41,9 @@ struct Clock {
 bool clockPresent();
 bool clockValid();               // false until it has been set at least once
 bool readClock(Clock& out);
+#ifdef TOYBOX_HOST
+void hostSetClock(bool on);
+#endif
 bool setClock(const Clock& c);   // also marks it valid
 // Convenience for the pairing pages: milliseconds since the Unix epoch,
 // already shifted to local time by the phone.

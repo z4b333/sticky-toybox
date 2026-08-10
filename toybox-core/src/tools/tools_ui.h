@@ -201,6 +201,32 @@ class ToolsHost {
   virtual int soundLevel() const { return soundOn() ? 3 : 0; }
   virtual void setSoundLevel(int lv) { setSoundOn(lv > 0); }
   virtual int soundLevels() const { return 2; }
+
+  // The wall clock, for the hub's corner. False when there is no RTC or it has
+  // never been set -- the hub then simply draws no time, which is honest.
+  virtual bool clockHHMM(int& hour, int& minute) const {
+    (void)hour;
+    (void)minute;
+    return false;
+  }
+
+  // Wallpapers on the SD card, for the settings page. Fills names (bare file
+  // names, NUL-terminated, truncated to fit) and returns how many were found;
+  // -1 means no card answered. A host with no card slot keeps the default and
+  // the settings row explains itself.
+  static constexpr int SD_NAME_LEN = 40;
+  virtual int sdWallpapers(char names[][SD_NAME_LEN], int max) {
+    (void)names;
+    (void)max;
+    return -1;
+  }
+  // Copy the named wallpaper from the card into the device, so it survives the
+  // card being removed. True when the file arrived whole and valid.
+  virtual bool sdWallpaperTake(const char* name) {
+    (void)name;
+    return false;
+  }
+
   // Y coordinate where a tool's own content may start (below the top bar).
   virtual int contentTop() const = 0;
 };

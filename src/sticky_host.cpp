@@ -1,5 +1,8 @@
 #include "sticky_host.h"
 
+#include "sdcard.h"
+#include "tools/lock_image.h"
+
 StickyHost stickyHost;
 
 extern Preferences prefs;  // opened in main.cpp
@@ -27,4 +30,13 @@ void StickyHost::setSoundLevel(int lv) {
   // The old on/off key stays written so a downgrade to a build that only knows
   // about the switch still comes up the way the device is set.
   ::prefs.putBool("sound", lv > 0);
+}
+
+int StickyHost::sdWallpapers(char names[][SD_NAME_LEN], int max) {
+  static_assert(SD_NAME_LEN == 40, "sdcard::listTbi fills 40-byte names");
+  return sdcard::listTbi(names, max);
+}
+
+bool StickyHost::sdWallpaperTake(const char* name) {
+  return sdcard::takeTbi(name, wallimg::PATH);
 }

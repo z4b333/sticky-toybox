@@ -277,10 +277,14 @@ static void checkHubRouting(const char* label) {
       printf("HUB ROUTING FAIL: dock corner of third %d missed\n", gi);
       abort();
     }
-    if (G[gi].n == 0) continue;
+    // When apps are hidden the drawer grows a "+ add" ghost cell after the
+    // last app, and it takes part in the geometry like any other cell.
+    const bool hasAdd = G[gi].n < ALL[gi].n;
+    const int cells = G[gi].n + (hasAdd ? 1 : 0);
+    if (cells == 0) continue;
 
-    // The folder's grid, mirrored from hub.cpp: two columns, centred block.
-    const int rows = (G[gi].n + 1) / 2;
+    // The drawer's grid, mirrored from hub.cpp: two columns, centred block.
+    const int rows = (cells + 1) / 2;
     int y0 = hubui::FOLDER_TOP +
              ((hubui::FOLDER_BOTTOM - hubui::FOLDER_TOP) - rows * hubui::ROW_STEP) / 2;
     if (y0 < hubui::FOLDER_TOP) y0 = hubui::FOLDER_TOP;
@@ -296,8 +300,24 @@ static void checkHubRouting(const char* label) {
       routesTo(col == 0 ? EPD_W / 2 - 2 : EPD_W - 2, rowTop + hubui::TILE / 2, w, "right edge",
                gi, ii);
     }
+    if (hasAdd) {
+      // The ghost cell itself: it must open settings, and leaving settings
+      // must come back to the hub with the drawer still selected.
+      const int col = G[gi].n % 2, row = G[gi].n / 2;
+      toybox.onTap(EPD_W / 4 + col * (EPD_W / 2),
+                   y0 + row * hubui::ROW_STEP + hubui::TILE / 2);
+      if (!toybox.hostInSettings()) {
+        printf("HUB ROUTING FAIL: + add in drawer %d did not open settings\n", gi);
+        abort();
+      }
+      toybox.onTap(50, 26);  // settings back: out to the hub
+      if (toybox.hostHub().folder() != gi) {
+        printf("HUB ROUTING FAIL: leaving settings lost drawer %d\n", gi);
+        abort();
+      }
+    }
     // An odd count leaves the last right-hand cell empty; nothing may open.
-    if (G[gi].n % 2 == 1) {
+    if (cells % 2 == 1) {
       toybox.onTap(3 * EPD_W / 4, y0 + (rows - 1) * hubui::ROW_STEP + hubui::TILE / 2);
       if (toybox.hostInApp() || toybox.hostInSettings()) {
         printf("HUB ROUTING FAIL: empty cell in folder %d opened something\n", gi);
@@ -394,6 +414,7 @@ int main() {
     epd.displayFull();
   }
 
+  sensors::hostSetClock(true);  // 09:41, the hour every product shot keeps
   setScreen("hub");
   toybox.goHub();
 
@@ -490,8 +511,10 @@ int main() {
   // --- settings ------------------------------------------------------------
   // Row geometry mirrors settings.cpp: two columns at x 16 and 248, list top
   // 92, a 26 px heading over each group, 52 px rows.
+  // Row geometry mirrors settings.cpp: 46 px rows since the wallpaper action
+  // arrived and the whole list tightened to make room for it.
   auto setRow = [](int col, int headTop, int i) {
-    return std::pair<int, int>{col ? 330 : 100, headTop + 26 + i * 52 + 26};
+    return std::pair<int, int>{col ? 330 : 100, headTop + 26 + i * 46 + 23};
   };
   setScreen("settings");
   toybox.openSettings();
@@ -499,7 +522,7 @@ int main() {
   // Hide four apps through the screen itself, so the hub below reflows around
   // exactly what a finger would have hidden.
   g_dumpEnabled = false;
-  for (auto rc : {setRow(0, 92, 0), setRow(0, 92, 2), setRow(1, 92, 1), setRow(1, 340, 2)})
+  for (auto rc : {setRow(0, 92, 0), setRow(0, 92, 2), setRow(1, 92, 1), setRow(1, 316, 2)})
     toybox.onTap(rc.first, rc.second);
   // Sound steps down a level on each tap and wraps at the bottom, so tapping it
   // once from the top has to land on the level below the top, and tapping it
@@ -590,6 +613,48 @@ int main() {
     }
     g_dumpEnabled = true;
     printf("lock screen ok (%d rows cycle, back goes up one page)\n", setui::LR_COUNT);
+  }
+
+  // --- the wallpaper page ---------------------------------------------------
+  // Settings > WALLPAPER lists the card's .tbi files (the host build invents
+  // two), copying one in must leave a valid wallpaper on the device, and
+  // REMOVE must take it away again.
+  {
+    g_dumpEnabled = false;
+    toybox.goHub();
+    toybox.hostHub().goHome();  // the hold that opens settings only fires here
+    toybox.openSettings();
+    g_dumpEnabled = true;
+    setScreen("settings_wallpaper");
+    tapRect(setui::actionRect(setui::ACT_WALL));
+    g_dumpEnabled = false;
+    if (wallimg::have()) {
+      printf("WALLPAPER FAIL: a wallpaper existed before one was chosen\n");
+      abort();
+    }
+    tapRect(setui::wallRect(0));  // "mountains.tbi"
+    if (!wallimg::have()) {
+      printf("WALLPAPER FAIL: choosing a file did not store a wallpaper\n");
+      abort();
+    }
+    // The chosen picture must actually reach the home screen.
+    toybox.onTap(BACK_W / 2, TOPBAR_H / 2);  // out of the wallpaper page
+    toybox.onTap(BACK_W / 2, TOPBAR_H / 2);  // out of settings
+    if (!toybox.atHubHome()) {
+      printf("WALLPAPER FAIL: backing out of settings did not land home\n");
+      abort();
+    }
+    toybox.openSettings();
+    tapRect(setui::actionRect(setui::ACT_WALL));
+    tapRect(setui::wallRemoveRect());
+    if (wallimg::have()) {
+      printf("WALLPAPER FAIL: REMOVE left the wallpaper behind\n");
+      abort();
+    }
+    toybox.onTap(BACK_W / 2, TOPBAR_H / 2);
+    toybox.onTap(BACK_W / 2, TOPBAR_H / 2);
+    g_dumpEnabled = true;
+    printf("wallpaper page ok (list, choose, remove, home shows it)\n");
   }
 
   // The battery icon, which had never been rendered here at all: it is drawn

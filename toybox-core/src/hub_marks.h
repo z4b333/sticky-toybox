@@ -24,38 +24,40 @@ inline void haloed(F draw) {
   draw(0, 0, false);
 }
 
-// A joystick: flat base, stick, ball. Simpler than a gamepad, which turns to
-// mush below about 60 px.
+// The dock marks follow the interface's "minimal pass": thin strokes, no
+// filled bodies beyond a pip or a ball, the least ink that still names the
+// folder.
+
+// A joystick: ball, stick, flat base line.
 inline void play(ToolsCanvas& c, int cx, int cy, int s, bool black) {
-  tdraw::roundRect(c, cx - (s * 46) / 100, cy + (s * 14) / 100, (s * 92) / 100,
-                   (s * 30) / 100, s / 10, 3, black);
-  c.drawLine(cx, cy + (s * 20) / 100, cx, cy - (s * 18) / 100, 5, black);
-  c.fillCircle(cx, cy - (s * 30) / 100, (s * 21) / 100, black);
+  c.fillCircle(cx, cy - (s * 26) / 100, (s * 17) / 100, black);
+  c.drawLine(cx, cy - (s * 12) / 100, cx, cy + (s * 26) / 100, 3, black);
+  c.drawLine(cx - (s * 30) / 100, cy + (s * 28) / 100, cx + (s * 30) / 100,
+             cy + (s * 28) / 100, 3, black);
 }
 
-// A die showing five. Fat pips: at this size thin ones close up.
+// A die showing five, thin-walled.
 inline void decide(ToolsCanvas& c, int cx, int cy, int s, bool black) {
-  const int r = (s * 44) / 100;
-  tdraw::roundRect(c, cx - r, cy - r, 2 * r, 2 * r, (s * 14) / 100, 4, black);
-  static constexpr int8_t P[][2] = {{-23, -23}, {23, -23}, {0, 0}, {-23, 23}, {23, 23}};
+  const int r = (s * 42) / 100;
+  tdraw::roundRect(c, cx - r, cy - r, 2 * r, 2 * r, (s * 14) / 100, 2, black);
+  static constexpr int8_t P[][2] = {{-20, -20}, {20, -20}, {0, 0}, {-20, 20}, {20, 20}};
   for (const auto& p : P)
-    c.fillCircle(cx + (p[0] * s) / 100, cy + (p[1] * s) / 100, (s * 8) / 100, black);
+    c.fillCircle(cx + (p[0] * s) / 100, cy + (p[1] * s) / 100, (s * 7) / 100, black);
 }
 
-// An open book: spine down the middle, a couple of lines on each page.
+// An open book: two thin pages either side of a spine gap, a line of text on
+// each.
 inline void study(ToolsCanvas& c, int cx, int cy, int s, bool black) {
-  const int w = (s * 46) / 100, h = (s * 34) / 100;
-  c.drawLine(cx, cy - h, cx, cy + h, 4, black);
+  const int w = (s * 36) / 100, h = (s * 42) / 100, gap = (s * 6) / 100;
   for (int sgn = -1; sgn <= 1; sgn += 2) {
-    const int ox = cx + sgn * w;
-    c.drawLine(cx, cy - h, ox, cy - (h * 72) / 100, 2, black);
-    c.drawLine(ox, cy - (h * 72) / 100, ox, cy + h, 2, black);
-    c.drawLine(ox, cy + h, cx, cy + (h * 86) / 100, 2, black);
-    for (int i = 0; i < 2; i++) {
-      const int yy = cy - (h * 28) / 100 + (i * h * 46) / 100;
-      c.drawLine(cx + (sgn * w * 28) / 100, yy, cx + (sgn * w * 80) / 100, yy, 2, black);
-    }
+    const int x0 = sgn < 0 ? cx - gap - w : cx + gap;
+    c.drawRect(x0, cy - h / 2 - (s * 4) / 100, w, h, 2, black);
+    c.drawLine(x0 + (w * 20) / 100, cy - (s * 8) / 100, x0 + (w * 80) / 100,
+               cy - (s * 8) / 100, 2, black);
+    c.drawLine(x0 + (w * 20) / 100, cy + (s * 2) / 100, x0 + (w * 80) / 100,
+               cy + (s * 2) / 100, 2, black);
   }
+  c.drawLine(cx, cy - h / 2 - (s * 4) / 100, cx, cy + h / 2 - (s * 4) / 100, 2, black);
 }
 
 inline void folder(ToolsCanvas& c, int f, int cx, int cy, int s, bool black) {

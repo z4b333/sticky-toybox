@@ -31,4 +31,15 @@ struct Report {
 // the screen".
 Report probe();
 
+// Wallpapers. Pre-converted 480x800 .tbi files, made on a PC with
+// tools/make_tbi.py, sitting in the card's root or in /wallpapers. The card is
+// powered for exactly as long as each call runs and the panel is re-initialised
+// afterwards, so the caller must follow either one with a full refresh.
+//
+// list fills bare file names and returns the count, or -1 when no card
+// mounted. take copies one of those files into LittleFS at destPath and
+// validates the size on the way; a wrong-sized file is refused, not truncated.
+int listTbi(char names[][40], int max);
+bool takeTbi(const char* name, const char* destPath);
+
 }  // namespace sdcard

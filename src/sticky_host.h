@@ -96,6 +96,19 @@ class StickyHost : public ToolsHost {
   void setSoundLevel(int lv) override;
   int soundLevels() const override { return buzzer::LEVEL_COUNT; }
 
+  bool clockHHMM(int& hour, int& minute) const override {
+    sensors::Clock ck;
+    if (!sensors::readClock(ck)) return false;
+    hour = ck.hour;
+    minute = ck.minute;
+    return true;
+  }
+
+  // Both go to the card. Declared out of line because sdcard.h and this header
+  // meet awkwardly in the harness build.
+  int sdWallpapers(char names[][SD_NAME_LEN], int max) override;
+  bool sdWallpaperTake(const char* name) override;
+
   ToolsCanvas& sharedCanvas() { return _canvas; }
 
 #ifdef TOYBOX_HOST

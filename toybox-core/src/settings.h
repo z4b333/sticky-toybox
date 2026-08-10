@@ -7,10 +7,20 @@
 // Geometry the preview harness aims at. Remembered coordinates go stale the
 // moment a row moves; these do not.
 namespace setui {
-inline constexpr int BTN_X = 16, BTN_W = SCREEN_W - 32, BTN_H = 54, BTN_STEP = 62;
-inline constexpr int BTN_Y0 = 528;
+// Five actions now, so the rows tightened: 50 px buttons at a 56 px step, and
+// the checkbox rows above went from 52 to 46 px to make the room. 46 px is
+// 5 mm -- under a fingertip -- but a miss only ticks a neighbouring box,
+// visible immediately and undone by tapping it again.
+inline constexpr int BTN_X = 16, BTN_W = SCREEN_W - 32, BTN_H = 50, BTN_STEP = 56;
+inline constexpr int BTN_Y0 = 496;
 inline TRect actionRect(int i) { return TRect{BTN_X, BTN_Y0 + i * BTN_STEP, BTN_W, BTN_H}; }
-enum Action : int { ACT_SOUND, ACT_LOCK, ACT_CARDS, ACT_RESET, ACT_COUNT };
+enum Action : int { ACT_SOUND, ACT_LOCK, ACT_WALL, ACT_CARDS, ACT_RESET, ACT_COUNT };
+
+// The wallpaper page: what is on the device now, then what the card offers.
+inline constexpr int WALL_MAX = 8;
+inline constexpr int WALL_Y0 = 172, WALL_ROW_H = 56, WALL_ROW_STEP = 62;
+inline TRect wallRect(int i) { return TRect{16, WALL_Y0 + i * WALL_ROW_STEP, SCREEN_W - 32, WALL_ROW_H}; }
+inline TRect wallRemoveRect() { return TRect{16, 84, SCREEN_W - 32, 50}; }
 
 // The lock screen page. Rows are not all the same height: most are a name, a
 // hint and an answer, but the one that chooses what an empty panel shows needs
@@ -79,11 +89,18 @@ class SettingsScreen {
  private:
   void renderLock(ToolsHost& host, ToolsCanvas& c);
   bool tapLock(ToolsHost& host, int x, int y);
+  void renderWall(ToolsHost& host, ToolsCanvas& c);
+  bool tapWall(ToolsHost& host, int x, int y);
+  void enterWall(ToolsHost& host);
 
   // Erasing every score on the device deserves a second tap, not a second
   // screen: the button asks, and any other tap takes the question away.
   bool _armed = false;
   const char* _note = nullptr;
-  uint8_t _page = 0;  // 0 = settings, 1 = lock screen
+  uint8_t _page = 0;  // 0 = settings, 1 = lock screen, 2 = wallpaper
   lock::Config _lock;
+  // The card's offerings, read once on entering the page: the card is powered
+  // per call, and re-listing on every repaint would strobe it.
+  int8_t _wallN = -1;
+  char _wallNames[setui::WALL_MAX][ToolsHost::SD_NAME_LEN] = {};
 };
