@@ -228,7 +228,13 @@ void handlePowerButton() {
 // touch it answers is the dock. The hold fires while the button is still down
 // (there is no release event to wait for), so a fired flag stops it firing
 // again until both buttons are up.
-constexpr uint32_t HOLD_MS = 900;
+//
+// The two holds are deliberately different lengths. Carrying on is the thing
+// you do twenty times a day and costs nothing if it fires by accident, so it
+// comes quickly. Settings is entered rarely and a pocket can press a button
+// for a long time, so it wants five deliberate seconds.
+constexpr uint32_t SETTINGS_HOLD_MS = 5000;
+constexpr uint32_t RESUME_HOLD_MS = 900;
 
 void handleSideButtons() {
   static bool upWas = false, downWas = false;
@@ -245,13 +251,13 @@ void handleSideButtons() {
     upWas = upNow;
     downWas = downNow;
     if (fired) return;
-    if (upNow && millis() - upSince >= HOLD_MS) {
+    if (upNow && millis() - upSince >= SETTINGS_HOLD_MS) {
       fired = true;
       noteActivity();
       TB_LOG("home: UP held, opening settings\n");
       buzzer::confirm();
       toybox.openSettings();
-    } else if (downNow && millis() - downSince >= HOLD_MS) {
+    } else if (downNow && millis() - downSince >= RESUME_HOLD_MS) {
       fired = true;
       noteActivity();
       if (toybox.resumeLast()) {

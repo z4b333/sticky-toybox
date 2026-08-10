@@ -83,9 +83,9 @@ inline void card2(ToolsCanvas& c) {
     c.text(dx0 + dw + 88, by - 2, R[i].verb, TS_MED, true, true);
     c.text(dx0 + dw + 88, by + 24, R[i].what, TS_MED, true);
   }
-  c.text(18, 486, "A hold is about a second. A short press", TS_MED, true);
-  c.text(18, 518, "moves between things on other screens;", TS_MED, true);
-  c.text(18, 550, "on the home screen it does nothing.", TS_MED, true);
+  c.text(18, 486, "Carry on takes about a second's hold.", TS_MED, true);
+  c.text(18, 518, "Settings wants a full five seconds, so", TS_MED, true);
+  c.text(18, 550, "a pocket cannot open it by accident.", TS_MED, true);
   c.text(18, 594, "The top button switches the device on", TS_MED, true);
   c.text(18, 626, "and off: press to wake it, hold it for", TS_MED, true);
   c.text(18, 658, "two seconds to put it away.", TS_MED, true);
