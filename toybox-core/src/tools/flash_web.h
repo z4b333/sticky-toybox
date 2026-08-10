@@ -50,6 +50,8 @@ class ImportServer {
   String wifiPayload() const {
     return String("WIFI:T:WPA;S:") + _ssid + ";P:" + _pass + ";;";
   }
+  bool hasClient() const { return _fakeClient; }
+  void hostSetClient(bool on) { _fakeClient = on; }
   void fakeResult(const char* name, int n) {
     strncpy(_deck, name, fcard::NAME_LEN);
     _count = n;
@@ -57,7 +59,7 @@ class ImportServer {
   }
 
  private:
-  bool _running = false, _received = false;
+  bool _running = false, _received = false, _fakeClient = false;
   int _count = 0, _ticks = 0;
   char _ssid[20] = {}, _pass[12] = {}, _deck[fcard::NAME_LEN + 1] = {};
 };
@@ -127,6 +129,9 @@ class ImportServer {
     // zxing WiFi config format, understood natively by phone cameras.
     return String("WIFI:T:WPA;S:") + _ssid + ";P:" + _pass + ";;";
   }
+  // This one raises its own access point rather than borrowing portal::Portal,
+  // so it asks WiFi directly. Same question either way: is a phone on it yet.
+  bool hasClient() const { return _running && WiFi.softAPgetStationNum() > 0; }
 
  private:
   void sendPage();

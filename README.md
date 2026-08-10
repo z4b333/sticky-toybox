@@ -39,7 +39,9 @@ and Vietnamese. The Thai readme is at [docs/README.th.md](docs/README.th.md).
 ## Tools
 
 - **Notes.** Write or dictate them on your phone, then read them and tick
-  checkboxes on the device. Pin one and it becomes the screen the device shows
+  checkboxes on the device. Pairing is two steps and the device moves between
+  them itself: scan the first code to join its wifi, and the moment your phone
+  is on it, the screen changes to the link. Pin one and it becomes the screen the device shows
   when it is off — pinning asks which way up you want it, with the note drawn
   full size so you are choosing the thing you are looking at rather than
   guessing from a settings row.

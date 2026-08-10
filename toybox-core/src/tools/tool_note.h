@@ -194,6 +194,15 @@ class NoteTool : public ToolApp {
   void tick() override {
     if (_screen != Screen::Pair) return;
     _net.loop();
+    // The moment a phone is on the access point, step two is the useful screen
+    // and step one is a picture of a thing already done. The device can see
+    // this, so it should not be asking.
+    if (!_altQr && !_got && _net.hasClient()) {
+      _altQr = true;
+      host().beep(1);
+      host().refresh(true);
+      return;
+    }
     if (_net.received()) {
       // A save landed: show it immediately, so the phone edit and the panel
       // stay in step without the user tapping anything.
@@ -477,22 +486,31 @@ class NoteTool : public ToolApp {
     if (_got) return renderPairDone(c);
 
     char buf[64];
+    // Two steps, and the device moves between them itself when a phone joins
+    // its access point. It used to ask -- a button reading PAGE DIDN'T OPEN?
+    // under a QR code that is only a wifi credential, which promised something
+    // the code does not do and made the honest answer ("it joins the wifi, and
+    // then your phone usually opens the page on its own") sound like an excuse.
     if (_altQr) {
-      c.textCentered(c.width() / 2, 64, "if it did not open by itself", TS_MED, true);
+      c.textCentered(c.width() / 2, 64, "STEP 2 OF 2", TS_MED, true, true);
+      c.textCentered(c.width() / 2, 96, "phone joined", TS_MED, true);
       fqr::draw(c, QR_X, QR_Y, QR_SIZE, _net.url());
-      c.textCentered(c.width() / 2, 406, "Open this in your browser", TS_MED, true, true);
-      c.textCentered(c.width() / 2, 444, _net.url(), TS_MED, true);
-      c.button(ALT_BTN.x, ALT_BTN.y, ALT_BTN.w, ALT_BTN.h, "BACK TO WIFI", false, TS_MED);
+      c.textCentered(c.width() / 2, 406, "The editor should have opened.", TS_MED, true);
+      c.textCentered(c.width() / 2, 434, "If not, scan this or type it in:", TS_MED, true);
+      c.textCentered(c.width() / 2, 470, _net.url(), TS_MED, true, true);
+      c.button(ALT_BTN.x, ALT_BTN.y, ALT_BTN.w, ALT_BTN.h, "BACK TO THE WIFI CODE", false,
+               TS_MED);
     } else {
-      c.textCentered(c.width() / 2, 64, "the editor opens by itself", TS_MED,
-                     true);
+      c.textCentered(c.width() / 2, 64, "STEP 1 OF 2", TS_MED, true, true);
+      c.textCentered(c.width() / 2, 96, "join the device's wifi", TS_MED, true);
       const String wifi = _net.wifiPayload();
       fqr::draw(c, QR_X, QR_Y, QR_SIZE, wifi.c_str());
       c.textCentered(c.width() / 2, 406, "Scan with your phone camera", TS_MED, true, true);
       snprintf(buf, sizeof(buf), "%s   key %s", _net.ssid(), _net.password());
       c.textCentered(c.width() / 2, 444, buf, TS_MED, true);
-      c.button(ALT_BTN.x, ALT_BTN.y, ALT_BTN.w, ALT_BTN.h, "PAGE DIDN'T OPEN?", false,
-               TS_MED);
+      c.textCentered(c.width() / 2, 480, "this code joins the wifi, nothing more", TS_SMALL,
+                     true);
+      c.button(ALT_BTN.x, ALT_BTN.y, ALT_BTN.w, ALT_BTN.h, "SHOW THE LINK", false, TS_MED);
     }
     c.button(DONE_BTN.x, DONE_BTN.y, DONE_BTN.w, DONE_BTN.h, "DONE", false, TS_LARGE);
   }

@@ -1106,9 +1106,30 @@ int main() {
   toybox.onTap(190 + 75, 716 + 25);  // EDIT -> pairing screen
 
   // A note arriving raises the "what should happen to it" prompt.
+  // A phone joining the access point moves the screen on by itself: step one is
+  // a picture of a thing already done. The device can see this, so it does not
+  // ask -- there used to be a button reading PAGE DIDN'T OPEN? under a QR code
+  // that only ever joins wifi, which promised something the code does not do.
+  setScreen("tool_note_pair_joined");
+  toybox.tick();
+  if (strstr(toybox.activeTitle(), "NOTES") == nullptr) {
+    printf("PAIR FAIL: the tool left its pairing screen\n");
+    abort();
+  }
+  {
+    // The step-two screen has to be a different picture from step one, or the
+    // advance happened in a variable and nowhere else.
+    int ink = 0;
+    for (uint32_t i = 0; i < EPD_BUF_SIZE; i++) ink += __builtin_popcount((uint8_t)~epd.fb()[i]);
+    if (ink < 2000) {
+      printf("PAIR FAIL: step two drew almost nothing (%d px)\n", ink);
+      abort();
+    }
+    printf("pairing ok (advances by itself when a phone joins)\n");
+  }
+
   setScreen("tool_note_prompt");
   g_dumpEnabled = false;
-  toybox.tick();
   toybox.tick();
   g_dumpEnabled = true;
   toybox.tick();

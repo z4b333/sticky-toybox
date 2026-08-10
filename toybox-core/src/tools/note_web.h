@@ -24,9 +24,12 @@ class NoteServer {
  public:
   bool start() { return _portal.begin(); }
   void stop() { _portal.end(); }
-  // Preview scaffolding: pretend a phone posted a note after a few polls.
+  // Preview scaffolding: a phone joins on the first poll and posts a note a
+  // couple of polls later, which is the order it happens in.
   void loop() {
-    if (++_ticks == 3) fakeResult("shopping", 214);
+    _ticks++;
+    if (_ticks >= 1) _portal.hostSetClient(true);
+    if (_ticks == 3) fakeResult("shopping", 214);
   }
   bool received() const { return _received; }
   const char* lastName() const { return _last; }
@@ -36,6 +39,7 @@ class NoteServer {
   const char* password() const { return _portal.password(); }
   const char* url() const { return _portal.url(); }
   String wifiPayload() const { return _portal.wifiPayload(); }
+  bool hasClient() const { return _portal.hasClient(); }
   bool pictureStored() const { return lockimg::have(); }
   void fakeResult(const char* n, int b) {
     strncpy(_last, n, note::NAME_LEN);
@@ -91,6 +95,7 @@ class NoteServer {
   const char* password() const { return _portal.password(); }
   const char* url() const { return _portal.url(); }
   String wifiPayload() const { return _portal.wifiPayload(); }
+  bool hasClient() const { return _portal.hasClient(); }
 
  private:
   void sendPage();

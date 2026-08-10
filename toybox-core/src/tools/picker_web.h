@@ -47,6 +47,7 @@ class ListServer {
   const char* password() const { return _portal.password(); }
   const char* url() const { return _portal.url(); }
   String wifiPayload() const { return _portal.wifiPayload(); }
+  bool hasClient() const { return _portal.hasClient(); }
 
  private:
   portal::Portal _portal;
@@ -85,6 +86,7 @@ class ListServer {
   const char* password() const { return _portal.password(); }
   const char* url() const { return _portal.url(); }
   String wifiPayload() const { return _portal.wifiPayload(); }
+  bool hasClient() const { return _portal.hasClient(); }
 
  private:
   void sendPage();

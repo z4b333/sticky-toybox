@@ -32,9 +32,11 @@ class Portal {
     _running = true;
     return true;
   }
-  void end() { _running = false; }
+  void end() { _running = false; _fakeClient = false; }
   void loop() {}
   bool running() const { return _running; }
+  bool hasClient() const { return _fakeClient; }
+  void hostSetClient(bool on) { _fakeClient = on; }
   const char* ssid() const { return _ssid; }
   const char* password() const { return _pass; }
   const char* url() const { return "http://192.168.4.1"; }
@@ -43,7 +45,7 @@ class Portal {
   }
 
  private:
-  bool _running = false;
+  bool _running = false, _fakeClient = false;
   char _ssid[20] = {}, _pass[12] = {};
 };
 
@@ -103,6 +105,11 @@ class Portal {
     WiFi.mode(WIFI_OFF);
     _running = false;
   }
+
+  // Has anything joined the access point? The pairing screens ask this so they
+  // can move on by themselves rather than asking the person whether something
+  // happened that the device can see for itself.
+  bool hasClient() const { return _running && WiFi.softAPgetStationNum() > 0; }
 
   void loop() {
     if (!_running || !_dns) return;
