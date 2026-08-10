@@ -85,6 +85,7 @@ bool requested() { return down(PIN_BTN_UP) || down(PIN_BTN_DOWN); }
 
 void run() {
   Report r;
+  r.panelOk = epd.panelAnswered();
   r.touchOk = touch.ok();
   r.touchAddr = touch.address();
   r.gauge = sensors::batteryPresent();

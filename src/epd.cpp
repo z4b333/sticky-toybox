@@ -59,8 +59,42 @@ bool Epd::begin() {
   digitalWrite(PIN_EPD_DC, HIGH);
 
   reset();
+  _panelOk = probePanel();
   initController();
   _firstPaint = true;
+  return true;
+}
+
+// Ask the panel whether it is there, using the only line it drives.
+//
+// A soft reset makes the SSD1677 hold BUSY high for a few milliseconds and then
+// release it. Nothing connected leaves the line wherever the pull resistor puts
+// it, and it never moves. So: send the reset, watch for a rise, then watch for
+// the fall. Either half failing means no panel answered.
+//
+// The rise window is generous at 100 ms and the fall window at five seconds.
+// Both are far longer than the datasheet needs, because the cost of being too
+// impatient here is telling somebody with a perfectly good display that theirs
+// is broken, which is worse than saying nothing.
+bool Epd::probePanel() {
+  writeCmd(CMD_SOFT_RESET);
+
+  const uint32_t t0 = millis();
+  bool rose = false;
+  while (millis() - t0 < 100) {
+    if (digitalRead(PIN_EPD_BUSY) == HIGH) {
+      rose = true;
+      break;
+    }
+    delay(1);
+  }
+  if (!rose) return false;
+
+  const uint32_t t1 = millis();
+  while (digitalRead(PIN_EPD_BUSY) == HIGH) {
+    if (millis() - t1 > 5000) return false;  // held busy for ever: wedged
+    delay(1);
+  }
   return true;
 }
 

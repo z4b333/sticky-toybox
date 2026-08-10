@@ -81,6 +81,7 @@ bool Epd::begin() {
   _fb = (uint8_t*)malloc(EPD_BUF_SIZE);
   _prev = (uint8_t*)malloc(EPD_BUF_SIZE);
   memset(_fb, 0xFF, EPD_BUF_SIZE);
+  _panelOk = true;  // the fake panel is always listening
   return true;
 }
 void Epd::clear(bool white) { memset(_fb, white ? 0xFF : 0x00, EPD_BUF_SIZE); }
@@ -1772,6 +1773,7 @@ int main() {
   // width rule.
   {
     svc::Report r;
+    r.panelOk = true;
     r.touchOk = true;
     r.touchAddr = 0x5D;
     r.gauge = r.rtc = r.sht = true;

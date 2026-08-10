@@ -279,6 +279,25 @@ void setup() {
     }
   }
 
+  // The panel is the one thing that cannot report its own absence, so if it did
+  // not answer, say so on the only other output there is.
+  //
+  // At full volume whatever the sound setting says: this fires only when the
+  // screen is dead, and somebody staring at the firmware they just flashed over
+  // deserves to be told, even if they had muted it. Three low notes, twice.
+  if (!epd.panelAnswered()) {
+    TB_LOG("panel: NO ANSWER -- BUSY never moved, display may not be connected\n");
+    const buzzer::Level was = buzzer::level();
+    buzzer::setLevel(buzzer::Level::High);
+    for (int i = 0; i < 6; i++) {
+      buzzer::error();
+      delay(i == 2 ? 400 : 120);
+    }
+    buzzer::setLevel(was);
+  } else {
+    TB_LOG("panel: answered\n");
+  }
+
   // Whatever the service screen last saved about this particular board, before
   // the first pixel is drawn or the first tap is read.
   svc::apply(svc::load());
@@ -295,7 +314,7 @@ void setup() {
     c.textCentered(EPD_W / 2, 740, "hold a side button for the service screen", TS_SMALL,
                    true);
     epd.displayFull();
-    TB_LOG("panel ok\n");
+    TB_LOG("panel: first paint sent\n");
   }
 
   touch.begin();

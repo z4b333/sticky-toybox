@@ -105,6 +105,11 @@ same thing as a tickable page for a phone.
 
 - The board's 8 MB of PSRAM is not configured, so the service screen reports
   none. Nothing currently needs it.
+- If the panel never answers, the firmware runs perfectly and you see nothing:
+  e-paper holds its last image, so a device with an unresponsive display looks
+  like a failed flash. It now says so with six low notes at boot and a line on
+  the service screen, which is the best it can do — the one output that cannot
+  report a dead display is the display.
 - The microSD slot is not used. It shares the display's SPI bus and has never
   been exercised.
 - Thai line breaking works at character-cluster level, not word level, so a

@@ -123,12 +123,22 @@ most likely to be wrong.
 Read the top block:
 
 ```
+panel    answered
 touch    found at 0x5D
 sensors  gauge 1   clock 1   temp 1   tilt 1
 battery  3.98 V
 psram    8192 KB
 fonts    0 extra faces
 ```
+
+`panel NO ANSWER` means the display never drove its BUSY line, which is how a
+device that boots, logs, sleeps and beeps perfectly can still be showing the
+firmware you flashed over — e-paper holds its last image for ever, so nothing
+about the screen tells you the screen is not being written to. The firmware
+also plays six low notes at boot in that case, at full volume whatever the
+sound setting says, because the one output that cannot report a dead display is
+the display. Check the ribbon seating and try a full power-off rather than a
+reset: the previous firmware can leave the controller in deep sleep.
 
 `touch NOT FOUND` means the GT911 did not answer at either address. Everything
 else can still be checked from this screen with the buttons, but the device is

@@ -56,6 +56,20 @@ class Epd {
   void setPanelFlip(bool fx, bool fy) { _flipX = fx; _flipY = fy; }
   bool panelFlipX() const { return _flipX; }
   bool panelFlipY() const { return _flipY; }
+
+  // Did the panel answer at boot?
+  //
+  // begin() returns true if the framebuffer allocated, which says nothing at
+  // all about whether a display is listening. A Sticky whose panel ignores SPI
+  // boots, logs, sleeps and beeps perfectly while showing whatever image was on
+  // the glass before -- and e-paper holds that image for ever, so the owner
+  // sees the firmware they flashed over. Somebody spent an evening on that.
+  //
+  // BUSY is the one line the panel drives, so it is the only thing that can be
+  // asked. This is advisory: nothing behaves differently, it is reported on the
+  // serial log, on the service screen, and on the buzzer, because the one thing
+  // you cannot use to report a broken display is the display.
+  bool panelAnswered() const { return _panelOk; }
   int rotation() const { return _rot; }
   int logicalW() const { return (_rot & 1) ? PANEL_W : PANEL_H; }
   int logicalH() const { return (_rot & 1) ? PANEL_H : PANEL_W; }
@@ -86,6 +100,7 @@ class Epd {
 
  private:
   int _rot = 0;
+  bool _panelOk = false;
   bool _flipX = false, _flipY = false;
 
  public:
@@ -96,6 +111,7 @@ class Epd {
   void writeData(const uint8_t* d, uint32_t len);
   void waitBusy(uint32_t timeoutMs = 5000);
   void reset();
+  bool probePanel();
   void initController();
   void setRamAreaFull();
 

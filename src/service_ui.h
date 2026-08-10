@@ -21,6 +21,7 @@ namespace svc {
 
 // What the board answered when it was asked, at boot, before any of this drew.
 struct Report {
+  bool panelOk = false;
   bool touchOk = false;
   uint8_t touchAddr = 0;
   bool gauge = false, rtc = false, sht = false, imu = false;
@@ -95,6 +96,12 @@ inline void render(ToolsCanvas& c, const Report& r, const Config& cfg, int sel, 
   y += 28;
   c.drawLine(MARGIN, y, W - MARGIN, y, 1, true);
   y += 10;
+
+  // First, because if this one says no then everything under it is being read
+  // off a screen that should not be showing anything.
+  snprintf(buf, sizeof(buf), "panel    %s", r.panelOk ? "answered" : "NO ANSWER");
+  c.text(MARGIN, y, buf, TS_MED, true);
+  y += 26;
 
   if (r.touchOk)
     snprintf(buf, sizeof(buf), "touch    found at 0x%02X", r.touchAddr);
