@@ -165,6 +165,20 @@ sound setting says, because the one output that cannot report a dead display is
 the display. Check the ribbon seating and try a full power-off rather than a
 reset: the previous firmware can leave the controller in deep sleep.
 
+**With a card in the slot, the device may not boot at all.** This is known and
+not yet explained. The card shares the display's SPI bus, and its chip select
+is now driven high from the first instruction of setup() so the card can never
+be selected while the panel is being written to — but on the one board this has
+been tried on, a 128 GB card still stopped it starting, and inserting one while
+running produced a screen full of glitches. Take the card out and it boots
+normally. Nothing on the device needs a card.
+
+If you can, capture the serial log with a card in. It answers the question that
+matters: a log that runs to `ready` means the firmware is fine and only the
+panel is affected, and a log with nothing in it at all means the card is
+browning out the board at power-up, which is a different problem with a
+different fix.
+
 **TEST THE SD CARD** is the one row that does something rather than setting
 something. Nothing in the firmware uses a card yet; the row exists because the
 card shares the display's SPI bus, and whether those two can coexist decides
