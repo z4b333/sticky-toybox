@@ -14,6 +14,8 @@
 // so far live in a little per-chapter table). Replay costs one re-inflate of
 // the chapter, which disappears inside the panel's own refresh time.
 #pragma once
+#include "book_thumbs.h"
+#include "epub/epub_cover.h"
 #include "epub/epubcore.h"
 #include "recents.h"
 #include "tools_ui.h"
@@ -49,6 +51,10 @@ class EpubTool : public ToolApp {
   }
 
   void render(ToolsCanvas& c) override {
+    if (_screen == Screen::Loading) {
+      bthumb::drawLoading(c, _books[_cur].file, _books[_cur].title);
+      return;
+    }
     if (_screen == Screen::Page) {
       renderPage(c);
       return;
@@ -138,7 +144,7 @@ class EpubTool : public ToolApp {
 #endif
 
  private:
-  enum class Screen : uint8_t { List, Page };
+  enum class Screen : uint8_t { List, Loading, Page };
 
   struct HostIO : epubc::IO {
     ToolsHost* h = nullptr;
@@ -174,8 +180,15 @@ class EpubTool : public ToolApp {
 
   void openBook(int i) {
     _cur = i;
+    // The cover as the loading screen, painted before the card is touched. An
+    // EPUB spends real seconds opening (zip walk, cover decode on the first
+    // open, the chapter replayed to the saved page); they pass behind the
+    // book's own face. First-ever open has no cover yet and shows the plate.
+    _screen = Screen::Loading;
+    host().refresh(true);
     if (!host().epubOpen(_books[i].file)) {
       _cur = -1;
+      _screen = Screen::List;
       _note = "could not open it - is the card still in?";
       host().beep(2);
       host().refresh(true);  // the failed open borrowed the bus
@@ -186,12 +199,20 @@ class EpubTool : public ToolApp {
       _note = _book.error();
       host().epubClose();
       _cur = -1;
+      _screen = Screen::List;
       host().beep(2);
       host().refresh(true);
       return;
     }
     _open = true;
     recents::note(prefs(), recents::KIND_EPUB, _books[i].file, _books[i].title);
+
+    // The cover thumbnail for the hub's recently-read strip: decoded once on
+    // a book's first open (a second or two for a big JPEG), never again --
+    // and a cover that will not decode is marked so it is never retried.
+    if (!bthumb::have(_books[i].file) && !bthumb::failed(_books[i].file)) {
+      if (!epubcov::makeThumb(_book, _books[i].file)) bthumb::markFailed(_books[i].file);
+    }
 
     // Where were we? The card remembers, in CrossPoint's format.
     epubc::Progress p;

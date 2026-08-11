@@ -103,6 +103,7 @@ int bookList(BookMeta* out, int max) {
 namespace {
 
 #include "fake_epub_ch2.inc"
+#include "fake_epub_cover.inc"
 
 // Chapter one is the offset-parity fixture: entities the XML layer expands
 // (&#233;), one only the HTML table knows (&nbsp;), one expat predefines
@@ -133,10 +134,13 @@ static const char kFakeContainer[] =
 static const char kFakeOpf[] =
     "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
     "<package xmlns=\"http://www.idpf.org/2007/opf\" version=\"2.0\">\n"
-    "  <metadata><dc:title xmlns:dc=\"http://purl.org/dc/elements/1.1/\">Wind</dc:title></metadata>\n"
+    "  <metadata><dc:title xmlns:dc=\"http://purl.org/dc/elements/1.1/\">Wind</dc:title>\n"
+    "    <meta name=\"cover\" content=\"cov\"/>\n"
+    "  </metadata>\n"
     "  <manifest>\n"
     "    <item id=\"c1\" href=\"ch1.xhtml\" media-type=\"application/xhtml+xml\"/>\n"
     "    <item id=\"c2\" href=\"ch2.xhtml\" media-type=\"application/xhtml+xml\"/>\n"
+    "    <item id=\"cov\" href=\"cover.jpg\" media-type=\"image/jpeg\"/>\n"
     "    <item id=\"css\" href=\"style.css\" media-type=\"text/css\"/>\n"
     "  </manifest>\n"
     "  <spine><itemref idref=\"c1\"/><itemref idref=\"c2\"/></spine>\n"
@@ -160,7 +164,7 @@ void buildFakeEpub() {
     uint16_t method;
     uint32_t lho;
   };
-  E ents[4] = {
+  E ents[5] = {
       {"META-INF/container.xml", (const uint8_t*)kFakeContainer, (uint32_t)strlen(kFakeContainer),
        (uint32_t)strlen(kFakeContainer), 0, 0},
       {"OEBPS/content.opf", (const uint8_t*)kFakeOpf, (uint32_t)strlen(kFakeOpf),
@@ -168,6 +172,8 @@ void buildFakeEpub() {
       {"OEBPS/ch1.xhtml", (const uint8_t*)kFakeCh1, (uint32_t)strlen(kFakeCh1),
        (uint32_t)strlen(kFakeCh1), 0, 0},
       {"OEBPS/ch2.xhtml", kFakeCh2Deflate, (uint32_t)sizeof(kFakeCh2Deflate), kFakeCh2Raw, 8, 0},
+      {"OEBPS/cover.jpg", kFakeCoverJpeg, (uint32_t)sizeof(kFakeCoverJpeg),
+       (uint32_t)sizeof(kFakeCoverJpeg), 0, 0},
   };
   uint32_t total = 22;
   for (const E& e : ents) total += 30 + 46 + 2 * (uint32_t)strlen(e.name) + e.csize;
@@ -202,8 +208,8 @@ void buildFakeEpub() {
   const uint32_t cdSize = (uint32_t)(p - g_fakeEpub) - cdOfs;
   memset(p, 0, 22);
   put32(p, 0x06054b50u);
-  put16(p + 8, 4);
-  put16(p + 10, 4);
+  put16(p + 8, 5);
+  put16(p + 10, 5);
   put32(p + 12, cdSize);
   put32(p + 16, cdOfs);
   p += 22;

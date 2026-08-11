@@ -171,17 +171,18 @@ void drawDock(ToolsCanvas& c, int active) {
 // drawn card with the open-book mark for everything else (EPUBs render no
 // images, so their cover is the caption under a clean plate).
 void drawRecentCover(ToolsCanvas& c, const recents::Entry& e, int x, int top) {
+  // Both kinds keep thumbnails in the same store now -- a .tbk's is its first
+  // page, an EPUB's its decoded cover image. The drawn plate with the
+  // open-book mark is the fallback for books whose cover would not decode.
   bool drew = false;
-  if (e.kind == recents::KIND_TBK) {
-    static uint8_t thumb[bthumb::BYTES];
-    if (bthumb::load(e.file, thumb)) {
-      for (int y = 0; y < REC_THUMB_H; y++) {
-        const uint8_t* row = thumb + (size_t)y * (REC_THUMB_W / 8);
-        for (int px = 0; px < REC_THUMB_W; px++)
-          if (!(row[px >> 3] & (0x80 >> (px & 7)))) c.fillRect(x + px, top + y, 1, 1, true);
-      }
-      drew = true;
+  static uint8_t thumb[bthumb::BYTES];
+  if (bthumb::load(e.file, thumb)) {
+    for (int y = 0; y < REC_THUMB_H; y++) {
+      const uint8_t* row = thumb + (size_t)y * (REC_THUMB_W / 8);
+      for (int px = 0; px < REC_THUMB_W; px++)
+        if (!(row[px >> 3] & (0x80 >> (px & 7)))) c.fillRect(x + px, top + y, 1, 1, true);
     }
+    drew = true;
   }
   if (!drew) ticons::epub(c, x + REC_THUMB_W / 2, top + REC_THUMB_H / 2, 56);
   c.drawRect(x, top, REC_THUMB_W, REC_THUMB_H, 1, true);

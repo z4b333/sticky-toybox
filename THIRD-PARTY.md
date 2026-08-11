@@ -103,3 +103,17 @@ The EPUB reader reads and writes CrossPoint Reader's on-card progress format
 convention inside it) so a card moved between the two firmwares keeps its
 reading position. The format was learned from the CrossPoint source (MIT);
 no CrossPoint code is compiled into Toybox for it.
+
+## TJpgDec (lib/tjpgd/)
+
+TJpgDec R0.03 by ChaN, vendored for the EPUB cover thumbnails (baseline JPEG
+decode, configured for grayscale output in lib/tjpgd/src/tjpgdcnf.h). ChaN's
+license permits use, modification and redistribution for any purpose with the
+copyright notice retained; see the header of tjpgd.c. The ESP32-S3 mask ROM
+carries an older build of this module behind weak PROVIDE symbols; the
+vendored strong definitions override it. Progressive JPEG covers are handled
+by Toybox's own DC-scan extractor (tools/epub/epub_jpegdc.h), and PNG covers
+by Toybox's own decoder over the vendored miniz inflate
+(tools/epub/epub_png.h).
+
+- http://elm-chan.org/fsw/tjpgd/ (via espressif/idf-extra-components)

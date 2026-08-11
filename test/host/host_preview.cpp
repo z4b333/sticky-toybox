@@ -30,6 +30,9 @@
 #include "tools/epub/epubcore.h"
 #include "tools/recents.h"
 #include "tools/book_thumbs.h"
+#include "tools/epub/epub_png.h"
+#include "tools/epub/epub_jpegdc.h"
+#include "fake_epub_cover.inc"
 #include "tools/tool_flash.h"
 #include "tools/tool_note.h"
 #include "tools/tool_picker.h"
@@ -910,9 +913,81 @@ int main() {
       printf("EPUB FAIL: chapter two gave %d words, last '%s'\n", words, last);
       abort();
     }
+    // The cover: the fake OPF declares it EPUB2-style, and the entry is a
+    // real baseline JPEG the tjpgd path must find and type correctly.
+    if (book.coverType() != epubc::Book::COVER_JPEG || book.coverSize() == 0) {
+      printf("EPUB FAIL: cover not found (type %d)\n", book.coverType());
+      abort();
+    }
     book.close();
     stickyHost.epubClose();
-    printf("epub core ok (hash pinned, offsets exact, tinfl streams)\n");
+    printf("epub core ok (hash pinned, offsets exact, tinfl streams, cover found)\n");
+  }
+
+  // --- the cover decoders ----------------------------------------------------
+  // Each decode path against a known image: the PNG decoder (both colour
+  // shapes), and the progressive-JPEG DC extractor, whose whole job is
+  // commercial covers tjpgd refuses. The baseline-JPEG path is proven by the
+  // reader test below, which must leave a stored thumbnail behind.
+  {
+    struct Mem {
+      const uint8_t* d;
+      uint32_t len, pos;
+    };
+    auto memRead = [](void* ctx, uint8_t* dst, int n) -> int {
+      Mem* m = (Mem*)ctx;
+      uint32_t take = m->len - m->pos;
+      if ((uint32_t)n < take) take = (uint32_t)n;
+      memcpy(dst, m->d + m->pos, take);
+      m->pos += take;
+      return (int)take;
+    };
+    struct Got {
+      int w = 0, h = 0;
+      uint8_t px[64 * 64] = {};
+      static bool size(void* u, int w, int h) {
+        ((Got*)u)->w = w;
+        ((Got*)u)->h = h;
+        return true;
+      }
+      static void row(void* u, int y, const uint8_t* g, int w) {
+        Got* s = (Got*)u;
+        if (y < 64 && w <= 64) memcpy(s->px + y * 64, g, (size_t)w);
+      }
+    };
+
+    // PNG, truecolour and palette: left half white, right half black.
+    for (const auto* blob : {&kTestPngRgb[0], &kTestPngPal[0]}) {
+      const bool pal = blob == &kTestPngPal[0];
+      Mem m{blob, pal ? (uint32_t)sizeof(kTestPngPal) : (uint32_t)sizeof(kTestPngRgb), 0};
+      Got got;
+      epng::In in{&m, memRead};
+      if (!epng::decodeGray(in, Got::size, Got::row, &got) || got.w != 40 || got.h != 30 ||
+          got.px[15 * 64 + 5] < 200 || got.px[15 * 64 + 35] > 50) {
+        printf("EPUB COVER FAIL: png %s decoded wrong (%dx%d, l=%d r=%d)\n",
+               pal ? "palette" : "rgb", got.w, got.h, got.px[15 * 64 + 5],
+               got.px[15 * 64 + 35]);
+        abort();
+      }
+    }
+
+    // Progressive JPEG: the DC scan is the image at 1/8. Left half dark
+    // (~60), right half light (~200), bright disc in the middle.
+    {
+      Mem m{kTestJpegProg, (uint32_t)sizeof(kTestJpegProg), 0};
+      Got got;
+      ejdc::In in{&m, memRead};
+      if (!ejdc::decodeGray(in, Got::size, Got::row, &got) || got.w != 40 || got.h != 60) {
+        printf("EPUB COVER FAIL: progressive DC scan (%dx%d)\n", got.w, got.h);
+        abort();
+      }
+      const int l = got.px[10 * 64 + 5], r = got.px[10 * 64 + 35], c = got.px[30 * 64 + 20];
+      if (l < 30 || l > 100 || r < 160 || r > 240 || c < 200) {
+        printf("EPUB COVER FAIL: DC tones l=%d r=%d disc=%d\n", l, r, c);
+        abort();
+      }
+    }
+    printf("epub covers ok (png rgb+palette, progressive DC extractor)\n");
   }
 
   // --- the EPUB reader app ---------------------------------------------------
@@ -1062,6 +1137,11 @@ int main() {
     }
     if (!bthumb::have(rec[1].file)) {
       printf("RECENTS FAIL: no thumbnail stored for %s\n", rec[1].file);
+      abort();
+    }
+    // ...and the epub's cover decoded into the same store when it was opened.
+    if (!bthumb::have("/books/wind.epub") || bthumb::failed("/books/wind.epub")) {
+      printf("RECENTS FAIL: the epub cover thumbnail was not made\n");
       abort();
     }
     toybox.goHub();

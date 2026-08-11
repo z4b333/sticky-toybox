@@ -63,6 +63,17 @@ class Book {
   // codepoint, in CrossPoint's counting.
   int next(char* word, uint32_t& startOff);
 
+  // The cover image, found the two ways EPUBs declare one: an EPUB2
+  // <meta name="cover"> pointing at a manifest id, or an EPUB3 item with
+  // "cover-image" in its properties. Streamed like any entry; open/read/close
+  // must not overlap an open chapter.
+  static constexpr int COVER_NONE = 0, COVER_JPEG = 1, COVER_PNG = 2;
+  int coverType() const { return _coverType; }
+  bool coverOpen();
+  int coverRead(uint8_t* dst, int n) { return entryRead(dst, n); }
+  void coverClose() { entryClose(); }
+  uint32_t coverSize() const { return _cover.usize; }
+
  private:
   struct Ent {
     uint32_t hrefHash;  // idref hash, then resolved-path hash; see parseOpf
@@ -97,6 +108,10 @@ class Book {
   int _cdCount = 0;
   const char* _err = "";
   char _opfDir[128] = "";
+  Ent _cover{};
+  uint32_t _coverPathHash = 0;
+  uint8_t _coverType = 0;
+  bool _coverOk = false;
 
   // entry stream state
   void* _inflator = nullptr;    // tinfl_decompressor, heap (~11 KB)

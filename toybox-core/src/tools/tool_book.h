@@ -48,6 +48,10 @@ class BookTool : public ToolApp {
   }
 
   void render(ToolsCanvas& c) override {
+    if (_screen == Screen::Loading) {
+      bthumb::drawLoading(c, _books[_cur].file, _books[_cur].title);
+      return;
+    }
     if (_screen == Screen::Page) {
       renderPage(c);
       return;
@@ -148,7 +152,7 @@ class BookTool : public ToolApp {
 #endif
 
  private:
-  enum class Screen : uint8_t { List, Page };
+  enum class Screen : uint8_t { List, Loading, Page };
 
   // Position keys are 4-byte FNV hashes of the file name: "b" + 8 hex chars
   // fits NVS's 15-char key limit with room to spare, and survives renames of
@@ -168,8 +172,14 @@ class BookTool : public ToolApp {
 
   void openBook(int i) {
     if (!_pageBuf) return;
+    // The cover as the loading screen: painted before the card is touched,
+    // so the open happens behind the book's own face rather than a stale list.
+    _cur = i;
+    _screen = Screen::Loading;
+    host().refresh(true);
     if (!host().bookOpen(_books[i].file)) {
       _note = "could not open it - is the card still in?";
+      _screen = Screen::List;
       host().beep(2);
       host().refresh(true);  // the failed open borrowed the bus
       return;

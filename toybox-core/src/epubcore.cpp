@@ -400,24 +400,36 @@ bool Book::parseOpf(const char* opfPath) {
     return false;
   }
 
-  // Pass one: the spine's idrefs, in reading order, stored as id hashes.
+  // Pass one: the spine's idrefs, in reading order, stored as id hashes --
+  // and the EPUB2 cover declaration, a <meta name="cover" content="id">.
   if (!entryOpen(opf)) return false;
   _spineN = 0;
+  uint32_t coverIdHash = 0;
   scanTags([&](const char* name, const char* attrs, bool close) {
-    if (!close && nameIs(name, "itemref") && _spineN < MAX_SPINE) {
+    if (close) return false;
+    if (nameIs(name, "itemref") && _spineN < MAX_SPINE) {
       char idref[128];
       if (attrValue(attrs, "idref", idref, sizeof(idref))) {
         _spine[_spineN].hrefHash = fnv(idref, strlen(idref));
         _spine[_spineN].ok = 0;
         _spineN++;
       }
+    } else if (nameIs(name, "meta") && coverIdHash == 0) {
+      char nm[32], content[128];
+      if (attrValue(attrs, "name", nm, sizeof(nm)) && strcmp(nm, "cover") == 0 &&
+          attrValue(attrs, "content", content, sizeof(content)))
+        coverIdHash = fnv(content, strlen(content));
     }
     return false;
   });
   entryClose();
 
-  // Pass two: manifest items turn id hashes into resolved-path hashes.
+  // Pass two: manifest items turn id hashes into resolved-path hashes. The
+  // cover resolves here too, matched by that meta id or by the EPUB3
+  // properties="cover-image" marker, whichever the book uses.
   if (!entryOpen(opf)) return false;
+  _coverPathHash = 0;
+  _coverType = 0;
   scanTags([&](const char* name, const char* attrs, bool close) {
     if (!close && nameIs(name, "item")) {
       char id[128], href[192];
@@ -431,6 +443,29 @@ bool Book::parseOpf(const char* opfPath) {
             _spine[i].hrefHash = pathHash;
             _spine[i].ok = 1;
           }
+        if (_coverPathHash == 0) {
+          char props[128] = "";
+          attrValue(attrs, "properties", props, sizeof(props));
+          const bool isCover =
+              (coverIdHash != 0 && idHash == coverIdHash) || strstr(props, "cover-image") != nullptr;
+          if (isCover) {
+            char mt[64] = "";
+            attrValue(attrs, "media-type", mt, sizeof(mt));
+            const size_t fl = strlen(full);
+            uint8_t type = 0;
+            if (strcmp(mt, "image/jpeg") == 0 ||
+                (fl > 4 && (strcasecmp(full + fl - 4, ".jpg") == 0 ||
+                            (fl > 5 && strcasecmp(full + fl - 5, ".jpeg") == 0))))
+              type = COVER_JPEG;
+            else if (strcmp(mt, "image/png") == 0 ||
+                     (fl > 4 && strcasecmp(full + fl - 4, ".png") == 0))
+              type = COVER_PNG;
+            if (type) {
+              _coverPathHash = pathHash;
+              _coverType = type;
+            }
+          }
+        }
       }
     }
     return false;
@@ -438,6 +473,7 @@ bool Book::parseOpf(const char* opfPath) {
   entryClose();
 
   // Pass three: one walk of the zip directory fills in every matched entry.
+  _coverOk = false;
   walkCD([&](const char* name, const Ent& e) {
     const uint32_t h = fnv(name, strlen(name));
     for (int i = 0; i < _spineN; i++)
@@ -447,8 +483,18 @@ bool Book::parseOpf(const char* opfPath) {
         _spine[i].hrefHash = keep;
         _spine[i].ok = 2;
       }
+    if (_coverPathHash != 0 && h == _coverPathHash && !_coverOk) {
+      _cover = e;
+      _coverOk = true;
+    }
   });
+  if (!_coverOk) _coverType = 0;
   return true;
+}
+
+bool Book::coverOpen() {
+  if (!_coverOk || _coverType == 0) return false;
+  return entryOpen(_cover);
 }
 
 // --- the entry stream --------------------------------------------------------
