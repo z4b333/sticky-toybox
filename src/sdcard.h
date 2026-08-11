@@ -81,6 +81,10 @@ int bookList(BookMeta* out, int max, const char* dir);  // -1: no card
 // so a read is just an index and a buffer big enough for either.
 bool bookOpen(const char* file);
 bool bookReadPage(uint32_t idx, uint8_t* dst);
+// A slice of a page, for anything that would rather not hold a whole one. A
+// grey page is 96,000 bytes and the panel reads it three times in order, so
+// it streams through this instead of sitting in the heap.
+bool bookReadPageSlice(uint32_t idx, uint32_t off, uint8_t* dst, uint32_t n);
 // The embedded cover, 48,000 bytes of 480x800 1-bit, valid while the book is
 // open. False when the file carries none.
 bool bookReadCover(uint8_t* dst);

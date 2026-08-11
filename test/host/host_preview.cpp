@@ -878,6 +878,13 @@ int main() {
       printf("BOOK FAIL: opening a book did not land on its first page\n");
       abort();
     }
+    // A 1-bit page still arrives whole -- 48 KB is a block this device can
+    // find, and the blit wants it contiguous.
+    if (bt->hostPageBufBytes() != 48000) {
+      printf("BOOK FAIL: a 1-bit book holds %u bytes, not one page\n",
+             (unsigned)bt->hostPageBufBytes());
+      abort();
+    }
     g_dumpEnabled = false;
 
     // This volume carries a cover made on a PC, and that is what the card's
@@ -999,6 +1006,16 @@ int main() {
     toybox.onTap(240, bookui::LIST_Y0 + 2 * bookui::LIST_ROW_H + 10);
     if (bt->hostScreen() != 1) {
       printf("BOOK FAIL: the grey book did not open\n");
+      abort();
+    }
+    // And it holds NOTHING. A grey page is 96,000 bytes; asking for that in
+    // one run is what stopped every grey book on the owner's card from
+    // opening at all, so the page goes to the panel -- and to the canvas --
+    // a band at a time and is never assembled. If this ever goes non-zero
+    // again, grey books are one fragmented heap away from being unopenable.
+    if (bt->hostPageBufBytes() != 0) {
+      printf("BOOK FAIL: a grey book allocated %u bytes of page buffer\n",
+             (unsigned)bt->hostPageBufBytes());
       abort();
     }
     g_dumpEnabled = false;

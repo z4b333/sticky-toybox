@@ -104,7 +104,22 @@ class Epd {
   // Sticky voltage tail come from the CrossPoint reader project (MIT) -- see
   // THIRD-PARTY.md; the factory waveform is restored automatically because
   // the next full refresh reloads the OTP LUT.
-  bool displayGrey2bpp(const uint8_t* packed2bpp);
+  // Where a grey page's 2-bit pixels come from.
+  //
+  // The plane builder reads the page three times and strictly in order, so a
+  // 96,000-byte page never has to be in memory at once -- and on this device
+  // it must not be, because 96 KB of contiguous heap is not reliably there
+  // once the UI has been running. A reader hands over the card instead and
+  // the page streams through a band at a time.
+  struct GreySource {
+    virtual ~GreySource() = default;
+    // n bytes from byte `off` of the page. False on a short read: a plane
+    // built from half a page is worse than no page at all.
+    virtual bool read(uint32_t off, uint8_t* dst, uint32_t n) = 0;
+  };
+
+  bool displayGrey2bpp(const uint8_t* packed2bpp);   // the whole page in RAM
+  bool displayGrey2bpp(GreySource& src);             // ...or streamed
   // Partial refresh: fast differential update against the previous frame.
   // Automatically promotes to full every FULL_EVERY partials (ghosting control),
   // and on the first paint after boot.
@@ -124,7 +139,7 @@ class Epd {
  public:
 
  private:
-  void buildGreyPlane(const uint8_t* packed, uint8_t* dst, int which);
+  void buildGreyPlane(GreySource& src, uint8_t* dst, int which);
   void writeCmd(uint8_t c);
   void writeData(uint8_t d);
   void writeData(const uint8_t* d, uint32_t len);

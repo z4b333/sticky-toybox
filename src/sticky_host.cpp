@@ -85,6 +85,32 @@ int StickyHost::bookList(BookInfo* out, int max, const char* dir) {
   return n;
 }
 
+#ifndef TOYBOX_HOST
+namespace {
+// The open book, wearing the panel's GreySource interface. The card is
+// already powered and mounted for the reading session, so a band is a seek
+// and a read -- three passes over 96 KB is about a third of a second against
+// a grey refresh that takes three.
+struct CardGrey : Epd::GreySource {
+  uint32_t page;
+  explicit CardGrey(uint32_t p) : page(p) {}
+  bool read(uint32_t off, uint8_t* dst, uint32_t n) override {
+    return sdcard::bookReadPageSlice(page, off, dst, n);
+  }
+};
+}  // namespace
+
+bool StickyHost::bookShowGreyPaged(uint32_t idx) {
+  CardGrey src(idx);
+  return epd.displayGrey2bpp(src);
+}
+#else
+bool StickyHost::bookShowGreyPaged(uint32_t idx) {
+  (void)idx;
+  return false;  // the preview harness has no waveform to drive
+}
+#endif
+
 bool StickyHost::bookOpen(const char* file) { return sdcard::bookOpen(file); }
 bool StickyHost::bookPage(uint32_t idx, uint8_t* dst) { return sdcard::bookReadPage(idx, dst); }
 void StickyHost::bookClose() { sdcard::bookClose(); }

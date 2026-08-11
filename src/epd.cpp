@@ -416,28 +416,60 @@ constexpr uint8_t BORDER_GREY = 0x80;  // park at VCOM: a follow-LUT border
 // Which plane a pixel level lights, per the row semantics above.
 //   BW pass: white only for level 3 (greys start black and get lifted).
 //   RED (msb): set for both mids.  BW-plane (lsb): set for the dark mid only.
-void Epd::buildGreyPlane(const uint8_t* packed, uint8_t* dst, int which) {
+// One row of a 2-bit page: 480 pixels, four to a byte.
+static constexpr int GREY_ROW_BYTES = EPD_W / 4;   // 120
+static constexpr int GREY_BAND_ROWS = 40;          // 4,800 bytes a read
+
+void Epd::buildGreyPlane(GreySource& src, uint8_t* dst, int which) {
   memset(dst, 0x00, EPD_BUF_SIZE);
-  for (int y = 0; y < EPD_H; y++) {
-    for (int x = 0; x < EPD_W; x++) {
-      const uint32_t i = (uint32_t)y * EPD_W + x;
-      const uint8_t lv = (packed[i >> 2] >> (6 - 2 * (i & 3))) & 3;
-      bool bit;
-      switch (which) {
-        case 0: bit = (lv == 3); break;             // the B/W pass: white
-        case 1: bit = (lv == 1); break;             // BW plane: dark grey
-        default: bit = (lv == 1 || lv == 2); break; // RED plane: both mids
+  // Static rather than stack: the loop task has 8 KB and this is 4.8 of it.
+  // Static rather than heap: a page that streams to avoid a big allocation
+  // should not need one to do it.
+  static uint8_t band[GREY_BAND_ROWS * GREY_ROW_BYTES];
+  for (int y0 = 0; y0 < EPD_H; y0 += GREY_BAND_ROWS) {
+    const int rows = (EPD_H - y0) < GREY_BAND_ROWS ? (EPD_H - y0) : GREY_BAND_ROWS;
+    if (!src.read((uint32_t)y0 * GREY_ROW_BYTES, band, (uint32_t)rows * GREY_ROW_BYTES)) return;
+    for (int r = 0; r < rows; r++) {
+      const uint8_t* row = band + (size_t)r * GREY_ROW_BYTES;
+      const int y = y0 + r;
+      for (int x = 0; x < EPD_W; x++) {
+        const uint8_t lv = (row[x >> 2] >> (6 - 2 * (x & 3))) & 3;
+        bool bit;
+        switch (which) {
+          case 0: bit = (lv == 3); break;             // the B/W pass: white
+          case 1: bit = (lv == 1); break;             // BW plane: dark grey
+          default: bit = (lv == 1 || lv == 2); break; // RED plane: both mids
+        }
+        if (!bit) continue;
+        int px, py;
+        epdMapPixel(0, _flipX, _flipY, x, y, px, py);
+        dst[(uint32_t)py * EPD_WB + (px >> 3)] |= (0x80 >> (px & 7));
       }
-      if (!bit) continue;
-      int px, py;
-      epdMapPixel(0, _flipX, _flipY, x, y, px, py);
-      dst[(uint32_t)py * EPD_WB + (px >> 3)] |= (0x80 >> (px & 7));
     }
   }
 }
 
+namespace {
+// The old caller's page, wearing the new interface. Nothing about the
+// sequence below knows or cares which one it got.
+struct MemGrey : Epd::GreySource {
+  const uint8_t* p;
+  explicit MemGrey(const uint8_t* src) : p(src) {}
+  bool read(uint32_t off, uint8_t* dst, uint32_t n) override {
+    memcpy(dst, p + off, n);
+    return true;
+  }
+};
+}  // namespace
+
 bool Epd::displayGrey2bpp(const uint8_t* packed) {
-  if (!_fb || !_prev || !packed) return false;
+  if (!packed) return false;
+  MemGrey src(packed);
+  return displayGrey2bpp(src);
+}
+
+bool Epd::displayGrey2bpp(GreySource& packed) {
+  if (!_fb || !_prev) return false;
 
   // Pass 1: absolute black-and-white, greys rendered black. SEQ_FULL reloads
   // the factory OTP waveform as a side effect, which is exactly the state the

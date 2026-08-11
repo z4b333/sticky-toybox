@@ -25,6 +25,15 @@ inline constexpr int TURN_W = 160;
 // The list itself is shelf.h's: series folders, then books, a page at a time.
 inline constexpr int LIST_Y0 = shelf::Y0, LIST_ROW_H = shelf::ROW_H;
 inline constexpr int MAX_BOOKS = shelf::MAX_ITEMS;
+// A grey page read a band at a time: 480 pixels at two bits is 120 bytes a
+// row, and forty rows is 4,800 -- small enough to be a fixed buffer, big
+// enough that a page is twenty reads rather than eight hundred.
+inline constexpr int GREY_ROW_BYTES = 120, GREY_BAND_ROWS = 40;
+// One band, shared by the two places that read one: drawing a grey page
+// through the canvas and building a grey book's cover. Neither ever runs
+// while the other is, and two copies would be 4.8 KB of BSS spent on saying
+// so twice.
+inline uint8_t g_greyBand[GREY_BAND_ROWS * GREY_ROW_BYTES];
 }  // namespace bookui
 
 class BookTool : public ToolApp {
@@ -210,6 +219,7 @@ class BookTool : public ToolApp {
   int hostFolders() const { return _nf; }
   int hostItems() const { return items(); }
   int hostListPage() const { return _lpage; }
+  uint32_t hostPageBufBytes() const { return _pageBufBytes; }
 #endif
 
  private:
@@ -218,11 +228,19 @@ class BookTool : public ToolApp {
   // Grown, never shrunk, while a book is open; released the moment one is
   // closed. Sized in whole pages so a grey book and a B/W book can follow one
   // another without a reallocation each time.
+  // A grey book asks for nothing. Its page goes to the panel a band at a time
+  // straight off the card, and the canvas fallback reads bands too, so the
+  // 96,000 bytes never exist in one place. A 1-bit page still arrives whole:
+  // 48 KB is a block this device can find, and the blit wants it contiguous.
   static uint32_t pageBufNeed(uint8_t bpp) {
-    return ToolsHost::BOOK_PAGE_BYTES * (bpp == 2 ? 2u : 1u);
+    return bpp == 2 ? 0u : ToolsHost::BOOK_PAGE_BYTES;
   }
   bool ensurePageBuf(uint8_t bpp) {
     const uint32_t need = pageBufNeed(bpp);
+    if (need == 0) {
+      freePageBuf();
+      return true;
+    }
     if (_pageBuf && _pageBufBytes >= need) return true;
     freePageBuf();
     _pageBuf = (uint8_t*)malloc(need);
@@ -275,6 +293,44 @@ class BookTool : public ToolApp {
     return at < _books[i].pages ? at : 0;
   }
 
+  // A 1-bit page is pulled into the buffer the blit needs. A grey page is not
+  // pulled anywhere -- showPage streams it -- so all this does is confirm the
+  // card will still answer for it, which is what the old read was really
+  // telling us when it failed.
+  // Page 0 of a grey book, banded into the thumbnail builder. The builder
+  // takes rows, which is exactly what a band is a stack of, so nothing here
+  // needs the page whole either.
+  bool makeGreyCover(const char* file) {
+    bthumb::Builder b;
+    if (!b.begin(host(), file, 480, 800)) return false;
+    uint8_t* band = bookui::g_greyBand;
+    uint8_t line[480];
+    for (int y0 = 0; y0 < 800; y0 += bookui::GREY_BAND_ROWS) {
+      const int rows = (800 - y0) < bookui::GREY_BAND_ROWS ? (800 - y0) : bookui::GREY_BAND_ROWS;
+      if (!host().bookPageSlice(0, (uint32_t)y0 * bookui::GREY_ROW_BYTES, band,
+                                (uint32_t)rows * bookui::GREY_ROW_BYTES)) {
+        b.abort();
+        return false;
+      }
+      for (int r = 0; r < rows; r++) {
+        const uint8_t* src = band + (size_t)r * bookui::GREY_ROW_BYTES;
+        for (int x = 0; x < 480; x++)
+          line[x] = (uint8_t)(((src[x >> 2] >> (6 - 2 * (x & 3))) & 3) * 85);
+        b.row(y0 + r, line, 480);
+      }
+    }
+    return b.finish();
+  }
+
+  bool readCurrentPage() {
+    if (_cur < 0) return false;
+    if (_books[_cur].bpp == 2) {
+      uint8_t probe[4];
+      return host().bookPageSlice(_pageNo, 0, probe, sizeof(probe));
+    }
+    return _pageBuf && host().bookPage(_pageNo, _pageBuf);
+  }
+
   void openBook(int i) {
     // A buffer for THIS book: 48 KB for one bit, 96 KB for grey. Asking for
     // the grey size always was asking for twice what most books need.
@@ -320,17 +376,27 @@ class BookTool : public ToolApp {
     // is a passing one. See makeAndSave.
     if (!bthumb::have(_books[i].file)) {
       bool made = false;
-      if (_books[i].cover && host().bookCover(_pageBuf))
-        made = bthumb::makeAndSave(host(), _books[i].file, _pageBuf, 1);
-      else if (host().bookPage(0, _pageBuf))
-        made = bthumb::makeAndSave(host(), _books[i].file, _pageBuf, _books[i].bpp);
+      if (_books[i].cover) {
+        // The embedded cover is 48,000 bytes of one bit and wants a buffer
+        // for exactly one call. A grey book has none, so borrow one and hand
+        // it straight back rather than carrying it all session.
+        uint8_t* tmp = _pageBuf ? _pageBuf : (uint8_t*)malloc(ToolsHost::BOOK_PAGE_BYTES);
+        if (tmp && host().bookCover(tmp))
+          made = bthumb::makeAndSave(host(), _books[i].file, tmp, 1);
+        if (tmp && tmp != _pageBuf) free(tmp);
+      }
+      if (!made) {
+        made = _books[i].bpp == 2 ? makeGreyCover(_books[i].file)
+                                  : (_pageBuf && host().bookPage(0, _pageBuf) &&
+                                     bthumb::makeAndSave(host(), _books[i].file, _pageBuf, 1));
+      }
       if (!made) _note = "the cover could not be made - it will try again";
     }
     // ...and, if the sleeping panel is set to wear a cover, this book's goes
     // into flash now. After the builder above, so the very first open of a
     // book still gets one.
     bthumb::noteForLock(host(), _books[i].file);
-    if (!host().bookPage(_pageNo, _pageBuf)) {
+    if (!readCurrentPage()) {
       leaveBook();
       return;
     }
@@ -345,7 +411,13 @@ class BookTool : public ToolApp {
   // host with no grey (guests, the harness) falls through to the canvas path,
   // where render() dithers the page down to 1-bit.
   void showPage() {
-    if (_books[_cur].bpp == 2 && !_chrome && host().bookShowGrey(_pageBuf)) return;
+    if (_books[_cur].bpp == 2 && !_chrome) {
+      // Streamed off the card first. bookShowGrey (the whole page in one
+      // buffer) is kept for a host that only has that, and is only reachable
+      // when a buffer exists -- which for a grey book it now never does.
+      if (host().bookShowGreyPaged(_pageNo)) return;
+      if (_pageBuf && host().bookShowGrey(_pageBuf)) return;
+    }
     host().refresh(true);
   }
 
@@ -365,12 +437,14 @@ class BookTool : public ToolApp {
       host().beep(2);  // the cover and the back cover are where turning stops
       return;
     }
-    if (!host().bookPage((uint32_t)want, _pageBuf)) {
+    const uint32_t was = _pageNo;
+    _pageNo = (uint32_t)want;
+    if (!readCurrentPage()) {
+      _pageNo = was;
       _note = "the card stopped answering";
       leaveBook();
       return;
     }
-    _pageNo = (uint32_t)want;
     char k[12];
     posKey(_cur, k);
     prefs().putUInt(k, _pageNo);
@@ -381,24 +455,36 @@ class BookTool : public ToolApp {
   }
 
   void renderPage(ToolsCanvas& c) {
-    if (!_pageBuf) return;
+    // A grey book has no buffer at all; it draws from the card below.
+    if (!_pageBuf && !(_cur >= 0 && _books[_cur].bpp == 2)) return;
     if (_cur >= 0 && _books[_cur].bpp == 2) {
       // The 1-bit stand-in for a grey page: black and white pass through, and
       // the two mids become an ordered 2x2 dither -- three dots in four for
       // dark grey, one in four for light. This is what guests and the preview
       // harness always see, and what the device shows under the footer.
-      for (int y = 0; y < 800; y++) {
-        for (int x = 0; x < 480; x++) {
-          const uint32_t i = (uint32_t)y * 480 + x;
-          const uint8_t lv = (_pageBuf[i >> 2] >> (6 - 2 * (i & 3))) & 3;
-          bool black;
-          switch (lv) {
-            case 0: black = true; break;
-            case 1: black = !((x & 1) && (y & 1)); break;
-            case 2: black = !(x & 1) && !(y & 1); break;
-            default: black = false; break;
+      //
+      // Read a band at a time, like the waveform path: a grey page is 96,000
+      // bytes and this reader no longer holds one.
+      uint8_t* band = bookui::g_greyBand;
+      for (int y0 = 0; y0 < 800; y0 += bookui::GREY_BAND_ROWS) {
+        const int rows = (800 - y0) < bookui::GREY_BAND_ROWS ? (800 - y0) : bookui::GREY_BAND_ROWS;
+        if (!host().bookPageSlice(_pageNo, (uint32_t)y0 * bookui::GREY_ROW_BYTES, band,
+                                  (uint32_t)rows * bookui::GREY_ROW_BYTES))
+          break;
+        for (int r = 0; r < rows; r++) {
+          const uint8_t* row = band + (size_t)r * bookui::GREY_ROW_BYTES;
+          const int y = y0 + r;
+          for (int x = 0; x < 480; x++) {
+            const uint8_t lv = (row[x >> 2] >> (6 - 2 * (x & 3))) & 3;
+            bool black;
+            switch (lv) {
+              case 0: black = true; break;
+              case 1: black = !((x & 1) && (y & 1)); break;
+              case 2: black = !(x & 1) && !(y & 1); break;
+              default: black = false; break;
+            }
+            if (black) c.fillRect(x, y, 1, 1, true);
           }
-          if (black) c.fillRect(x, y, 1, 1, true);
         }
       }
     } else {

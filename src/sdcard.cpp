@@ -445,6 +445,20 @@ bool bookReadPage(uint32_t idx, uint8_t* dst) {
   return true;
 }
 
+bool bookReadPageSlice(uint32_t idx, uint32_t off, uint8_t* dst, uint32_t n) {
+  const uint32_t bytes = 48000u * g_fakeBpp;
+  if (idx >= g_fakeOpenPages || off + n > bytes) return false;
+  // The invented pages are cheap to draw, so the slice is cut from a freshly
+  // drawn one rather than cached -- the point is the seam, not the speed.
+  static uint8_t whole[96000];
+  if (g_fakeBpp == 2)
+    fakePageGrey(idx, whole);
+  else
+    fakePage(idx, whole);
+  memcpy(dst, whole + off, n);
+  return true;
+}
+
 void bookClose() { g_fakeOpenPages = 0; }
 
 // The invented card, for the file-manager harness: a handful of files the
@@ -1286,6 +1300,19 @@ bool bookReadCover(uint8_t* dst) {
     got += (uint32_t)n;
   }
   return got == TBK_COVER_BYTES;
+}
+
+bool bookReadPageSlice(uint32_t idx, uint32_t off, uint8_t* dst, uint32_t n) {
+  if (!g_book || off + n > g_bookPageBytes) return false;
+  if (!g_book.seek((uint64_t)g_bookDataOffset + (uint64_t)idx * g_bookPageBytes + off))
+    return false;
+  uint32_t got = 0;
+  while (got < n) {
+    const int r = g_book.read(dst + got, n - got);
+    if (r <= 0) break;
+    got += (uint32_t)r;
+  }
+  return got == n;
 }
 
 bool bookReadPage(uint32_t idx, uint8_t* dst) {

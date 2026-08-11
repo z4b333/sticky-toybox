@@ -337,6 +337,24 @@ class ToolsHost {
     (void)packed2bpp;
     return false;
   }
+  // The same, straight off the card: the host streams the page through the
+  // waveform a band at a time and the reader never holds one. A grey page is
+  // 96,000 bytes, and 96 KB of contiguous heap is not something this device
+  // reliably has once the UI has been running -- which is why every grey book
+  // refused to open before this existed.
+  virtual bool bookShowGreyPaged(uint32_t idx) {
+    (void)idx;
+    return false;
+  }
+  // A slice of a page, for drawing a grey one through the canvas when the
+  // waveform cannot be used (the footer is up, or the host has no grey).
+  virtual bool bookPageSlice(uint32_t idx, uint32_t off, uint8_t* dst, uint32_t n) {
+    (void)idx;
+    (void)off;
+    (void)dst;
+    (void)n;
+    return false;
+  }
 
   // EPUBs. The same session shape as .tbk books -- an open EPUB holds the SD
   // bus until epubClose(), which re-initialises the panel -- but the host
