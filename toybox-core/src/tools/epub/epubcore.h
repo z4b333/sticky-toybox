@@ -53,6 +53,17 @@ class Book {
   int spineCount() const { return _spineN; }
   const char* error() const { return _err; }
 
+  // How large each chapter's XHTML is uncompressed, and the book's total.
+  // The zip's central directory already said, so a position can be placed as
+  // a fraction of the whole book without decompressing anything -- which is
+  // what the KOReader sidecar needs and what nothing else here has cause to
+  // ask. Bytes of markup, not of text, so the fraction is approximate in the
+  // way a chapter heavy with tags is approximate; across a whole book the
+  // error is small and it never accumulates, because every chapter boundary
+  // is exact.
+  uint32_t spineBytes(int i) const;
+  uint32_t spineTotalBytes() const;
+
   // Chapter streaming. One chapter open at a time; reopening the same index
   // restarts it from the top (that is how the reader pages backwards).
   bool chapterOpen(int spineIdx);

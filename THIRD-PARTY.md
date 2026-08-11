@@ -101,8 +101,38 @@ vendoring notes in the CrossPoint Reader project. miniz is public domain
 The EPUB reader reads and writes CrossPoint Reader's on-card progress format
 (`/.crosspoint/epub_<hash>/progress.bin`, and the visible-codepoint offset
 convention inside it) so a card moved between the two firmwares keeps its
-reading position. The format was learned from the CrossPoint source (MIT);
-no CrossPoint code is compiled into Toybox for it.
+reading position. The format itself was learned from the CrossPoint source
+and reimplemented: the hash, the record layout, the invisible-tag list and
+the offset counting in `toybox-core/src/epubcore.cpp` are Toybox's own code.
+
+One piece is **not** reimplemented. `toybox-core/src/tools/epub/epub_entities.h`
+is the HTML named-entity table from CrossPoint's `htmlEntities.cpp` (MIT,
+Copyright (c) 2025 Dave Allie), itself derived from atomic14's
+diy-esp32-epub-reader (MIT), copied verbatim and compiled into the firmware.
+Verbatim on purpose: the offsets the two firmwares exchange count codepoints
+of the rendered text, so an entity one firmware expands and the other does
+not shifts every bookmark after it. Matching the table exactly is the only
+way to match the counting exactly, and a rewritten table that happened to
+differ by one entry would fail silently, on one book, at one paragraph.
+
+- https://github.com/crosspoint-reader/crosspoint-reader (MIT, Copyright (c) 2025 Dave Allie)
+- https://github.com/atomic14/diy-esp32-epub-reader (MIT)
+
+## KOReader sidecar compatibility
+
+The reader also writes KOReader's own local sidecar next to each book
+(`<book>.sdr/metadata.epub.lua`), so a card carried to a KOReader device
+shows the right progress without a sync server or an account. The sidecar is
+a small Lua table; the field names and the file layout were learned from the
+KOReader source (AGPL-3.0), and the writer in
+`toybox-core/src/tools/epub/koreader_sdr.h` is Toybox's own code. No KOReader
+code is compiled into Toybox.
+
+Writing a file another program reads is interoperability, not derivation, so
+the AGPL of the program that also reads it does not reach this firmware --
+the same reasoning that lets an MIT-licensed tool write a `.docx`.
+
+- https://github.com/koreader/koreader (AGPL-3.0)
 
 ## TJpgDec (lib/tjpgd/)
 

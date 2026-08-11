@@ -28,6 +28,7 @@
 #include "tools/tool_dice.h"
 #include "tools/tool_epub.h"
 #include "tools/epub/epubcore.h"
+#include "tools/epub/koreader_sdr.h"
 #include "tools/recents.h"
 #include "tools/book_thumbs.h"
 #include "tools/epub/epub_png.h"
@@ -982,6 +983,50 @@ int main() {
         abort();
       }
     }
+    // The KOReader sidecar's path derivation, which is a different rule from
+    // CrossPoint's hash: strip the last suffix, add .sdr, and keep the suffix
+    // in the file name exactly as the card spells it.
+    {
+      struct MP { const char* book; const char* want; };
+      static const MP CASES[] = {
+          {"/books/wind.epub", "/books/wind.sdr/metadata.epub.lua"},
+          {"/books/Uketsu/strange-houses.epub",
+           "/books/Uketsu/strange-houses.sdr/metadata.epub.lua"},
+          // Case is carried through: KOReader derives its name from the same
+          // string, so lower-casing here is the one way to disagree.
+          {"/books/Loud.EPUB", "/books/Loud.sdr/metadata.EPUB.lua"},
+          // Dots in the title must not be mistaken for the suffix.
+          {"/books/Vol.1 - Title.epub", "/books/Vol.1 - Title.sdr/metadata.epub.lua"},
+      };
+      char got[160];
+      for (const MP& c : CASES) {
+        if (!ksdr::metaPath(c.book, got, sizeof(got)) || strcmp(got, c.want) != 0) {
+          printf("KSDR FAIL: %s -> %s, wanted %s\n", c.book, got, c.want);
+          abort();
+        }
+      }
+      // No suffix means no name KOReader would ever look for.
+      if (ksdr::metaPath("/books/noext", got, sizeof(got))) {
+        printf("KSDR FAIL: a suffixless book got a sidecar path\n");
+        abort();
+      }
+      // The percentage is clamped, and a clamped value still has to be Lua a
+      // dofile() will accept -- no "nan", no exponent.
+      ksdr::State st;
+      st.percent = 1.7;
+      char lua[256];
+      if (ksdr::render(st, lua, sizeof(lua)) <= 0 || !strstr(lua, "= 1.000000,") ||
+          strstr(lua, "e-") || strstr(lua, "nan")) {
+        printf("KSDR FAIL: an out-of-range percentage rendered as:\n%s\n", lua);
+        abort();
+      }
+      st.percent = 0.0 / 0.0;  // NaN: would render as "nan" and break dofile
+      if (ksdr::render(st, lua, sizeof(lua)) <= 0 || strstr(lua, "nan")) {
+        printf("KSDR FAIL: NaN reached the sidecar\n");
+        abort();
+      }
+    }
+
     char dir[96];
     epubc::cacheDir("/books/wind.epub", dir, sizeof(dir));
     if (strcmp(dir, "/.crosspoint/epub_836526750") != 0) {
@@ -1086,6 +1131,7 @@ int main() {
     book.close();
     stickyHost.epubClose();
     printf("epub core ok (hash pinned, offsets exact, tinfl streams, cover found)\n");
+    printf("koreader sidecar ok (paths derived, percentages clamped and finite)\n");
   }
 
   // --- the cover decoders ----------------------------------------------------
@@ -1338,6 +1384,45 @@ int main() {
           p.offset != page1Off) {
         printf("EPUB APP FAIL: progress.bin says n=%d spine=%d off=%u, reader is at %u\n", n,
                n == 10 ? p.spine : -1, n == 10 ? p.offset : 0, page1Off);
+        abort();
+      }
+    }
+
+    // And beside the book, KOReader's own sidecar: a card carried to a
+    // KOReader device should open near here without a sync server.
+    {
+      char mp[160];
+      if (!ksdr::metaPath("/books/wind.epub", mp, sizeof(mp)) ||
+          strcmp(mp, "/books/wind.sdr/metadata.epub.lua") != 0) {
+        printf("KSDR FAIL: metaPath gave '%s'\n", mp);
+        abort();
+      }
+      char lua[512];
+      const int n = stickyHost.sdReadFile(mp, lua, sizeof(lua) - 1);
+      if (n <= 0) {
+        printf("KSDR FAIL: no sidecar written beside the book\n");
+        abort();
+      }
+      lua[n] = 0;
+      // Reading chapter two of two: past the start of the book, short of its
+      // end. The exact number is the first chapter's share of the bytes, and
+      // pinning it would pin the fixture's whitespace, so the guard is the
+      // shape -- which is what a wrong percentage gets wrong.
+      const char* key = strstr(lua, "[\"last_percent\"] = ");
+      if (!key) {
+        printf("KSDR FAIL: no last_percent in:\n%s\n", lua);
+        abort();
+      }
+      const double pct = atof(key + strlen("[\"last_percent\"] = "));
+      if (!(pct > 0.0 && pct < 1.0)) {
+        printf("KSDR FAIL: mid-book percentage came out %f\n", pct);
+        abort();
+      }
+      // percent_finished drives KOReader's footer and must agree with the
+      // position it actually restores from.
+      const char* disp = strstr(lua, "[\"percent_finished\"] = ");
+      if (!disp || atof(disp + strlen("[\"percent_finished\"] = ")) != pct) {
+        printf("KSDR FAIL: the two percentages disagree\n");
         abort();
       }
     }

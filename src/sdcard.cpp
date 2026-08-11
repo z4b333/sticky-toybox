@@ -275,11 +275,13 @@ void buildFakeEpub() {
 // reads it back through readFileAt to check what a CrossPoint device would
 // find on the card.
 struct FakeSide {
-  char path[120];
-  uint8_t data[32];
+  char path[160];
+  // Big enough for the largest thing written beside a book: CrossPoint's
+  // progress.bin is ten bytes, the KOReader sidecar is a couple of hundred.
+  uint8_t data[512];
   int n = 0;
 };
-FakeSide g_side[4];
+FakeSide g_side[6];
 }  // namespace
 
 // The second invented book exists to exercise long paths: real release

@@ -17,6 +17,7 @@
 #include "book_thumbs.h"
 #include "epub/epub_cover.h"
 #include "epub/epubcore.h"
+#include "epub/koreader_sdr.h"
 #include "recents.h"
 #include "shelf.h"
 #include "tools_ui.h"
@@ -251,6 +252,40 @@ class EpubTool : public ToolApp {
     char path[128];
     progressPath(path, sizeof(path));
     host().sdWriteFileAtomic(path, buf, n);
+    saveKoreader();
+  }
+
+  // How far through the whole book we are, as KOReader wants it: 0..1.
+  //
+  // Chapter boundaries are exact -- the zip said how big every chapter is --
+  // and within a chapter we only claim a fraction once the chapter has been
+  // read to its end and its page count is therefore known. Until then the
+  // answer is the START of the chapter you are in, which is honest and never
+  // overshoots. Landing a reader slightly behind costs them a page turn;
+  // landing them ahead costs them the ending.
+  double bookFraction() const {
+    const uint32_t total = _book.spineTotalBytes();
+    if (total == 0) return 0;
+    uint32_t before = 0;
+    for (int i = 0; i < _spine && i < _book.spineCount(); i++) before += _book.spineBytes(i);
+    double f = 0;
+    if (_chapterPages > 0 && _page > 0) {
+      f = (double)_page / (double)_chapterPages;
+      if (f > 1) f = 1;
+    }
+    const double at = (double)before + (double)_book.spineBytes(_spine) * f;
+    const double pct = at / (double)total;
+    return pct < 0 ? 0 : (pct > 1 ? 1 : pct);
+  }
+
+  void saveKoreader() {
+    char path[160];
+    if (!ksdr::metaPath(_books[_cur].file, path, sizeof(path))) return;
+    ksdr::State st;
+    st.percent = bookFraction();
+    char lua[256];
+    const int n = ksdr::render(st, lua, sizeof(lua));
+    if (n > 0) host().sdWriteFileAtomic(path, lua, n);
   }
 
   void openBook(int i) {

@@ -254,6 +254,19 @@ bool decodeProgress(const uint8_t* d, int n, Progress& out) {
 
 // --- the zip directory -------------------------------------------------------
 
+uint32_t Book::spineBytes(int i) const {
+  if (!_spine || i < 0 || i >= _spineN) return 0;
+  // Chapters the OPF named but the zip never had contribute nothing, which is
+  // right: they occupy no reading time either.
+  return _spine[i].ok >= 2 ? _spine[i].usize : 0;
+}
+
+uint32_t Book::spineTotalBytes() const {
+  uint32_t t = 0;
+  for (int i = 0; i < _spineN; i++) t += spineBytes(i);
+  return t;
+}
+
 bool Book::open(IO& io) {
   close();
   _io = &io;
