@@ -63,4 +63,26 @@ bool bookOpen(const char* file);
 bool bookReadPage(uint32_t idx, uint8_t* dst);
 void bookClose();
 
+// EPUBs. Same bus discipline as .tbk books: listing borrows the bus for one
+// call, an open EPUB holds it for the whole reading session, and epubClose()
+// powers the card down and re-initialises the panel. The file field is the
+// book's ABSOLUTE card path ("/books/x.epub") because that exact string is
+// what CrossPoint hashes to find its progress directory -- see epubcore.h.
+struct EpubMeta {
+  char file[64];
+  char title[41];
+  bool cont = false;  // a CrossPoint progress file exists for it
+};
+int epubList(EpubMeta* out, int max);  // -1: no card
+bool epubOpen(const char* path);
+int epubRead(uint32_t pos, void* dst, uint32_t n);
+uint32_t epubSize();
+void epubClose();
+
+// Small sidecar files (CrossPoint's progress.bin), valid only while an EPUB
+// session holds the bus. writeFileAtomic makes the directories, writes a
+// .tmp, and renames over -- an interrupted write leaves the old file whole.
+int readFileAt(const char* path, void* dst, int max);
+bool writeFileAtomic(const char* path, const void* data, int n);
+
 }  // namespace sdcard

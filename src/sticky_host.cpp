@@ -59,3 +59,29 @@ int StickyHost::bookList(BookInfo* out, int max) {
 bool StickyHost::bookOpen(const char* file) { return sdcard::bookOpen(file); }
 bool StickyHost::bookPage(uint32_t idx, uint8_t* dst) { return sdcard::bookReadPage(idx, dst); }
 void StickyHost::bookClose() { sdcard::bookClose(); }
+
+int StickyHost::epubList(EpubInfo* out, int max) {
+  sdcard::EpubMeta metas[8];
+  const int n = sdcard::epubList(metas, max < 8 ? max : 8);
+  for (int i = 0; i < (n < 0 ? 0 : n); i++) {
+    strncpy(out[i].file, metas[i].file, sizeof(out[i].file) - 1);
+    out[i].file[sizeof(out[i].file) - 1] = 0;
+    strncpy(out[i].title, metas[i].title, sizeof(out[i].title) - 1);
+    out[i].title[sizeof(out[i].title) - 1] = 0;
+    out[i].cont = metas[i].cont;
+  }
+  return n;
+}
+
+bool StickyHost::epubOpen(const char* path) { return sdcard::epubOpen(path); }
+int StickyHost::epubRead(uint32_t pos, void* dst, uint32_t n) {
+  return sdcard::epubRead(pos, dst, n);
+}
+uint32_t StickyHost::epubSize() { return sdcard::epubSize(); }
+void StickyHost::epubClose() { sdcard::epubClose(); }
+int StickyHost::sdReadFile(const char* path, void* dst, int max) {
+  return sdcard::readFileAt(path, dst, max);
+}
+bool StickyHost::sdWriteFileAtomic(const char* path, const void* data, int n) {
+  return sdcard::writeFileAtomic(path, data, n);
+}

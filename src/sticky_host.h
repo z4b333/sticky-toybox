@@ -113,6 +113,13 @@ class StickyHost : public ToolsHost {
   bool bookPage(uint32_t idx, uint8_t* dst) override;
   void bookClose() override;
   bool bookShowGrey(const uint8_t* packed2bpp) override { return epd.displayGrey2bpp(packed2bpp); }
+  int epubList(EpubInfo* out, int max) override;
+  bool epubOpen(const char* path) override;
+  int epubRead(uint32_t pos, void* dst, uint32_t n) override;
+  uint32_t epubSize() override;
+  void epubClose() override;
+  int sdReadFile(const char* path, void* dst, int max) override;
+  bool sdWriteFileAtomic(const char* path, const void* data, int n) override;
 
   ToolsCanvas& sharedCanvas() { return _canvas; }
 

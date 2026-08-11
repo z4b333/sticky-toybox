@@ -4,6 +4,7 @@
 #include "nonogram.h"
 #include "tools/tool_book.h"
 #include "tools/tool_coin.h"
+#include "tools/tool_epub.h"
 #include "tools/tool_dice.h"
 #include "tools/tool_flash.h"
 #include "tools/tool_note.h"
@@ -41,7 +42,8 @@ bool Toybox::build(bool game, int idx) {
       case 6: _active = new NoteTool(); break;
       case 7: _active = new SeaTool(); break;
       case 8: _active = new SudokuTool(); break;
-      default: _active = new BookTool(); break;
+      case 9: _active = new BookTool(); break;
+      default: _active = new EpubTool(); break;
     }
   }
   if (!_active) return false;

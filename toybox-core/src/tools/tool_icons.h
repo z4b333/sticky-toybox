@@ -6,14 +6,14 @@
 
 namespace ticons {
 
-inline constexpr int COUNT = 10;
+inline constexpr int COUNT = 11;
 inline const char* const NAMES[COUNT] = {"COIN",  "DICE",   "TIMER", "RANDOM",
                                          "PICKER", "FLASHCARDS", "NOTES",  "SHIPS",
-                                         "SUDOKU", "BOOKS"};
+                                         "SUDOKU", "BOOKS", "EPUB"};
 // Kept short: a hub tile is 140 px, which is about twelve characters.
 inline const char* const DESCS[COUNT] = {"heads/tails", "D4 - D20",   "countdown", "number/card",
                                          "from a list", "flashcards", "from phone", "battleship",
-                                         "9x9 numbers", "from the card"};
+                                         "9x9 numbers", "from the card", "ebooks"};
 
 inline void coin(ToolsCanvas& c, int cx, int cy, int s) {
   c.drawCircle(cx, cy, s / 2, 3, true);
@@ -127,6 +127,22 @@ inline void books(ToolsCanvas& c, int cx, int cy, int s) {
   c.fillRect(x + s / 8 + 8, cy + 12, w - s / 4 - 8, 3, true);
 }
 
+// An open book, pages of text: the closed book with the bookmark is the .tbk
+// shelf, so the ebook shelf reads as the same object opened.
+inline void epub(ToolsCanvas& c, int cx, int cy, int s) {
+  const int w = s / 2 - 2, h = (s * 3) / 4;
+  const int y = cy - h / 2;
+  // two page panels meeting at the spine, slightly splayed
+  c.drawRect(cx - w - 2, y, w, h, 3, true);
+  c.drawRect(cx + 2, y, w, h, 3, true);
+  c.fillRect(cx - 1, y, 2, h, true);  // the spine
+  for (int k = 0; k < 3; k++) {
+    const int ly = y + 10 + k * 12;
+    c.fillRect(cx - w + 4, ly, w - 12, 3, true);
+    c.fillRect(cx + 8, ly, w - 12, 3, true);
+  }
+}
+
 inline void draw(ToolsCanvas& c, int idx, int cx, int cy, int s) {
   switch (idx) {
     case 0: coin(c, cx, cy, s); break;
@@ -138,7 +154,8 @@ inline void draw(ToolsCanvas& c, int idx, int cx, int cy, int s) {
     case 6: notes(c, cx, cy, s); break;
     case 7: battleship(c, cx, cy, s); break;
     case 8: sudoku(c, cx, cy, s); break;
-    default: books(c, cx, cy, s); break;
+    case 9: books(c, cx, cy, s); break;
+    default: epub(c, cx, cy, s); break;
   }
 }
 

@@ -268,6 +268,48 @@ class ToolsHost {
     return false;
   }
 
+  // EPUBs. The same session shape as .tbk books -- an open EPUB holds the SD
+  // bus until epubClose(), which re-initialises the panel -- but the host
+  // only moves bytes; the parsing lives in epubc (tools/epub/epubcore.h).
+  // file is the ABSOLUTE card path, because CrossPoint hashes that exact
+  // string to find its progress directory.
+  struct EpubInfo {
+    char file[64];
+    char title[41];
+    bool cont = false;  // a reading position already exists on the card
+  };
+  virtual int epubList(EpubInfo* out, int max) {
+    (void)out;
+    (void)max;
+    return -1;
+  }
+  virtual bool epubOpen(const char* path) {
+    (void)path;
+    return false;
+  }
+  virtual int epubRead(uint32_t pos, void* dst, uint32_t n) {
+    (void)pos;
+    (void)dst;
+    (void)n;
+    return -1;
+  }
+  virtual uint32_t epubSize() { return 0; }
+  virtual void epubClose() {}
+  // Sidecar files beside the book (CrossPoint's progress.bin). Only valid
+  // while an EPUB session holds the bus.
+  virtual int sdReadFile(const char* path, void* dst, int max) {
+    (void)path;
+    (void)dst;
+    (void)max;
+    return -1;
+  }
+  virtual bool sdWriteFileAtomic(const char* path, const void* data, int n) {
+    (void)path;
+    (void)data;
+    (void)n;
+    return false;
+  }
+
   // Y coordinate where a tool's own content may start (below the top bar).
   virtual int contentTop() const = 0;
 };

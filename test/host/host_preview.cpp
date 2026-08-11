@@ -26,6 +26,8 @@
 #include "tools/note_store.h"
 #include "tools/tool_book.h"
 #include "tools/tool_dice.h"
+#include "tools/tool_epub.h"
+#include "tools/epub/epubcore.h"
 #include "tools/tool_flash.h"
 #include "tools/tool_note.h"
 #include "tools/tool_picker.h"
@@ -228,7 +230,7 @@ static void checkHubRouting(const char* label) {
   const Grp ALL[3] = {
       {{{true, 0}, {true, 1}, {true, 2}, {true, 3}, {false, 7}, {false, 8}}, 6},
       {{{false, 0}, {false, 1}, {false, 3}, {false, 4}}, 4},
-      {{{false, 9}, {false, 5}, {false, 6}, {false, 2}}, 4},
+      {{{false, 9}, {false, 10}, {false, 5}, {false, 6}, {false, 2}}, 5},
   };
   Grp G[3] = {};
   int shown = 0;
@@ -548,7 +550,7 @@ int main() {
   const int levels = stickyHost.soundLevels();
   const int soundWas = stickyHost.soundLevel();
   tapRect(setui::actionRect(setui::ACT_SOUND));
-  if (appvis::shown() != 10 || stickyHost.soundLevel() != soundWas - 1) {
+  if (appvis::shown() != 11 || stickyHost.soundLevel() != soundWas - 1) {
     printf("SETTINGS FAIL: taps did not land (%d shown, sound %d)\n", appvis::shown(),
            stickyHost.soundLevel());
     abort();
@@ -780,6 +782,264 @@ int main() {
     toybox.hostHub().goHome();
     g_dumpEnabled = true;
     printf("book reader ok (list, rtl turns, buttons, ends, position, grey fallback)\n");
+  }
+
+  // --- the EPUB core: CrossPoint parity --------------------------------------
+  // The hash and the visible-codepoint counting are the two things that make a
+  // reading position portable between firmwares. Both are pinned to exact
+  // values here: the hash against numbers taken from a real 32-bit libstdc++
+  // (g++ -m32, the same _Hash_bytes the ESP32 toolchains carry), the counting
+  // against hand-derived offsets in the invented book's first chapter.
+  {
+    struct HV { const char* s; uint32_t h; };
+    // std::hash<std::string> observed under g++ -m32:
+    static const HV VECS[] = {{"/books/x.epub", 1473393747u},
+                              {"/Alice in Wonderland.epub", 1076398746u},
+                              {"/books/One Piece vol 1.epub", 2644013571u},
+                              {"", 3990065800u},
+                              {"a", 2167009006u},
+                              {"/books/wind.epub", 836526750u}};
+    for (const HV& v : VECS) {
+      if (epubc::cpHash(v.s, strlen(v.s)) != v.h) {
+        printf("EPUB FAIL: cpHash(\"%s\") = %u, CrossPoint would use %u\n", v.s,
+               epubc::cpHash(v.s, strlen(v.s)), v.h);
+        abort();
+      }
+    }
+    char dir[96];
+    epubc::cacheDir("/books/wind.epub", dir, sizeof(dir));
+    if (strcmp(dir, "/.crosspoint/epub_836526750") != 0) {
+      printf("EPUB FAIL: cache dir is %s\n", dir);
+      abort();
+    }
+
+    // progress.bin round-trip, all three sizes CrossPoint writes.
+    {
+      epubc::Progress p;
+      uint8_t b10[10] = {3, 0, 7, 0, 20, 0, 0x39, 0x30, 0, 0};  // spine 3, page 7/20, off 12345
+      if (!epubc::decodeProgress(b10, 10, p) || p.spine != 3 || p.page != 7 || p.pageCount != 20 ||
+          !p.hasOffset || p.offset != 12345) {
+        printf("EPUB FAIL: 10-byte progress decoded wrong\n");
+        abort();
+      }
+      uint8_t out[10];
+      if (epubc::encodeProgress(p, out) != 10 || memcmp(out, b10, 10) != 0) {
+        printf("EPUB FAIL: progress did not round-trip\n");
+        abort();
+      }
+      uint8_t b6[6] = {1, 0, 0xFF, 0xFF, 9, 0};  // the last-page sentinel must clear
+      if (!epubc::decodeProgress(b6, 6, p) || p.spine != 1 || p.page != 0 || p.hasOffset) {
+        printf("EPUB FAIL: 6-byte progress decoded wrong\n");
+        abort();
+      }
+    }
+
+    // The word stream, against the invented book. Chapter one is stored (its
+    // bytes are the fixture); chapter two is a real deflate blob, so tinfl
+    // streams compressed data even on this build.
+    struct MemIO : epubc::IO {
+      int read(uint32_t pos, void* dst, uint32_t n) override {
+        return stickyHost.epubRead(pos, dst, n);
+      }
+      uint32_t size() override { return stickyHost.epubSize(); }
+    } mio;
+    if (!stickyHost.epubOpen("/books/wind.epub")) {
+      printf("EPUB FAIL: the invented epub did not open\n");
+      abort();
+    }
+    epubc::Book book;
+    if (!book.open(mio) || book.spineCount() != 2) {
+      printf("EPUB FAIL: open: %s (spine %d)\n", book.error(), book.spineCount());
+      abort();
+    }
+    struct Tok { int t; const char* w; uint32_t off; };
+    // Hand-derived from kFakeCh1 in sdcard.cpp: offsets count every codepoint
+    // inside <body> (newlines between tags included), &nbsp; glues "two three"
+    // into one token, &#233; and &amp; decode, head/style/title text does not
+    // count at all.
+    static const Tok WANT[] = {{epubc::TOK_WORD, "One", 1},   {epubc::TOK_WORD, "two three", 5},
+                               {epubc::TOK_PARA, "", 0},      {epubc::TOK_WORD, "caf\xC3\xA9", 15},
+                               {epubc::TOK_WORD, "&", 20},    {epubc::TOK_WORD, "more", 22},
+                               {epubc::TOK_PARA, "", 0},      {epubc::TOK_WORD, "ende", 27},
+                               {epubc::TOK_PARA, "", 0},      {epubc::TOK_END, "", 0}};
+    if (!book.chapterOpen(0)) {
+      printf("EPUB FAIL: chapter one did not open\n");
+      abort();
+    }
+    char w[epubc::WORD_CAP];
+    uint32_t off = 0;
+    for (const Tok& want : WANT) {
+      const int t = book.next(w, off);
+      if (t != want.t || (t == epubc::TOK_WORD && (strcmp(w, want.w) != 0 || off != want.off))) {
+        printf("EPUB FAIL: expected %d '%s'@%u, got %d '%s'@%u\n", want.t, want.w, want.off, t,
+               w, off);
+        abort();
+      }
+    }
+    // Chapter two through tinfl: 800 numbered words plus a five-word coda,
+    // first word at offset 1 (the newline after <body> is offset 0).
+    if (!book.chapterOpen(1)) {
+      printf("EPUB FAIL: chapter two did not open\n");
+      abort();
+    }
+    int words = 0;
+    bool sawFirst = false;
+    char last[epubc::WORD_CAP] = "";
+    for (;;) {
+      const int t = book.next(w, off);
+      if (t == epubc::TOK_END) break;
+      if (t == epubc::TOK_ERR) {
+        printf("EPUB FAIL: chapter two errored mid-stream\n");
+        abort();
+      }
+      if (t != epubc::TOK_WORD) continue;
+      if (words == 0) sawFirst = (strcmp(w, "w0001") == 0 && off == 1);
+      words++;
+      strcpy(last, w);
+    }
+    if (words != 805 || !sawFirst || strcmp(last, "line") != 0) {
+      printf("EPUB FAIL: chapter two gave %d words, last '%s'\n", words, last);
+      abort();
+    }
+    book.close();
+    stickyHost.epubClose();
+    printf("epub core ok (hash pinned, offsets exact, tinfl streams)\n");
+  }
+
+  // --- the EPUB reader app ---------------------------------------------------
+  // Open through the hub, read, turn, close; then the CrossPoint round-trip:
+  // the position a turn writes must be the position a fresh open lands on,
+  // through the same file a CrossPoint device would read.
+  {
+    g_dumpEnabled = false;
+    toybox.goHub();
+    toybox.hostHub().goHome();
+    toybox.onTap(80 + 2 * 160, hubui::DOCK_Y + 30);  // the STUDY drawer
+    // EPUB is the drawer's second cell (row 0, right column).
+    {
+      const int rows = 3;  // 5 apps + the hidden-apps ghost cell
+      int y0 = hubui::FOLDER_TOP +
+               ((hubui::FOLDER_BOTTOM - hubui::FOLDER_TOP) - rows * hubui::ROW_STEP) / 2;
+      if (y0 < hubui::FOLDER_TOP) y0 = hubui::FOLDER_TOP;
+      toybox.onTap(3 * EPD_W / 4, y0 + hubui::TILE / 2);
+    }
+    if (!toybox.hostInApp() || strcmp(toybox.activeTitle(), "EPUB") != 0) {
+      printf("EPUB APP FAIL: the STUDY drawer's second cell did not open EPUB\n");
+      abort();
+    }
+    auto* et = static_cast<EpubTool*>(toybox.hostActive());
+    g_dumpEnabled = true;
+    setScreen("tool_epub_list");
+    stickyHost.refresh(true);
+
+    // Open the one invented book; it starts at the top of chapter one.
+    g_dumpEnabled = false;
+    toybox.onTap(240, epubui::LIST_Y0 + 10);
+    if (et->hostScreen() != 1 || et->hostSpine() != 0 || et->hostPage() != 0) {
+      printf("EPUB APP FAIL: the book did not open at the start (s%d p%d)\n", et->hostSpine(),
+             et->hostPage());
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_epub_page");
+    stickyHost.refresh(true);
+
+    // Forward: chapter one is one page, so DOWN lands on chapter two.
+    g_dumpEnabled = false;
+    toybox.onButton(SideBtn::Down);
+    if (et->hostSpine() != 1 || et->hostPage() != 0) {
+      printf("EPUB APP FAIL: DOWN did not cross into chapter two (s%d p%d)\n", et->hostSpine(),
+             et->hostPage());
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_epub_ch2");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    toybox.onButton(SideBtn::Down);  // page 2 of chapter two
+    if (et->hostSpine() != 1 || et->hostPage() != 1) {
+      printf("EPUB APP FAIL: DOWN did not turn within chapter two\n");
+      abort();
+    }
+    const uint32_t page1Off = et->hostPageOffset();
+
+    // What did that write to the card? Exactly what CrossPoint reads.
+    {
+      uint8_t buf[16];
+      const int n = stickyHost.sdReadFile("/.crosspoint/epub_836526750/progress.bin", buf, 16);
+      epubc::Progress p;
+      if (n != 10 || !epubc::decodeProgress(buf, n, p) || p.spine != 1 || !p.hasOffset ||
+          p.offset != page1Off) {
+        printf("EPUB APP FAIL: progress.bin says n=%d spine=%d off=%u, reader is at %u\n", n,
+               n == 10 ? p.spine : -1, n == 10 ? p.offset : 0, page1Off);
+        abort();
+      }
+    }
+
+    // UP goes back to page 1 of the chapter, and the replayed page starts
+    // where it started the first time.
+    toybox.onButton(SideBtn::Up);
+    if (et->hostSpine() != 1 || et->hostPage() != 0 || et->hostPageOffset() != 1) {
+      printf("EPUB APP FAIL: UP did not replay page one (p%d off %u)\n", et->hostPage(),
+             et->hostPageOffset());
+      abort();
+    }
+    // ...and back across the chapter boundary to chapter one's last page.
+    toybox.onButton(SideBtn::Up);
+    if (et->hostSpine() != 0) {
+      printf("EPUB APP FAIL: UP did not cross back into chapter one\n");
+      abort();
+    }
+
+    // OK closes the book; the list must know the book now carries a position.
+    if (!toybox.onButton(SideBtn::Ok) || et->hostScreen() != 0) {
+      printf("EPUB APP FAIL: OK did not close the book\n");
+      abort();
+    }
+    toybox.goHub();
+
+    // The CrossPoint round-trip: a position written by "another firmware"
+    // (spine 1, mid-chapter offset 2500) must open on the page containing it.
+    {
+      epubc::Progress cp;
+      cp.spine = 1;
+      cp.page = 3;       // deliberately wrong for our pagination: the offset wins
+      cp.pageCount = 9;
+      cp.offset = 2500;
+      cp.hasOffset = true;
+      uint8_t buf[10];
+      const int n = epubc::encodeProgress(cp, buf);
+      // The fake sidecar store accepts writes without a session; a device
+      // writes through the same call while the bus is held.
+      if (!stickyHost.sdWriteFileAtomic("/.crosspoint/epub_836526750/progress.bin", buf, n)) {
+        printf("EPUB APP FAIL: could not plant the CrossPoint position\n");
+        abort();
+      }
+      toybox.open(false, 10);  // EPUB, fresh
+      auto* et2 = static_cast<EpubTool*>(toybox.hostActive());
+      toybox.onTap(240, epubui::LIST_Y0 + 10);
+      if (et2->hostScreen() != 1 || et2->hostSpine() != 1) {
+        printf("EPUB APP FAIL: the planted position did not open chapter two\n");
+        abort();
+      }
+      const uint32_t start = et2->hostPageOffset();
+      if (start > 2500) {
+        printf("EPUB APP FAIL: landed at %u, past the planted 2500\n", start);
+        abort();
+      }
+      // the next page must start beyond the planted offset
+      toybox.onButton(SideBtn::Down);
+      if (et2->hostPageOffset() <= 2500) {
+        printf("EPUB APP FAIL: page after the planted one starts at %u\n",
+               et2->hostPageOffset());
+        abort();
+      }
+      toybox.onButton(SideBtn::Ok);
+    }
+    toybox.goHub();
+    toybox.hostHub().goHome();
+    g_dumpEnabled = true;
+    printf("epub reader ok (opens, turns, replays, and trades positions with CrossPoint)\n");
   }
 
   // The battery icon, which had never been rendered here at all: it is drawn

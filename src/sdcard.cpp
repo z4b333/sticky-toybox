@@ -1,7 +1,9 @@
 #include "sdcard.h"
 
+#include <stdlib.h>
 #include <string.h>
 
+#include "tools/epub/epubcore.h"
 #include "tools/lock_image.h"
 #include "tools/tiny_fs.h"
 
@@ -92,6 +94,190 @@ int bookList(BookMeta* out, int max) {
   int n = 0;
   for (; n < 3 && n < max; n++) out[n] = kFake[n];
   return n;
+}
+
+// --- the invented EPUB -------------------------------------------------------
+// A real zip, assembled in memory: chapter one stored, so the offset guard can
+// count its codepoints by hand, and chapter two deflated (a blob compressed at
+// build time), so tinfl streams real compressed data in the harness too.
+namespace {
+
+#include "fake_epub_ch2.inc"
+
+// Chapter one is the offset-parity fixture: entities the XML layer expands
+// (&#233;), one only the HTML table knows (&nbsp;), one expat predefines
+// (&amp;), skipped head content, and whitespace text nodes that all count.
+// The harness's expected numbers are hand-derived from THIS string; touching
+// it means re-deriving them.
+static const char kFakeCh1[] =
+    "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+    "<html xmlns=\"http://www.w3.org/1999/xhtml\">\n"
+    "<head><title>Chapter one</title>\n"
+    "<style>p { margin: 0; }</style>\n"
+    "</head>\n"
+    "<body>\n"
+    "<p>One two&nbsp;three</p>\n"
+    "<p>caf&#233; &amp; more</p>\n"
+    "<p>ende</p>\n"
+    "</body>\n"
+    "</html>\n";
+
+static const char kFakeContainer[] =
+    "<?xml version=\"1.0\"?>\n"
+    "<container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">\n"
+    "  <rootfiles>\n"
+    "    <rootfile full-path=\"OEBPS/content.opf\" media-type=\"application/oebps-package+xml\"/>\n"
+    "  </rootfiles>\n"
+    "</container>\n";
+
+static const char kFakeOpf[] =
+    "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+    "<package xmlns=\"http://www.idpf.org/2007/opf\" version=\"2.0\">\n"
+    "  <metadata><dc:title xmlns:dc=\"http://purl.org/dc/elements/1.1/\">Wind</dc:title></metadata>\n"
+    "  <manifest>\n"
+    "    <item id=\"c1\" href=\"ch1.xhtml\" media-type=\"application/xhtml+xml\"/>\n"
+    "    <item id=\"c2\" href=\"ch2.xhtml\" media-type=\"application/xhtml+xml\"/>\n"
+    "    <item id=\"css\" href=\"style.css\" media-type=\"text/css\"/>\n"
+    "  </manifest>\n"
+    "  <spine><itemref idref=\"c1\"/><itemref idref=\"c2\"/></spine>\n"
+    "</package>\n";
+
+uint8_t* g_fakeEpub = nullptr;
+uint32_t g_fakeEpubLen = 0;
+bool g_fakeEpubOpen = false;
+
+void put16(uint8_t* p, uint32_t v) { p[0] = v & 255; p[1] = (v >> 8) & 255; }
+void put32(uint8_t* p, uint32_t v) {
+  p[0] = v & 255; p[1] = (v >> 8) & 255; p[2] = (v >> 16) & 255; p[3] = (v >> 24) & 255;
+}
+
+void buildFakeEpub() {
+  if (g_fakeEpub) return;
+  struct E {
+    const char* name;
+    const uint8_t* data;
+    uint32_t csize, usize;
+    uint16_t method;
+    uint32_t lho;
+  };
+  E ents[4] = {
+      {"META-INF/container.xml", (const uint8_t*)kFakeContainer, (uint32_t)strlen(kFakeContainer),
+       (uint32_t)strlen(kFakeContainer), 0, 0},
+      {"OEBPS/content.opf", (const uint8_t*)kFakeOpf, (uint32_t)strlen(kFakeOpf),
+       (uint32_t)strlen(kFakeOpf), 0, 0},
+      {"OEBPS/ch1.xhtml", (const uint8_t*)kFakeCh1, (uint32_t)strlen(kFakeCh1),
+       (uint32_t)strlen(kFakeCh1), 0, 0},
+      {"OEBPS/ch2.xhtml", kFakeCh2Deflate, (uint32_t)sizeof(kFakeCh2Deflate), kFakeCh2Raw, 8, 0},
+  };
+  uint32_t total = 22;
+  for (const E& e : ents) total += 30 + 46 + 2 * (uint32_t)strlen(e.name) + e.csize;
+  g_fakeEpub = (uint8_t*)malloc(total);
+  uint8_t* p = g_fakeEpub;
+  for (E& e : ents) {
+    e.lho = (uint32_t)(p - g_fakeEpub);
+    const uint32_t nl = (uint32_t)strlen(e.name);
+    memset(p, 0, 30);
+    put32(p, 0x04034b50u);
+    put16(p + 8, e.method);
+    put32(p + 18, e.csize);
+    put32(p + 22, e.usize);
+    put16(p + 26, nl);
+    memcpy(p + 30, e.name, nl);
+    memcpy(p + 30 + nl, e.data, e.csize);
+    p += 30 + nl + e.csize;
+  }
+  const uint32_t cdOfs = (uint32_t)(p - g_fakeEpub);
+  for (const E& e : ents) {
+    const uint32_t nl = (uint32_t)strlen(e.name);
+    memset(p, 0, 46);
+    put32(p, 0x02014b50u);
+    put16(p + 10, e.method);
+    put32(p + 20, e.csize);
+    put32(p + 24, e.usize);
+    put16(p + 28, nl);
+    put32(p + 42, e.lho);
+    memcpy(p + 46, e.name, nl);
+    p += 46 + nl;
+  }
+  const uint32_t cdSize = (uint32_t)(p - g_fakeEpub) - cdOfs;
+  memset(p, 0, 22);
+  put32(p, 0x06054b50u);
+  put16(p + 8, 4);
+  put16(p + 10, 4);
+  put32(p + 12, cdSize);
+  put32(p + 16, cdOfs);
+  p += 22;
+  g_fakeEpubLen = (uint32_t)(p - g_fakeEpub);
+}
+
+// The sidecar store: enough of a filesystem for progress files. The harness
+// reads it back through readFileAt to check what a CrossPoint device would
+// find on the card.
+struct FakeSide {
+  char path[120];
+  uint8_t data[32];
+  int n = 0;
+};
+FakeSide g_side[4];
+}  // namespace
+
+int epubList(EpubMeta* out, int max) {
+  if (max < 1) return 0;
+  EpubMeta m{};
+  strncpy(m.file, "/books/wind.epub", sizeof(m.file) - 1);
+  strncpy(m.title, "wind", sizeof(m.title) - 1);
+  char cache[96];
+  epubc::cacheDir(m.file, cache, sizeof(cache));
+  strncat(cache, "/progress.bin", sizeof(cache) - strlen(cache) - 1);
+  m.cont = false;
+  for (const FakeSide& s : g_side)
+    if (s.n > 0 && strcmp(s.path, cache) == 0) m.cont = true;
+  out[0] = m;
+  return 1;
+}
+
+bool epubOpen(const char* path) {
+  if (strcmp(path, "/books/wind.epub") != 0) return false;
+  buildFakeEpub();
+  g_fakeEpubOpen = true;
+  return true;
+}
+
+int epubRead(uint32_t pos, void* dst, uint32_t n) {
+  if (!g_fakeEpubOpen || pos > g_fakeEpubLen) return -1;
+  uint32_t take = g_fakeEpubLen - pos;
+  if (n < take) take = n;
+  memcpy(dst, g_fakeEpub + pos, take);
+  return (int)take;
+}
+
+uint32_t epubSize() { return g_fakeEpubOpen ? g_fakeEpubLen : 0; }
+
+void epubClose() { g_fakeEpubOpen = false; }
+
+int readFileAt(const char* path, void* dst, int max) {
+  for (const FakeSide& s : g_side)
+    if (s.n > 0 && strcmp(s.path, path) == 0) {
+      const int n = s.n < max ? s.n : max;
+      memcpy(dst, s.data, (size_t)n);
+      return n;
+    }
+  return -1;
+}
+
+bool writeFileAtomic(const char* path, const void* data, int n) {
+  if (n > (int)sizeof(g_side[0].data)) return false;
+  FakeSide* slot = nullptr;
+  for (FakeSide& s : g_side)
+    if (s.n > 0 && strcmp(s.path, path) == 0) slot = &s;
+  if (!slot)
+    for (FakeSide& s : g_side)
+      if (s.n == 0 && !slot) slot = &s;
+  if (!slot) return false;
+  strncpy(slot->path, path, sizeof(slot->path) - 1);
+  memcpy(slot->data, data, (size_t)n);
+  slot->n = n;
+  return true;
 }
 
 bool bookOpen(const char* file) {
@@ -354,6 +540,123 @@ int bookList(BookMeta* out, int max) {
   }
   busRelease();
   return n;
+}
+
+namespace {
+File g_epub;
+bool g_epubBusUp = false;
+
+bool isEpubName(const char* n) {
+  const size_t len = strlen(n);
+  return len > 5 && strcasecmp(n + len - 5, ".epub") == 0;
+}
+
+// mkdir every parent of `path` ("/a/b/c.bin" -> /a, /a/b). FAT mkdir on an
+// existing directory is a cheap no-op-with-false, so no exists() dance.
+void makeParents(const char* path) {
+  char tmp[128];
+  strncpy(tmp, path, sizeof(tmp) - 1);
+  tmp[sizeof(tmp) - 1] = 0;
+  for (char* p = tmp + 1; *p; p++) {
+    if (*p != '/') continue;
+    *p = 0;
+    SD.mkdir(tmp);
+    *p = '/';
+  }
+}
+}  // namespace
+
+int epubList(EpubMeta* out, int max) {
+  if (!busClaim()) {
+    busRelease();
+    return -1;
+  }
+  int n = 0;
+  for (const char* dir : kBookDirs) {
+    File d = SD.open(dir);
+    if (!d || !d.isDirectory()) continue;
+    for (File f = d.openNextFile(); f && n < max; f = d.openNextFile()) {
+      if (f.isDirectory() || !isEpubName(f.name())) continue;
+      EpubMeta m{};
+      const char* bare = strrchr(f.name(), '/');
+      bare = bare ? bare + 1 : f.name();
+      snprintf(m.file, sizeof(m.file), "%s%s%s", dir, dir[1] ? "/" : "", bare);
+      strncpy(m.title, bare, sizeof(m.title) - 1);
+      char* dot = strrchr(m.title, '.');
+      if (dot) *dot = 0;
+      // Whether CrossPoint (or a previous Toybox session) left a position.
+      char cache[96];
+      epubc::cacheDir(m.file, cache, sizeof(cache));
+      strncat(cache, "/progress.bin", sizeof(cache) - strlen(cache) - 1);
+      m.cont = SD.exists(cache);
+      out[n++] = m;
+    }
+  }
+  busRelease();
+  return n;
+}
+
+bool epubOpen(const char* path) {
+  epubClose();
+  if (!busClaim()) {
+    busRelease();
+    return false;
+  }
+  g_epubBusUp = true;
+  g_epub = SD.open(path, FILE_READ);
+  if (!g_epub || g_epub.isDirectory()) {
+    epubClose();
+    return false;
+  }
+  return true;  // the bus stays up: reading now
+}
+
+int epubRead(uint32_t pos, void* dst, uint32_t n) {
+  if (!g_epub) return -1;
+  if (!g_epub.seek(pos)) return -1;
+  uint32_t got = 0;
+  while (got < n) {
+    const int r = g_epub.read((uint8_t*)dst + got, n - got);
+    if (r <= 0) break;
+    got += (uint32_t)r;
+  }
+  return (int)got;
+}
+
+uint32_t epubSize() { return g_epub ? g_epub.size() : 0; }
+
+void epubClose() {
+  if (g_epub) g_epub.close();
+  if (g_epubBusUp) {
+    busRelease();
+    g_epubBusUp = false;
+  }
+}
+
+int readFileAt(const char* path, void* dst, int max) {
+  if (!g_epubBusUp) return -1;
+  File f = SD.open(path, FILE_READ);
+  if (!f || f.isDirectory()) return -1;
+  const int n = f.read((uint8_t*)dst, max);
+  f.close();
+  return n;
+}
+
+bool writeFileAtomic(const char* path, const void* data, int n) {
+  if (!g_epubBusUp) return false;
+  makeParents(path);
+  char tmp[128];
+  snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+  File f = SD.open(tmp, FILE_WRITE);
+  if (!f) return false;
+  const bool wrote = f.write((const uint8_t*)data, n) == (size_t)n;
+  f.close();
+  if (!wrote) {
+    SD.remove(tmp);
+    return false;
+  }
+  SD.remove(path);  // FAT rename does not overwrite
+  return SD.rename(tmp, path);
 }
 
 bool bookOpen(const char* file) {

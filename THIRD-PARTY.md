@@ -84,3 +84,22 @@ sublicense, and/or sell copies of the Software, subject to the copyright
 notice and this permission notice being included in all copies or
 substantial portions of the Software. THE SOFTWARE IS PROVIDED "AS IS",
 WITHOUT WARRANTY OF ANY KIND.
+
+## miniz (lib/miniz/third_party/)
+
+miniz 3.1.2 by Rich Geldreich, vendored for its streaming inflate (tinfl),
+which the EPUB reader uses to read zip entries. Compiled decompress-only via
+`lib/miniz/src/toybox_miniz.h`, whose tinfl_* symbol renames -- guarding
+against the ESP32 mask ROM's incompatible built-in copy -- follow the
+vendoring notes in the CrossPoint Reader project. miniz is public domain
+(unlicense); see the statement at the end of miniz.c.
+
+- https://github.com/richgel999/miniz (public domain)
+
+## CrossPoint progress compatibility
+
+The EPUB reader reads and writes CrossPoint Reader's on-card progress format
+(`/.crosspoint/epub_<hash>/progress.bin`, and the visible-codepoint offset
+convention inside it) so a card moved between the two firmwares keeps its
+reading position. The format was learned from the CrossPoint source (MIT);
+no CrossPoint code is compiled into Toybox for it.
