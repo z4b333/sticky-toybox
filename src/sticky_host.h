@@ -85,7 +85,9 @@ class StickyHost : public ToolsHost {
     touch.setRotation(r);
   }
   int canvasRotation() const override { return epd.rotation(); }
-  void topBar(const char* t, bool withHelp) override { drawTopBar(_canvas, t, withHelp); }
+  void topBar(const char* t, bool withHelp, const char* backLabel) override {
+    drawTopBar(_canvas, t, withHelp, backLabel);
+  }
   bool isHelpTap(int x, int y) const override { return tappedHelp(x, y, EPD_W); }
   bool isBackTap(int x, int y) const override { return tappedBack(x, y); }
   int contentTop() const override { return TOPBAR_H + 4; }
@@ -109,12 +111,13 @@ class StickyHost : public ToolsHost {
   // this header meet awkwardly in the harness build.
   int sdWallpapers(char names[][SD_NAME_LEN], int max) override;
   bool sdWallpaperTake(const char* name) override;
-  int bookList(BookInfo* out, int max) override;
+  int shelfFolders(ShelfFolder* out, int max, const char* ext) override;
+  int bookList(BookInfo* out, int max, const char* dir) override;
   bool bookOpen(const char* file) override;
   bool bookPage(uint32_t idx, uint8_t* dst) override;
   void bookClose() override;
   bool bookShowGrey(const uint8_t* packed2bpp) override { return epd.displayGrey2bpp(packed2bpp); }
-  int epubList(EpubInfo* out, int max) override;
+  int epubList(EpubInfo* out, int max, const char* dir) override;
   bool epubOpen(const char* path) override;
   int epubRead(uint32_t pos, void* dst, uint32_t n) override;
   uint32_t epubSize() override;

@@ -13,6 +13,7 @@
 #pragma once
 #include "book_thumbs.h"
 #include "recents.h"
+#include "shelf.h"
 #include "tools_ui.h"
 
 namespace bookui {
@@ -21,8 +22,9 @@ namespace bookui {
 // footer with the title and position, and the top-left corner is the way out,
 // same place every other screen keeps it.
 inline constexpr int TURN_W = 160;
-inline constexpr int LIST_Y0 = 64, LIST_ROW_H = 88;
-inline constexpr int MAX_BOOKS = 8;
+// The list itself is shelf.h's: series folders, then books, a page at a time.
+inline constexpr int LIST_Y0 = shelf::Y0, LIST_ROW_H = shelf::ROW_H;
+inline constexpr int MAX_BOOKS = shelf::MAX_ITEMS;
 }  // namespace bookui
 
 class BookTool : public ToolApp {
@@ -42,7 +44,8 @@ class BookTool : public ToolApp {
     _screen = Screen::List;
     _open = false;
     _note = nullptr;
-    _n = h.bookList(_books, bookui::MAX_BOOKS);
+    snprintf(_dir, sizeof(_dir), "%s", shelf::TOP);
+    reload();
     // Sized for a grey page; a B/W book simply uses the front half.
     if (!_pageBuf) _pageBuf = (uint8_t*)malloc(ToolsHost::BOOK_PAGE_BYTES_GREY);
   }
@@ -56,45 +59,85 @@ class BookTool : public ToolApp {
       renderPage(c);
       return;
     }
-    host().topBar(title());
+    // Inside a series the bar carries the series name, because that is the
+    // only thing on the screen that says where you are.
+    host().topBar(inFolder() ? seriesName() : title(), false, inFolder() ? title() : "HUB");
     if (_n < 0) {
       c.textCentered(c.width() / 2, 320, "no card found", TS_LARGE, true);
       c.textCentered(c.width() / 2, 364, "is one in the slot?", TS_MED, true);
       return;
     }
-    if (_n == 0) {
+    const int total = items();
+    if (total == 0) {
       c.textCentered(c.width() / 2, 300, "no books on the card", TS_LARGE, true);
       c.textCentered(c.width() / 2, 348, "make .tbk files with tools/make_tbk.py", TS_SMALL, true);
       c.textCentered(c.width() / 2, 376, "and put them in /books", TS_SMALL, true);
       return;
     }
-    for (int i = 0; i < _n; i++) {
-      const int y = bookui::LIST_Y0 + i * bookui::LIST_ROW_H;
-      c.text(24, y + 10, _books[i].title, TS_MED, true, true);
+    for (int k = 0; k < shelf::PER_PAGE; k++) {
+      const int idx = _lpage * shelf::PER_PAGE + k;
+      if (idx >= total) break;
+      if (idx < _nf) {
+        shelf::drawFolderRow(c, k, _folders[idx].name, _folders[idx].count,
+                             shelf::rowSep(k, idx, total));
+        continue;
+      }
+      const int b = idx - _nf;
+      const int y = shelf::Y0 + k * shelf::ROW_H;
+      c.text(24, y + 10, _books[b].title, TS_MED, true, true);
       char sub[64];
-      const uint32_t at = savedPage(i);
+      const uint32_t at = savedPage(b);
       if (at > 0)
-        snprintf(sub, sizeof(sub), "%lu pages  ·  at page %lu", (unsigned long)_books[i].pages,
+        snprintf(sub, sizeof(sub), "%lu pages  ·  at page %lu", (unsigned long)_books[b].pages,
                  (unsigned long)(at + 1));
       else
-        snprintf(sub, sizeof(sub), "%lu pages  ·  new", (unsigned long)_books[i].pages);
+        snprintf(sub, sizeof(sub), "%lu pages  ·  new", (unsigned long)_books[b].pages);
       c.text(24, y + 44, sub, TS_SMALL, true);
-      c.fillRect(16, y + bookui::LIST_ROW_H - 6, c.width() - 32, 1, true);
+      if (shelf::rowSep(k, idx, total))
+        c.fillRect(16, y + shelf::ROW_H - 6, c.width() - 32, 1, true);
     }
-    c.textCentered(c.width() / 2, 776, _note ? _note : "the card stays in while you read",
+    shelf::drawPager(c, _lpage, total);
+    c.textCentered(c.width() / 2, 770, _note ? _note : "the card stays in while you read",
                    TS_SMALL, true);
   }
 
   void onTap(int x, int y) override {
     if (_screen == Screen::List) {
       if (host().isBackTap(x, y)) {
-        host().goHub();
+        // The back arrow climbs one level at a time: out of the series
+        // first, out of the app second. One arrow, no second control.
+        if (inFolder()) {
+          snprintf(_dir, sizeof(_dir), "%s", shelf::TOP);
+          _note = nullptr;
+          reload();
+          host().refresh(true);
+        } else {
+          host().goHub();
+        }
         return;
       }
-      if (_n <= 0) return;
-      const int i = (y - bookui::LIST_Y0) / bookui::LIST_ROW_H;
-      if (y < bookui::LIST_Y0 || i < 0 || i >= _n) return;
-      openBook(i);
+      const int total = items();
+      if (total <= 0) return;
+      const int pages = shelf::pageCount(total);
+      if (y >= shelf::PAGER_Y && pages > 1) {
+        if (_lpage > 0 && shelf::prevRect().hit(x, y)) {
+          _lpage--;
+          host().beep(0);
+          host().refresh(true);
+        } else if (_lpage < pages - 1 && shelf::nextRect().hit(x, y)) {
+          _lpage++;
+          host().beep(0);
+          host().refresh(true);
+        }
+        return;
+      }
+      const int idx = shelf::hitRow(x, y, total, _lpage);
+      if (idx < 0) return;
+      if (idx < _nf) {
+        openFolder(idx);
+        return;
+      }
+      openBook(idx - _nf);
       return;
     }
 
@@ -137,8 +180,17 @@ class BookTool : public ToolApp {
   }
 
   // The hub's recently-read covers land here: straight into the named book.
+  // The book may live in a series the list is not currently showing, so walk
+  // to its folder first -- and if it is gone, the reader is left standing in
+  // that folder, which is the most useful place to be looking.
   bool openDirect(const char* file) override {
-    for (int i = 0; i < _n; i++)
+    char dir[128];
+    shelf::dirOf(file, dir, sizeof(dir));
+    if (strcmp(dir, _dir) != 0) {
+      snprintf(_dir, sizeof(_dir), "%s", dir);
+      reload();
+    }
+    for (int i = 0; i < (_n < 0 ? 0 : _n); i++)
       if (strcmp(_books[i].file, file) == 0) {
         openBook(i);
         return _open;
@@ -149,10 +201,38 @@ class BookTool : public ToolApp {
 #ifdef TOYBOX_HOST
   int hostScreen() const { return _screen == Screen::Page ? 1 : 0; }
   uint32_t hostPage() const { return _pageNo; }
+  const char* hostDir() const { return _dir; }
+  int hostFolders() const { return _nf; }
+  int hostItems() const { return items(); }
+  int hostListPage() const { return _lpage; }
 #endif
 
  private:
   enum class Screen : uint8_t { List, Loading, Page };
+
+  bool inFolder() const { return !shelf::isTop(_dir); }
+  const char* seriesName() const {
+    const char* s = strrchr(_dir, '/');
+    return s ? s + 1 : _dir;
+  }
+  int items() const { return (_nf < 0 ? 0 : _nf) + (_n < 0 ? 0 : _n); }
+
+  // One listing call per level. Folders only exist at the top: a series of a
+  // series is a filing system, not a shelf.
+  void reload() {
+    _nf = inFolder() ? 0 : host().shelfFolders(_folders, shelf::MAX_FOLDERS, ".tbk");
+    if (_nf < 0) _nf = 0;
+    _n = host().bookList(_books, bookui::MAX_BOOKS, _dir);
+    _lpage = 0;
+  }
+
+  void openFolder(int i) {
+    snprintf(_dir, sizeof(_dir), "%s/%s", shelf::TOP, _folders[i].name);
+    _note = nullptr;
+    reload();
+    host().beep(0);
+    host().refresh(true);
+  }
 
   // Position keys are 4-byte FNV hashes of the file name: "b" + 8 hex chars
   // fits NVS's 15-char key limit with room to spare, and survives renames of
@@ -292,6 +372,10 @@ class BookTool : public ToolApp {
   }
 
   Screen _screen = Screen::List;
+  char _dir[128] = "/books";
+  ToolsHost::ShelfFolder _folders[shelf::MAX_FOLDERS];
+  int _nf = 0;
+  int _lpage = 0;
   ToolsHost::BookInfo _books[bookui::MAX_BOOKS];
   int _n = -1;
   int _cur = -1;

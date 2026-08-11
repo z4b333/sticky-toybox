@@ -840,7 +840,37 @@ int main() {
       abort();
     }
 
+    // The top shelf is a series folder and the two loose books; the folder
+    // opens onto its own list, which needs two pages.
+    if (bt->hostFolders() != 1 || bt->hostItems() != 3) {
+      printf("BOOK FAIL: the top shelf is %d folders and %d rows\n", bt->hostFolders(),
+             bt->hostItems());
+      abort();
+    }
+    setScreen("tool_books_series");
+    toybox.onTap(240, shelf::Y0 + 10);  // the series row
+    if (strcmp(bt->hostDir(), "/books/One Piece") != 0 || bt->hostFolders() != 0 ||
+        bt->hostItems() != 9) {
+      printf("BOOK FAIL: the series opened as '%s' with %d rows\n", bt->hostDir(),
+             bt->hostItems());
+      abort();
+    }
+    // MORE goes to the second page, BACK returns; nine books over seven rows.
+    setScreen("tool_books_series_p2");
+    toybox.onTap(EPD_W - 16 - shelf::PAGER_W / 2, shelf::PAGER_Y + shelf::PAGER_H / 2);
+    if (bt->hostListPage() != 1) {
+      printf("BOOK FAIL: MORE did not turn the list page\n");
+      abort();
+    }
+    g_dumpEnabled = false;
+    toybox.onTap(16 + shelf::PAGER_W / 2, shelf::PAGER_Y + shelf::PAGER_H / 2);
+    if (bt->hostListPage() != 0) {
+      printf("BOOK FAIL: BACK did not return to the first list page\n");
+      abort();
+    }
+
     // Open the manga (right-to-left, 12 pages) and read a few pages.
+    g_dumpEnabled = true;
     setScreen("tool_books_page");
     toybox.onTap(240, bookui::LIST_Y0 + 10);
     if (bt->hostScreen() != 1 || bt->hostPage() != 0) {
@@ -890,6 +920,13 @@ int main() {
       abort();
     }
     toybox.onTap(20, 20);
+    // The back arrow on a series list climbs out of the folder rather than
+    // out of the app.
+    toybox.onTap(20, 20);
+    if (!toybox.hostInApp() || strcmp(bt->hostDir(), "/books") != 0) {
+      printf("BOOK FAIL: back did not climb out of the series\n");
+      abort();
+    }
 
     // The grey volume: the host build has no grey waveform, so opening it must
     // land on the 1-bit fallback dither -- which is also the render captured.
@@ -1240,9 +1277,30 @@ int main() {
     setScreen("tool_epub_list");
     stickyHost.refresh(true);
 
-    // Open the one invented book; it starts at the top of chapter one.
+    // The EPUB shelf has its own folder -- one series, holding one book --
+    // and the .tbk series is not on it, because each reader sees only its
+    // own kind. Walk in and back out without opening anything.
+    if (et->hostFolders() != 1 || et->hostItems() != 3) {
+      printf("EPUB APP FAIL: the shelf is %d folders and %d rows\n", et->hostFolders(),
+             et->hostItems());
+      abort();
+    }
+    setScreen("tool_epub_series");
+    toybox.onTap(240, shelf::Y0 + 10);
+    if (strcmp(et->hostDir(), "/books/Uketsu") != 0 || et->hostItems() != 1) {
+      printf("EPUB APP FAIL: the series opened as '%s' with %d rows\n", et->hostDir(),
+             et->hostItems());
+      abort();
+    }
     g_dumpEnabled = false;
-    toybox.onTap(240, epubui::LIST_Y0 + 10);
+    toybox.onTap(20, 20);
+    if (strcmp(et->hostDir(), "/books") != 0) {
+      printf("EPUB APP FAIL: back did not climb out of the series\n");
+      abort();
+    }
+
+    // Open the one invented book; it starts at the top of chapter one.
+    toybox.onTap(240, epubui::LIST_Y0 + epubui::LIST_ROW_H + 10);
     if (et->hostScreen() != 1 || et->hostSpine() != 0 || et->hostPage() != 0) {
       printf("EPUB APP FAIL: the book did not open at the start (s%d p%d)\n", et->hostSpine(),
              et->hostPage());
@@ -1325,7 +1383,7 @@ int main() {
       }
       toybox.open(false, 10);  // EPUB, fresh
       auto* et2 = static_cast<EpubTool*>(toybox.hostActive());
-      toybox.onTap(240, epubui::LIST_Y0 + 10);
+      toybox.onTap(240, epubui::LIST_Y0 + epubui::LIST_ROW_H + 10);
       if (et2->hostScreen() != 1 || et2->hostSpine() != 1) {
         printf("EPUB APP FAIL: the planted position did not open chapter two\n");
         abort();
@@ -1425,7 +1483,7 @@ int main() {
     g_dumpEnabled = false;
     toybox.open(false, 10);
     auto* et = static_cast<EpubTool*>(toybox.hostActive());
-    toybox.onTap(240, epubui::LIST_Y0 + epubui::LIST_ROW_H + 10);  // the second row
+    toybox.onTap(240, epubui::LIST_Y0 + 2 * epubui::LIST_ROW_H + 10);  // folder, wind, then it
     if (et->hostScreen() != 1 || et->hostSpine() != 0) {
       printf("LONGPATH FAIL: the long-named book did not open\n");
       abort();

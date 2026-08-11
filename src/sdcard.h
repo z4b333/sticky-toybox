@@ -50,13 +50,20 @@ bool takeTbi(const char* name, const char* destPath);
 // run. bookClose() powers the card down and re-initialises the panel, so the
 // next paint after it must be full.
 struct BookMeta {
-  char file[40];
+  // Absolute, like the EPUB side: with series folders two books can be called
+  // "vol01.tbk" and only the whole path tells them apart. The reading
+  // position and the cover are both keyed off this string, so books read
+  // before folders existed start again once -- worth it for not silently
+  // showing one book's page inside another.
+  char file[128];
   char title[41];
   uint32_t pages = 0;
   bool rtl = false;
   uint8_t bpp = 1;       // 1 = B/W (48,000-byte pages), 2 = grey (96,000)
 };
-int bookList(BookMeta* out, int max);  // -1: no card
+// Books of one kind inside one directory. `dir` is "/books" for the top
+// level, or "/books/<series>" inside a folder.
+int bookList(BookMeta* out, int max, const char* dir);  // -1: no card
 // The module remembers the open book's page size (48,000 or 96,000 bytes),
 // so a read is just an index and a buffer big enough for either.
 bool bookOpen(const char* file);
@@ -76,11 +83,22 @@ struct EpubMeta {
   char title[41];
   bool cont = false;  // a CrossPoint progress file exists for it
 };
-int epubList(EpubMeta* out, int max);  // -1: no card
+int epubList(EpubMeta* out, int max, const char* dir);  // -1: no card
+
 bool epubOpen(const char* path);
 int epubRead(uint32_t pos, void* dst, uint32_t n);
 uint32_t epubSize();
 void epubClose();
+
+// The card's own folders under /books, which the readers show as series.
+// Only folders holding at least one file of `ext` come back, each with how
+// many -- a series with no books of this reader's kind is not a place the
+// reader should let anyone walk into.
+struct ShelfFolder {
+  char name[64];
+  uint16_t count = 0;
+};
+int shelfFolders(ShelfFolder* out, int max, const char* ext);
 
 // Small sidecar files (CrossPoint's progress.bin), valid only while an EPUB
 // session holds the bus. writeFileAtomic makes the directories, writes a

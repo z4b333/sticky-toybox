@@ -41,9 +41,28 @@ bool StickyHost::sdWallpaperTake(const char* name) {
   return sdcard::takeTbi(name, wallimg::PATH);
 }
 
-int StickyHost::bookList(BookInfo* out, int max) {
-  sdcard::BookMeta metas[8];
-  const int n = sdcard::bookList(metas, max < 8 ? max : 8);
+int StickyHost::shelfFolders(ShelfFolder* out, int max, const char* ext) {
+  // Same shape on both sides, so one small buffer and a copy; folders are
+  // few enough that this stays on the stack.
+  sdcard::ShelfFolder fs[16];
+  if (max > 16) max = 16;
+  const int n = sdcard::shelfFolders(fs, max, ext);
+  for (int i = 0; i < (n < 0 ? 0 : n); i++) {
+    strncpy(out[i].name, fs[i].name, sizeof(out[i].name) - 1);
+    out[i].name[sizeof(out[i].name) - 1] = 0;
+    out[i].count = fs[i].count;
+  }
+  return n;
+}
+
+int StickyHost::bookList(BookInfo* out, int max, const char* dir) {
+  // A shelf's worth of metadata is several KB, which is more than the loop
+  // task's stack should be asked to hold; it lives on the heap for the one
+  // call and goes straight back.
+  if (max < 1) return 0;
+  sdcard::BookMeta* metas = (sdcard::BookMeta*)malloc(sizeof(sdcard::BookMeta) * (size_t)max);
+  if (!metas) return -1;
+  const int n = sdcard::bookList(metas, max, dir);
   for (int i = 0; i < (n < 0 ? 0 : n); i++) {
     strncpy(out[i].file, metas[i].file, sizeof(out[i].file) - 1);
     out[i].file[sizeof(out[i].file) - 1] = 0;
@@ -53,6 +72,7 @@ int StickyHost::bookList(BookInfo* out, int max) {
     out[i].rtl = metas[i].rtl;
     out[i].bpp = metas[i].bpp;
   }
+  free(metas);
   return n;
 }
 
@@ -60,9 +80,11 @@ bool StickyHost::bookOpen(const char* file) { return sdcard::bookOpen(file); }
 bool StickyHost::bookPage(uint32_t idx, uint8_t* dst) { return sdcard::bookReadPage(idx, dst); }
 void StickyHost::bookClose() { sdcard::bookClose(); }
 
-int StickyHost::epubList(EpubInfo* out, int max) {
-  sdcard::EpubMeta metas[8];
-  const int n = sdcard::epubList(metas, max < 8 ? max : 8);
+int StickyHost::epubList(EpubInfo* out, int max, const char* dir) {
+  if (max < 1) return 0;
+  sdcard::EpubMeta* metas = (sdcard::EpubMeta*)malloc(sizeof(sdcard::EpubMeta) * (size_t)max);
+  if (!metas) return -1;
+  const int n = sdcard::epubList(metas, max, dir);
   for (int i = 0; i < (n < 0 ? 0 : n); i++) {
     strncpy(out[i].file, metas[i].file, sizeof(out[i].file) - 1);
     out[i].file[sizeof(out[i].file) - 1] = 0;
@@ -70,6 +92,7 @@ int StickyHost::epubList(EpubInfo* out, int max) {
     out[i].title[sizeof(out[i].title) - 1] = 0;
     out[i].cont = metas[i].cont;
   }
+  free(metas);
   return n;
 }
 

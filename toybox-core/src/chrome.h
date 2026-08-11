@@ -24,7 +24,11 @@ constexpr int HELP_W = 56;
 // preview harness holds that line with static assertions.
 constexpr int BAR_TOUCH_H = 50;
 
-inline void drawTopBar(ToolsCanvas& c, const char* title, bool withHelp = false) {
+// backLabel names where the arrow goes. It is "HUB" almost everywhere, and
+// the shelf name when a reader is standing inside a series folder -- one
+// arrow that always climbs exactly one level, saying which level that is.
+inline void drawTopBar(ToolsCanvas& c, const char* title, bool withHelp = false,
+                       const char* backLabel = "HUB") {
   const int w = c.width();
   c.fillRect(0, 0, w, TOPBAR_H, false);
   c.fillRect(0, TOPBAR_H - 2, w, 2, true);
@@ -36,7 +40,7 @@ inline void drawTopBar(ToolsCanvas& c, const char* title, bool withHelp = false)
   const int cy = TOPBAR_H / 2 - 1;
   c.drawLine(22, cy, 32, cy - 9, 3, true);
   c.drawLine(22, cy, 32, cy + 9, 3, true);
-  c.text(40, (TOPBAR_H - c.textHeight(TS_MED)) / 2, "HUB", TS_MED, true);
+  c.text(40, (TOPBAR_H - c.textHeight(TS_MED)) / 2, backLabel, TS_MED, true);
 
   // Only drawn where something is actually behind it, so a "?" always means
   // "there are rules here" rather than sometimes doing nothing.

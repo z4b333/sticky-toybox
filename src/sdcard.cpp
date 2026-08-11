@@ -92,12 +92,62 @@ void fakePageGrey(uint32_t idx, uint8_t* dst) {
 uint8_t g_fakeBpp = 1;
 }  // namespace
 
-int bookList(BookMeta* out, int max) {
-  static const BookMeta kFake[3] = {{"one-piece-v1.tbk", "One Piece vol 1", 12, true, 1},
-                                    {"walden.tbk", "Walden", 8, false, 1},
-                                    {"grey-test.tbk", "Grey test card", 3, false, 2}};
+// The invented shelf: two loose books at the top level, and a series folder
+// with enough volumes to need a second page.
+namespace {
+struct FakeBook {
+  const char* dir;
+  const char* file;
+  const char* title;
+  uint32_t pages;
+  bool rtl;
+  uint8_t bpp;
+};
+const FakeBook kFakeBooks[] = {
+    {"/books", "walden.tbk", "Walden", 8, false, 1},
+    {"/books", "grey-test.tbk", "Grey test card", 3, false, 2},
+    {"/books/One Piece", "one-piece-v1.tbk", "One Piece vol 1", 12, true, 1},
+    {"/books/One Piece", "one-piece-v2.tbk", "One Piece vol 2", 10, true, 1},
+    {"/books/One Piece", "one-piece-v3.tbk", "One Piece vol 3", 11, true, 1},
+    {"/books/One Piece", "one-piece-v4.tbk", "One Piece vol 4", 9, true, 1},
+    {"/books/One Piece", "one-piece-v5.tbk", "One Piece vol 5", 12, true, 1},
+    {"/books/One Piece", "one-piece-v6.tbk", "One Piece vol 6", 10, true, 1},
+    {"/books/One Piece", "one-piece-v7.tbk", "One Piece vol 7", 11, true, 1},
+    {"/books/One Piece", "one-piece-v8.tbk", "One Piece vol 8", 13, true, 1},
+    {"/books/One Piece", "one-piece-v9.tbk", "One Piece vol 9", 12, true, 1},
+};
+}  // namespace
+
+int bookList(BookMeta* out, int max, const char* dir) {
   int n = 0;
-  for (; n < 3 && n < max; n++) out[n] = kFake[n];
+  for (const FakeBook& b : kFakeBooks) {
+    if (n >= max || strcmp(b.dir, dir) != 0) continue;
+    BookMeta m{};
+    snprintf(m.file, sizeof(m.file), "%s/%s", b.dir, b.file);
+    strncpy(m.title, b.title, sizeof(m.title) - 1);
+    m.pages = b.pages;
+    m.rtl = b.rtl;
+    m.bpp = b.bpp;
+    out[n++] = m;
+  }
+  return n;
+}
+
+int shelfFolders(ShelfFolder* out, int max, const char* ext) {
+  int n = 0;
+  if (strcasecmp(ext, ".tbk") == 0 && max > 0) {
+    ShelfFolder f{};
+    strncpy(f.name, "One Piece", sizeof(f.name) - 1);
+    for (const FakeBook& b : kFakeBooks)
+      if (strcmp(b.dir, "/books/One Piece") == 0) f.count++;
+    out[n++] = f;
+  }
+  if (strcasecmp(ext, ".epub") == 0 && max > 0) {
+    ShelfFolder f{};
+    strncpy(f.name, "Uketsu", sizeof(f.name) - 1);
+    f.count = 1;
+    out[n++] = f;
+  }
   return n;
 }
 
@@ -238,11 +288,14 @@ FakeSide g_side[4];
 static const char kFakeLongPath[] =
     "/books/A Book With The Kind Of Very Long Release Filename Publishers Actually Use Vol 01.epub";
 
-int epubList(EpubMeta* out, int max) {
+int epubList(EpubMeta* out, int max, const char* dir) {
   int n = 0;
-  const char* files[2] = {"/books/wind.epub", kFakeLongPath};
-  const char* titles[2] = {"wind", "the long-named book"};
-  for (int i = 0; i < 2 && n < max; i++) {
+  const bool top = strcmp(dir, "/books") == 0;
+  const char* files[3] = {"/books/wind.epub", kFakeLongPath, "/books/Uketsu/strange-houses.epub"};
+  const char* titles[3] = {"wind", "the long-named book", "Strange Houses"};
+  for (int i = 0; i < 3 && n < max; i++) {
+    // The first two sit loose at the top level; the third is inside a series.
+    if ((i < 2) != top) continue;
     EpubMeta m{};
     strncpy(m.file, files[i], sizeof(m.file) - 1);
     strncpy(m.title, titles[i], sizeof(m.title) - 1);
@@ -258,7 +311,9 @@ int epubList(EpubMeta* out, int max) {
 }
 
 bool epubOpen(const char* path) {
-  if (strcmp(path, "/books/wind.epub") != 0 && strcmp(path, kFakeLongPath) != 0) return false;
+  if (strcmp(path, "/books/wind.epub") != 0 && strcmp(path, kFakeLongPath) != 0 &&
+      strcmp(path, "/books/Uketsu/strange-houses.epub") != 0)
+    return false;
   buildFakeEpub();
   g_fakeEpubOpen = true;
   return true;
@@ -306,6 +361,8 @@ bool bookOpen(const char* file) {
   g_fakeOpenPages = strstr(file, "walden") ? 8 : (g_fakeBpp == 2 ? 3 : 12);
   return true;
 }
+
+
 
 bool bookReadPage(uint32_t idx, uint8_t* dst) {
   if (idx >= g_fakeOpenPages) return false;
@@ -691,6 +748,14 @@ constexpr uint32_t TBK_HEADER = 64;
 
 const char* kBookDirs[2] = {"/books", "/"};
 
+// The shelf's top level is /books itself; anything deeper is one series.
+bool isTopShelf(const char* dir) { return dir && strcmp(dir, "/books") == 0; }
+
+bool hasExt(const char* name, const char* ext) {
+  const size_t n = strlen(name), e = strlen(ext);
+  return n > e && strcasecmp(name + n - e, ext) == 0;
+}
+
 bool parseTbkHeader(File& f, BookMeta& out) {
   uint8_t h[TBK_HEADER];
   if (f.read(h, sizeof(h)) != sizeof(h)) return false;
@@ -712,14 +777,18 @@ bool parseTbkHeader(File& f, BookMeta& out) {
 }
 }  // namespace
 
-int bookList(BookMeta* out, int max) {
+int bookList(BookMeta* out, int max, const char* dir) {
   if (!busClaim()) {
     busRelease();
     return -1;
   }
   int n = 0;
-  for (const char* dir : kBookDirs) {
-    File d = SD.open(dir);
+  // The top level also shows books sitting loose in the card's root, which is
+  // where a card that has never been organised keeps them.
+  const char* dirs[2] = {dir, isTopShelf(dir) ? "/" : nullptr};
+  for (const char* d0 : dirs) {
+    if (!d0) continue;
+    File d = SD.open(d0);
     if (!d || !d.isDirectory()) continue;
     for (File f = d.openNextFile(); f && n < max; f = d.openNextFile()) {
       if (f.isDirectory()) continue;
@@ -729,8 +798,46 @@ int bookList(BookMeta* out, int max) {
       BookMeta m{};
       if (!parseTbkHeader(f, m)) continue;
       const char* bare = strrchr(nm, '/');
-      strncpy(m.file, bare ? bare + 1 : nm, sizeof(m.file) - 1);
+      bare = bare ? bare + 1 : nm;
+      if (snprintf(m.file, sizeof(m.file), "%s%s%s", d0, d0[1] ? "/" : "", bare) >=
+          (int)sizeof(m.file))
+        continue;
       out[n++] = m;
+    }
+  }
+  busRelease();
+  return n;
+}
+
+// The card's folders under /books, each with how many books of one kind it
+// holds. Counting means opening every folder, which is one directory listing
+// apiece -- cheap next to the bus claim that wraps the lot.
+int shelfFolders(ShelfFolder* out, int max, const char* ext) {
+  if (!busClaim()) {
+    busRelease();
+    return -1;
+  }
+  int n = 0;
+  File shelf = SD.open("/books");
+  if (shelf && shelf.isDirectory()) {
+    for (File d = shelf.openNextFile(); d && n < max; d = shelf.openNextFile()) {
+      if (!d.isDirectory()) continue;
+      const char* nm = d.name();
+      const char* bare = strrchr(nm, '/');
+      bare = bare ? bare + 1 : nm;
+      if (bare[0] == '.') continue;  // ours, or the card's own housekeeping
+      char path[128];
+      if (snprintf(path, sizeof(path), "/books/%s", bare) >= (int)sizeof(path)) continue;
+      ShelfFolder f{};
+      File inside = SD.open(path);
+      if (inside && inside.isDirectory())
+        for (File b = inside.openNextFile(); b; b = inside.openNextFile())
+          if (!b.isDirectory() && hasExt(b.name(), ext)) f.count++;
+      // A series with none of this reader's books is not a door worth
+      // drawing: it would open onto an empty room.
+      if (f.count == 0) continue;
+      strncpy(f.name, bare, sizeof(f.name) - 1);
+      out[n++] = f;
     }
   }
   busRelease();
@@ -761,21 +868,23 @@ void makeParents(const char* path) {
 }
 }  // namespace
 
-int epubList(EpubMeta* out, int max) {
+int epubList(EpubMeta* out, int max, const char* dir) {
   if (!busClaim()) {
     busRelease();
     return -1;
   }
   int n = 0;
-  for (const char* dir : kBookDirs) {
-    File d = SD.open(dir);
+  const char* dirs[2] = {dir, isTopShelf(dir) ? "/" : nullptr};
+  for (const char* d0 : dirs) {
+    if (!d0) continue;
+    File d = SD.open(d0);
     if (!d || !d.isDirectory()) continue;
     for (File f = d.openNextFile(); f && n < max; f = d.openNextFile()) {
       if (f.isDirectory() || !isEpubName(f.name())) continue;
       EpubMeta m{};
       const char* bare = strrchr(f.name(), '/');
       bare = bare ? bare + 1 : f.name();
-      const int need = snprintf(m.file, sizeof(m.file), "%s%s%s", dir, dir[1] ? "/" : "", bare);
+      const int need = snprintf(m.file, sizeof(m.file), "%s%s%s", d0, d0[1] ? "/" : "", bare);
       // A truncated path could never open (and would hash to the wrong
       // progress directory); leaving the book off the list beats listing a
       // name that only fails when tapped.
@@ -1064,9 +1173,20 @@ bool bookOpen(const char* file) {
     return false;
   }
   g_bookBusUp = true;
-  for (const char* dir : kBookDirs) {
-    char path[64];
-    snprintf(path, sizeof(path), "%s%s%s", dir, dir[1] ? "/" : "", file);
+  // bookList hands out absolute paths now that books can sit in series
+  // folders, so the first candidate is the name itself; the /books and root
+  // guesses stay for anything still passing a bare name.
+  for (int attempt = 0; attempt < 3; attempt++) {
+    char path[128];
+    if (attempt == 0) {
+      if (file[0] != '/') continue;
+      snprintf(path, sizeof(path), "%s", file);
+    } else {
+      if (file[0] == '/') continue;
+      const char* dir = kBookDirs[attempt - 1];
+      if (snprintf(path, sizeof(path), "%s%s%s", dir, dir[1] ? "/" : "", file) >= (int)sizeof(path))
+        continue;
+    }
     g_book = SD.open(path, FILE_READ);
     if (g_book && !g_book.isDirectory()) {
       BookMeta m{};

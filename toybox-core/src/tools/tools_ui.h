@@ -176,7 +176,7 @@ class ToolsHost {
   // fixed screen ignores it and reports 0.
   virtual void setCanvasRotation(int r) { (void)r; }
   virtual int canvasRotation() const { return 0; }
-  virtual void topBar(const char* title, bool withHelp = false) = 0;
+  virtual void topBar(const char* title, bool withHelp = false, const char* backLabel = "HUB") = 0;
   // A tool with no rules card leaves this false and no "?" is drawn.
   virtual bool isHelpTap(int x, int y) const { return false; }
   virtual bool isBackTap(int x, int y) const = 0;
@@ -236,16 +236,36 @@ class ToolsHost {
   // and bookClose() must be called before anything else wants the panel,
   // because it re-initialises the controller on the way out.
   struct BookInfo {
-    char file[SD_NAME_LEN];
+    // Absolute, and 128 for the same reason as EpubInfo: a book inside a
+    // series folder carries the folder in its path, and two series can both
+    // hold a "vol01.tbk".
+    char file[128];
     char title[41];
     uint32_t pages = 0;
     bool rtl = false;
     uint8_t bpp = 1;  // 1 = B/W, 2 = four-level grey
   };
-  static constexpr uint32_t BOOK_PAGE_BYTES = 48000;
-  virtual int bookList(BookInfo* out, int max) {
+  // A series folder under /books, and how many books of ONE kind it holds --
+  // the .tbk reader and the EPUB reader each see only their own, so neither
+  // offers a door onto an empty room.
+  struct ShelfFolder {
+    char name[64];
+    uint16_t count = 0;
+  };
+  // `ext` is ".tbk" or ".epub", lowercase with the dot.
+  virtual int shelfFolders(ShelfFolder* out, int max, const char* ext) {
     (void)out;
     (void)max;
+    (void)ext;
+    return 0;  // a host with no folders simply has a flat shelf
+  }
+  static constexpr uint32_t BOOK_PAGE_BYTES = 48000;
+  // `dir` is "/books" for the top level (which also picks up books loose in
+  // the card's root), or "/books/<series>" inside a folder.
+  virtual int bookList(BookInfo* out, int max, const char* dir) {
+    (void)out;
+    (void)max;
+    (void)dir;
     return -1;  // no card, or no host support
   }
   virtual bool bookOpen(const char* file) {
@@ -278,9 +298,10 @@ class ToolsHost {
     char title[41];
     bool cont = false;  // a reading position already exists on the card
   };
-  virtual int epubList(EpubInfo* out, int max) {
+  virtual int epubList(EpubInfo* out, int max, const char* dir) {
     (void)out;
     (void)max;
+    (void)dir;
     return -1;
   }
   virtual bool epubOpen(const char* path) {

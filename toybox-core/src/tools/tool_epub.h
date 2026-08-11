@@ -18,6 +18,7 @@
 #include "epub/epub_cover.h"
 #include "epub/epubcore.h"
 #include "recents.h"
+#include "shelf.h"
 #include "tools_ui.h"
 
 namespace epubui {
@@ -28,8 +29,9 @@ inline constexpr int LINE_STEP = 34; // 24 px type with air; ~22 lines a page
 inline constexpr int PARA_GAP = 14;
 inline constexpr int MAX_LINES = 24;
 inline constexpr int TURN_W = 160;   // tap thirds, same as the .tbk reader
-inline constexpr int LIST_Y0 = 64, LIST_ROW_H = 88;
-inline constexpr int MAX_BOOKS = 8;
+// The list itself is shelf.h's: series folders, then books, a page at a time.
+inline constexpr int LIST_Y0 = shelf::Y0, LIST_ROW_H = shelf::ROW_H;
+inline constexpr int MAX_BOOKS = shelf::MAX_ITEMS;
 inline constexpr int MAX_PAGES = 2048;  // per chapter; ~90x any real chapter
 }  // namespace epubui
 
@@ -46,7 +48,8 @@ class EpubTool : public ToolApp {
     ToolApp::enter(h);
     _screen = Screen::List;
     _note = nullptr;
-    _n = h.epubList(_books, epubui::MAX_BOOKS);
+    snprintf(_dir, sizeof(_dir), "%s", shelf::TOP);
+    reload();
     if (!_lut) _lut = (uint32_t*)malloc(sizeof(uint32_t) * epubui::MAX_PAGES);
   }
 
@@ -59,41 +62,79 @@ class EpubTool : public ToolApp {
       renderPage(c);
       return;
     }
-    host().topBar(title());
+    // Inside a series the bar carries the series name, because that is the
+    // only thing on the screen that says where you are.
+    host().topBar(inFolder() ? seriesName() : title(), false, inFolder() ? title() : "HUB");
     if (_n < 0) {
       c.textCentered(c.width() / 2, 320, "no card found", TS_LARGE, true);
       c.textCentered(c.width() / 2, 364, "is one in the slot?", TS_MED, true);
       return;
     }
-    if (_n == 0) {
+    const int total = items();
+    if (total == 0) {
       c.textCentered(c.width() / 2, 300, "no ebooks on the card", TS_LARGE, true);
       c.textCentered(c.width() / 2, 348, "put .epub files in /books", TS_SMALL, true);
       return;
     }
-    for (int i = 0; i < _n; i++) {
-      const int y = epubui::LIST_Y0 + i * epubui::LIST_ROW_H;
-      c.text(24, y + 10, _books[i].title, TS_MED, true, true);
-      c.text(24, y + 44, _books[i].cont ? "carries on where it stopped" : "from the start",
+    for (int k = 0; k < shelf::PER_PAGE; k++) {
+      const int idx = _lpage * shelf::PER_PAGE + k;
+      if (idx >= total) break;
+      if (idx < _nf) {
+        shelf::drawFolderRow(c, k, _folders[idx].name, _folders[idx].count,
+                             shelf::rowSep(k, idx, total));
+        continue;
+      }
+      const int b = idx - _nf;
+      const int y = shelf::Y0 + k * shelf::ROW_H;
+      c.text(24, y + 10, _books[b].title, TS_MED, true, true);
+      c.text(24, y + 44, _books[b].cont ? "carries on where it stopped" : "from the start",
              TS_SMALL, true);
-      c.fillRect(16, y + epubui::LIST_ROW_H - 6, c.width() - 32, 1, true);
+      if (shelf::rowSep(k, idx, total))
+        c.fillRect(16, y + shelf::ROW_H - 6, c.width() - 32, 1, true);
     }
-    c.textCentered(c.width() / 2, 748, _note ? _note : "the position is kept on the card itself,",
+    shelf::drawPager(c, _lpage, total);
+    c.textCentered(c.width() / 2, 770,
+                   _note ? _note : "positions are kept on the card, as CrossPoint keeps them",
                    TS_SMALL, true);
-    if (!_note)
-      c.textCentered(c.width() / 2, 772, "so CrossPoint firmware picks up the same page",
-                     TS_SMALL, true);
   }
 
   void onTap(int x, int y) override {
     if (_screen == Screen::List) {
       if (host().isBackTap(x, y)) {
-        host().goHub();
+        // The back arrow climbs one level at a time: out of the series
+        // first, out of the app second. One arrow, no second control.
+        if (inFolder()) {
+          snprintf(_dir, sizeof(_dir), "%s", shelf::TOP);
+          _note = nullptr;
+          reload();
+          host().refresh(true);
+        } else {
+          host().goHub();
+        }
         return;
       }
-      if (_n <= 0) return;
-      const int i = (y - epubui::LIST_Y0) / epubui::LIST_ROW_H;
-      if (y < epubui::LIST_Y0 || i < 0 || i >= _n) return;
-      openBook(i);
+      const int total = items();
+      if (total <= 0) return;
+      const int pages = shelf::pageCount(total);
+      if (y >= shelf::PAGER_Y && pages > 1) {
+        if (_lpage > 0 && shelf::prevRect().hit(x, y)) {
+          _lpage--;
+          host().beep(0);
+          host().refresh(true);
+        } else if (_lpage < pages - 1 && shelf::nextRect().hit(x, y)) {
+          _lpage++;
+          host().beep(0);
+          host().refresh(true);
+        }
+        return;
+      }
+      const int idx = shelf::hitRow(x, y, total, _lpage);
+      if (idx < 0) return;
+      if (idx < _nf) {
+        openFolder(idx);
+        return;
+      }
+      openBook(idx - _nf);
       return;
     }
     // The page. Corner out, thirds turn, middle toggles the footer.
@@ -126,7 +167,13 @@ class EpubTool : public ToolApp {
 
   // The hub's recently-read covers land here: straight into the named book.
   bool openDirect(const char* file) override {
-    for (int i = 0; i < _n; i++)
+    char dir[128];
+    shelf::dirOf(file, dir, sizeof(dir));
+    if (strcmp(dir, _dir) != 0) {
+      snprintf(_dir, sizeof(_dir), "%s", dir);
+      reload();
+    }
+    for (int i = 0; i < (_n < 0 ? 0 : _n); i++)
       if (strcmp(_books[i].file, file) == 0) {
         openBook(i);
         return _open;
@@ -141,10 +188,38 @@ class EpubTool : public ToolApp {
   uint32_t hostPageOffset() const { return _page < _lutN ? _lut[_page] : 0; }
   const char* hostLine(int i) const { return i < _lineN ? _lines[i].t : ""; }
   int hostLineCount() const { return _lineN; }
+  const char* hostDir() const { return _dir; }
+  int hostFolders() const { return _nf; }
+  int hostItems() const { return items(); }
+  int hostListPage() const { return _lpage; }
 #endif
 
  private:
   enum class Screen : uint8_t { List, Loading, Page };
+
+  bool inFolder() const { return !shelf::isTop(_dir); }
+  const char* seriesName() const {
+    const char* s = strrchr(_dir, '/');
+    return s ? s + 1 : _dir;
+  }
+  int items() const { return (_nf < 0 ? 0 : _nf) + (_n < 0 ? 0 : _n); }
+
+  // One listing call per level. Folders only exist at the top: a series of a
+  // series is a filing system, not a shelf.
+  void reload() {
+    _nf = inFolder() ? 0 : host().shelfFolders(_folders, shelf::MAX_FOLDERS, ".epub");
+    if (_nf < 0) _nf = 0;
+    _n = host().epubList(_books, epubui::MAX_BOOKS, _dir);
+    _lpage = 0;
+  }
+
+  void openFolder(int i) {
+    snprintf(_dir, sizeof(_dir), "%s/%s", shelf::TOP, _folders[i].name);
+    _note = nullptr;
+    reload();
+    host().beep(0);
+    host().refresh(true);
+  }
 
   struct HostIO : epubc::IO {
     ToolsHost* h = nullptr;
@@ -539,6 +614,10 @@ class EpubTool : public ToolApp {
   }
 
   Screen _screen = Screen::List;
+  char _dir[128] = "/books";
+  ToolsHost::ShelfFolder _folders[shelf::MAX_FOLDERS];
+  int _nf = 0;
+  int _lpage = 0;
   ToolsHost::EpubInfo _books[epubui::MAX_BOOKS];
   int _n = -1;
   int _cur = -1;

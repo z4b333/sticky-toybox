@@ -24,7 +24,9 @@ fine for most fonts.
 - `refresh(full)` – re-render the current screen and push it to the panel.
   `full` means the slow flicker refresh that clears ghosting.
 - `beep(kind)` – 0 tap, 1 confirm, 2 reject, 3 alarm
-- `topBar(title)`, `isBackTap()`, `isHelpTap()`, `contentTop()`
+- `topBar(title, withHelp, backLabel)`, `isBackTap()`, `isHelpTap()`,
+  `contentTop()`. `backLabel` is what the arrow returns to — "HUB" almost
+  everywhere, the shelf name when a reader is inside a series folder.
 - `canExit()` and `exit()` – whether there is something above Toybox to
   return to. The hub only shows a BACK button when there is.
 - `soundOn()` / `setSoundOn()` – sound settings belong to the host
