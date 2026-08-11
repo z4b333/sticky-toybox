@@ -324,6 +324,10 @@ class EpubTool : public ToolApp {
       if (!epubcov::makeThumb(host(), _book, _books[i].file))
         bthumb::markFailed(_books[i].file);
     }
+    // ...and, if the sleeping panel is set to wear a cover, this book's goes
+    // into flash now. After the decode above, so the very first open of a
+    // book still gets one.
+    bthumb::noteForLock(host(), _books[i].file);
 
     // Where were we? The card remembers, in CrossPoint's format.
     epubc::Progress p;

@@ -274,6 +274,10 @@ class BookTool : public ToolApp {
     // on the first-ever open of a book; nothing on every open after.
     if (!bthumb::have(_books[i].file) && host().bookPage(0, _pageBuf))
       bthumb::makeAndSave(host(), _books[i].file, _pageBuf, _books[i].bpp);
+    // ...and, if the sleeping panel is set to wear a cover, this book's goes
+    // into flash now. After the builder above, so the very first open of a
+    // book still gets one.
+    bthumb::noteForLock(host(), _books[i].file);
     if (!host().bookPage(_pageNo, _pageBuf)) {
       leaveBook();
       return;

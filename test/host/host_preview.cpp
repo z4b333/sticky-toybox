@@ -2335,6 +2335,74 @@ int main() {
     toybox.render(stickyHost.sharedCanvas());
     epd.displayFull();
 
+    // The fourth thing an empty panel can show: the cover of the book being
+    // read. We are already standing on the lock page, and the readers above
+    // have left a real decoded cover on the fake card, so the whole path is
+    // exercisable from here -- chip, copy, and the picture it produces.
+    if (bthumb::haveLock()) {
+      printf("COVER LOCK FAIL: a cover was stashed before anyone asked for one\n");
+      abort();
+    }
+    // Nothing is copied while the setting is something else: 48 KB of flash on
+    // every book open would be a cost paid by people who never chose this.
+    if (bthumb::noteForLock(stickyHost, "/books/wind.epub")) {
+      printf("COVER LOCK FAIL: a cover was copied with the setting off\n");
+      abort();
+    }
+    g_dumpEnabled = false;
+    tapRect(setui::chipRect(lock::EMPTY_COVER - lock::EMPTY_FIRST));
+    if (lock::config().empty != lock::EMPTY_COVER) {
+      printf("COVER LOCK FAIL: the chip did not select the cover\n");
+      abort();
+    }
+    // Choosing it takes the copy there and then, rather than leaving the panel
+    // unchanged until the next book is opened.
+    if (!bthumb::haveLock()) {
+      printf("COVER LOCK FAIL: choosing the chip did not take a copy\n");
+      abort();
+    }
+    if (tfs::size(bthumb::LOCK_PATH) != tbimg::FILE_SIZE) {
+      printf("COVER LOCK FAIL: the copy is %d bytes, not a picture\n",
+             (int)tfs::size(bthumb::LOCK_PATH));
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("settings_lock_cover");
+    epd.clear();
+    toybox.render(stickyHost.sharedCanvas());
+    epd.displayFull();
+
+    // And what the sleeping panel then shows. main.cpp's power-off path is not
+    // in this build, so the draw is called the way it calls it.
+    setScreen("lockscreen_cover");
+    epd.clear();
+    if (!tbimg::draw(stickyHost.sharedCanvas(), bthumb::LOCK_PATH)) {
+      printf("COVER LOCK FAIL: the stashed cover did not draw\n");
+      abort();
+    }
+    epd.displayFull();
+    g_dumpEnabled = false;
+
+    // With the setting on, a book open copies its own cover over the top...
+    if (!bthumb::noteForLock(stickyHost, "/books/wind.epub")) {
+      printf("COVER LOCK FAIL: an open did not refresh the cover\n");
+      abort();
+    }
+    // ...and a book whose cover was never built leaves the old one alone
+    // rather than writing a broken file.
+    if (bthumb::stashForLock(stickyHost, "/books/no-such-book.epub")) {
+      printf("COVER LOCK FAIL: a book with no cover produced one\n");
+      abort();
+    }
+    if (!bthumb::haveLock()) {
+      printf("COVER LOCK FAIL: a failed copy destroyed the good one\n");
+      abort();
+    }
+    // Put the setting back so the screens below are the ordinary ones.
+    tapRect(setui::chipRect(lock::EMPTY_GOODBYE - lock::EMPTY_FIRST));
+    g_dumpEnabled = true;
+    printf("cover lock screen ok (opt-in, copied on choosing, survives a bad book)\n");
+
     // The same bits as the home wallpaper, drawn under the dock and the
     // overlays: the one screen where the halo treatment meets a real picture.
     tfs::write(wallimg::PATH, (const char*)img, sizeof(img));

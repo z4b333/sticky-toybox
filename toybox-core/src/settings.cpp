@@ -3,8 +3,10 @@
 #include "applist.h"
 #include "appvis.h"
 #include "record.h"
+#include "tools/book_thumbs.h"
 #include "tools/flash_qr.h"
 #include "tools/lock_image.h"
+#include "tools/recents.h"
 #include "tools/tool_icons.h"
 
 namespace {
@@ -349,6 +351,7 @@ const char* emptyLabel(uint8_t e) {
   switch (e) {
     case lock::EMPTY_PICTURE: return "PICTURE";
     case lock::EMPTY_GOODBYE: return "GOODBYE";
+    case lock::EMPTY_COVER: return "COVER";
     default: return "BLANK";
   }
 }
@@ -472,7 +475,21 @@ bool SettingsScreen::tapLock(ToolsHost& host, int x, int y) {
     lock::save(host.prefs(), _lock);
     lock::setConfig(_lock);
     host.beep(0);
-    return true;
+    if (_lock.empty != lock::EMPTY_COVER) {
+      _note = nullptr;
+      return true;
+    }
+    // Take the copy now rather than at the next book open, so choosing this
+    // does something today. It reads the card, which re-initialises the panel
+    // on the way out -- hence the full repaint here instead of the partial the
+    // shell would otherwise do.
+    recents::Entry rec[recents::MAX];
+    const int n = recents::list(host.prefs(), rec);
+    _note = (n > 0 && bthumb::stashForLock(host, rec[0].file))
+                ? nullptr
+                : "no cover yet - open a book and it will appear here";
+    host.refresh(true);
+    return false;
   }
 
   for (int i = 0; i < LR_COUNT; i++) {

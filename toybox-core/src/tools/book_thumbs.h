@@ -35,6 +35,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "lock_image.h"
+#include "lockscreen.h"
 #include "tiny_fs.h"
 #include "tools_ui.h"
 
@@ -64,6 +66,48 @@ inline void bigPath(const char* file, char* out, int cap) {
 // Swept as books are reopened rather than in a migration nobody would test.
 inline void staleFlashPath(const char* file, char* out, int cap) {
   snprintf(out, (size_t)cap, "/cv_%08lx", (unsigned long)key(file));
+}
+
+// --- the lock screen's copy ---------------------------------------------------
+// The sleeping panel can wear the cover of the book being read, and it must be
+// able to do that with the card out: power-off is not a moment to be powering
+// the SD up and re-initialising the panel. So the cover is copied into flash
+// the moment a book opens, in the picture format the lock screen already
+// knows (tbimg), and power-off is the same flash read it always was.
+//
+// One file, overwritten. Keeping a copy per book would be 48 KB each for
+// covers only ever shown one at a time.
+inline constexpr const char* LOCK_PATH = "/lockcover.tbi";
+
+inline bool haveLock() { return tbimg::have(LOCK_PATH); }
+
+// Copies this book's full-size cover off the card into that file. False when
+// the book has no cover yet (the very first open, before the builder has run)
+// or the card is gone -- and the lock screen falls back to GOODBYE, which is
+// what it does for a picture that was never sent.
+inline bool stashForLock(ToolsHost& h, const char* file) {
+  char p[48];
+  bigPath(file, p, sizeof(p));
+  uint8_t* buf = (uint8_t*)malloc(tbimg::FILE_SIZE);
+  if (!buf) return false;
+  bool ok = h.sdReadWhole(p, buf + tbimg::HEADER, BIG_BYTES) == BIG_BYTES;
+  if (ok) {
+    buf[0] = 'T'; buf[1] = 'B'; buf[2] = 'I'; buf[3] = '1';
+    buf[4] = (uint8_t)(BIG_W & 255); buf[5] = (uint8_t)(BIG_W >> 8);
+    buf[6] = (uint8_t)(BIG_H & 255); buf[7] = (uint8_t)(BIG_H >> 8);
+    ok = tfs::write(LOCK_PATH, (const char*)buf, tbimg::FILE_SIZE);
+  }
+  free(buf);
+  return ok;
+}
+
+// What a reader calls when it opens a book: nothing at all unless the sleeping
+// panel is actually set to show covers, because 48 KB of flash written on
+// every open would be a cost paid by everyone for a setting most people leave
+// alone.
+inline bool noteForLock(ToolsHost& h, const char* file) {
+  if (lock::load(h.prefs()).empty != lock::EMPTY_COVER) return false;
+  return stashForLock(h, file);
 }
 
 inline bool have(const char* file) {

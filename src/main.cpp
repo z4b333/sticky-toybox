@@ -17,6 +17,7 @@
 #include "sensors.h"
 #include "service.h"
 #include "sticky_host.h"
+#include "tools/book_thumbs.h"
 #include "tools/lock_image.h"
 #include "tools/lockscreen.h"
 #include "tools/tool_note.h"
@@ -178,6 +179,11 @@ void powerOff(bool lowBattery = false) {
       // than to an empty panel that looks like a fault.
       case lock::EMPTY_PICTURE:
         if (lockimg::draw(c)) break;
+        // fall through
+      // The book you are in the middle of. Copied into flash when the book was
+      // opened, so this costs no card and no bus claim on the way to sleep.
+      case lock::EMPTY_COVER:
+        if (tbimg::draw(c, bthumb::LOCK_PATH)) break;
         // fall through
       default:
         c.textTrackedCentered(EPD_W / 2, 200, "GOODBYE!", TS_HUGE, true, true, 4);

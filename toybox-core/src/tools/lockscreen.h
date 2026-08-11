@@ -28,10 +28,21 @@ namespace lock {
 //
 // The other three keep their stored numbers so a device that has already been
 // set keeps its setting. A device still set to 0 falls through to the default.
-enum Empty : uint8_t { EMPTY_PICTURE = 1, EMPTY_GOODBYE = 2, EMPTY_BLANK = 3 };
+//
+// EMPTY_COVER came last and is the only one that changes by itself: the panel
+// wears the cover of whatever you are reading. A device that spends its life
+// showing one image should show the image its owner is actually in the middle
+// of, and a book cover is the one picture on the device that nobody had to
+// choose.
+enum Empty : uint8_t {
+  EMPTY_PICTURE = 1,
+  EMPTY_GOODBYE = 2,
+  EMPTY_BLANK = 3,
+  EMPTY_COVER = 4,
+};
 inline constexpr uint8_t EMPTY_FIRST = EMPTY_PICTURE;
-inline constexpr uint8_t EMPTY_LAST = EMPTY_BLANK;
-inline constexpr int EMPTY_COUNT = 3;
+inline constexpr uint8_t EMPTY_LAST = EMPTY_COVER;
+inline constexpr int EMPTY_COUNT = 4;
 enum Wake : uint8_t { WAKE_NOTE = 0, WAKE_HUB = 1 };
 
 // Zero is never. Five minutes suits a magnet on a fridge; a device sitting on a
