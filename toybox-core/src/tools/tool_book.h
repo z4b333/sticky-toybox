@@ -117,9 +117,15 @@ class BookTool : public ToolApp {
   }
 
   // The side buttons page too: DOWN is always forward, whatever the reading
-  // direction, matching the flashcards' "DOWN proceeds".
+  // direction, matching the flashcards' "DOWN proceeds". The power button's
+  // short press closes the book -- the one physical way out, for a hand
+  // holding the device by its edge with no thumb free for the corner.
   bool onButton(SideBtn b) override {
     if (_screen != Screen::Page) return false;
+    if (b == SideBtn::Ok) {
+      leaveBook();
+      return true;
+    }
     turn(b == SideBtn::Down ? 1 : -1);
     return true;
   }

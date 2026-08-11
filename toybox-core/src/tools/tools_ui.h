@@ -148,7 +148,9 @@ class ToolsCanvas {
 
 // The two buttons down the side of the device, named for what is written on
 // them rather than for what any one app does with them.
-enum class SideBtn : uint8_t { Up, Down };
+// Ok is the power button's short press. It reaches an app only as an offer,
+// same as the other two: an app that ignores it leaves it meaning nothing.
+enum class SideBtn : uint8_t { Up, Down, Ok };
 
 // Everything a tool app needs from the firmware it is embedded in.
 class ToolsHost {

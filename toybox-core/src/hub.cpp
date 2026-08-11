@@ -28,14 +28,14 @@ static_assert(NGROUPS == 3, "the dock draws exactly three folders");
 // frame, nub, bolt and number take the halo, and the bar itself is laid on
 // afterwards as solid black inside a white rim -- readable over a white home,
 // a black mountain, and everything between.
-constexpr int BATT_W = 36, BATT_H = 18;
+constexpr int BATT_W = 28, BATT_H = 14;
 
 void batteryFrame(ToolsCanvas& c, const ToolsHost& host, int right, int top, bool black) {
   const int pct = host.batteryPercent();
   if (pct < 0) return;  // no gauge answered: an empty outline would be a lie
   const int x = right - 4 - BATT_W;  // 4 px of nub
   c.drawRect(x, top, BATT_W, BATT_H, 2, black);
-  c.fillRect(x + BATT_W, top + 5, 4, 8, black);
+  c.fillRect(x + BATT_W, top + 4, 4, 6, black);
   if (host.charging()) {
     decor::triangle(c, x + BATT_W / 2 + 3, top - 2, x + BATT_W / 2 - 4, top + BATT_H / 2 + 1,
                     x + BATT_W / 2 + 2, top + BATT_H / 2 + 1, black);
@@ -44,7 +44,7 @@ void batteryFrame(ToolsCanvas& c, const ToolsHost& host, int right, int top, boo
   }
   char buf[8];
   snprintf(buf, sizeof(buf), "%d%%", pct);
-  c.text(x - 8 - c.textWidth(buf, TS_MED), top - 3, buf, TS_MED, black);
+  c.text(x - 8 - c.textWidth(buf, TS_SMALL), top - 1, buf, TS_SMALL, black);
 }
 
 void batteryFill(ToolsCanvas& c, const ToolsHost& host, int right, int top) {
@@ -217,8 +217,9 @@ void HubScreen::render(ToolsHost& host, ToolsCanvas& c) {
   {
     static const char* L[6] = {"T", "O", "Y", "B", "O", "X"};
     static const bool FILLED[6] = {true, false, false, true, false, false};
+    // The plates touch: a wordmark reads as one word, not six tiles.
     for (int i = 0; i < 6; i++) {
-      const int bx = 16 + i * 30;
+      const int bx = 16 + i * 26;
       c.fillRect(bx, 14, 26, 26, FILLED[i]);
       if (!FILLED[i]) c.drawRect(bx, 14, 26, 26, 2, true);
       c.textInBox(bx, 14, 26, 26, L[i], TS_SMALL, !FILLED[i], true);
@@ -229,9 +230,9 @@ void HubScreen::render(ToolsHost& host, ToolsCanvas& c) {
   // exists when an RTC has been set; the loop ticks it with a partial refresh
   // once a minute while home is showing.
   hubmarks::haloed([&](int dx, int dy, bool black) {
-    batteryFrame(c, host, SCREEN_W - 14 + dx, 16 + dy, black);
+    batteryFrame(c, host, SCREEN_W - 14 + dx, 18 + dy, black);
   });
-  batteryFill(c, host, SCREEN_W - 14, 16);
+  batteryFill(c, host, SCREEN_W - 14, 18);
   {
     int hh = 0, mm = 0;
     if (host.clockHHMM(hh, mm)) {
@@ -241,9 +242,9 @@ void HubScreen::render(ToolsHost& host, ToolsCanvas& c) {
       if (host.batteryPercent() >= 0) {
         char pct[8];
         snprintf(pct, sizeof(pct), "%d%%", host.batteryPercent());
-        pctW = c.textWidth(pct, TS_MED) + 8;
+        pctW = c.textWidth(pct, TS_SMALL) + 8;
       }
-      const int x = SCREEN_W - 14 - 4 - 36 - pctW - 12 - c.textWidth(clk, TS_MED);
+      const int x = SCREEN_W - 14 - 4 - 28 - pctW - 12 - c.textWidth(clk, TS_MED);
       hubmarks::haloed(
           [&](int dx, int dy, bool black) { c.text(x + dx, 13 + dy, clk, TS_MED, black); });
     }

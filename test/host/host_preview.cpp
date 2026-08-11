@@ -514,20 +514,25 @@ int main() {
 
   // --- settings ------------------------------------------------------------
   // Row geometry mirrors settings.cpp: two columns at x 16 and 248, list top
-  // 92, a 26 px heading over each group, 52 px rows.
-  // Row geometry mirrors settings.cpp: 46 px rows since the wallpaper action
-  // arrived and the whole list tightened to make room for it.
+  // 92, a 26 px heading over each group, 52 px rows -- back to 52 since the
+  // checkboxes moved onto their own page and stopped sharing the height.
   auto setRow = [](int col, int headTop, int i) {
-    return std::pair<int, int>{col ? 330 : 100, headTop + 26 + i * 46 + 23};
+    return std::pair<int, int>{col ? 330 : 100, headTop + 26 + i * 52 + 26};
   };
   setScreen("settings");
   toybox.openSettings();
 
+  // The checkbox list lives behind APPS ON THE HUB... now.
+  setScreen("settings_apps");
+  tapRect(setui::actionRect(setui::ACT_APPS));
+
   // Hide four apps through the screen itself, so the hub below reflows around
-  // exactly what a finger would have hidden.
+  // exactly what a finger would have hidden. STUDY's heading sits at
+  // 92 + 26 + 4*52 + 14 = 340 with DECIDE's four rows above it.
   g_dumpEnabled = false;
-  for (auto rc : {setRow(0, 92, 0), setRow(0, 92, 2), setRow(1, 92, 1), setRow(1, 316, 2)})
+  for (auto rc : {setRow(0, 92, 0), setRow(0, 92, 2), setRow(1, 92, 1), setRow(1, 340, 2)})
     toybox.onTap(rc.first, rc.second);
+  toybox.onTap(BACK_W / 2, TOPBAR_H / 2);  // back up to the buttons page
   // Sound steps down a level on each tap and wraps at the bottom, so tapping it
   // once from the top has to land on the level below the top, and tapping it
   // as many times as there are levels has to come back to where it started.
@@ -751,7 +756,17 @@ int main() {
       printf("BOOK FAIL: the grey book did not turn\n");
       abort();
     }
-    toybox.onTap(20, 20);
+    // The power button's short press closes the book from the page view...
+    if (!toybox.onButton(SideBtn::Ok) || bt->hostScreen() != 0) {
+      printf("BOOK FAIL: OK did not close the book\n");
+      abort();
+    }
+    // ...and means nothing on the list, so main.cpp falls through to its own
+    // uses of the button.
+    if (toybox.onButton(SideBtn::Ok)) {
+      printf("BOOK FAIL: OK was swallowed on the book list\n");
+      abort();
+    }
     toybox.goHub();
     toybox.hostHub().goHome();
     g_dumpEnabled = true;
@@ -772,7 +787,7 @@ int main() {
     // white pass -- so counting black ink there measures the halo, not the
     // bar. The cell is drawn plain instead, at a spot the harness chooses,
     // and the expected ink is computed here from the percentage alone.
-    const int W = 36, H = 18, RIGHT = 200, TOP = 100, X = RIGHT - 4 - W;
+    const int W = 28, H = 14, RIGHT = 200, TOP = 100, X = RIGHT - 4 - W;
     int worst = 0, worstPct = -1;
     for (int pct : {0, 25, 50, 89, 100}) {
       sensors::hostSetBattery(pct, false);

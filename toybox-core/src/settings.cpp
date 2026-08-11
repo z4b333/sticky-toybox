@@ -8,14 +8,13 @@
 
 namespace {
 
-// Two columns of checkboxes. A 52 px row is 5.6 mm -- under the 7 mm a
-// fingertip wants -- but the row is 216 px wide and a miss only ticks a
-// neighbouring box, which is visible immediately and undone by tapping it
-// again. Nothing here is destructive except the reset, and that one is a
-// full-width 60 px button with a confirm.
+// Two columns of checkboxes, on their own page now, so the rows got their
+// height back: 52 px is 5.6 mm -- still under the 7 mm a fingertip wants --
+// but the row is 216 px wide and a miss only ticks a neighbouring box, which
+// is visible immediately and undone by tapping it again.
 constexpr int COL_X[2] = {16, 248};
 constexpr int COL_W = 216;
-constexpr int ROW_H = 46, BOX = 28;
+constexpr int ROW_H = 52, BOX = 28;
 constexpr int HEAD_H = 26, GROUP_GAP = 14;
 constexpr int LIST_TOP = 92;
 
@@ -163,7 +162,36 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
     renderWall(host, c);
     return;
   }
+  if (_page == 3) {
+    renderApps(host, c);
+    return;
+  }
   drawTopBar(c, "SETTINGS");
+
+  using namespace setui;
+  // The pages first, then the things that act right here.
+  const TRect sa = actionRect(ACT_APPS), sw = actionRect(ACT_WALL);
+  const TRect s1 = actionRect(ACT_LOCK), s0 = actionRect(ACT_SOUND);
+  const TRect s2 = actionRect(ACT_CARDS), s3 = actionRect(ACT_RESET);
+  c.button(sa.x, sa.y, sa.w, sa.h, "APPS ON THE HUB...", false, TS_MED);
+  c.button(sw.x, sw.y, sw.w, sw.h, "WALLPAPER...", false, TS_MED);
+  c.button(s1.x, s1.y, s1.w, s1.h, "LOCK SCREEN...", false, TS_MED);
+  c.button(s0.x, s0.y, s0.w, s0.h, soundLabel(host), false, TS_MED);
+  c.button(s2.x, s2.y, s2.w, s2.h, "SHOW HOW TO PLAY AGAIN", false, TS_MED);
+  c.button(s3.x, s3.y, s3.w, s3.h,
+           _armed ? "TAP AGAIN TO ERASE SCORES" : "RESET STATS AND TALLIES", _armed, TS_MED);
+
+  c.textCentered(SCREEN_W / 2, 776, _note ? _note : "rows ending in ... open a page of their own",
+                 TS_SMALL, true);
+}
+
+// --- the apps page ------------------------------------------------------------
+// Which apps the hub's folders show, as the checkbox list the main settings
+// page used to carry. On its own page both it and the buttons stopped elbowing
+// each other for height.
+void SettingsScreen::renderApps(ToolsHost& host, ToolsCanvas& c) {
+  (void)host;
+  drawTopBar(c, "APPS");
 
   c.textTracked(16, 56, "SHOW ON THE HUB", TS_MED, true, false, 1);
 
@@ -180,19 +208,20 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
     c.text(x + BOX + 12, rowTop + (ROW_H - c.textHeight(TS_MED)) / 2, nameOf(it), TS_MED, true);
   });
 
-  using namespace setui;
-  const TRect s0 = actionRect(ACT_SOUND), s1 = actionRect(ACT_LOCK);
-  const TRect sw = actionRect(ACT_WALL);
-  const TRect s2 = actionRect(ACT_CARDS), s3 = actionRect(ACT_RESET);
-  c.button(s0.x, s0.y, s0.w, s0.h, soundLabel(host), false, TS_MED);
-  c.button(s1.x, s1.y, s1.w, s1.h, "LOCK SCREEN...", false, TS_MED);
-  c.button(sw.x, sw.y, sw.w, sw.h, "WALLPAPER...", false, TS_MED);
-  c.button(s2.x, s2.y, s2.w, s2.h, "SHOW HOW TO PLAY AGAIN", false, TS_MED);
-  c.button(s3.x, s3.y, s3.w, s3.h,
-           _armed ? "TAP AGAIN TO ERASE SCORES" : "RESET STATS AND TALLIES", _armed, TS_MED);
+  c.textCentered(SCREEN_W / 2, 776, "hiding an app keeps everything saved in it", TS_SMALL, true);
+}
 
-  c.textCentered(SCREEN_W / 2, 776, _note ? _note : "hiding an app keeps everything saved in it",
-                 TS_SMALL, true);
+bool SettingsScreen::tapApps(ToolsHost& host, int x, int y) {
+  bool hit = false;
+  walkList([&](const applist::Item& it, const applist::Group&, int, int rowTop, int col) {
+    if (hit || !inRect(x, y, COL_X[col], rowTop, COL_W, ROW_H)) return;
+    hit = true;
+    appvis::toggle(it.game, it.idx);
+  });
+  if (!hit) return false;
+  appvis::save(host.prefs());
+  host.beep(0);
+  return true;
 }
 
 // --- the lock screen page -----------------------------------------------------
@@ -353,6 +382,7 @@ bool SettingsScreen::tapLock(ToolsHost& host, int x, int y) {
 bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
   if (_page == 1) return tapLock(host, x, y);
   if (_page == 2) return tapWall(host, x, y);
+  if (_page == 3) return tapApps(host, x, y);
 
   // Any tap that is not the reset takes the confirm back down, so an armed
   // button never survives long enough to be pressed by accident later.
@@ -361,6 +391,12 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
   _note = nullptr;
 
   using namespace setui;
+  if (actionRect(ACT_APPS).hit(x, y)) {
+    _page = 3;
+    host.beep(1);
+    return true;
+  }
+
   if (actionRect(ACT_LOCK).hit(x, y)) {
     _lock = lock::load(host.prefs());
     _page = 1;
@@ -408,15 +444,5 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
     return true;
   }
 
-  bool hit = false;
-  walkList([&](const applist::Item& it, const applist::Group&, int, int rowTop, int col) {
-    if (hit || !inRect(x, y, COL_X[col], rowTop, COL_W, ROW_H)) return;
-    hit = true;
-    appvis::toggle(it.game, it.idx);
-  });
-  if (!hit) return wasArmed;  // only repaint if a question came down
-
-  appvis::save(host.prefs());
-  host.beep(0);
-  return true;
+  return wasArmed;  // only repaint if a question came down
 }

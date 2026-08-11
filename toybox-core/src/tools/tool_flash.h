@@ -111,6 +111,7 @@ class FlashTool : public ToolApp {
   // turns the card back over -- the same word at a smaller scale.
   bool onButton(SideBtn b) override {
     if (_screen != Screen::Study) return false;
+    if (b == SideBtn::Ok) return false;  // grading is UP and DOWN only
     if (_pos >= _qLen) {
       if (b == SideBtn::Down) restart();
       return b == SideBtn::Down;

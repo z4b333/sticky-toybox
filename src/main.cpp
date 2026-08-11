@@ -198,9 +198,11 @@ void powerOff(bool lowBattery = false) {
   esp_deep_sleep_start();
 }
 
-// The power button does two things. Held, it always powers off. Released
-// quickly it locks the pinned note again — but only from the pinned screen,
-// because a stray press in the middle of a game should not end it.
+// The power button does three things. Held, it always powers off. Released
+// quickly it is first offered to the open app as SideBtn::Ok -- only the book
+// reader takes it, as its way out of a page -- and otherwise it locks the
+// pinned note again, but only from the pinned screen, because a stray press
+// in the middle of a game should not end it.
 void handlePowerButton() {
   if (digitalRead(PIN_BTN_OK) == LOW) {
     noteActivity();
@@ -211,7 +213,10 @@ void handlePowerButton() {
   const bool wasDown = g_okDownSince != 0;
   const uint32_t held = wasDown ? millis() - g_okDownSince : 0;
   g_okDownSince = 0;
-  if (wasDown && held > 40 && g_pinnedMode) powerOff();
+  if (wasDown && held > 40) {
+    if (toybox.onButton(SideBtn::Ok)) return;
+    if (g_pinnedMode) powerOff();
+  }
 }
 
 // The two side buttons wear two hats.
