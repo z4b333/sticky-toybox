@@ -602,8 +602,16 @@ bool streamWrite(const uint8_t* data, uint32_t n) {
   g_streamBuf.append((const char*)data, n);
   return true;
 }
+bool g_failNextClose = false;
+void hostFailNextStreamClose() { g_failNextClose = true; }
+
 bool streamClose(bool keep) {
   if (!g_streaming) return false;
+  if (keep && g_failNextClose) {
+    g_failNextClose = false;
+    g_streaming = false;
+    return false;  // the card filled up mid-write, as far as anyone can tell
+  }
   if (keep) fakeCard()[g_streamPath] = g_streamBuf;
   g_streaming = false;
   g_streamBuf.clear();

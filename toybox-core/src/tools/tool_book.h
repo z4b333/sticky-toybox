@@ -274,11 +274,16 @@ class BookTool : public ToolApp {
     // there, and page 0 otherwise. Page 0 is the fallback rather than the
     // rule because it is only the cover by accident -- a trimmed scan starts
     // at the story, and a grey test card starts at a test card.
+    // A build that fails leaves have() false and is tried again next time,
+    // which is right for this reader: nothing here decodes, so every failure
+    // is a passing one. See makeAndSave.
     if (!bthumb::have(_books[i].file)) {
+      bool made = false;
       if (_books[i].cover && host().bookCover(_pageBuf))
-        bthumb::makeAndSave(host(), _books[i].file, _pageBuf, 1);
+        made = bthumb::makeAndSave(host(), _books[i].file, _pageBuf, 1);
       else if (host().bookPage(0, _pageBuf))
-        bthumb::makeAndSave(host(), _books[i].file, _pageBuf, _books[i].bpp);
+        made = bthumb::makeAndSave(host(), _books[i].file, _pageBuf, _books[i].bpp);
+      if (!made) _note = "the cover could not be made - it will try again";
     }
     // ...and, if the sleeping panel is set to wear a cover, this book's goes
     // into flash now. After the builder above, so the very first open of a

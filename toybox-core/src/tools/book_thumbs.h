@@ -407,9 +407,21 @@ class Builder {
 
 // A .tbk cover: the book's first page, which is already exactly panel-sized,
 // so this is the same pipeline with nothing to scale.
-inline void makeAndSave(ToolsHost& h, const char* file, const uint8_t* page, int bpp) {
+// True when both pictures were written. The caller is expected to look: a
+// cover that did not get made leaves `have()` false, and the next open of the
+// book tries again.
+//
+// Deliberately no failure marker here, unlike the EPUB side. There the marker
+// exists because a cover that will not DECODE will never decode -- it is a
+// property of the file, and retrying it costs seconds on every open forever.
+// A .tbk cover decodes nothing: it is already the framebuffer's own bytes, so
+// every way this can fail (no heap for the bands, a card that stopped
+// answering, a full card) is a passing condition. Marking those permanently
+// would deny a book its cover for the rest of its life because the device was
+// briefly short of memory once.
+inline bool makeAndSave(ToolsHost& h, const char* file, const uint8_t* page, int bpp) {
   Builder b;
-  if (!b.begin(h, file, 480, 800)) return;
+  if (!b.begin(h, file, 480, 800)) return false;
   uint8_t line[480];
   for (int y = 0; y < 800; y++) {
     for (int x = 0; x < 480; x++) {
@@ -423,7 +435,9 @@ inline void makeAndSave(ToolsHost& h, const char* file, const uint8_t* page, int
     }
     b.row(y, line, 480);
   }
-  b.finish();
+  // finish() writes the small picture only if the big one closed, so a failure
+  // here leaves neither -- not a thumbnail with no cover behind it.
+  return b.finish();
 }
 
 // The loading screen a book opens behind. Best available: the full-size

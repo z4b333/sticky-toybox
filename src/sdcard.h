@@ -132,6 +132,12 @@ bool streamOpen(const char* path);
 bool streamWrite(const uint8_t* data, uint32_t n);
 bool streamClose(bool keep);
 
+#ifdef TOYBOX_HOST
+// Test hook: make the next streamClose(true) fail, so the harness can walk
+// the path a full card takes without a card.
+void hostFailNextStreamClose();
+#endif
+
 // Reads a whole file. If nothing holds the bus this claims it for the read
 // and gives it back -- which re-initialises the panel, so the caller's next
 // paint must be a full one. Returns bytes read, or -1.

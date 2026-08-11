@@ -910,6 +910,38 @@ int main() {
       free(want);
       free(got);
     }
+
+    // A build that fails must leave nothing behind: no thumbnail standing in
+    // front of a cover that was never written, and no permanent marker either.
+    // Nothing in this reader decodes, so a failure is the card or the heap
+    // having a bad moment, and the right answer is to try again next time.
+    {
+      const char* victim = "/books/walden.tbk";
+      char sp[24];
+      bthumb::path(victim, sp, sizeof(sp));
+      tfs::remove(sp);
+      uint8_t* page = (uint8_t*)malloc(48000);
+      memset(page, 0xFF, 48000);
+      sdcard::hostFailNextStreamClose();
+      if (bthumb::makeAndSave(stickyHost, victim, page, 1)) {
+        printf("TBKCOVER FAIL: a failed stream close was reported as success\n");
+        abort();
+      }
+      if (bthumb::have(victim)) {
+        printf("TBKCOVER FAIL: a thumbnail survived a cover that was never written\n");
+        abort();
+      }
+      if (bthumb::failed(victim)) {
+        printf("TBKCOVER FAIL: a passing failure was marked permanent\n");
+        abort();
+      }
+      // And the retry works, which is the whole point of not marking it.
+      if (!bthumb::makeAndSave(stickyHost, victim, page, 1) || !bthumb::have(victim)) {
+        printf("TBKCOVER FAIL: the retry did not make the cover\n");
+        abort();
+      }
+      free(page);
+    }
     // RTL: forward is the LEFT third; the right third must go nowhere at the
     // cover.
     toybox.onTap(EPD_W - 20, 400);
@@ -990,6 +1022,7 @@ int main() {
     toybox.hostHub().goHome();
     g_dumpEnabled = true;
     printf("book reader ok (list, rtl turns, buttons, ends, position, grey fallback)\n");
+    printf("tbk covers ok (embedded beats page 0, a failed build retries cleanly)\n");
   }
 
   // --- the .tbk header ---------------------------------------------------------
