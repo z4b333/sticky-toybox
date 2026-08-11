@@ -244,6 +244,10 @@ class ToolsHost {
     uint32_t pages = 0;
     bool rtl = false;
     uint8_t bpp = 1;  // 1 = B/W, 2 = four-level grey
+    // The file carries a cover made on a PC. Page 0 is only ever the cover by
+    // accident -- a trimmed scan starts at the story -- so when a book says it
+    // has a real one, that is what the strip and the loading screen show.
+    bool cover = false;
   };
   // A series folder under /books, and how many books of ONE kind it holds --
   // the .tbk reader and the EPUB reader each see only their own, so neither
@@ -274,6 +278,13 @@ class ToolsHost {
   }
   virtual bool bookPage(uint32_t idx, uint8_t* dst) {
     (void)idx;
+    (void)dst;
+    return false;
+  }
+  // The embedded cover: 48,000 bytes, 480x800 one bit, the framebuffer's own
+  // convention. Only valid while the book is open, and only when BookInfo::
+  // cover said there is one.
+  virtual bool bookCover(uint8_t* dst) {
     (void)dst;
     return false;
   }

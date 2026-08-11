@@ -269,11 +269,17 @@ class BookTool : public ToolApp {
     _pageNo = savedPage(i);
     _chrome = false;
     recents::note(prefs(), recents::KIND_TBK, _books[i].file, _books[i].title);
-    // The cover thumbnail for the hub's recently-read strip: page 0 shrunk
-    // into flash, made once while the bus is already up. One extra page read
-    // on the first-ever open of a book; nothing on every open after.
-    if (!bthumb::have(_books[i].file) && host().bookPage(0, _pageBuf))
-      bthumb::makeAndSave(host(), _books[i].file, _pageBuf, _books[i].bpp);
+    // The cover thumbnail for the hub's recently-read strip, made once while
+    // the bus is already up: the file's own cover if the converter put one
+    // there, and page 0 otherwise. Page 0 is the fallback rather than the
+    // rule because it is only the cover by accident -- a trimmed scan starts
+    // at the story, and a grey test card starts at a test card.
+    if (!bthumb::have(_books[i].file)) {
+      if (_books[i].cover && host().bookCover(_pageBuf))
+        bthumb::makeAndSave(host(), _books[i].file, _pageBuf, 1);
+      else if (host().bookPage(0, _pageBuf))
+        bthumb::makeAndSave(host(), _books[i].file, _pageBuf, _books[i].bpp);
+    }
     // ...and, if the sleeping panel is set to wear a cover, this book's goes
     // into flash now. After the builder above, so the very first open of a
     // book still gets one.

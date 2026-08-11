@@ -22,6 +22,42 @@
 
 namespace sdcard {
 
+// --- the .tbk header, shared by both builds -----------------------------------
+// A PC-side converter has to agree with every rule in here, so it lives in one
+// place and the preview harness tests it directly rather than through a card.
+bool parseTbkBytes(const uint8_t h[64], BookMeta& out) {
+  constexpr uint32_t HDR = 64, COVER_BYTES = 48000;
+  constexpr uint8_t FLAG_RTL = 1, FLAG_COVER = 2;
+  if (memcmp(h, "TBK1", 4) != 0) return false;
+  const int w = h[4] | (h[5] << 8), ht = h[6] | (h[7] << 8);
+  const int bpp = h[8];
+  if (w != 480 || ht != 800 || (bpp != 1 && bpp != 2)) return false;
+  const uint32_t pageBytes = (uint32_t)h[16] | ((uint32_t)h[17] << 8) |
+                             ((uint32_t)h[18] << 16) | ((uint32_t)h[19] << 24);
+  if (pageBytes != 48000u * (uint32_t)bpp) return false;  // header lying about itself
+  out.bpp = (uint8_t)bpp;
+  out.rtl = (h[9] & FLAG_RTL) != 0;
+  out.cover = (h[9] & FLAG_COVER) != 0;
+  // dataOffset. Every file written before covers existed says 64, and the
+  // firmware used to assume it rather than read it, so a zero or a nonsense
+  // value is treated as 64 rather than refused -- there may be files out there
+  // whose converter never filled it in. A file that CLAIMS a cover, though,
+  // must leave room for one: otherwise page 0 would be read from inside it,
+  // and a book that opens on garbage is worse than one that opens plainly.
+  uint32_t data = (uint32_t)h[20] | ((uint32_t)h[21] << 8) | ((uint32_t)h[22] << 16) |
+                  ((uint32_t)h[23] << 24);
+  if (data < HDR) data = HDR;
+  if (out.cover && data < HDR + COVER_BYTES) out.cover = false;
+  out.dataOffset = data;
+  out.pages = (uint32_t)h[12] | ((uint32_t)h[13] << 8) | ((uint32_t)h[14] << 16) |
+              ((uint32_t)h[15] << 24);
+  memcpy(out.title, h + 24, 40);
+  out.title[40] = 0;
+  if (!out.title[0]) strncpy(out.title, "untitled", sizeof(out.title) - 1);
+  return out.pages > 0;
+}
+
+
 #ifdef TOYBOX_HOST
 
 Report probe() {
@@ -102,19 +138,22 @@ struct FakeBook {
   uint32_t pages;
   bool rtl;
   uint8_t bpp;
+  bool cover;  // carries a PC-made cover inside the file
 };
 const FakeBook kFakeBooks[] = {
-    {"/books", "walden.tbk", "Walden", 8, false, 1},
-    {"/books", "grey-test.tbk", "Grey test card", 3, false, 2},
-    {"/books/One Piece", "one-piece-v1.tbk", "One Piece vol 1", 12, true, 1},
-    {"/books/One Piece", "one-piece-v2.tbk", "One Piece vol 2", 10, true, 1},
-    {"/books/One Piece", "one-piece-v3.tbk", "One Piece vol 3", 11, true, 1},
-    {"/books/One Piece", "one-piece-v4.tbk", "One Piece vol 4", 9, true, 1},
-    {"/books/One Piece", "one-piece-v5.tbk", "One Piece vol 5", 12, true, 1},
-    {"/books/One Piece", "one-piece-v6.tbk", "One Piece vol 6", 10, true, 1},
-    {"/books/One Piece", "one-piece-v7.tbk", "One Piece vol 7", 11, true, 1},
-    {"/books/One Piece", "one-piece-v8.tbk", "One Piece vol 8", 13, true, 1},
-    {"/books/One Piece", "one-piece-v9.tbk", "One Piece vol 9", 12, true, 1},
+    {"/books", "walden.tbk", "Walden", 8, false, 1, false},
+    {"/books", "grey-test.tbk", "Grey test card", 3, false, 2, false},
+    // The one with a cover made on a PC: its thumbnail must come from that
+    // rather than from page 0, which is how every other book gets one.
+    {"/books/One Piece", "one-piece-v1.tbk", "One Piece vol 1", 12, true, 1, true},
+    {"/books/One Piece", "one-piece-v2.tbk", "One Piece vol 2", 10, true, 1, false},
+    {"/books/One Piece", "one-piece-v3.tbk", "One Piece vol 3", 11, true, 1, false},
+    {"/books/One Piece", "one-piece-v4.tbk", "One Piece vol 4", 9, true, 1, false},
+    {"/books/One Piece", "one-piece-v5.tbk", "One Piece vol 5", 12, true, 1, false},
+    {"/books/One Piece", "one-piece-v6.tbk", "One Piece vol 6", 10, true, 1, false},
+    {"/books/One Piece", "one-piece-v7.tbk", "One Piece vol 7", 11, true, 1, false},
+    {"/books/One Piece", "one-piece-v8.tbk", "One Piece vol 8", 13, true, 1, false},
+    {"/books/One Piece", "one-piece-v9.tbk", "One Piece vol 9", 12, true, 1, false},
 };
 }  // namespace
 
@@ -128,6 +167,8 @@ int bookList(BookMeta* out, int max, const char* dir) {
     m.pages = b.pages;
     m.rtl = b.rtl;
     m.bpp = b.bpp;
+    m.cover = b.cover;
+    m.dataOffset = b.cover ? 64 + 48000 : 64;
     out[n++] = m;
   }
   return n;
@@ -358,9 +399,34 @@ bool writeFileAtomic(const char* path, const void* data, int n) {
   return true;
 }
 
+bool g_fakeCover = false;
+
 bool bookOpen(const char* file) {
   g_fakeBpp = strstr(file, "grey") ? 2 : 1;
   g_fakeOpenPages = strstr(file, "walden") ? 8 : (g_fakeBpp == 2 ? 3 : 12);
+  g_fakeCover = strstr(file, "one-piece-v1") != nullptr;
+  return true;
+}
+
+// The invented embedded cover: a bordered plate with a big diagonal cross, so
+// a render makes it obvious at a glance that this is NOT page 0 (a frame, a
+// diagonal, and tally bars).
+bool bookReadCover(uint8_t* dst) {
+  if (!g_fakeCover) return false;
+  memset(dst, 0xFF, 48000);
+  auto setBlack = [&](int x, int y) {
+    if (x < 0 || x >= 480 || y < 0 || y >= 800) return;
+    dst[(size_t)y * 60 + (x >> 3)] &= ~(0x80 >> (x & 7));
+  };
+  for (int t = 0; t < 24; t++) {
+    for (int x = 40; x < 440; x++) { setBlack(x, 100 + t); setBlack(x, 676 + t); }
+    for (int y = 100; y < 700; y++) { setBlack(40 + t, y); setBlack(416 + t, y); }
+  }
+  for (int t = 0; t < 560; t++)
+    for (int w = 0; w < 10; w++) {
+      setBlack(80 + (t * 320) / 560 + w, 120 + t);
+      setBlack(400 - (t * 320) / 560 + w, 120 + t);
+    }
   return true;
 }
 
@@ -745,8 +811,15 @@ namespace {
 File g_book;
 bool g_bookBusUp = false;
 uint32_t g_bookPageBytes = 48000;
+// Where page 0 starts, from the header rather than assumed. The field was
+// always in the format and always written as 64; honouring it is what lets a
+// cover sit between the header and the pages.
+uint32_t g_bookDataOffset = 64;
+bool g_bookHasCover = false;
 
 constexpr uint32_t TBK_HEADER = 64;
+constexpr uint32_t TBK_COVER_BYTES = 48000;  // 480x800, 1 bit, like a page
+constexpr uint8_t TBK_FLAG_RTL = 1, TBK_FLAG_COVER = 2;
 
 const char* kBookDirs[2] = {"/books", "/"};
 
@@ -761,21 +834,7 @@ bool hasExt(const char* name, const char* ext) {
 bool parseTbkHeader(File& f, BookMeta& out) {
   uint8_t h[TBK_HEADER];
   if (f.read(h, sizeof(h)) != sizeof(h)) return false;
-  if (memcmp(h, "TBK1", 4) != 0) return false;
-  const int w = h[4] | (h[5] << 8), ht = h[6] | (h[7] << 8);
-  const int bpp = h[8];
-  if (w != 480 || ht != 800 || (bpp != 1 && bpp != 2)) return false;
-  const uint32_t pageBytes = (uint32_t)h[16] | ((uint32_t)h[17] << 8) |
-                             ((uint32_t)h[18] << 16) | ((uint32_t)h[19] << 24);
-  if (pageBytes != 48000u * (uint32_t)bpp) return false;  // header lying about itself
-  out.bpp = (uint8_t)bpp;
-  out.rtl = (h[9] & 1) != 0;
-  out.pages = (uint32_t)h[12] | ((uint32_t)h[13] << 8) | ((uint32_t)h[14] << 16) |
-              ((uint32_t)h[15] << 24);
-  memcpy(out.title, h + 24, 40);
-  out.title[40] = 0;
-  if (!out.title[0]) strncpy(out.title, "untitled", sizeof(out.title) - 1);
-  return out.pages > 0;
+  return parseTbkBytes(h, out);
 }
 }  // namespace
 
@@ -1194,6 +1253,8 @@ bool bookOpen(const char* file) {
       BookMeta m{};
       if (parseTbkHeader(g_book, m)) {
         g_bookPageBytes = 48000u * m.bpp;
+        g_bookDataOffset = m.dataOffset;
+        g_bookHasCover = m.cover;
         return true;  // bus stays up: reading now
       }
       g_book.close();
@@ -1203,9 +1264,21 @@ bool bookOpen(const char* file) {
   return false;
 }
 
+bool bookReadCover(uint8_t* dst) {
+  if (!g_book || !g_bookHasCover) return false;
+  if (!g_book.seek(TBK_HEADER)) return false;
+  uint32_t got = 0;
+  while (got < TBK_COVER_BYTES) {
+    const int n = g_book.read(dst + got, TBK_COVER_BYTES - got);
+    if (n <= 0) break;
+    got += (uint32_t)n;
+  }
+  return got == TBK_COVER_BYTES;
+}
+
 bool bookReadPage(uint32_t idx, uint8_t* dst) {
   if (!g_book) return false;
-  if (!g_book.seek(TBK_HEADER + (uint64_t)idx * g_bookPageBytes)) return false;
+  if (!g_book.seek((uint64_t)g_bookDataOffset + (uint64_t)idx * g_bookPageBytes)) return false;
   uint32_t got = 0;
   while (got < g_bookPageBytes) {
     const int n = g_book.read(dst + got, g_bookPageBytes - got);
@@ -1216,6 +1289,8 @@ bool bookReadPage(uint32_t idx, uint8_t* dst) {
 }
 
 void bookClose() {
+  g_bookDataOffset = TBK_HEADER;
+  g_bookHasCover = false;
   if (g_book) g_book.close();
   if (g_bookBusUp) {
     busRelease();

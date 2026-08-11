@@ -879,6 +879,37 @@ int main() {
       abort();
     }
     g_dumpEnabled = false;
+
+    // This volume carries a cover made on a PC, and that is what the card's
+    // full-size cover must be -- byte for byte, because a 480x800 one-bit
+    // source neither scales nor dithers on the way through. Page 0 would
+    // differ in every band, which is exactly the bug this guards.
+    {
+      uint8_t* want = (uint8_t*)malloc(48000);
+      uint8_t* got = (uint8_t*)malloc(48000);
+      char bp[48];
+      bthumb::bigPath("/books/One Piece/one-piece-v1.tbk", bp, sizeof(bp));
+      if (!want || !got || !stickyHost.bookCover(want)) {
+        printf("TBKCOVER FAIL: the book did not hand back its embedded cover\n");
+        abort();
+      }
+      if (stickyHost.sdReadWhole(bp, got, 48000) != 48000 || memcmp(want, got, 48000) != 0) {
+        printf("TBKCOVER FAIL: the stored cover is not the embedded one\n");
+        abort();
+      }
+      // ...and a book with no embedded cover still gets one from page 0.
+      uint8_t* p0 = (uint8_t*)malloc(48000);
+      char wp[48];
+      bthumb::bigPath("/books/walden.tbk", wp, sizeof(wp));
+      if (p0 && stickyHost.sdReadWhole(wp, p0, 48000) == 48000 &&
+          memcmp(want, p0, 48000) == 0) {
+        printf("TBKCOVER FAIL: a book with no cover borrowed another book's\n");
+        abort();
+      }
+      free(p0);
+      free(want);
+      free(got);
+    }
     // RTL: forward is the LEFT third; the right third must go nowhere at the
     // cover.
     toybox.onTap(EPD_W - 20, 400);
@@ -959,6 +990,80 @@ int main() {
     toybox.hostHub().goHome();
     g_dumpEnabled = true;
     printf("book reader ok (list, rtl turns, buttons, ends, position, grey fallback)\n");
+  }
+
+  // --- the .tbk header ---------------------------------------------------------
+  // The rules a PC-side converter has to match, tested on bytes rather than
+  // through a card. dataOffset was in the format from the start but assumed
+  // rather than read until covers arrived, so its edge cases are the ones a
+  // file in the wild is most likely to land on.
+  {
+    g_dumpEnabled = false;
+    auto header = [](uint8_t bpp, uint8_t flags, uint32_t pages, uint32_t dataOff,
+                     uint8_t* h) {
+      memset(h, 0, 64);
+      memcpy(h, "TBK1", 4);
+      h[4] = 480 & 255; h[5] = 480 >> 8;
+      h[6] = 800 & 255; h[7] = 800 >> 8;
+      h[8] = bpp;
+      h[9] = flags;
+      h[12] = (uint8_t)(pages & 255); h[13] = (uint8_t)(pages >> 8);
+      const uint32_t pb = 48000u * bpp;
+      h[16] = (uint8_t)(pb & 255); h[17] = (uint8_t)((pb >> 8) & 255);
+      h[18] = (uint8_t)((pb >> 16) & 255); h[19] = (uint8_t)((pb >> 24) & 255);
+      h[20] = (uint8_t)(dataOff & 255); h[21] = (uint8_t)((dataOff >> 8) & 255);
+      h[22] = (uint8_t)((dataOff >> 16) & 255); h[23] = (uint8_t)((dataOff >> 24) & 255);
+      strcpy((char*)h + 24, "A Title");
+    };
+    uint8_t h[64];
+    sdcard::BookMeta m;
+
+    // The ordinary file every converter has written until now.
+    header(1, 0, 12, 64, h);
+    if (!sdcard::parseTbkBytes(h, m) || m.cover || m.dataOffset != 64 || m.rtl) {
+      printf("TBKHDR FAIL: a plain header parsed as cover=%d off=%u\n", (int)m.cover,
+             (unsigned)m.dataOffset);
+      abort();
+    }
+    // One with a cover: flag set, pages pushed past it.
+    header(1, 2, 12, 64 + 48000, h);
+    if (!sdcard::parseTbkBytes(h, m) || !m.cover || m.dataOffset != 64 + 48000) {
+      printf("TBKHDR FAIL: a cover header parsed as cover=%d off=%u\n", (int)m.cover,
+             (unsigned)m.dataOffset);
+      abort();
+    }
+    // Both flags together: rtl and a cover are independent bits.
+    header(1, 1 | 2, 12, 64 + 48000, h);
+    if (!sdcard::parseTbkBytes(h, m) || !m.cover || !m.rtl) {
+      printf("TBKHDR FAIL: rtl and cover did not survive together\n");
+      abort();
+    }
+    // Claims a cover but leaves no room for one: the flag is dropped rather
+    // than believed, because believing it reads page 0 out of the middle of
+    // the cover.
+    header(1, 2, 12, 64, h);
+    if (!sdcard::parseTbkBytes(h, m) || m.cover || m.dataOffset != 64) {
+      printf("TBKHDR FAIL: an impossible cover claim was believed\n");
+      abort();
+    }
+    // A converter that never filled the field in. Treated as 64, not refused.
+    header(1, 0, 12, 0, h);
+    if (!sdcard::parseTbkBytes(h, m) || m.dataOffset != 64) {
+      printf("TBKHDR FAIL: a zero dataOffset was not read as 64\n");
+      abort();
+    }
+    // Still refused: wrong magic, a page size that contradicts the depth, and
+    // a book with no pages.
+    header(1, 0, 12, 64, h);
+    h[0] = 'X';
+    if (sdcard::parseTbkBytes(h, m)) { printf("TBKHDR FAIL: bad magic accepted\n"); abort(); }
+    header(2, 0, 12, 64, h);
+    h[16] = 0x80; h[17] = 0xBB;  // 48,000 on a 2-bpp file, which needs 96,000
+    if (sdcard::parseTbkBytes(h, m)) { printf("TBKHDR FAIL: a lying page size was accepted\n"); abort(); }
+    header(1, 0, 0, 64, h);
+    if (sdcard::parseTbkBytes(h, m)) { printf("TBKHDR FAIL: an empty book was accepted\n"); abort(); }
+    g_dumpEnabled = true;
+    printf("tbk header ok (dataOffset honoured, cover flag checked against it)\n");
   }
 
   // --- the EPUB core: CrossPoint parity --------------------------------------

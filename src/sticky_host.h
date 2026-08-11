@@ -115,6 +115,7 @@ class StickyHost : public ToolsHost {
   int bookList(BookInfo* out, int max, const char* dir) override;
   bool bookOpen(const char* file) override;
   bool bookPage(uint32_t idx, uint8_t* dst) override;
+  bool bookCover(uint8_t* dst) override { return sdcard::bookReadCover(dst); }
   void bookClose() override;
   bool bookShowGrey(const uint8_t* packed2bpp) override { return epd.displayGrey2bpp(packed2bpp); }
   int epubList(EpubInfo* out, int max, const char* dir) override;

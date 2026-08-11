@@ -71,6 +71,7 @@ int StickyHost::bookList(BookInfo* out, int max, const char* dir) {
     out[i].pages = metas[i].pages;
     out[i].rtl = metas[i].rtl;
     out[i].bpp = metas[i].bpp;
+    out[i].cover = metas[i].cover;
   }
   free(metas);
   return n;

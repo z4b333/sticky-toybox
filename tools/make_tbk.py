@@ -12,11 +12,19 @@ Header:
     6   u16 height = 800
     8   u8  bpp    = 1
     9   u8  flags  bit0 = right-to-left (manga)
+               bit1 = a cover follows the header
     10  u16 reserved
     12  u32 pageCount
     16  u32 pageBytes = 48000
-    20  u32 dataOffset = 64
+    20  u32 dataOffset = 64, or 48064 when a cover is present
     24  char[40] title, UTF-8, NUL-padded
+
+The cover, when bit1 is set, is 48,000 bytes at offset 64: 480x800, one bit
+per pixel, the same convention as a page. The device shows it as the loading
+screen and shrinks it for the hub's recently-read strip. Without one it falls
+back to page 0, which is the cover only by luck -- a trimmed scan starts at
+the story. A cover carried inside the file also survives the book being
+renamed or moved, which a cover kept beside it does not.
 
 Usage:
     python make_tbk.py volume1.cbz --rtl --title "One Piece 1"
@@ -144,6 +152,9 @@ def main() -> None:
     ap.add_argument("--grey", action="store_true",
                     help="four-level grey pages (2 bits/pixel, double the size); "
                          "the device shows them with its grey waveform")
+    ap.add_argument("--cover", help="an image to carry inside the file as the book's "
+                                    "cover; shown while the book opens and in the hub's "
+                                    "recently-read strip")
     ap.add_argument("--out", help="output directory")
     args = ap.parse_args()
 
@@ -152,6 +163,14 @@ def main() -> None:
     dest = os.path.join(args.out or ".", base + ".tbk")
     if args.out:
         os.makedirs(args.out, exist_ok=True)
+
+    cover = None
+    if args.cover:
+        # Always one bit, never grey: the loading screen and the strip are both
+        # drawn through the ordinary canvas, and a grey cover would have to be
+        # dithered on the device anyway.
+        with Image.open(args.cover) as ci:
+            cover = to_page(ci.convert("L"), False, args.dither)
 
     pages = []
     for i, im in enumerate(load_pages(args.source)):
@@ -167,18 +186,21 @@ def main() -> None:
     header[4:6] = W.to_bytes(2, "little")
     header[6:8] = H.to_bytes(2, "little")
     header[8] = 2 if args.grey else 1
-    header[9] = 1 if args.rtl else 0
+    header[9] = (1 if args.rtl else 0) | (2 if cover else 0)
     header[12:16] = len(pages).to_bytes(4, "little")
     header[16:20] = (PAGE_BYTES_GREY if args.grey else PAGE_BYTES).to_bytes(4, "little")
-    header[20:24] = (64).to_bytes(4, "little")
+    header[20:24] = (64 + (len(cover) if cover else 0)).to_bytes(4, "little")
     header[24:24 + len(title)] = title
 
     with open(dest, "wb") as f:
         f.write(header)
+        if cover:
+            f.write(cover)
         for p in pages:
             f.write(p)
     mb = os.path.getsize(dest) / 1e6
-    print(f"{dest}: {len(pages)} pages, {mb:.1f} MB{'  (right-to-left)' if args.rtl else ''}")
+    print(f"{dest}: {len(pages)} pages, {mb:.1f} MB"
+          f"{'  (right-to-left)' if args.rtl else ''}{'  (with a cover)' if cover else ''}")
     print("put it in the card's /books folder")
 
 

@@ -60,7 +60,20 @@ struct BookMeta {
   uint32_t pages = 0;
   bool rtl = false;
   uint8_t bpp = 1;       // 1 = B/W (48,000-byte pages), 2 = grey (96,000)
+  // A cover made on the PC and carried inside the file (flags bit 1). It
+  // beats page 0, which is only ever the cover by accident, and unlike a
+  // cover kept beside the book it survives the book being renamed.
+  bool cover = false;
+  // Where page 0 begins. 64 for every file written before covers existed,
+  // 64 + 48,000 for one carrying a cover. The field was always in the format;
+  // it just used to be assumed rather than read.
+  uint32_t dataOffset = 64;
 };
+// The 64-byte header, decided in one place so both sides of the card agree
+// and the harness can test the rules a PC-side converter has to match.
+// False means the file is not a .tbk this firmware will open.
+bool parseTbkBytes(const uint8_t h[64], BookMeta& out);
+
 // Books of one kind inside one directory. `dir` is "/books" for the top
 // level, or "/books/<series>" inside a folder.
 int bookList(BookMeta* out, int max, const char* dir);  // -1: no card
@@ -68,6 +81,9 @@ int bookList(BookMeta* out, int max, const char* dir);  // -1: no card
 // so a read is just an index and a buffer big enough for either.
 bool bookOpen(const char* file);
 bool bookReadPage(uint32_t idx, uint8_t* dst);
+// The embedded cover, 48,000 bytes of 480x800 1-bit, valid while the book is
+// open. False when the file carries none.
+bool bookReadCover(uint8_t* dst);
 void bookClose();
 
 // EPUBs. Same bus discipline as .tbk books: listing borrows the bus for one
