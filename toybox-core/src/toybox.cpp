@@ -5,6 +5,7 @@
 #include "tools/tool_book.h"
 #include "tools/tool_coin.h"
 #include "tools/tool_epub.h"
+#include "tools/recents.h"
 #include "tools/tool_dice.h"
 #include "tools/tool_flash.h"
 #include "tools/tool_note.h"
@@ -189,6 +190,18 @@ void Toybox::onTap(int x, int y) {
       _hub.goHome();
       _host->refresh(true);
       return;
+    case HubScreen::Tap::Recent: {
+      // A recently-read cover: open its reader, then the book itself, which
+      // resumes at the saved position the way it always does. If the book is
+      // gone (card out, file renamed) the reader stays on its list, which
+      // says so better than a beep would.
+      recents::Entry rec[recents::MAX];
+      const int n = recents::list(_host->prefs(), rec);
+      if (t.idx >= n) return;
+      open(false, rec[t.idx].kind == recents::KIND_EPUB ? 10 : 9);
+      if (_active) _active->openDirect(rec[t.idx].file);
+      return;
+    }
     default:
       open(t.game, t.idx);
       return;

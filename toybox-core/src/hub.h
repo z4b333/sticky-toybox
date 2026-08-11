@@ -38,6 +38,14 @@ inline constexpr int ROW_STEP = 196;       // >= 190 px cells, per the design
 // there in the header), which is what keeps a drawer to three rows at most.
 inline constexpr int GUEST_ROW_STEP = 180;
 inline constexpr int GUEST_FOLDER_BOTTOM = DOCK_Y - 8;
+
+// The recently-read strip on the Study drawer: the last two books as covers,
+// under the app tiles. Only drawn standalone with the tiles in two rows or
+// fewer -- three rows (hidden apps growing the + add cell) leave no room, and
+// the guest drawers give the space to the dock instead.
+inline constexpr int REC_THUMB_W = 96, REC_THUMB_H = 160;  // a .tbk page over 5
+inline constexpr int REC_HEAD_H = 44;                      // heading + rule
+inline constexpr int REC_GAP = 4;                          // tiles to heading
 }  // namespace hubui
 
 #ifdef TOYBOX_HOST
@@ -49,11 +57,11 @@ void hubHostBattery(ToolsCanvas& c, const ToolsHost& host, int right, int top, b
 class HubScreen {
  public:
   struct Tap {
-    enum Kind : uint8_t { None, App, Folder, Home, Settings, Exit } kind = None;
+    enum Kind : uint8_t { None, App, Folder, Home, Settings, Exit, Recent } kind = None;
     // Settings is also the answer for the drawers' "+ add" cell, which exists
     // to bring hidden apps back.
     bool game = false;
-    int idx = 0;  // app index for App, folder index for Folder
+    int idx = 0;  // app index for App, folder index for Folder, slot for Recent
   };
 
   void render(ToolsHost& host, ToolsCanvas& c);
@@ -68,4 +76,7 @@ class HubScreen {
 
  private:
   int8_t _folder = -1;
+  // The recently-read entries, cached at render time so the const hit() can
+  // agree with what was drawn without touching NVS.
+  int8_t _recN = 0;
 };

@@ -15,6 +15,7 @@
 // the chapter, which disappears inside the panel's own refresh time.
 #pragma once
 #include "epub/epubcore.h"
+#include "recents.h"
 #include "tools_ui.h"
 
 namespace epubui {
@@ -117,6 +118,16 @@ class EpubTool : public ToolApp {
     return true;
   }
 
+  // The hub's recently-read covers land here: straight into the named book.
+  bool openDirect(const char* file) override {
+    for (int i = 0; i < _n; i++)
+      if (strcmp(_books[i].file, file) == 0) {
+        openBook(i);
+        return _open;
+      }
+    return false;
+  }
+
 #ifdef TOYBOX_HOST
   int hostScreen() const { return _screen == Screen::Page ? 1 : 0; }
   int hostSpine() const { return _spine; }
@@ -180,6 +191,7 @@ class EpubTool : public ToolApp {
       return;
     }
     _open = true;
+    recents::note(prefs(), recents::KIND_EPUB, _books[i].file, _books[i].title);
 
     // Where were we? The card remembers, in CrossPoint's format.
     epubc::Progress p;

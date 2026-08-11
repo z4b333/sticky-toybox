@@ -1,5 +1,8 @@
 #include "hub.h"
 
+#include "tools/book_thumbs.h"
+#include "tools/recents.h"
+
 #include <math.h>
 
 #include "applist.h"
@@ -75,8 +78,10 @@ constexpr uint8_t ADD_IDX = 255;
 // A guest drawer walks tighter (the dock takes the bottom of the page) and
 // never grows the "+ add" cell -- the gear in its header is the way to the
 // hidden apps, and dropping the cell is what caps a drawer at three rows.
+// topAnchor pins the block under the title instead of centring it, which is
+// how the Study drawer makes room for the recently-read strip below.
 template <typename F>
-void walkFolder(int folder, bool guest, F f) {
+void walkFolder(int folder, bool guest, bool topAnchor, F f) {
   const Group& grp = GROUPS[folder];
   Item vis[7];
   int n = 0;
@@ -90,7 +95,7 @@ void walkFolder(int folder, bool guest, F f) {
   const int rows = (n + 1) / 2;
   const int block = rows * step;
   const int avail = bottom - FOLDER_TOP;
-  int y0 = FOLDER_TOP + (avail - block) / 2;
+  int y0 = topAnchor ? FOLDER_TOP : FOLDER_TOP + (avail - block) / 2;
   if (y0 < FOLDER_TOP) y0 = FOLDER_TOP;
 
   for (int i = 0; i < n; i++) {
@@ -100,6 +105,23 @@ void walkFolder(int folder, bool guest, F f) {
     f(vis[i], cx, rowTop + TILE / 2, col, rowTop, rowTop + step);
   }
 }
+
+// How many cells the drawer will lay out, and where the recently-read strip
+// would start under them. Shared by drawing and hit-testing, like the walk.
+int folderCells(int folder, bool guest) {
+  const Group& grp = GROUPS[folder];
+  int n = 0;
+  for (int i = 0; i < grp.n; i++)
+    if (appvis::visible(grp.items[i].game, grp.items[i].idx)) n++;
+  if (!guest && n < grp.n) n++;
+  return n;
+}
+
+int stripTopFor(int cells) { return FOLDER_TOP + ((cells + 1) / 2) * ROW_STEP + REC_GAP; }
+
+// The strip fits only when the tiles stop at two rows; the third row (hidden
+// apps growing the + add cell) takes the space back.
+bool stripFits(int cells) { return cells > 0 && cells <= 4; }
 
 // Sentence case, the design's register: "Wordle", "Flashcards". A name of one
 // or two letters (XO) is an initialism and keeps its capitals; digits pass
@@ -145,7 +167,50 @@ void drawDock(ToolsCanvas& c, int active) {
   }
 }
 
-void renderFolder(ToolsHost& host, ToolsCanvas& c, int folder) {
+// One recently-read cover: a stored .tbk thumbnail when there is one, and a
+// drawn card with the open-book mark for everything else (EPUBs render no
+// images, so their cover is the caption under a clean plate).
+void drawRecentCover(ToolsCanvas& c, const recents::Entry& e, int x, int top) {
+  bool drew = false;
+  if (e.kind == recents::KIND_TBK) {
+    static uint8_t thumb[bthumb::BYTES];
+    if (bthumb::load(e.file, thumb)) {
+      for (int y = 0; y < REC_THUMB_H; y++) {
+        const uint8_t* row = thumb + (size_t)y * (REC_THUMB_W / 8);
+        for (int px = 0; px < REC_THUMB_W; px++)
+          if (!(row[px >> 3] & (0x80 >> (px & 7)))) c.fillRect(x + px, top + y, 1, 1, true);
+      }
+      drew = true;
+    }
+  }
+  if (!drew) ticons::epub(c, x + REC_THUMB_W / 2, top + REC_THUMB_H / 2, 56);
+  c.drawRect(x, top, REC_THUMB_W, REC_THUMB_H, 1, true);
+}
+
+void drawRecentStrip(ToolsCanvas& c, int stripTop, const recents::Entry* rec, int recN) {
+  c.textTracked(24, stripTop + 6, "RECENTLY READ", TS_SMALL, true, false, 1);
+  c.fillRect(16, stripTop + 32, SCREEN_W - 32, 1, true);
+  const int coverTop = stripTop + REC_HEAD_H;
+  for (int i = 0; i < recN; i++) {
+    const int cx = SCREEN_W / 4 + i * (SCREEN_W / 2);
+    drawRecentCover(c, rec[i], cx - REC_THUMB_W / 2, coverTop);
+    // The caption, trimmed to its half of the page on UTF-8 boundaries.
+    char cap[41];
+    strncpy(cap, rec[i].title, sizeof(cap) - 1);
+    cap[sizeof(cap) - 1] = 0;
+    const int capW = SCREEN_W / 2 - 24;
+    size_t len = strlen(cap);
+    while (len > 0 && c.textWidth(cap, TS_SMALL) > capW) {
+      len--;
+      while (len > 0 && ((uint8_t)cap[len] & 0xC0) == 0x80) len--;
+      cap[len] = 0;
+    }
+    c.textCentered(cx, coverTop + REC_THUMB_H + 10, cap, TS_SMALL, true);
+  }
+}
+
+void renderFolder(ToolsHost& host, ToolsCanvas& c, int folder, const recents::Entry* rec,
+                  int recN) {
   const bool guest = host.canExit();
   const Group& grp = GROUPS[folder];
 
@@ -172,8 +237,11 @@ void renderFolder(ToolsHost& host, ToolsCanvas& c, int folder) {
 
   // Where the block of cells starts and ends, for the hairline dividers. The
   // walk is the authority; this only records what it did.
+  const int cellCount = folderCells(folder, guest);
+  const bool strip = folder == 2 && !guest && recN > 0 && stripFits(cellCount);
   int top = SCREEN_H, bottom = 0, cells = 0;
-  walkFolder(folder, guest, [&](const Item& it, int cx, int cy2, int, int rowTop, int rowBottom) {
+  walkFolder(folder, guest, strip,
+             [&](const Item& it, int cx, int cy2, int, int rowTop, int rowBottom) {
     cells++;
     if (rowTop < top) top = rowTop;
     if (rowBottom > bottom) bottom = rowBottom;
@@ -194,6 +262,7 @@ void renderFolder(ToolsHost& host, ToolsCanvas& c, int folder) {
     c.textCentered(cx, cy2 + TILE / 2 + 26, label, sz, true);
   });
   if (guest) drawDock(c, folder);
+  if (strip) drawRecentStrip(c, stripTopFor(cellCount), rec, recN);
   if (cells == 0) return;
 
   // Hairline dividers between cells, not boxes around them.
@@ -220,7 +289,13 @@ void HubScreen::render(ToolsHost& host, ToolsCanvas& c) {
   // path that would have landed home lands on the first drawer instead.
   if (host.canExit() && _folder < 0) _folder = 0;
   if (_folder >= 0) {
-    renderFolder(host, c, _folder);
+    // The Study drawer's recently-read strip. Loaded here, at render, and the
+    // count cached so the const hit() agrees with what is on the glass.
+    recents::Entry rec[recents::MAX];
+    int recN = 0;
+    if (_folder == 2 && !host.canExit()) recN = recents::list(host.prefs(), rec);
+    _recN = (int8_t)recN;
+    renderFolder(host, c, _folder, rec, recN);
     return;
   }
 
@@ -306,16 +381,31 @@ HubScreen::Tap HubScreen::hit(const ToolsHost& host, int x, int y) const {
       if (t.idx > 2) t.idx = 2;
       return t;
     }
+    // The recently-read covers, when the Study drawer is wearing them.
+    const int cellCount = folderCells(folder, guest);
+    const bool strip = folder == 2 && !guest && _recN > 0 && stripFits(cellCount);
+    if (strip) {
+      const int coverTop = stripTopFor(cellCount) + REC_HEAD_H;
+      if (y >= coverTop - 8 && y < coverTop + REC_THUMB_H + 32) {
+        const int slot = x < SCREEN_W / 2 ? 0 : 1;
+        if (slot < _recN) {
+          t.kind = Tap::Recent;
+          t.idx = slot;
+          return t;
+        }
+      }
+    }
     bool found = false;
     Item got{};
-    walkFolder(folder, guest, [&](const Item& it, int cx, int, int col, int rowTop, int rowBottom) {
-      if (found) return;
-      const int left = col == 0 ? 0 : SCREEN_W / 2;
-      if (x < left || x >= left + SCREEN_W / 2) return;
-      if (y < rowTop || y >= rowBottom) return;
-      found = true;
-      got = it;
-    });
+    walkFolder(folder, guest, strip,
+               [&](const Item& it, int cx, int, int col, int rowTop, int rowBottom) {
+                 if (found) return;
+                 const int left = col == 0 ? 0 : SCREEN_W / 2;
+                 if (x < left || x >= left + SCREEN_W / 2) return;
+                 if (y < rowTop || y >= rowBottom) return;
+                 found = true;
+                 got = it;
+               });
     if (!found) return t;
     if (!got.game && got.idx == ADD_IDX) {
       t.kind = Tap::Settings;  // the "+ add" cell: hidden apps live in settings

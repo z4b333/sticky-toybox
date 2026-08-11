@@ -337,6 +337,13 @@ class ToolApp {
   // Open somewhere other than the front page. Only the notes tool answers, and
   // only for pairing; everything else opens where it always does.
   virtual bool openPairing() { return false; }
+  // Open straight into a named item -- the readers use this for the hub's
+  // recently-read covers. Called after enter(); false means the item was not
+  // found (card gone, file renamed) and the app stays on its list.
+  virtual bool openDirect(const char* file) {
+    (void)file;
+    return false;
+  }
 
  protected:
   ToolsHost* _host = nullptr;

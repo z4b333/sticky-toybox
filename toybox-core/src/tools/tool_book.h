@@ -11,6 +11,8 @@
 // read, blit: no decoder, no zip, and the panel's own refresh is the floor on
 // how fast a page can turn.
 #pragma once
+#include "book_thumbs.h"
+#include "recents.h"
 #include "tools_ui.h"
 
 namespace bookui {
@@ -130,6 +132,16 @@ class BookTool : public ToolApp {
     return true;
   }
 
+  // The hub's recently-read covers land here: straight into the named book.
+  bool openDirect(const char* file) override {
+    for (int i = 0; i < _n; i++)
+      if (strcmp(_books[i].file, file) == 0) {
+        openBook(i);
+        return _open;
+      }
+    return false;  // card gone or file renamed: the list explains itself
+  }
+
 #ifdef TOYBOX_HOST
   int hostScreen() const { return _screen == Screen::Page ? 1 : 0; }
   uint32_t hostPage() const { return _pageNo; }
@@ -166,6 +178,12 @@ class BookTool : public ToolApp {
     _open = true;
     _pageNo = savedPage(i);
     _chrome = false;
+    recents::note(prefs(), recents::KIND_TBK, _books[i].file, _books[i].title);
+    // The cover thumbnail for the hub's recently-read strip: page 0 shrunk
+    // into flash, made once while the bus is already up. One extra page read
+    // on the first-ever open of a book; nothing on every open after.
+    if (!bthumb::have(_books[i].file) && host().bookPage(0, _pageBuf))
+      bthumb::makeAndSave(_books[i].file, _pageBuf, _books[i].bpp);
     if (!host().bookPage(_pageNo, _pageBuf)) {
       leaveBook();
       return;

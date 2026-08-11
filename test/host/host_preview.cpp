@@ -28,6 +28,8 @@
 #include "tools/tool_dice.h"
 #include "tools/tool_epub.h"
 #include "tools/epub/epubcore.h"
+#include "tools/recents.h"
+#include "tools/book_thumbs.h"
 #include "tools/tool_flash.h"
 #include "tools/tool_note.h"
 #include "tools/tool_picker.h"
@@ -229,9 +231,13 @@ static void checkHubRouting(const char* label) {
   struct Grp { Want items[6]; int n; };
   const Grp ALL[3] = {
       {{{true, 0}, {true, 1}, {true, 2}, {true, 3}, {false, 7}, {false, 8}}, 6},
-      {{{false, 0}, {false, 1}, {false, 3}, {false, 4}}, 4},
-      {{{false, 9}, {false, 10}, {false, 5}, {false, 6}, {false, 2}}, 5},
+      {{{false, 0}, {false, 1}, {false, 3}, {false, 4}, {false, 2}}, 5},
+      {{{false, 9}, {false, 10}, {false, 5}, {false, 6}}, 4},
   };
+  // The Study drawer wears the recently-read strip once any book has been
+  // opened; its tiles are then top-anchored rather than centred.
+  recents::Entry rrTmp[recents::MAX];
+  const int recentsN = recents::list(stickyHost.prefs(), rrTmp);
   Grp G[3] = {};
   int shown = 0;
   for (int gi = 0; gi < 3; gi++)
@@ -289,10 +295,13 @@ static void checkHubRouting(const char* label) {
     const int cells = G[gi].n + (hasAdd ? 1 : 0);
     if (cells == 0) continue;
 
-    // The drawer's grid, mirrored from hub.cpp: two columns, centred block.
+    // The drawer's grid, mirrored from hub.cpp: two columns, centred block --
+    // except Study with recents, whose block pins to the top for the strip.
+    const bool strip = gi == 2 && recentsN > 0 && cells <= 4;
     const int rows = (cells + 1) / 2;
-    int y0 = hubui::FOLDER_TOP +
-             ((hubui::FOLDER_BOTTOM - hubui::FOLDER_TOP) - rows * hubui::ROW_STEP) / 2;
+    int y0 = strip ? hubui::FOLDER_TOP
+                   : hubui::FOLDER_TOP +
+                         ((hubui::FOLDER_BOTTOM - hubui::FOLDER_TOP) - rows * hubui::ROW_STEP) / 2;
     if (y0 < hubui::FOLDER_TOP) y0 = hubui::FOLDER_TOP;
     for (int ii = 0; ii < G[gi].n; ii++) {
       const int col = ii % 2, row = ii / 2;
@@ -539,9 +548,9 @@ int main() {
 
   // Hide four apps through the screen itself, so the hub below reflows around
   // exactly what a finger would have hidden. STUDY's heading sits at
-  // 92 + 26 + 4*52 + 14 = 340 with DECIDE's four rows above it.
+  // 92 + 26 + 5*52 + 14 = 392 with DECIDE's five rows above it.
   g_dumpEnabled = false;
-  for (auto rc : {setRow(0, 92, 0), setRow(0, 92, 2), setRow(1, 92, 1), setRow(1, 340, 2)})
+  for (auto rc : {setRow(0, 92, 0), setRow(0, 92, 2), setRow(1, 92, 1), setRow(1, 392, 2)})
     toybox.onTap(rc.first, rc.second);
   toybox.onTap(BACK_W / 2, TOPBAR_H / 2);  // back up to the buttons page
   // Sound steps down a level on each tap and wraps at the bottom, so tapping it
@@ -915,14 +924,10 @@ int main() {
     toybox.goHub();
     toybox.hostHub().goHome();
     toybox.onTap(80 + 2 * 160, hubui::DOCK_Y + 30);  // the STUDY drawer
-    // EPUB is the drawer's second cell (row 0, right column).
-    {
-      const int rows = 3;  // 5 apps + the hidden-apps ghost cell
-      int y0 = hubui::FOLDER_TOP +
-               ((hubui::FOLDER_BOTTOM - hubui::FOLDER_TOP) - rows * hubui::ROW_STEP) / 2;
-      if (y0 < hubui::FOLDER_TOP) y0 = hubui::FOLDER_TOP;
-      toybox.onTap(3 * EPD_W / 4, y0 + hubui::TILE / 2);
-    }
+    // EPUB is the drawer's second cell (row 0, right column). The book test
+    // already put entries in recents, so Study is wearing the strip and its
+    // tiles are top-anchored.
+    toybox.onTap(3 * EPD_W / 4, hubui::FOLDER_TOP + hubui::TILE / 2);
     if (!toybox.hostInApp() || strcmp(toybox.activeTitle(), "EPUB") != 0) {
       printf("EPUB APP FAIL: the STUDY drawer's second cell did not open EPUB\n");
       abort();
@@ -1040,6 +1045,55 @@ int main() {
     toybox.hostHub().goHome();
     g_dumpEnabled = true;
     printf("epub reader ok (opens, turns, replays, and trades positions with CrossPoint)\n");
+  }
+
+  // --- the recently-read strip -----------------------------------------------
+  // The book tests above opened real books, so the Study drawer now carries
+  // covers: the epub most recently, a .tbk (with a stored page-0 thumbnail)
+  // before it. Tapping a cover reopens that book directly.
+  {
+    g_dumpEnabled = false;
+    recents::Entry rec[recents::MAX];
+    const int n = recents::list(stickyHost.prefs(), rec);
+    if (n != 2 || rec[0].kind != recents::KIND_EPUB || strcmp(rec[0].file, "/books/wind.epub") != 0 ||
+        rec[1].kind != recents::KIND_TBK) {
+      printf("RECENTS FAIL: %d entries, front '%s'\n", n, n ? rec[0].file : "");
+      abort();
+    }
+    if (!bthumb::have(rec[1].file)) {
+      printf("RECENTS FAIL: no thumbnail stored for %s\n", rec[1].file);
+      abort();
+    }
+    toybox.goHub();
+    toybox.hostHub().goHome();
+    toybox.onTap(80 + 2 * 160, hubui::DOCK_Y + 30);  // the STUDY drawer
+    g_dumpEnabled = true;
+    setScreen("hub_study_recent");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+
+    // The covers sit under the two tile rows; left is slot 0 (the epub).
+    const int coverY = hubui::FOLDER_TOP + 2 * hubui::ROW_STEP + hubui::REC_GAP +
+                       hubui::REC_HEAD_H + hubui::REC_THUMB_H / 2;
+    toybox.onTap(EPD_W / 4, coverY);
+    if (!toybox.hostInApp() || strcmp(toybox.activeTitle(), "EPUB") != 0 ||
+        static_cast<EpubTool*>(toybox.hostActive())->hostScreen() != 1) {
+      printf("RECENTS FAIL: the epub cover did not reopen the book\n");
+      abort();
+    }
+    toybox.onButton(SideBtn::Ok);  // close the book
+    toybox.goHub();
+    toybox.onTap(3 * EPD_W / 4, coverY);  // slot 1: the .tbk
+    if (!toybox.hostInApp() || toybox.hostIdx() != 9 ||
+        static_cast<BookTool*>(toybox.hostActive())->hostScreen() != 1) {
+      printf("RECENTS FAIL: the tbk cover did not reopen the book\n");
+      abort();
+    }
+    toybox.onButton(SideBtn::Ok);
+    toybox.goHub();
+    toybox.hostHub().goHome();
+    g_dumpEnabled = true;
+    printf("recents ok (two covers, thumbnail stored, both reopen their book)\n");
   }
 
   // The battery icon, which had never been rendered here at all: it is drawn
