@@ -72,27 +72,32 @@ void battery(ToolsCanvas& c, const ToolsHost& host, int right, int top, bool bla
 constexpr uint8_t ADD_IDX = 255;
 
 //   f(item, cx, cy, col, rowTop, rowBottom)
+// A guest drawer walks tighter (the dock takes the bottom of the page) and
+// never grows the "+ add" cell -- the gear in its header is the way to the
+// hidden apps, and dropping the cell is what caps a drawer at three rows.
 template <typename F>
-void walkFolder(int folder, F f) {
+void walkFolder(int folder, bool guest, F f) {
   const Group& grp = GROUPS[folder];
   Item vis[7];
   int n = 0;
   for (int i = 0; i < grp.n; i++)
     if (appvis::visible(grp.items[i].game, grp.items[i].idx)) vis[n++] = grp.items[i];
-  if (n < grp.n) vis[n++] = Item{false, ADD_IDX};
+  if (!guest && n < grp.n) vis[n++] = Item{false, ADD_IDX};
   if (n == 0) return;
 
+  const int step = guest ? GUEST_ROW_STEP : ROW_STEP;
+  const int bottom = guest ? GUEST_FOLDER_BOTTOM : FOLDER_BOTTOM;
   const int rows = (n + 1) / 2;
-  const int block = rows * ROW_STEP;
-  const int avail = FOLDER_BOTTOM - FOLDER_TOP;
+  const int block = rows * step;
+  const int avail = bottom - FOLDER_TOP;
   int y0 = FOLDER_TOP + (avail - block) / 2;
   if (y0 < FOLDER_TOP) y0 = FOLDER_TOP;
 
   for (int i = 0; i < n; i++) {
     const int col = i % 2, row = i / 2;
     const int cx = SCREEN_W / 4 + col * (SCREEN_W / 2);
-    const int rowTop = y0 + row * ROW_STEP;
-    f(vis[i], cx, rowTop + TILE / 2, col, rowTop, rowTop + ROW_STEP);
+    const int rowTop = y0 + row * step;
+    f(vis[i], cx, rowTop + TILE / 2, col, rowTop, rowTop + step);
   }
 }
 
@@ -122,19 +127,44 @@ int visibleCount(int folder) {
   return n;
 }
 
+// The dock: a hairline and three thin marks. On home it sits over a picture,
+// so everything is haloed; a guest drawer reuses it unchanged on plain white,
+// where the halo simply vanishes. `active` underlines the drawer being looked
+// at; home passes -1 and no mark is set apart.
+void drawDock(ToolsCanvas& c, int active) {
+  hubmarks::haloed([&](int dx, int dy, bool black) {
+    c.fillRect(0, DOCK_Y + dy, SCREEN_W, 2, black);
+    (void)dx;
+  });
+  for (int f = 0; f < NGROUPS; f++) {
+    const int cx = (SCREEN_W / 6) + f * (SCREEN_W / 3);
+    hubmarks::haloed([&](int dx, int dy, bool black) {
+      hubmarks::folder(c, f, cx + dx, DOCK_Y + DOCK_H / 2 + 3 + dy, DOCK_ICON, black);
+    });
+    if (f == active) c.fillRect(cx - 14, SCREEN_H - 8, 28, 3, true);
+  }
+}
+
 void renderFolder(ToolsHost& host, ToolsCanvas& c, int folder) {
-  (void)host;
+  const bool guest = host.canExit();
   const Group& grp = GROUPS[folder];
 
   // The header, per the design: a back arrow, the count small in the far
-  // corner, and the drawer's name big, left-aligned, in sentence case.
+  // corner, and the drawer's name big, left-aligned, in sentence case. For a
+  // guest the back arrow leaves Toybox altogether, the corner carries the gear
+  // (settings has no button hold to reach it by), and the count goes -- a
+  // corner does one thing.
   c.drawLine(24, 34, 52, 34, 3, true);
   c.drawLine(24, 34, 36, 24, 3, true);
   c.drawLine(24, 34, 36, 44, 3, true);
-  const int n = visibleCount(folder);
-  char buf[16];
-  snprintf(buf, sizeof(buf), "%d apps", n);
-  c.text(SCREEN_W - 16 - c.textWidth(buf, TS_SMALL), 24, buf, TS_SMALL, true);
+  if (guest) {
+    decor::gear(c, SCREEN_W - 34, 34, 14, 8, true);
+  } else {
+    const int n = visibleCount(folder);
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%d apps", n);
+    c.text(SCREEN_W - 16 - c.textWidth(buf, TS_SMALL), 24, buf, TS_SMALL, true);
+  }
   char title[16];
   sentence(title, sizeof(title), grp.name);
   c.text(24, 68, title, TS_HUGE, true, true);
@@ -143,7 +173,7 @@ void renderFolder(ToolsHost& host, ToolsCanvas& c, int folder) {
   // Where the block of cells starts and ends, for the hairline dividers. The
   // walk is the authority; this only records what it did.
   int top = SCREEN_H, bottom = 0, cells = 0;
-  walkFolder(folder, [&](const Item& it, int cx, int cy2, int, int rowTop, int rowBottom) {
+  walkFolder(folder, guest, [&](const Item& it, int cx, int cy2, int, int rowTop, int rowBottom) {
     cells++;
     if (rowTop < top) top = rowTop;
     if (rowBottom > bottom) bottom = rowBottom;
@@ -163,13 +193,15 @@ void renderFolder(ToolsHost& host, ToolsCanvas& c, int folder) {
     const TSize sz = c.textWidth(label, TS_MED) <= SCREEN_W / 2 - 24 ? TS_MED : TS_SMALL;
     c.textCentered(cx, cy2 + TILE / 2 + 26, label, sz, true);
   });
+  if (guest) drawDock(c, folder);
   if (cells == 0) return;
 
   // Hairline dividers between cells, not boxes around them.
+  const int step = guest ? GUEST_ROW_STEP : ROW_STEP;
   const int rows = (cells + 1) / 2;
   if (cells > 1) c.fillRect(SCREEN_W / 2, top, 1, bottom - top, true);
   for (int r = 1; r < rows; r++)
-    c.fillRect(16, top + r * ROW_STEP, SCREEN_W - 32, 1, true);
+    c.fillRect(16, top + r * step, SCREEN_W - 32, 1, true);
 }
 }  // namespace
 
@@ -184,6 +216,9 @@ void HubScreen::openFolder(int f) {
 }
 
 void HubScreen::render(ToolsHost& host, ToolsCanvas& c) {
+  // A guest has no home page at all: the drawers are its top level, so any
+  // path that would have landed home lands on the first drawer instead.
+  if (host.canExit() && _folder < 0) _folder = 0;
   if (_folder >= 0) {
     renderFolder(host, c, _folder);
     return;
@@ -198,19 +233,10 @@ void HubScreen::render(ToolsHost& host, ToolsCanvas& c) {
     c.textCentered(SCREEN_W / 2, 412, "settings > wallpaper", TS_SMALL, true);
   }
 
-  // The dock: a hairline and three thin marks, the one part of home that
-  // answers touch. No bar behind it -- the design took the boxes away -- so
-  // everything on it is haloed against the picture.
-  hubmarks::haloed([&](int dx, int dy, bool black) {
-    c.fillRect(0, DOCK_Y + dy, SCREEN_W, 2, black);
-    (void)dx;
-  });
-  for (int f = 0; f < NGROUPS; f++) {
-    const int cx = (SCREEN_W / 6) + f * (SCREEN_W / 3);
-    hubmarks::haloed([&](int dx, int dy, bool black) {
-      hubmarks::folder(c, f, cx + dx, DOCK_Y + DOCK_H / 2 + 3 + dy, DOCK_ICON, black);
-    });
-  }
+  // The dock: the one part of home that answers touch. No bar behind it --
+  // the design took the boxes away -- so everything on it is haloed against
+  // the picture.
+  drawDock(c, -1);
 
   // The wordmark: each letter in its own small plate, the T and B plates
   // filled. Plates carry their own background, so no halo is needed.
@@ -256,30 +282,33 @@ void HubScreen::render(ToolsHost& host, ToolsCanvas& c) {
     hubmarks::resume(c, HINT_X + dx, HINT_RESUME_Y + dy, HINT_R, black);
   });
 
-  // A guest host may have no side buttons at all, so the two things the holds
-  // do get plates when there is a host to go back to.
-  if (host.canExit()) {
-    c.fillRect(0, 0, 110, 46, false);
-    c.drawRect(0, 0, 110, 46, 2, true);
-    c.textCentered(55, 12, "< BACK", TS_MED, true);
-    const int gx = SCREEN_W - 55;
-    c.fillRect(SCREEN_W - 110, 50, 110, 46, false);
-    c.drawRect(SCREEN_W - 110, 50, 110, 46, 2, true);
-    decor::gear(c, gx, 73, 16, 8, true);
-  }
 }
 
 HubScreen::Tap HubScreen::hit(const ToolsHost& host, int x, int y) const {
   Tap t;
+  const bool guest = host.canExit();
+  const int folder = (guest && _folder < 0) ? 0 : _folder;
 
-  if (_folder >= 0) {
+  if (folder >= 0) {
     if (tappedBack(x, y)) {
-      t.kind = Tap::Home;
+      // The arrow means "up one level": home when there is one, and out of
+      // Toybox altogether for a guest, whose drawers are the top.
+      t.kind = guest ? Tap::Exit : Tap::Home;
+      return t;
+    }
+    if (guest && inRect(x, y, SCREEN_W - 100, 0, 100, 60)) {
+      t.kind = Tap::Settings;  // the gear in the header corner
+      return t;
+    }
+    if (guest && y >= DOCK_Y) {
+      t.kind = Tap::Folder;
+      t.idx = x / (SCREEN_W / 3);
+      if (t.idx > 2) t.idx = 2;
       return t;
     }
     bool found = false;
     Item got{};
-    walkFolder(_folder, [&](const Item& it, int cx, int, int col, int rowTop, int rowBottom) {
+    walkFolder(folder, guest, [&](const Item& it, int cx, int, int col, int rowTop, int rowBottom) {
       if (found) return;
       const int left = col == 0 ? 0 : SCREEN_W / 2;
       if (x < left || x >= left + SCREEN_W / 2) return;
@@ -298,18 +327,8 @@ HubScreen::Tap HubScreen::hit(const ToolsHost& host, int x, int y) const {
     return t;
   }
 
-  // Home. The dock is the only touch surface; the guest plates come first so
-  // the dock cannot shadow them.
-  if (host.canExit()) {
-    if (inRect(x, y, 0, 0, 110, 50)) {
-      t.kind = Tap::Exit;
-      return t;
-    }
-    if (inRect(x, y, SCREEN_W - 110, 50, 110, 50)) {
-      t.kind = Tap::Settings;
-      return t;
-    }
-  }
+  // Home, which only a standalone device has. The dock is the only touch
+  // surface on it.
   if (y >= DOCK_Y) {
     t.kind = Tap::Folder;
     t.idx = x / (SCREEN_W / 3);

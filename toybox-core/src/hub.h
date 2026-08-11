@@ -30,6 +30,14 @@ inline constexpr int FOLDER_TOP = 164;     // below the title and its rule
 inline constexpr int FOLDER_BOTTOM = 796;
 inline constexpr int TILE = 104;           // icon size
 inline constexpr int ROW_STEP = 196;       // >= 190 px cells, per the design
+
+// As a guest inside another firmware there is no home page at all -- the
+// drawers are the top level, so they carry the dock themselves and the rows
+// tighten to fit above it. Three rows of 180 in the 556 px between the title
+// rule and the dock; the "+ add" ghost cell is dropped (the gear is right
+// there in the header), which is what keeps a drawer to three rows at most.
+inline constexpr int GUEST_ROW_STEP = 180;
+inline constexpr int GUEST_FOLDER_BOTTOM = DOCK_Y - 8;
 }  // namespace hubui
 
 #ifdef TOYBOX_HOST

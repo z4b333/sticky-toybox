@@ -477,39 +477,48 @@ int main() {
     printf("resume trail ok (follows, refuses hidden)\n");
   }
 
-  // Inside the reader the hub is one activity deep, so it grows a way out. The
-  // standalone firmware never draws this, because there is nothing above it.
+  // As a guest the hub has no home page at all: the drawers are the top level,
+  // wearing the dock, with the back arrow leaving Toybox and the gear in the
+  // header corner. The standalone home never draws any of that.
   setScreen("hub_as_guest");
   stickyHost.hostSetCanExit(true);
   stickyHost.refresh(true);
   {
     g_dumpEnabled = false;
-    stickyHost.hostClearExited();
-    toybox.onTap(50, 26);  // < BACK
-    if (!stickyHost.hostExited()) {
-      printf("EXIT FAIL: the hub's back button did not leave\n");
+    // The dock on a guest drawer switches drawers in place.
+    toybox.onTap(EPD_W / 2, hubui::DOCK_Y + 30);  // middle third: DECIDE
+    if (toybox.hostHub().folder() != 1 || toybox.hostHub().atHome()) {
+      printf("EXIT FAIL: the guest dock did not switch to the second drawer\n");
       abort();
     }
-    // ...and with nothing above, the same tap must open nothing at all.
+    stickyHost.hostClearExited();
+    toybox.onTap(50, 26);  // the back arrow: out of Toybox altogether
+    if (!stickyHost.hostExited()) {
+      printf("EXIT FAIL: the guest back arrow did not leave\n");
+      abort();
+    }
+    // ...standalone, the same tap on home must open nothing at all.
     stickyHost.hostSetCanExit(false);
+    toybox.hostHub().goHome();
     stickyHost.hostClearExited();
     toybox.onTap(50, 26);
     if (stickyHost.hostExited() || toybox.hostInApp() || toybox.hostInSettings()) {
       printf("EXIT FAIL: standalone hub reacted to a corner that has no button\n");
       abort();
     }
-    // The guest gear plate under the battery corner opens settings, because a
-    // guest host may have no side buttons to hold.
+    // The gear in the guest header corner opens settings, because a guest host
+    // may have no side buttons to hold.
     stickyHost.hostSetCanExit(true);
-    toybox.onTap(EPD_W - 55, 73);
+    toybox.onTap(EPD_W - 45, 30);
     if (!toybox.hostInSettings()) {
-      printf("EXIT FAIL: the guest gear plate did not open settings\n");
+      printf("EXIT FAIL: the guest gear did not open settings\n");
       abort();
     }
     toybox.goHub();
     stickyHost.hostSetCanExit(false);
+    toybox.hostHub().goHome();
     g_dumpEnabled = true;
-    printf("hub exit ok (offered as a guest, absent when standalone)\n");
+    printf("hub exit ok (guest drawers with dock, absent when standalone)\n");
   }
 
   // --- settings ------------------------------------------------------------

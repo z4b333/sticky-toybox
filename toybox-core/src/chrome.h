@@ -56,14 +56,9 @@ inline void drawTopBar(ToolsCanvas& c, const char* title, bool withHelp = false)
     sp = 1;
   }
   c.textTrackedCentered(w / 2, (TOPBAR_H - c.textHeight(sz)) / 2, title, sz, true, false, sp);
-
-  // A diamond either side of the title. Two marks and nothing else: enough to
-  // stop the bar reading as a form field, small enough that a long title simply
-  // squeezes them out rather than colliding with them.
-  const int half = c.textTrackedWidth(title, sz, false, sp) / 2;
-  if (w / 2 - half - BACK_W - 8 >= 26)
-    for (int side = -1; side <= 1; side += 2)
-      decor::diamond(c, w / 2 + side * (half + 14), TOPBAR_H / 2 - 1, 4, true);
+  // No ornaments beside the title. There used to be a diamond either side, but
+  // they squeezed out on long titles, so some bars had them and some did not --
+  // a uniform nothing beats an occasional something.
 }
 
 inline bool tappedBack(int x, int y) { return tHit(x, y, 0, 0, BACK_W, BAR_TOUCH_H); }
