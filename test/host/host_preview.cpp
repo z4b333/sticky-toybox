@@ -24,6 +24,7 @@
 #include "tools/lockscreen.h"
 #include "nonogram.h"
 #include "tools/note_store.h"
+#include "tools/tool_book.h"
 #include "tools/tool_dice.h"
 #include "tools/tool_flash.h"
 #include "tools/tool_note.h"
@@ -224,7 +225,7 @@ static void checkHubRouting(const char* label) {
   const Grp ALL[3] = {
       {{{true, 0}, {true, 1}, {true, 2}, {true, 3}, {false, 7}, {false, 8}}, 6},
       {{{false, 0}, {false, 1}, {false, 3}, {false, 4}}, 4},
-      {{{false, 5}, {false, 6}, {false, 2}}, 3},
+      {{{false, 9}, {false, 5}, {false, 6}, {false, 2}}, 4},
   };
   Grp G[3] = {};
   int shown = 0;
@@ -530,7 +531,7 @@ int main() {
   const int levels = stickyHost.soundLevels();
   const int soundWas = stickyHost.soundLevel();
   tapRect(setui::actionRect(setui::ACT_SOUND));
-  if (appvis::shown() != 9 || stickyHost.soundLevel() != soundWas - 1) {
+  if (appvis::shown() != 10 || stickyHost.soundLevel() != soundWas - 1) {
     printf("SETTINGS FAIL: taps did not land (%d shown, sound %d)\n", appvis::shown(),
            stickyHost.soundLevel());
     abort();
@@ -655,6 +656,86 @@ int main() {
     toybox.onTap(BACK_W / 2, TOPBAR_H / 2);
     g_dumpEnabled = true;
     printf("wallpaper page ok (list, choose, remove, home shows it)\n");
+  }
+
+  // --- the book reader ------------------------------------------------------
+  // The .tbk reader against the host's two invented volumes: the list, a page,
+  // the turn zones (including the right-to-left swap), the side buttons, the
+  // ends of the book, and the position surviving a trip out and back in.
+  {
+    g_dumpEnabled = false;
+    toybox.goHub();
+    toybox.hostHub().goHome();
+    toybox.onTap(80 + 2 * 160, hubui::DOCK_Y + 30);  // STUDY
+    {
+      // BOOKS is the drawer's first cell.
+      const int rows = (4 + 1) / 2;
+      int y0 = hubui::FOLDER_TOP +
+               ((hubui::FOLDER_BOTTOM - hubui::FOLDER_TOP) - rows * hubui::ROW_STEP) / 2;
+      g_dumpEnabled = true;
+      setScreen("tool_books_list");
+      toybox.onTap(EPD_W / 4, y0 + hubui::TILE / 2);
+    }
+    BookTool* bt = static_cast<BookTool*>(toybox.hostActive());
+    if (!toybox.hostInApp() || toybox.hostIdx() != 9 || bt->hostScreen() != 0) {
+      printf("BOOK FAIL: the STUDY drawer's first cell did not open the list\n");
+      abort();
+    }
+
+    // Open the manga (right-to-left, 12 pages) and read a few pages.
+    setScreen("tool_books_page");
+    toybox.onTap(240, bookui::LIST_Y0 + 10);
+    if (bt->hostScreen() != 1 || bt->hostPage() != 0) {
+      printf("BOOK FAIL: opening a book did not land on its first page\n");
+      abort();
+    }
+    g_dumpEnabled = false;
+    // RTL: forward is the LEFT third; the right third must go nowhere at the
+    // cover.
+    toybox.onTap(EPD_W - 20, 400);
+    if (bt->hostPage() != 0) {
+      printf("BOOK FAIL: an rtl book paged forward off the right edge\n");
+      abort();
+    }
+    toybox.onTap(20, 400);   // forward
+    toybox.onTap(20, 400);   // forward
+    if (bt->hostPage() != 2) {
+      printf("BOOK FAIL: two left taps should stand on page 3 of a manga\n");
+      abort();
+    }
+    toybox.onButton(SideBtn::Down);  // DOWN is always forward
+    if (bt->hostPage() != 3) {
+      printf("BOOK FAIL: DOWN did not page forward\n");
+      abort();
+    }
+    toybox.onButton(SideBtn::Up);
+    if (bt->hostPage() != 2) {
+      printf("BOOK FAIL: UP did not page back\n");
+      abort();
+    }
+    // The middle toggles the footer chrome; capture it once.
+    g_dumpEnabled = true;
+    setScreen("tool_books_footer");
+    toybox.onTap(240, 400);
+    g_dumpEnabled = false;
+    toybox.onTap(240, 400);  // and away again
+
+    // Leave through the corner, reopen: the book must remember page 3.
+    toybox.onTap(20, 20);
+    if (bt->hostScreen() != 0) {
+      printf("BOOK FAIL: the corner did not leave the page view\n");
+      abort();
+    }
+    toybox.onTap(240, bookui::LIST_Y0 + 10);
+    if (bt->hostPage() != 2) {
+      printf("BOOK FAIL: the book forgot its page across a close\n");
+      abort();
+    }
+    toybox.onTap(20, 20);
+    toybox.goHub();
+    toybox.hostHub().goHome();
+    g_dumpEnabled = true;
+    printf("book reader ok (list, rtl turns, buttons, ends, position)\n");
   }
 
   // The battery icon, which had never been rendered here at all: it is drawn

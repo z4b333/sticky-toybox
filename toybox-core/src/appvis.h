@@ -15,7 +15,7 @@
 namespace appvis {
 
 constexpr int GAMES = 4;   // wordle, nonogram, 2048, xo
-constexpr int TOOLS = 9;   // the tool shell's own apps, in ticons order
+constexpr int TOOLS = 10;  // the tool shell's own apps, in ticons order
 constexpr int COUNT = GAMES + TOOLS;
 constexpr uint32_t ALL = (1u << COUNT) - 1;
 
@@ -47,7 +47,14 @@ inline void set(bool game, int idx, bool on) {
 
 inline void toggle(bool game, int idx) { g_mask ^= 1u << bitOf(game, idx); }
 
-inline void load(Preferences& p) { g_mask = p.getUInt("vis", ALL) & ALL; }
+// The BOOKS bit is OR-ed in on load: devices that saved a visibility mask
+// before the reader existed have a stored mask with no opinion about it, and
+// "the new app is hidden" is the wrong default for something just shipped.
+// Hiding it afterwards sticks only until the next boot; that is the accepted
+// cost of not versioning the key -- revisit if another app lands after v1.
+inline void load(Preferences& p) {
+  g_mask = (p.getUInt("vis", ALL) | (1u << bitOf(false, 9))) & ALL;
+}
 inline void save(Preferences& p) { p.putUInt("vis", g_mask); }
 
 }  // namespace appvis

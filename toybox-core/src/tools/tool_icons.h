@@ -1,18 +1,19 @@
 // Hub tile icons for the utility apps, drawn from canvas primitives so the
 // standalone and CrossPoint hubs show the same artwork.
 #pragma once
+#include "decor.h"
 #include "tools_draw.h"
 
 namespace ticons {
 
-inline constexpr int COUNT = 9;
+inline constexpr int COUNT = 10;
 inline const char* const NAMES[COUNT] = {"COIN",  "DICE",   "TIMER", "RANDOM",
                                          "PICKER", "FLASHCARDS", "NOTES",  "SHIPS",
-                                         "SUDOKU"};
+                                         "SUDOKU", "BOOKS"};
 // Kept short: a hub tile is 140 px, which is about twelve characters.
 inline const char* const DESCS[COUNT] = {"heads/tails", "D4 - D20",   "countdown", "number/card",
                                          "from a list", "flashcards", "from phone", "battleship",
-                                         "9x9 numbers"};
+                                         "9x9 numbers", "from the card"};
 
 inline void coin(ToolsCanvas& c, int cx, int cy, int s) {
   c.drawCircle(cx, cy, s / 2, 3, true);
@@ -113,6 +114,19 @@ inline void sudoku(ToolsCanvas& c, int cx, int cy, int s) {
   }
 }
 
+// A closed book: cover, spine, and a bookmark ribbon over the edge.
+inline void books(ToolsCanvas& c, int cx, int cy, int s) {
+  const int w = (s * 70) / 100, h = s;
+  const int x = cx - w / 2, y = cy - h / 2;
+  c.drawRect(x, y, w, h, 3, true);
+  c.fillRect(x, y, s / 8, h, true);                      // the spine
+  const int bx = x + w - s / 4 - 4;                      // bookmark
+  c.fillRect(bx, y, s / 8, s / 3, true);
+  decor::triangle(c, bx, y + s / 3, bx + s / 8, y + s / 3, bx + s / 16, y + s / 4, false);
+  c.fillRect(x + s / 8 + 8, cy + 2, w - s / 8 - 16, 3, true);   // title lines
+  c.fillRect(x + s / 8 + 8, cy + 12, w - s / 4 - 8, 3, true);
+}
+
 inline void draw(ToolsCanvas& c, int idx, int cx, int cy, int s) {
   switch (idx) {
     case 0: coin(c, cx, cy, s); break;
@@ -123,7 +137,8 @@ inline void draw(ToolsCanvas& c, int idx, int cx, int cy, int s) {
     case 5: study(c, cx, cy, s); break;
     case 6: notes(c, cx, cy, s); break;
     case 7: battleship(c, cx, cy, s); break;
-    default: sudoku(c, cx, cy, s); break;
+    case 8: sudoku(c, cx, cy, s); break;
+    default: books(c, cx, cy, s); break;
   }
 }
 

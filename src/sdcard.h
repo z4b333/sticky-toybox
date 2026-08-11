@@ -42,4 +42,22 @@ Report probe();
 int listTbi(char names[][40], int max);
 bool takeTbi(const char* name, const char* destPath);
 
+// Books. A .tbk (tools/make_tbk.py) is a 64-byte header and then fixed-size
+// pages in the framebuffer's own layout; page N is a seek and a 48,000-byte
+// read, nothing else. Unlike everything above, an open book HOLDS the bus:
+// the card stays powered and mounted between page turns, with panel refreshes
+// interleaved -- which is exactly the sharing experiment the reader exists to
+// run. bookClose() powers the card down and re-initialises the panel, so the
+// next paint after it must be full.
+struct BookMeta {
+  char file[40];
+  char title[41];
+  uint32_t pages = 0;
+  bool rtl = false;
+};
+int bookList(BookMeta* out, int max);  // -1: no card
+bool bookOpen(const char* file);
+bool bookReadPage(uint32_t idx, uint8_t* dst48k);
+void bookClose();
+
 }  // namespace sdcard

@@ -40,3 +40,21 @@ int StickyHost::sdWallpapers(char names[][SD_NAME_LEN], int max) {
 bool StickyHost::sdWallpaperTake(const char* name) {
   return sdcard::takeTbi(name, wallimg::PATH);
 }
+
+int StickyHost::bookList(BookInfo* out, int max) {
+  sdcard::BookMeta metas[8];
+  const int n = sdcard::bookList(metas, max < 8 ? max : 8);
+  for (int i = 0; i < (n < 0 ? 0 : n); i++) {
+    strncpy(out[i].file, metas[i].file, sizeof(out[i].file) - 1);
+    out[i].file[sizeof(out[i].file) - 1] = 0;
+    strncpy(out[i].title, metas[i].title, sizeof(out[i].title) - 1);
+    out[i].title[sizeof(out[i].title) - 1] = 0;
+    out[i].pages = metas[i].pages;
+    out[i].rtl = metas[i].rtl;
+  }
+  return n;
+}
+
+bool StickyHost::bookOpen(const char* file) { return sdcard::bookOpen(file); }
+bool StickyHost::bookPage(uint32_t idx, uint8_t* dst) { return sdcard::bookReadPage(idx, dst); }
+void StickyHost::bookClose() { sdcard::bookClose(); }

@@ -47,6 +47,48 @@ bool takeTbi(const char* name, const char* destPath) {
   return tfs::write(destPath, (const char*)img, sizeof(img));
 }
 
+namespace {
+// Two invented volumes. Page k is a frame, a diagonal, and k+1 tally bars --
+// cheap to draw into a raw buffer, and visibly different page to page, which
+// is what the harness needs to prove a turn actually turned.
+void fakePage(uint32_t idx, uint8_t* dst) {
+  memset(dst, 0xFF, 48000);
+  auto setBlack = [&](int x, int y) {
+    if (x < 0 || x >= 480 || y < 0 || y >= 800) return;
+    dst[(size_t)y * 60 + (x >> 3)] &= ~(0x80 >> (x & 7));
+  };
+  for (int x = 8; x < 472; x++) { setBlack(x, 8); setBlack(x, 791); }
+  for (int y = 8; y < 792; y++) { setBlack(8, y); setBlack(471, y); }
+  for (int t = 0; t < 700; t++)
+    for (int w = 0; w < 3; w++) setBlack(40 + (t * 400) / 700 + w, 60 + t);
+  for (uint32_t k = 0; k <= idx && k < 12; k++)
+    for (int y = 40; y < 100; y++)
+      for (int x = 0; x < 24; x++) setBlack(40 + (int)k * 36 + x, y);
+}
+uint32_t g_fakeOpenPages = 0;
+}  // namespace
+
+int bookList(BookMeta* out, int max) {
+  static const BookMeta kFake[2] = {{"one-piece-v1.tbk", "One Piece vol 1", 12, true},
+                                    {"walden.tbk", "Walden", 8, false}};
+  int n = 0;
+  for (; n < 2 && n < max; n++) out[n] = kFake[n];
+  return n;
+}
+
+bool bookOpen(const char* file) {
+  g_fakeOpenPages = strstr(file, "walden") ? 8 : 12;
+  return true;
+}
+
+bool bookReadPage(uint32_t idx, uint8_t* dst48k) {
+  if (idx >= g_fakeOpenPages) return false;
+  fakePage(idx, dst48k);
+  return true;
+}
+
+void bookClose() { g_fakeOpenPages = 0; }
+
 #else
 
 Report probe() {
@@ -233,6 +275,99 @@ bool takeTbi(const char* name, const char* destPath) {
   }
   busRelease();
   return ok;
+}
+
+namespace {
+// The open book: its file handle, and whether the bus is currently claimed.
+// One at a time is all the UI can show, so one is all this holds.
+File g_book;
+bool g_bookBusUp = false;
+
+constexpr uint32_t TBK_HEADER = 64;
+
+const char* kBookDirs[2] = {"/books", "/"};
+
+bool parseTbkHeader(File& f, BookMeta& out) {
+  uint8_t h[TBK_HEADER];
+  if (f.read(h, sizeof(h)) != sizeof(h)) return false;
+  if (memcmp(h, "TBK1", 4) != 0) return false;
+  const int w = h[4] | (h[5] << 8), ht = h[6] | (h[7] << 8);
+  const int bpp = h[8];
+  if (w != 480 || ht != 800 || bpp != 1) return false;  // 2-bit waits for grey
+  out.rtl = (h[9] & 1) != 0;
+  out.pages = (uint32_t)h[12] | ((uint32_t)h[13] << 8) | ((uint32_t)h[14] << 16) |
+              ((uint32_t)h[15] << 24);
+  memcpy(out.title, h + 24, 40);
+  out.title[40] = 0;
+  if (!out.title[0]) strncpy(out.title, "untitled", sizeof(out.title) - 1);
+  return out.pages > 0;
+}
+}  // namespace
+
+int bookList(BookMeta* out, int max) {
+  if (!busClaim()) {
+    busRelease();
+    return -1;
+  }
+  int n = 0;
+  for (const char* dir : kBookDirs) {
+    File d = SD.open(dir);
+    if (!d || !d.isDirectory()) continue;
+    for (File f = d.openNextFile(); f && n < max; f = d.openNextFile()) {
+      if (f.isDirectory()) continue;
+      const char* nm = f.name();
+      const size_t len = strlen(nm);
+      if (len < 5 || strcasecmp(nm + len - 4, ".tbk") != 0) continue;
+      BookMeta m{};
+      if (!parseTbkHeader(f, m)) continue;
+      const char* bare = strrchr(nm, '/');
+      strncpy(m.file, bare ? bare + 1 : nm, sizeof(m.file) - 1);
+      out[n++] = m;
+    }
+  }
+  busRelease();
+  return n;
+}
+
+bool bookOpen(const char* file) {
+  bookClose();
+  if (!busClaim()) {
+    busRelease();
+    return false;
+  }
+  g_bookBusUp = true;
+  for (const char* dir : kBookDirs) {
+    char path[64];
+    snprintf(path, sizeof(path), "%s%s%s", dir, dir[1] ? "/" : "", file);
+    g_book = SD.open(path, FILE_READ);
+    if (g_book && !g_book.isDirectory()) {
+      BookMeta m{};
+      if (parseTbkHeader(g_book, m)) return true;  // bus stays up: reading now
+      g_book.close();
+    }
+  }
+  bookClose();
+  return false;
+}
+
+bool bookReadPage(uint32_t idx, uint8_t* dst48k) {
+  if (!g_book) return false;
+  if (!g_book.seek(TBK_HEADER + (uint64_t)idx * 48000)) return false;
+  uint32_t got = 0;
+  while (got < 48000) {
+    const int n = g_book.read(dst48k + got, 48000 - got);
+    if (n <= 0) break;
+    got += (uint32_t)n;
+  }
+  return got == 48000;
+}
+
+void bookClose() {
+  if (g_book) g_book.close();
+  if (g_bookBusUp) {
+    busRelease();
+    g_bookBusUp = false;
+  }
 }
 
 #endif

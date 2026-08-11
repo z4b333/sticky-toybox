@@ -104,10 +104,14 @@ class StickyHost : public ToolsHost {
     return true;
   }
 
-  // Both go to the card. Declared out of line because sdcard.h and this header
-  // meet awkwardly in the harness build.
+  // All of these go to the card. Declared out of line because sdcard.h and
+  // this header meet awkwardly in the harness build.
   int sdWallpapers(char names[][SD_NAME_LEN], int max) override;
   bool sdWallpaperTake(const char* name) override;
+  int bookList(BookInfo* out, int max) override;
+  bool bookOpen(const char* file) override;
+  bool bookPage(uint32_t idx, uint8_t* dst) override;
+  void bookClose() override;
 
   ToolsCanvas& sharedCanvas() { return _canvas; }
 

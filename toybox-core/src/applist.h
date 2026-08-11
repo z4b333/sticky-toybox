@@ -24,10 +24,9 @@ struct Group {
 inline constexpr Group GROUPS[] = {
     {"PLAY", {{true, 0}, {true, 1}, {true, 2}, {true, 3}, {false, 7}, {false, 8}}, 6},
     {"DECIDE", {{false, 0}, {false, 1}, {false, 3}, {false, 4}}, 4},
-    // FLASHCARDS first: on the study page it is the thing you came for, and
-    // when the book reader lands it will sit under the reading card in this
-    // same order.
-    {"STUDY", {{false, 5}, {false, 6}, {false, 2}}, 3},
+    // BOOKS first: the drawer was drawn around "the thing you were reading on
+    // top", and the reader is that thing.
+    {"STUDY", {{false, 9}, {false, 5}, {false, 6}, {false, 2}}, 4},
 };
 inline constexpr int NGROUPS = (int)(sizeof(GROUPS) / sizeof(GROUPS[0]));
 

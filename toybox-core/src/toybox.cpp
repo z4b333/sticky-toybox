@@ -2,6 +2,7 @@
 
 #include "game2048.h"
 #include "nonogram.h"
+#include "tools/tool_book.h"
 #include "tools/tool_coin.h"
 #include "tools/tool_dice.h"
 #include "tools/tool_flash.h"
@@ -39,7 +40,8 @@ bool Toybox::build(bool game, int idx) {
       case 5: _active = new FlashTool(); break;
       case 6: _active = new NoteTool(); break;
       case 7: _active = new SeaTool(); break;
-      default: _active = new SudokuTool(); break;
+      case 8: _active = new SudokuTool(); break;
+      default: _active = new BookTool(); break;
     }
   }
   if (!_active) return false;

@@ -227,6 +227,35 @@ class ToolsHost {
     return false;
   }
 
+  // Books: pre-converted .tbk volumes on the SD card (tools/make_tbk.py).
+  // A page is 48,000 bytes in the framebuffer's own layout, so the reader
+  // copies rather than decodes. While a book is open the card stays powered
+  // and mounted -- that is the whole experiment this API exists to run --
+  // and bookClose() must be called before anything else wants the panel,
+  // because it re-initialises the controller on the way out.
+  struct BookInfo {
+    char file[SD_NAME_LEN];
+    char title[41];
+    uint32_t pages = 0;
+    bool rtl = false;
+  };
+  static constexpr uint32_t BOOK_PAGE_BYTES = 48000;
+  virtual int bookList(BookInfo* out, int max) {
+    (void)out;
+    (void)max;
+    return -1;  // no card, or no host support
+  }
+  virtual bool bookOpen(const char* file) {
+    (void)file;
+    return false;
+  }
+  virtual bool bookPage(uint32_t idx, uint8_t* dst) {
+    (void)idx;
+    (void)dst;
+    return false;
+  }
+  virtual void bookClose() {}
+
   // Y coordinate where a tool's own content may start (below the top bar).
   virtual int contentTop() const = 0;
 };
