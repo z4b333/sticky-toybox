@@ -69,6 +69,7 @@ class Toybox {
   int hostIdx() const { return _activeIdx; }
   bool hostInApp() const { return _where == Where::App; }
   bool hostInSettings() const { return _where == Where::Settings; }
+  SettingsScreen& hostSettings() { return _settings; }
   HubScreen& hostHub() { return _hub; }
 #endif
 

@@ -88,4 +88,34 @@ void epubClose();
 int readFileAt(const char* path, void* dst, int max);
 bool writeFileAtomic(const char* path, const void* data, int n);
 
+// --- managing the card from a phone -----------------------------------------
+// The card is the only place books live, and until now the only way to put one
+// there was to take it out. This is the same bus discipline as a reading
+// session -- claim, work, release, panel re-initialised on the way out -- but
+// driven by HTTP handlers instead of taps, so the claim is held across a whole
+// burst of phone activity rather than per file.
+//
+// Every path here is absolute and comes back out of mgrList exactly as the
+// phone must send it in again. Writes take a folder and a BARE name, which the
+// device joins itself: a phone cannot talk its way out of /books that way.
+struct FileEntry {
+  char path[128];
+  uint32_t size = 0;
+};
+inline constexpr int MGR_MAX_FILES = 64;
+
+bool mgrOpen();   // claim the bus for a session; false when no card mounts
+void mgrClose();  // release it -- the caller's next paint must be full
+bool mgrHolding();
+int mgrList(FileEntry* out, int max);  // -1 when the session is not open
+bool mgrDelete(const char* path);
+bool mgrRename(const char* path, const char* bareName);
+// Streaming upload: open, feed chunks as they arrive off the socket, close.
+// mgrWriteClose(false) throws the partial file away, which is what a dropped
+// connection deserves -- half a book is worse than no book.
+bool mgrWriteOpen(const char* dir, const char* bareName);
+bool mgrWriteChunk(const uint8_t* data, uint32_t n);
+bool mgrWriteClose(bool keep);
+uint32_t mgrFreeMb();
+
 }  // namespace sdcard

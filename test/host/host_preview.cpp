@@ -689,6 +689,133 @@ int main() {
     printf("wallpaper page ok (list, choose, remove, home shows it)\n");
   }
 
+  // --- files over wifi -------------------------------------------------------
+  // The settings page that hands the card to a phone. What matters here is not
+  // the pairing -- that is the same portal every other screen uses -- but the
+  // bus discipline: the card is claimed lazily, held across a burst of work,
+  // and handed back before anything repaints. And the path rules, which are
+  // the only thing standing between a phone and the rest of the card.
+  {
+    g_dumpEnabled = false;
+    toybox.goHub();
+    toybox.hostHub().goHome();
+    toybox.openSettings();
+    tapRect(setui::actionRect(setui::ACT_FILES));
+    if (toybox.hostSettings().hostPage() != 4) {
+      printf("FILES FAIL: the row did not open the files page\n");
+      abort();
+    }
+    auto& fs = toybox.hostSettings().hostFiles();
+    g_dumpEnabled = true;
+    setScreen("settings_files");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+
+    // A phone joins: the page advances by itself, exactly like notes pairing.
+    if (!toybox.wantsTick()) {
+      printf("FILES FAIL: settings did not ask for ticks while serving\n");
+      abort();
+    }
+    toybox.tick();
+    if (!fs.hasClient()) {
+      printf("FILES FAIL: no phone joined\n");
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("settings_files_joined");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+
+    // What the card looked like before the phone touched it.
+    ToolsHost::SdFile before[48];
+    const int nBefore = fs.hostList(before, 48);
+    if (nBefore < 2) {
+      printf("FILES FAIL: the invented card listed %d files\n", nBefore);
+      abort();
+    }
+
+    // A real send, through the same host calls an upload handler makes.
+    if (!fs.hostUpload("books", "walden.epub", 812000)) {
+      printf("FILES FAIL: upload refused\n");
+      abort();
+    }
+    if (!fs.hostRename("/books/one-piece-v1.tbk", "one-piece-01.tbk")) {
+      printf("FILES FAIL: rename refused\n");
+      abort();
+    }
+    if (!fs.hostDelete("/wallpapers/mountains.tbi")) {
+      printf("FILES FAIL: delete refused\n");
+      abort();
+    }
+
+    // The path rules. A phone may name a file, never a place: anything that
+    // could climb out of the three known folders has to be refused.
+    if (fs.hostUpload("books", "../../secret.bin", 10) ||
+        fs.hostUpload("books", "sub/dir.epub", 10) || fs.hostUpload("etc", "x.epub", 10) ||
+        fs.hostDelete("/books/../wind.epub") || fs.hostDelete("/nvs/key") ||
+        fs.hostRename("/books/wind.epub", "../out.epub")) {
+      printf("FILES FAIL: a path a phone should never reach was accepted\n");
+      abort();
+    }
+    // ...and a rename onto a name already taken must not eat the other book.
+    if (fs.hostRename("/books/wind.epub", "walden.epub")) {
+      printf("FILES FAIL: rename overwrote an existing file\n");
+      abort();
+    }
+
+    ToolsHost::SdFile after[48];
+    const int nAfter = fs.hostList(after, 48);
+    bool sawNew = false, sawRenamed = false, sawDeleted = true;
+    for (int i = 0; i < nAfter; i++) {
+      if (strcmp(after[i].path, "/books/walden.epub") == 0 && after[i].size == 812000)
+        sawNew = true;
+      if (strcmp(after[i].path, "/books/one-piece-01.tbk") == 0) sawRenamed = true;
+      if (strcmp(after[i].path, "/wallpapers/mountains.tbi") == 0) sawDeleted = false;
+    }
+    if (nAfter != nBefore || !sawNew || !sawRenamed || !sawDeleted) {
+      printf("FILES FAIL: card is %d files, new %d renamed %d deleted %d\n", nAfter, sawNew,
+             sawRenamed, sawDeleted);
+      abort();
+    }
+
+    // The bus is still held -- a burst is one claim -- and nothing may have
+    // repainted while it was.
+    if (!fs.holdingBus()) {
+      printf("FILES FAIL: the card was let go mid-burst\n");
+      abort();
+    }
+    // Quiet for long enough, and it hands the card back and asks to repaint.
+    bool released = false;
+    for (int i = 0; i < 8 && !released; i++) {
+      if (toybox.hostSettings().tick(stickyHost)) released = true;
+    }
+    if (!released || fs.holdingBus()) {
+      printf("FILES FAIL: the card was never handed back\n");
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("settings_files_done");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+
+    // DONE leaves, and the access point must not outlive the screen.
+    tapRect(setui::filesDoneRect());
+    if (toybox.hostSettings().hostPage() != 0 || fs.hasClient()) {
+      printf("FILES FAIL: DONE did not close the session\n");
+      abort();
+    }
+    // ...and so must leaving settings by any other door.
+    tapRect(setui::actionRect(setui::ACT_FILES));
+    toybox.goHub();
+    if (toybox.hostSettings().hostFiles().hasClient()) {
+      printf("FILES FAIL: the access point outlived settings\n");
+      abort();
+    }
+    toybox.hostHub().goHome();
+    g_dumpEnabled = true;
+    printf("files over wifi ok (one claim per burst, handed back, paths refused)\n");
+  }
+
   // --- the book reader ------------------------------------------------------
   // The .tbk reader against the host's two invented volumes: the list, a page,
   // the turn zones (including the right-to-left swap), the side buttons, the

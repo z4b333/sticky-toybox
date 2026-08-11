@@ -81,6 +81,7 @@ int folderOf(bool game, int idx) {
 }  // namespace
 
 void Toybox::open(bool game, int idx) {
+  _settings.leave();  // an access point must not outlive the screen that ran it
   if (!build(game, idx)) {
     _where = Where::Hub;  // out of memory: better to bounce back than draw nothing
     return;
@@ -144,6 +145,7 @@ void Toybox::openPairPicture() {
 
 void Toybox::goHub() {
   release();
+  _settings.leave();
   _where = Where::Hub;
   _host->refresh(true);
 }
@@ -230,9 +232,17 @@ void Toybox::onSwipe(int dx, int dy) {
 }
 
 void Toybox::tick() {
-  if (_where == Where::App && _active) _active->tick();
+  if (_where == Where::App && _active) {
+    _active->tick();
+    return;
+  }
+  // Settings wants ticks too, for the one page that runs a web server. A true
+  // answer means the screen changed while nobody was tapping -- a phone
+  // joined, or the card was handed back -- so it has to be repainted here.
+  if (_where == Where::Settings && _settings.tick(*_host)) _host->refresh(true);
 }
 
 bool Toybox::wantsTick() const {
+  if (_where == Where::Settings) return _settings.wantsTick();
   return _where == Where::App && _active && _active->wantsTick();
 }

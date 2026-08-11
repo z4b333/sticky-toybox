@@ -313,6 +313,140 @@ bool bookReadPage(uint32_t idx, uint8_t* dst) {
 
 void bookClose() { g_fakeOpenPages = 0; }
 
+// The invented card, for the file-manager harness: a handful of files the
+// phone can list, rename, delete and add to, with the same path rules the
+// device enforces so the guards are testing the real decisions.
+namespace {
+struct FakeFile {
+  char path[128];
+  uint32_t size;
+  bool used;
+};
+FakeFile g_card[16] = {
+    {"/books/wind.epub", 19443403, true},
+    {"/books/one-piece-v1.tbk", 640064, true},
+    {"/wallpapers/mountains.tbi", 48008, true},
+};
+bool g_mgrUp = false;
+int g_writeSlot = -1;
+uint32_t g_written = 0;
+
+bool safeName(const char* n) {
+  if (!n || !*n || *n == '.') return false;
+  if (strlen(n) > 90) return false;
+  for (const char* p = n; *p; p++)
+    if (*p == '/' || *p == '\\' || *p < 32 || *p == 127) return false;
+  return strstr(n, "..") == nullptr;
+}
+bool safePath(const char* p) {
+  if (!p || p[0] != '/' || strlen(p) >= 128) return false;
+  if (strstr(p, "..")) return false;
+  const char* slash = strrchr(p, '/');
+  if (!slash || !safeName(slash + 1)) return false;
+  const size_t dirLen = (size_t)(slash - p);
+  if (dirLen == 0) return true;
+  return (dirLen == 6 && strncmp(p, "/books", 6) == 0) ||
+         (dirLen == 11 && strncmp(p, "/wallpapers", 11) == 0);
+}
+const char* dirFor(const char* key) {
+  if (strcmp(key, "books") == 0) return "/books";
+  if (strcmp(key, "wallpapers") == 0) return "/wallpapers";
+  if (strcmp(key, "root") == 0) return "/";
+  return nullptr;
+}
+}  // namespace
+
+bool mgrOpen() {
+  g_mgrUp = true;
+  return true;
+}
+void mgrClose() {
+  if (g_writeSlot >= 0) {
+    g_card[g_writeSlot].used = false;  // a session cut mid-file
+    g_writeSlot = -1;
+  }
+  g_mgrUp = false;
+}
+bool mgrHolding() { return g_mgrUp; }
+
+int mgrList(FileEntry* out, int max) {
+  if (!g_mgrUp) return -1;
+  int n = 0;
+  for (const FakeFile& f : g_card) {
+    if (!f.used || n >= max) continue;
+    FileEntry e{};
+    strncpy(e.path, f.path, sizeof(e.path) - 1);
+    e.size = f.size;
+    out[n++] = e;
+  }
+  return n;
+}
+
+bool mgrDelete(const char* path) {
+  if (!g_mgrUp || !safePath(path)) return false;
+  for (FakeFile& f : g_card)
+    if (f.used && strcmp(f.path, path) == 0) {
+      f.used = false;
+      return true;
+    }
+  return false;
+}
+
+bool mgrRename(const char* path, const char* bareName) {
+  if (!g_mgrUp || !safePath(path) || !safeName(bareName)) return false;
+  const char* slash = strrchr(path, '/');
+  char dest[128];
+  if (snprintf(dest, sizeof(dest), "%.*s/%s", (int)(slash - path), path, bareName) >=
+      (int)sizeof(dest))
+    return false;
+  for (const FakeFile& f : g_card)
+    if (f.used && strcmp(f.path, dest) == 0) return false;
+  for (FakeFile& f : g_card)
+    if (f.used && strcmp(f.path, path) == 0) {
+      strncpy(f.path, dest, sizeof(f.path) - 1);
+      return true;
+    }
+  return false;
+}
+
+bool mgrWriteOpen(const char* dir, const char* bareName) {
+  if (!g_mgrUp) return false;
+  const char* folder = dirFor(dir);
+  if (!folder || !safeName(bareName)) return false;
+  char full[128];
+  if (snprintf(full, sizeof(full), "%s%s%s", folder, folder[1] ? "/" : "", bareName) >=
+      (int)sizeof(full))
+    return false;
+  for (int i = 0; i < 16; i++)
+    if (!g_card[i].used) {
+      strncpy(g_card[i].path, full, sizeof(g_card[i].path) - 1);
+      g_card[i].size = 0;
+      g_card[i].used = true;
+      g_writeSlot = i;
+      g_written = 0;
+      return true;
+    }
+  return false;
+}
+
+bool mgrWriteChunk(const uint8_t*, uint32_t n) {
+  if (g_writeSlot < 0) return false;
+  g_written += n;
+  return true;
+}
+
+bool mgrWriteClose(bool keep) {
+  if (g_writeSlot < 0) return false;
+  if (keep)
+    g_card[g_writeSlot].size = g_written;
+  else
+    g_card[g_writeSlot].used = false;
+  g_writeSlot = -1;
+  return keep;
+}
+
+uint32_t mgrFreeMb() { return g_mgrUp ? 121000 : 0; }
+
 #else
 
 Report probe() {
@@ -660,6 +794,156 @@ int readFileAt(const char* path, void* dst, int max) {
   const int n = f.read((uint8_t*)dst, max);
   f.close();
   return n;
+}
+
+// --- managing the card from a phone -----------------------------------------
+
+namespace {
+bool g_mgrUp = false;
+File g_mgrWrite;
+char g_mgrWritePath[128] = "";
+
+// The folders a phone may write into, and the only ones it can name. "books"
+// and "wallpapers" are where the readers and the wallpaper picker look;
+// "root" is the card's top level, for anything else.
+const char* mgrDirFor(const char* key) {
+  if (strcmp(key, "books") == 0) return "/books";
+  if (strcmp(key, "wallpapers") == 0) return "/wallpapers";
+  if (strcmp(key, "root") == 0) return "/";
+  return nullptr;
+}
+
+// A name the device is willing to build a path out of. No separators, no
+// parent hops, nothing hidden, and short enough that the joined path still
+// fits every buffer that will carry it.
+bool mgrSafeName(const char* n) {
+  if (!n || !*n || *n == '.') return false;
+  if (strlen(n) > 90) return false;
+  for (const char* p = n; *p; p++)
+    if (*p == '/' || *p == '\\' || *p < 32 || *p == 127) return false;
+  return strstr(n, "..") == nullptr;
+}
+
+// ...and a path the device is willing to touch: one it could itself have
+// produced, which means inside one of the three known folders.
+bool mgrSafePath(const char* p) {
+  if (!p || p[0] != '/' || strlen(p) >= 128) return false;
+  if (strstr(p, "..")) return false;
+  const char* slash = strrchr(p, '/');
+  if (!slash) return false;
+  if (!mgrSafeName(slash + 1)) return false;
+  const size_t dirLen = (size_t)(slash - p);
+  if (dirLen == 0) return true;  // the card's root
+  return (dirLen == 6 && strncmp(p, "/books", 6) == 0) ||
+         (dirLen == 11 && strncmp(p, "/wallpapers", 11) == 0);
+}
+}  // namespace
+
+bool mgrOpen() {
+  if (g_mgrUp) return true;
+  if (!busClaim()) {
+    busRelease();
+    return false;
+  }
+  g_mgrUp = true;
+  return true;
+}
+
+void mgrClose() {
+  if (g_mgrWrite) {
+    g_mgrWrite.close();
+    if (g_mgrWritePath[0]) SD.remove(g_mgrWritePath);  // a session cut mid-file
+    g_mgrWritePath[0] = 0;
+  }
+  if (!g_mgrUp) return;
+  busRelease();
+  g_mgrUp = false;
+}
+
+bool mgrHolding() { return g_mgrUp; }
+
+int mgrList(FileEntry* out, int max) {
+  if (!g_mgrUp) return -1;
+  static const char* kDirs[3] = {"/books", "/wallpapers", "/"};
+  int n = 0;
+  for (const char* dir : kDirs) {
+    File d = SD.open(dir);
+    if (!d || !d.isDirectory()) continue;
+    for (File f = d.openNextFile(); f && n < max; f = d.openNextFile()) {
+      if (f.isDirectory()) continue;
+      const char* nm = f.name();
+      const char* bare = strrchr(nm, '/');
+      bare = bare ? bare + 1 : nm;
+      if (bare[0] == '.') continue;  // dotfiles, and the CrossPoint cache
+      FileEntry e{};
+      if (snprintf(e.path, sizeof(e.path), "%s%s%s", dir, dir[1] ? "/" : "", bare) >=
+          (int)sizeof(e.path))
+        continue;
+      e.size = f.size();
+      out[n++] = e;
+    }
+  }
+  return n;
+}
+
+bool mgrDelete(const char* path) {
+  if (!g_mgrUp || !mgrSafePath(path)) return false;
+  return SD.remove(path);
+}
+
+bool mgrRename(const char* path, const char* bareName) {
+  if (!g_mgrUp || !mgrSafePath(path) || !mgrSafeName(bareName)) return false;
+  char dest[128];
+  const char* slash = strrchr(path, '/');
+  const int dirLen = (int)(slash - path);
+  if (snprintf(dest, sizeof(dest), "%.*s/%s", dirLen, path, bareName) >= (int)sizeof(dest))
+    return false;
+  if (strcmp(dest, path) == 0) return true;
+  if (SD.exists(dest)) return false;  // never silently eat an existing book
+  return SD.rename(path, dest);
+}
+
+bool mgrWriteOpen(const char* dir, const char* bareName) {
+  if (!g_mgrUp) return false;
+  const char* folder = mgrDirFor(dir);
+  if (!folder || !mgrSafeName(bareName)) return false;
+  if (g_mgrWrite) g_mgrWrite.close();
+  if (folder[1]) SD.mkdir(folder);
+  if (snprintf(g_mgrWritePath, sizeof(g_mgrWritePath), "%s%s%s", folder, folder[1] ? "/" : "",
+               bareName) >= (int)sizeof(g_mgrWritePath)) {
+    g_mgrWritePath[0] = 0;
+    return false;
+  }
+  g_mgrWrite = SD.open(g_mgrWritePath, FILE_WRITE);
+  if (!g_mgrWrite) {
+    g_mgrWritePath[0] = 0;
+    return false;
+  }
+  return true;
+}
+
+bool mgrWriteChunk(const uint8_t* data, uint32_t n) {
+  if (!g_mgrWrite) return false;
+  return g_mgrWrite.write(data, n) == n;
+}
+
+bool mgrWriteClose(bool keep) {
+  if (!g_mgrWrite) return false;
+  g_mgrWrite.close();
+  bool ok = true;
+  if (!keep && g_mgrWritePath[0]) {
+    SD.remove(g_mgrWritePath);
+    ok = false;
+  }
+  g_mgrWritePath[0] = 0;
+  return ok;
+}
+
+uint32_t mgrFreeMb() {
+  if (!g_mgrUp) return 0;
+  const uint64_t total = SD.totalBytes(), used = SD.usedBytes();
+  if (total <= used) return 0;
+  return (uint32_t)((total - used) / (1024ULL * 1024ULL));
 }
 
 bool writeFileAtomic(const char* path, const void* data, int n) {

@@ -85,3 +85,15 @@ int StickyHost::sdReadFile(const char* path, void* dst, int max) {
 bool StickyHost::sdWriteFileAtomic(const char* path, const void* data, int n) {
   return sdcard::writeFileAtomic(path, data, n);
 }
+
+int StickyHost::sdMgrList(SdFile* out, int max) {
+  sdcard::FileEntry ents[sdcard::MGR_MAX_FILES];
+  const int cap = max < sdcard::MGR_MAX_FILES ? max : sdcard::MGR_MAX_FILES;
+  const int n = sdcard::mgrList(ents, cap);
+  for (int i = 0; i < (n < 0 ? 0 : n); i++) {
+    strncpy(out[i].path, ents[i].path, sizeof(out[i].path) - 1);
+    out[i].path[sizeof(out[i].path) - 1] = 0;
+    out[i].size = ents[i].size;
+  }
+  return n;
+}

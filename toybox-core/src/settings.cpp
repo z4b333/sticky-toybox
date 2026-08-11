@@ -3,6 +3,7 @@
 #include "applist.h"
 #include "appvis.h"
 #include "record.h"
+#include "tools/flash_qr.h"
 #include "tools/lock_image.h"
 #include "tools/tool_icons.h"
 
@@ -79,9 +80,39 @@ void SettingsScreen::enter() {
 
 bool SettingsScreen::back() {
   if (_page == 0) return false;
+  leaveFiles();  // no-op unless the files page was the one being left
   _page = 0;
   _note = nullptr;
   return true;
+}
+
+// Both ways out of the files page go through here: the access point comes
+// down, and with it any claim the session still had on the card.
+void SettingsScreen::leaveFiles() {
+  if (!_filesOk) return;
+  _files.stop();
+  _filesOk = false;
+  _filesSawClient = false;
+}
+
+void SettingsScreen::leave() { leaveFiles(); }
+
+bool SettingsScreen::tick(ToolsHost& host) {
+  if (_page != 4 || !_filesOk) return false;
+  _files.loop();
+  // Two things ask for a repaint: the first phone joining (step one becomes
+  // step two), and the card being let go after a burst of work (the summary
+  // can finally be drawn). Both are impossible to draw any earlier -- the
+  // second because the panel's bus was busy.
+  if (_files.dirty()) {
+    _files.clearDirty();
+    return true;
+  }
+  if (!_filesSawClient && _files.hasClient()) {
+    _filesSawClient = true;
+    return true;
+  }
+  return false;
 }
 
 // --- the wallpaper page -------------------------------------------------------
@@ -153,6 +184,84 @@ bool SettingsScreen::tapWall(ToolsHost& host, int x, int y) {
   return false;
 }
 
+// --- the files page -----------------------------------------------------------
+// Pair, then get out of the way. The file list is on the phone because that is
+// where the person is looking -- and because while the card is being written
+// to, this panel physically cannot be redrawn.
+void SettingsScreen::renderFiles(ToolsHost& host, ToolsCanvas& c) {
+  (void)host;
+  using namespace setui;
+  drawTopBar(c, "FILES");
+  char buf[72];
+
+  if (!_filesOk) {
+    c.textCentered(SCREEN_W / 2, 320, "could not start wifi", TS_LARGE, true, true);
+    c.button(filesDoneRect().x, filesDoneRect().y, filesDoneRect().w, filesDoneRect().h, "BACK",
+             true, TS_LARGE);
+    return;
+  }
+
+  if (!_files.hasClient()) {
+    c.textCentered(SCREEN_W / 2, 64, "STEP 1 OF 2", TS_MED, true, true);
+    c.textCentered(SCREEN_W / 2, 96, "join the device's wifi", TS_MED, true);
+    const String wifi = _files.wifiPayload();
+    fqr::draw(c, FILES_QR_X, FILES_QR_Y, FILES_QR, wifi.c_str());
+    c.textCentered(SCREEN_W / 2, 420, "Scan with your phone camera", TS_MED, true, true);
+    snprintf(buf, sizeof(buf), "%s   key %s", _files.ssid(), _files.password());
+    c.textCentered(SCREEN_W / 2, 456, buf, TS_MED, true);
+    c.textCentered(SCREEN_W / 2, 492, "this code joins the wifi, nothing more", TS_SMALL, true);
+  } else {
+    c.textCentered(SCREEN_W / 2, 64, "STEP 2 OF 2", TS_MED, true, true);
+    c.textCentered(SCREEN_W / 2, 96, "phone joined", TS_MED, true);
+    fqr::draw(c, FILES_QR_X, FILES_QR_Y, FILES_QR, _files.url());
+    c.textCentered(SCREEN_W / 2, 420, "The file list should have opened.", TS_MED, true);
+    c.textCentered(SCREEN_W / 2, 448, "If not, scan this or type it in:", TS_MED, true);
+    c.textCentered(SCREEN_W / 2, 484, _files.url(), TS_MED, true, true);
+  }
+
+  // What the phone has done so far. Written after the fact, because while it
+  // was happening the card had the wire this screen draws on.
+  const fweb::Counts& n = _files.counts();
+  if (_files.touched()) {
+    c.fillRect(16, 546, SCREEN_W - 32, 1, true);
+    int y = 562;
+    if (n.added) {
+      snprintf(buf, sizeof(buf), "%u added   %u MB", (unsigned)n.added,
+               (unsigned)(n.bytes / 1024));
+      c.textCentered(SCREEN_W / 2, y, buf, TS_MED, true, true);
+      y += 32;
+    }
+    if (n.removed) {
+      snprintf(buf, sizeof(buf), "%u deleted", (unsigned)n.removed);
+      c.textCentered(SCREEN_W / 2, y, buf, TS_MED, true);
+      y += 32;
+    }
+    if (n.renamed) {
+      snprintf(buf, sizeof(buf), "%u renamed", (unsigned)n.renamed);
+      c.textCentered(SCREEN_W / 2, y, buf, TS_MED, true);
+    }
+  } else {
+    c.textCentered(SCREEN_W / 2, 578, "nothing sent yet", TS_SMALL, true);
+  }
+
+  c.textCentered(SCREEN_W / 2, 664, "the screen waits while files are moving", TS_SMALL, true);
+  const TRect d = filesDoneRect();
+  c.button(d.x, d.y, d.w, d.h, "DONE", false, TS_LARGE);
+}
+
+bool SettingsScreen::tapFiles(ToolsHost& host, int x, int y) {
+  if (setui::filesDoneRect().hit(x, y)) {
+    leaveFiles();
+    _page = 0;
+    host.beep(1);
+    // The card may have been claimed a moment ago, so the panel starts again
+    // from nothing rather than from a difference.
+    host.refresh(true);
+    return false;
+  }
+  return false;
+}
+
 void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
   if (_page == 1) {
     renderLock(host, c);
@@ -160,6 +269,10 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
   }
   if (_page == 2) {
     renderWall(host, c);
+    return;
+  }
+  if (_page == 4) {
+    renderFiles(host, c);
     return;
   }
   if (_page == 3) {
@@ -172,10 +285,12 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
   // The pages first, then the things that act right here.
   const TRect sa = actionRect(ACT_APPS), sw = actionRect(ACT_WALL);
   const TRect s1 = actionRect(ACT_LOCK), s0 = actionRect(ACT_SOUND);
+  const TRect sf = actionRect(ACT_FILES);
   const TRect s2 = actionRect(ACT_CARDS), s3 = actionRect(ACT_RESET);
   c.button(sa.x, sa.y, sa.w, sa.h, "APPS ON THE HUB...", false, TS_MED);
   c.button(sw.x, sw.y, sw.w, sw.h, "WALLPAPER...", false, TS_MED);
   c.button(s1.x, s1.y, s1.w, s1.h, "LOCK SCREEN...", false, TS_MED);
+  c.button(sf.x, sf.y, sf.w, sf.h, "FILES OVER WIFI...", false, TS_MED);
   c.button(s0.x, s0.y, s0.w, s0.h, soundLabel(host), false, TS_MED);
   c.button(s2.x, s2.y, s2.w, s2.h, "SHOW HOW TO PLAY AGAIN", false, TS_MED);
   c.button(s3.x, s3.y, s3.w, s3.h,
@@ -383,6 +498,7 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
   if (_page == 1) return tapLock(host, x, y);
   if (_page == 2) return tapWall(host, x, y);
   if (_page == 3) return tapApps(host, x, y);
+  if (_page == 4) return tapFiles(host, x, y);
 
   // Any tap that is not the reset takes the confirm back down, so an armed
   // button never survives long enough to be pressed by accident later.
@@ -411,6 +527,17 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
     // The list read borrowed the display's bus and re-initialised the panel,
     // so the repaint has to be full. Done here rather than by the shell,
     // which would have done a partial.
+    host.refresh(true);
+    return false;
+  }
+
+  if (actionRect(ACT_FILES).hit(x, y)) {
+    host.beep(1);
+    _filesOk = _files.start(host);
+    _filesSawClient = false;
+    _page = 4;
+    // Full, not differential: a QR code with the last screen ghosted through
+    // it is a QR code a camera may refuse, and this page is mostly QR.
     host.refresh(true);
     return false;
   }

@@ -10,6 +10,7 @@
 #include "buzzer.h"
 #include "chrome.h"
 #include "gfx.h"
+#include "sdcard.h"
 #include "sensors.h"
 #include "touch.h"
 #include "toybox.h"
@@ -120,6 +121,21 @@ class StickyHost : public ToolsHost {
   void epubClose() override;
   int sdReadFile(const char* path, void* dst, int max) override;
   bool sdWriteFileAtomic(const char* path, const void* data, int n) override;
+  bool sdMgrOpen() override { return sdcard::mgrOpen(); }
+  void sdMgrClose() override { sdcard::mgrClose(); }
+  int sdMgrList(SdFile* out, int max) override;
+  bool sdMgrDelete(const char* path) override { return sdcard::mgrDelete(path); }
+  bool sdMgrRename(const char* path, const char* bare) override {
+    return sdcard::mgrRename(path, bare);
+  }
+  bool sdMgrWriteOpen(const char* dir, const char* bare) override {
+    return sdcard::mgrWriteOpen(dir, bare);
+  }
+  bool sdMgrWriteChunk(const uint8_t* d, uint32_t n) override {
+    return sdcard::mgrWriteChunk(d, n);
+  }
+  bool sdMgrWriteClose(bool keep) override { return sdcard::mgrWriteClose(keep); }
+  uint32_t sdMgrFreeMb() override { return sdcard::mgrFreeMb(); }
 
   ToolsCanvas& sharedCanvas() { return _canvas; }
 

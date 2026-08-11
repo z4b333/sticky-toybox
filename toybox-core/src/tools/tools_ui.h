@@ -310,6 +310,46 @@ class ToolsHost {
     return false;
   }
 
+  // Managing the card from a phone. A session claims the SD bus and holds it
+  // across a burst of activity, so nothing may repaint the panel between
+  // sdMgrOpen() and sdMgrClose() -- and the paint after the close must be a
+  // full one, because closing re-initialises the controller.
+  struct SdFile {
+    char path[128];
+    uint32_t size = 0;
+  };
+  virtual bool sdMgrOpen() { return false; }
+  virtual void sdMgrClose() {}
+  virtual int sdMgrList(SdFile* out, int max) {
+    (void)out;
+    (void)max;
+    return -1;
+  }
+  virtual bool sdMgrDelete(const char* path) {
+    (void)path;
+    return false;
+  }
+  virtual bool sdMgrRename(const char* path, const char* bareName) {
+    (void)path;
+    (void)bareName;
+    return false;
+  }
+  virtual bool sdMgrWriteOpen(const char* dir, const char* bareName) {
+    (void)dir;
+    (void)bareName;
+    return false;
+  }
+  virtual bool sdMgrWriteChunk(const uint8_t* data, uint32_t n) {
+    (void)data;
+    (void)n;
+    return false;
+  }
+  virtual bool sdMgrWriteClose(bool keep) {
+    (void)keep;
+    return false;
+  }
+  virtual uint32_t sdMgrFreeMb() { return 0; }
+
   // Y coordinate where a tool's own content may start (below the top bar).
   virtual int contentTop() const = 0;
 };

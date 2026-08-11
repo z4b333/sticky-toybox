@@ -2,19 +2,37 @@
 // back the way they were.
 #pragma once
 #include "chrome.h"
+#include "tools/files_web.h"
 #include "tools/lockscreen.h"
 
 // Geometry the preview harness aims at. Remembered coordinates go stale the
 // moment a row moves; these do not.
 namespace setui {
-// The main page is six buttons and nothing else -- the app checkboxes moved
-// to their own page, which gave everything back its breathing room: 64 px
-// buttons at an 84 px step, comfortably over the 7 mm a fingertip wants.
-// The three that end in "..." open pages; the other three act right here.
-inline constexpr int BTN_X = 16, BTN_W = SCREEN_W - 32, BTN_H = 64, BTN_STEP = 84;
-inline constexpr int BTN_Y0 = 132;
+// The main page is buttons and nothing else -- the app checkboxes moved to
+// their own page, which gave everything back its breathing room: 62 px
+// buttons at a 76 px step, comfortably over the 7 mm a fingertip wants and
+// still clear of the footer with seven of them. The four that end in "..."
+// open pages; the other three act right here.
+inline constexpr int BTN_X = 16, BTN_W = SCREEN_W - 32, BTN_H = 62, BTN_STEP = 76;
+inline constexpr int BTN_Y0 = 116;
 inline TRect actionRect(int i) { return TRect{BTN_X, BTN_Y0 + i * BTN_STEP, BTN_W, BTN_H}; }
-enum Action : int { ACT_APPS, ACT_WALL, ACT_LOCK, ACT_SOUND, ACT_CARDS, ACT_RESET, ACT_COUNT };
+enum Action : int {
+  ACT_APPS,
+  ACT_WALL,
+  ACT_LOCK,
+  ACT_FILES,
+  ACT_SOUND,
+  ACT_CARDS,
+  ACT_RESET,
+  ACT_COUNT
+};
+
+// The files-over-wifi page. Two pairing steps, then a summary of what the
+// phone did -- the file list itself lives on the phone, which is where the
+// person is looking, and is the only place it can be shown while the card
+// holds the display's bus.
+inline constexpr int FILES_QR = 240, FILES_QR_X = (SCREEN_W - FILES_QR) / 2, FILES_QR_Y = 150;
+inline TRect filesDoneRect() { return TRect{16, 700, SCREEN_W - 32, 60}; }
 
 // The wallpaper page: what is on the device now, then what the card offers.
 inline constexpr int WALL_MAX = 8;
@@ -80,10 +98,21 @@ class SettingsScreen {
   // The shell offers the back tap here first. True means it was consumed going
   // up a page rather than out of settings altogether.
   bool back();
+  // Leaving settings altogether, however that happens: the files page owns a
+  // running access point and a possibly-claimed SD bus, and neither may
+  // outlive the screen that started them.
+  void leave();
+
+  // The files page runs a web server, so settings needs loop time -- the only
+  // page here that does. Returns true when the screen wants repainting after
+  // the tick (the card was let go and the summary has changed).
+  bool wantsTick() const { return _page == 4; }
+  bool tick(ToolsHost& host);
 
 #ifdef TOYBOX_HOST
   void hostOpenLock() { _page = 1; }
   int hostPage() const { return _page; }
+  fweb::FilesServer& hostFiles() { return _files; }
 #endif
 
  private:
@@ -94,15 +123,23 @@ class SettingsScreen {
   void enterWall(ToolsHost& host);
   void renderApps(ToolsHost& host, ToolsCanvas& c);
   bool tapApps(ToolsHost& host, int x, int y);
+  void renderFiles(ToolsHost& host, ToolsCanvas& c);
+  bool tapFiles(ToolsHost& host, int x, int y);
+  void leaveFiles();
 
   // Erasing every score on the device deserves a second tap, not a second
   // screen: the button asks, and any other tap takes the question away.
   bool _armed = false;
   const char* _note = nullptr;
-  uint8_t _page = 0;  // 0 = settings, 1 = lock screen, 2 = wallpaper, 3 = apps
+  uint8_t _page = 0;  // 0 = settings, 1 = lock, 2 = wallpaper, 3 = apps, 4 = files
   lock::Config _lock;
   // The card's offerings, read once on entering the page: the card is powered
   // per call, and re-listing on every repaint would strobe it.
   int8_t _wallN = -1;
   char _wallNames[setui::WALL_MAX][ToolsHost::SD_NAME_LEN] = {};
+  // The files page's access point. Held by value, started on entering the
+  // page and stopped on every way out of it.
+  fweb::FilesServer _files;
+  bool _filesOk = false;
+  bool _filesSawClient = false;
 };
