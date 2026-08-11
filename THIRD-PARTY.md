@@ -61,3 +61,26 @@ face means proving that work again.
 
 This is not legal advice. If any of this matters commercially, ask someone
 qualified.
+
+## SSD1677 four-level grayscale waveform
+
+The custom grayscale LUT in `src/epd.cpp` (`GREY_LUT`) -- 105 waveform bytes,
+the Sticky voltage tail, and the multi-pass sequence around it (rails up
+before the short LUT phases; border parked at VCOM; no revert waveform,
+baseline resync instead) -- comes from the CrossPoint Reader project's
+FreeInk SDK, whose Sticky profile carries the same table with per-module
+tuning notes, cross-checked against the papyrix-reader project's SSD1677
+driver documentation. Both are MIT licensed.
+
+- https://github.com/crosspoint-reader/crosspoint-reader (MIT, Copyright (c) 2025 Dave Allie)
+- https://github.com/Free-Ink/freeink-sdk (MIT)
+- https://github.com/bigbag/papyrix-reader (MIT, Copyright (c) 2025 Dave Allie)
+
+MIT License: Permission is hereby granted, free of charge, to any person
+obtaining a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including without
+limitation the rights to use, copy, modify, merge, publish, distribute,
+sublicense, and/or sell copies of the Software, subject to the copyright
+notice and this permission notice being included in all copies or
+substantial portions of the Software. THE SOFTWARE IS PROVIDED "AS IS",
+WITHOUT WARRANTY OF ANY KIND.

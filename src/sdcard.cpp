@@ -68,22 +68,44 @@ void fakePage(uint32_t idx, uint8_t* dst) {
 uint32_t g_fakeOpenPages = 0;
 }  // namespace
 
+namespace {
+// A grey fake: four vertical bands at the four levels, plus idx+1 black tally
+// bars, so the fallback dither and a page turn are both visible in a render.
+void fakePageGrey(uint32_t idx, uint8_t* dst) {
+  for (uint32_t i = 0; i < 96000; i++) dst[i] = 0;
+  for (int y = 0; y < 800; y++) {
+    for (int x = 0; x < 480; x++) {
+      const uint32_t i = (uint32_t)y * 480 + x;
+      uint8_t lv = (uint8_t)(x / 120);  // 0,1,2,3 left to right
+      if (y > 60 && y < 120 && (x / 36) < (int)(idx + 1) && (x / 36) % 2 == 0) lv = 0;
+      dst[i >> 2] |= lv << (6 - 2 * (i & 3));
+    }
+  }
+}
+uint8_t g_fakeBpp = 1;
+}  // namespace
+
 int bookList(BookMeta* out, int max) {
-  static const BookMeta kFake[2] = {{"one-piece-v1.tbk", "One Piece vol 1", 12, true},
-                                    {"walden.tbk", "Walden", 8, false}};
+  static const BookMeta kFake[3] = {{"one-piece-v1.tbk", "One Piece vol 1", 12, true, 1},
+                                    {"walden.tbk", "Walden", 8, false, 1},
+                                    {"grey-test.tbk", "Grey test card", 3, false, 2}};
   int n = 0;
-  for (; n < 2 && n < max; n++) out[n] = kFake[n];
+  for (; n < 3 && n < max; n++) out[n] = kFake[n];
   return n;
 }
 
 bool bookOpen(const char* file) {
-  g_fakeOpenPages = strstr(file, "walden") ? 8 : 12;
+  g_fakeBpp = strstr(file, "grey") ? 2 : 1;
+  g_fakeOpenPages = strstr(file, "walden") ? 8 : (g_fakeBpp == 2 ? 3 : 12);
   return true;
 }
 
-bool bookReadPage(uint32_t idx, uint8_t* dst48k) {
+bool bookReadPage(uint32_t idx, uint8_t* dst) {
   if (idx >= g_fakeOpenPages) return false;
-  fakePage(idx, dst48k);
+  if (g_fakeBpp == 2)
+    fakePageGrey(idx, dst);
+  else
+    fakePage(idx, dst);
   return true;
 }
 
@@ -282,6 +304,7 @@ namespace {
 // One at a time is all the UI can show, so one is all this holds.
 File g_book;
 bool g_bookBusUp = false;
+uint32_t g_bookPageBytes = 48000;
 
 constexpr uint32_t TBK_HEADER = 64;
 
@@ -293,7 +316,11 @@ bool parseTbkHeader(File& f, BookMeta& out) {
   if (memcmp(h, "TBK1", 4) != 0) return false;
   const int w = h[4] | (h[5] << 8), ht = h[6] | (h[7] << 8);
   const int bpp = h[8];
-  if (w != 480 || ht != 800 || bpp != 1) return false;  // 2-bit waits for grey
+  if (w != 480 || ht != 800 || (bpp != 1 && bpp != 2)) return false;
+  const uint32_t pageBytes = (uint32_t)h[16] | ((uint32_t)h[17] << 8) |
+                             ((uint32_t)h[18] << 16) | ((uint32_t)h[19] << 24);
+  if (pageBytes != 48000u * (uint32_t)bpp) return false;  // header lying about itself
+  out.bpp = (uint8_t)bpp;
   out.rtl = (h[9] & 1) != 0;
   out.pages = (uint32_t)h[12] | ((uint32_t)h[13] << 8) | ((uint32_t)h[14] << 16) |
               ((uint32_t)h[15] << 24);
@@ -342,7 +369,10 @@ bool bookOpen(const char* file) {
     g_book = SD.open(path, FILE_READ);
     if (g_book && !g_book.isDirectory()) {
       BookMeta m{};
-      if (parseTbkHeader(g_book, m)) return true;  // bus stays up: reading now
+      if (parseTbkHeader(g_book, m)) {
+        g_bookPageBytes = 48000u * m.bpp;
+        return true;  // bus stays up: reading now
+      }
       g_book.close();
     }
   }
@@ -350,16 +380,16 @@ bool bookOpen(const char* file) {
   return false;
 }
 
-bool bookReadPage(uint32_t idx, uint8_t* dst48k) {
+bool bookReadPage(uint32_t idx, uint8_t* dst) {
   if (!g_book) return false;
-  if (!g_book.seek(TBK_HEADER + (uint64_t)idx * 48000)) return false;
+  if (!g_book.seek(TBK_HEADER + (uint64_t)idx * g_bookPageBytes)) return false;
   uint32_t got = 0;
-  while (got < 48000) {
-    const int n = g_book.read(dst48k + got, 48000 - got);
+  while (got < g_bookPageBytes) {
+    const int n = g_book.read(dst + got, g_bookPageBytes - got);
     if (n <= 0) break;
     got += (uint32_t)n;
   }
-  return got == 48000;
+  return got == g_bookPageBytes;
 }
 
 void bookClose() {

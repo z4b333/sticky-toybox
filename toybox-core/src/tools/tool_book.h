@@ -41,7 +41,8 @@ class BookTool : public ToolApp {
     _open = false;
     _note = nullptr;
     _n = h.bookList(_books, bookui::MAX_BOOKS);
-    if (!_pageBuf) _pageBuf = (uint8_t*)malloc(ToolsHost::BOOK_PAGE_BYTES);
+    // Sized for a grey page; a B/W book simply uses the front half.
+    if (!_pageBuf) _pageBuf = (uint8_t*)malloc(ToolsHost::BOOK_PAGE_BYTES_GREY);
   }
 
   void render(ToolsCanvas& c) override {
@@ -101,7 +102,12 @@ class BookTool : public ToolApp {
     if (!leftZone && !rightZone) {
       _chrome = !_chrome;
       host().beep(0);
-      host().refresh(false);  // the footer band is the only change
+      // A grey page cannot take a partial band -- toggling chrome swaps the
+      // whole page between the grey waveform and the dithered canvas path.
+      if (_books[_cur].bpp == 2)
+        showPage();
+      else
+        host().refresh(false);  // the footer band is the only change
       return;
     }
     // In a right-to-left book the "next" page is on the left, which is the
@@ -160,6 +166,16 @@ class BookTool : public ToolApp {
     }
     _screen = Screen::Page;
     host().beep(1);
+    showPage();
+  }
+
+  // One place decides how a page reaches the glass. A 2-bit page goes through
+  // the host's grey waveform when it can -- unless the footer is up, because
+  // chrome has to be drawn over the page and only the canvas can do that. A
+  // host with no grey (guests, the harness) falls through to the canvas path,
+  // where render() dithers the page down to 1-bit.
+  void showPage() {
+    if (_books[_cur].bpp == 2 && !_chrome && host().bookShowGrey(_pageBuf)) return;
     host().refresh(true);
   }
 
@@ -188,13 +204,33 @@ class BookTool : public ToolApp {
     posKey(_cur, k);
     prefs().putUInt(k, _pageNo);
     host().beep(0);
-    // Full refresh: a page of a book changes every region of the panel, and
-    // partials would stack ghosts of the last page under this one.
-    host().refresh(true);
+    // Full refresh either way: a page of a book changes every region of the
+    // panel, and partials would stack ghosts of the last page under this one.
+    showPage();
   }
 
   void renderPage(ToolsCanvas& c) {
     if (!_pageBuf) return;
+    if (_cur >= 0 && _books[_cur].bpp == 2) {
+      // The 1-bit stand-in for a grey page: black and white pass through, and
+      // the two mids become an ordered 2x2 dither -- three dots in four for
+      // dark grey, one in four for light. This is what guests and the preview
+      // harness always see, and what the device shows under the footer.
+      for (int y = 0; y < 800; y++) {
+        for (int x = 0; x < 480; x++) {
+          const uint32_t i = (uint32_t)y * 480 + x;
+          const uint8_t lv = (_pageBuf[i >> 2] >> (6 - 2 * (i & 3))) & 3;
+          bool black;
+          switch (lv) {
+            case 0: black = true; break;
+            case 1: black = !((x & 1) && (y & 1)); break;
+            case 2: black = !(x & 1) && !(y & 1); break;
+            default: black = false; break;
+          }
+          if (black) c.fillRect(x, y, 1, 1, true);
+        }
+      }
+    } else {
     // The blit: same convention as the framebuffer, so this is a copy through
     // the canvas -- rotation and the board flips still apply. Runs of white
     // skip a byte at a time, which is most of any page.
@@ -206,6 +242,7 @@ class BookTool : public ToolApp {
         for (int k = 0; k < 8; k++)
           if (!(v & (0x80 >> k))) c.fillRect(xb * 8 + k, y, 1, 1, true);
       }
+    }
     }
     if (_chrome) {
       // The footer: title and where you are, on a plate the page shows through

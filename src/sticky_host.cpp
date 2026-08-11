@@ -51,6 +51,7 @@ int StickyHost::bookList(BookInfo* out, int max) {
     out[i].title[sizeof(out[i].title) - 1] = 0;
     out[i].pages = metas[i].pages;
     out[i].rtl = metas[i].rtl;
+    out[i].bpp = metas[i].bpp;
   }
   return n;
 }

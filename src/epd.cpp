@@ -366,6 +366,160 @@ void Epd::displayPartial() {
   _partialsSinceFull++;
 }
 
+// --- four-level grey ----------------------------------------------------------
+// The waveform below is the CrossPoint reader project's Sticky grayscale LUT
+// (MIT, see THIRD-PARTY.md), carried verbatim: 50 bytes of VS rows (five rows
+// of ten), 50 of TP/RP timing, 5 of frame rate, then the voltage tail
+// VGH/VSH1/VSH2/VSL/VCOM and two reserved bytes. The voltage tail is
+// per-module analog calibration -- their tuning notes say: if the mid-greys
+// sit wrong, move VCOM (byte 109) in single steps first, then VSH1 (106).
+//
+// Row semantics, keyed by the (RED, BW) RAM bit pair per pixel:
+//   00 -> no drive: the pixel keeps whatever the B/W pass left (black or white)
+//   10 -> "gray"       (the lighter of the two mids)
+//   11 -> "dark gray"
+// The 01 row exists in the table but this mapping never selects it, matching
+// the papyrix/CrossPoint renderers byte for byte.
+namespace {
+constexpr uint8_t GREY_LUT[112] = {
+    // VS rows: 00 keep, 01 light (unused), 10 gray, 11 dark gray, VCOM
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x54, 0x54, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0xAA, 0xA0, 0xA8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0xA2, 0x22, 0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // TP/RP timing
+    0x01, 0x01, 0x01, 0x01, 0x00, 0x01, 0x01, 0x01, 0x01, 0x00,
+    0x01, 0x01, 0x01, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    // frame rate
+    0x8F, 0x8F, 0x8F, 0x8F, 0x8F,
+    // voltages: VGH, VSH1, VSH2, VSL, VCOM -- the Sticky tuning point
+    0x17, 0x41, 0xA8, 0x32, 0x30,
+    // reserved
+    0x00, 0x00};
+
+constexpr uint8_t CMD_WRITE_LUT = 0x32;
+constexpr uint8_t CMD_GATE_V = 0x03;
+constexpr uint8_t CMD_SOURCE_V = 0x04;
+constexpr uint8_t CMD_VCOM = 0x2C;
+// External-LUT activation: clock/analog on + display + power down, WITHOUT the
+// OTP LUT reload bit (0x10) that 0xF7/0xFF carry -- that bit would overwrite
+// the table just loaded.
+constexpr uint8_t SEQ_GREY = 0xCF;
+constexpr uint8_t BORDER_GREY = 0x80;  // park at VCOM: a follow-LUT border
+                                       // would paint the frame black
+}  // namespace
+
+// Which plane a pixel level lights, per the row semantics above.
+//   BW pass: white only for level 3 (greys start black and get lifted).
+//   RED (msb): set for both mids.  BW-plane (lsb): set for the dark mid only.
+void Epd::buildGreyPlane(const uint8_t* packed, uint8_t* dst, int which) {
+  memset(dst, 0x00, EPD_BUF_SIZE);
+  for (int y = 0; y < EPD_H; y++) {
+    for (int x = 0; x < EPD_W; x++) {
+      const uint32_t i = (uint32_t)y * EPD_W + x;
+      const uint8_t lv = (packed[i >> 2] >> (6 - 2 * (i & 3))) & 3;
+      bool bit;
+      switch (which) {
+        case 0: bit = (lv == 3); break;             // the B/W pass: white
+        case 1: bit = (lv == 1); break;             // BW plane: dark grey
+        default: bit = (lv == 1 || lv == 2); break; // RED plane: both mids
+      }
+      if (!bit) continue;
+      int px, py;
+      epdMapPixel(0, _flipX, _flipY, x, y, px, py);
+      dst[(uint32_t)py * EPD_WB + (px >> 3)] |= (0x80 >> (px & 7));
+    }
+  }
+}
+
+bool Epd::displayGrey2bpp(const uint8_t* packed) {
+  if (!_fb || !_prev || !packed) return false;
+
+  // Pass 1: absolute black-and-white, greys rendered black. SEQ_FULL reloads
+  // the factory OTP waveform as a side effect, which is exactly the state the
+  // custom LUT wants to be loaded over.
+  buildGreyPlane(packed, _fb, 0);
+  // displayFull() maps nothing -- _fb is already in panel space -- so drive
+  // the sequence directly rather than letting it re-copy the shadow.
+  setRamAreaFull();
+  writeCmd(CMD_UPDATE_CTRL1);
+  writeData(CTRL1_BYPASS_RED);
+  writeCmd(CMD_BORDER);
+  writeData(BORDER_FULL);
+  writeCmd(CMD_WRITE_BW);
+  writeData(_fb, EPD_BUF_SIZE);
+  writeCmd(CMD_WRITE_RED);
+  writeData(_fb, EPD_BUF_SIZE);
+  writeCmd(CMD_UPDATE_CTRL2);
+  writeData(SEQ_FULL);
+  writeCmd(CMD_ACTIVATE);
+  waitBusy(8000);
+
+  // Keep the pass-1 frame: it is the baseline both RAMs get afterwards.
+  memcpy(_prev, _fb, EPD_BUF_SIZE);
+
+  // Load the custom LUT: 105 waveform bytes, then the voltage tail into its
+  // three registers, then the border parked at VCOM.
+  writeCmd(CMD_WRITE_LUT);
+  writeData(GREY_LUT, 105);
+  writeCmd(CMD_GATE_V);
+  writeData(GREY_LUT[105]);
+  writeCmd(CMD_SOURCE_V);
+  writeData(GREY_LUT[106]);
+  writeData(GREY_LUT[107]);
+  writeData(GREY_LUT[108]);
+  writeCmd(CMD_VCOM);
+  writeData(GREY_LUT[109]);
+  writeCmd(CMD_BORDER);
+  writeData(BORDER_GREY);
+
+  // Rails up BEFORE the grey activation, in their own step. The vendor
+  // sequences power down after every refresh, and the grey LUT's one-frame
+  // phases would otherwise run while the booster is still ramping --
+  // under-driven, pale mid-greys. CrossPoint found this the hard way.
+  writeCmd(CMD_UPDATE_CTRL2);
+  writeData(0xC0);
+  writeCmd(CMD_ACTIVATE);
+  waitBusy(3000);
+
+  // Pass 2: the two planes, then the external-LUT activation.
+  buildGreyPlane(packed, _fb, 1);  // lsb -> BW RAM
+  setRamAreaFull();
+  writeCmd(CMD_UPDATE_CTRL1);
+  writeData(CTRL1_NORMAL);
+  writeCmd(CMD_WRITE_BW);
+  writeData(_fb, EPD_BUF_SIZE);
+  buildGreyPlane(packed, _fb, 2);  // msb -> RED RAM
+  writeCmd(CMD_WRITE_RED);
+  writeData(_fb, EPD_BUF_SIZE);
+  writeCmd(CMD_UPDATE_CTRL2);
+  writeData(SEQ_GREY);
+  writeCmd(CMD_ACTIVATE);
+  waitBusy(8000);
+
+  // Baseline resync, stock parity: the pass-1 B/W frame into both RAMs, the
+  // border back to its resting value. There is no revert waveform on this
+  // panel family; the next SEQ_FULL reloads the OTP LUT by itself.
+  memcpy(_fb, _prev, EPD_BUF_SIZE);
+  setRamAreaFull();
+  writeCmd(CMD_WRITE_BW);
+  writeData(_fb, EPD_BUF_SIZE);
+  writeCmd(CMD_WRITE_RED);
+  writeData(_fb, EPD_BUF_SIZE);
+  writeCmd(CMD_BORDER);
+  writeData(BORDER_INIT);
+
+  // Grey is on the glass and the shadow describes the B/W pass, not it. The
+  // next UI paint has to be a full clean, and displayPartial promotes itself.
+  _firstPaint = true;
+  _partialsSinceFull = 0;
+  return true;
+}
+
 void Epd::deepSleep() {
   writeCmd(CMD_DEEP_SLEEP);
   writeData(0x03);

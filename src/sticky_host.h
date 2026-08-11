@@ -112,6 +112,7 @@ class StickyHost : public ToolsHost {
   bool bookOpen(const char* file) override;
   bool bookPage(uint32_t idx, uint8_t* dst) override;
   void bookClose() override;
+  bool bookShowGrey(const uint8_t* packed2bpp) override { return epd.displayGrey2bpp(packed2bpp); }
 
   ToolsCanvas& sharedCanvas() { return _canvas; }
 

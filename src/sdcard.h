@@ -54,10 +54,13 @@ struct BookMeta {
   char title[41];
   uint32_t pages = 0;
   bool rtl = false;
+  uint8_t bpp = 1;       // 1 = B/W (48,000-byte pages), 2 = grey (96,000)
 };
 int bookList(BookMeta* out, int max);  // -1: no card
+// The module remembers the open book's page size (48,000 or 96,000 bytes),
+// so a read is just an index and a buffer big enough for either.
 bool bookOpen(const char* file);
-bool bookReadPage(uint32_t idx, uint8_t* dst48k);
+bool bookReadPage(uint32_t idx, uint8_t* dst);
 void bookClose();
 
 }  // namespace sdcard

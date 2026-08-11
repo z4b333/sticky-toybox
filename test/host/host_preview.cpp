@@ -87,6 +87,9 @@ bool Epd::begin() {
   return true;
 }
 void Epd::clear(bool white) { memset(_fb, white ? 0xFF : 0x00, EPD_BUF_SIZE); }
+// No grey waveform on a PC: the reader falls back to its 1-bit dither, which
+// is also the only rendering a .pgm can hold.
+bool Epd::displayGrey2bpp(const uint8_t*) { return false; }
 void Epd::drawPixel(int x, int y, uint8_t color) {
   // Not a copy of the device mapping -- the same function. See epd.h.
   if (x < 0 || y < 0 || x >= logicalW() || y >= logicalH()) return;
@@ -732,10 +735,27 @@ int main() {
       abort();
     }
     toybox.onTap(20, 20);
+
+    // The grey volume: the host build has no grey waveform, so opening it must
+    // land on the 1-bit fallback dither -- which is also the render captured.
+    g_dumpEnabled = true;
+    setScreen("tool_books_grey");
+    toybox.onTap(240, bookui::LIST_Y0 + 2 * bookui::LIST_ROW_H + 10);
+    if (bt->hostScreen() != 1) {
+      printf("BOOK FAIL: the grey book did not open\n");
+      abort();
+    }
+    g_dumpEnabled = false;
+    toybox.onButton(SideBtn::Down);
+    if (bt->hostPage() != 1) {
+      printf("BOOK FAIL: the grey book did not turn\n");
+      abort();
+    }
+    toybox.onTap(20, 20);
     toybox.goHub();
     toybox.hostHub().goHome();
     g_dumpEnabled = true;
-    printf("book reader ok (list, rtl turns, buttons, ends, position)\n");
+    printf("book reader ok (list, rtl turns, buttons, ends, position, grey fallback)\n");
   }
 
   // The battery icon, which had never been rendered here at all: it is drawn

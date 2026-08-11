@@ -92,6 +92,19 @@ class Epd {
   // Push the framebuffer to the panel.
   // Full refresh: absolute waveform, clears ghosting; use on screen changes.
   void displayFull();
+
+  // Four-level grey, for the book reader's 2-bit pages. Takes a packed 2bpp
+  // portrait page (480x800, four pixels a byte, high bits first, 0 = black
+  // ... 3 = white) and runs the whole multi-pass sequence: an absolute B/W
+  // pass with the greys black, then a custom-LUT pass that lifts them to
+  // their levels, then a baseline resync so the next differential update has
+  // something honest to diff against. Borrows both internal buffers, so the
+  // partial-refresh shadow is gone afterwards; _firstPaint is re-armed and
+  // the next UI paint promotes itself to full. The custom waveform and its
+  // Sticky voltage tail come from the CrossPoint reader project (MIT) -- see
+  // THIRD-PARTY.md; the factory waveform is restored automatically because
+  // the next full refresh reloads the OTP LUT.
+  bool displayGrey2bpp(const uint8_t* packed2bpp);
   // Partial refresh: fast differential update against the previous frame.
   // Automatically promotes to full every FULL_EVERY partials (ghosting control),
   // and on the first paint after boot.
@@ -111,6 +124,7 @@ class Epd {
  public:
 
  private:
+  void buildGreyPlane(const uint8_t* packed, uint8_t* dst, int which);
   void writeCmd(uint8_t c);
   void writeData(uint8_t d);
   void writeData(const uint8_t* d, uint32_t len);

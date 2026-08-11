@@ -238,6 +238,7 @@ class ToolsHost {
     char title[41];
     uint32_t pages = 0;
     bool rtl = false;
+    uint8_t bpp = 1;  // 1 = B/W, 2 = four-level grey
   };
   static constexpr uint32_t BOOK_PAGE_BYTES = 48000;
   virtual int bookList(BookInfo* out, int max) {
@@ -255,6 +256,15 @@ class ToolsHost {
     return false;
   }
   virtual void bookClose() {}
+  // Show a 2-bit page in true four-level grey, bypassing the canvas: grey is
+  // a hardware waveform, not a drawing primitive. False means the host cannot
+  // (guest hosts, the preview harness), and the reader dithers the page down
+  // to 1-bit instead -- readable everywhere, grey where the glass allows it.
+  static constexpr uint32_t BOOK_PAGE_BYTES_GREY = 96000;
+  virtual bool bookShowGrey(const uint8_t* packed2bpp) {
+    (void)packed2bpp;
+    return false;
+  }
 
   // Y coordinate where a tool's own content may start (below the top bar).
   virtual int contentTop() const = 0;
