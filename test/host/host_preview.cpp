@@ -2097,6 +2097,10 @@ int main() {
     // The SD row, in the three states it has. Nothing on the device uses a card
     // yet; this screen exists to answer whether one can be used at all, and a
     // result nobody can read is not an answer.
+    setScreen("service_patterns");
+    epd.clear();
+    svc::render(stickyHost.sharedCanvas(), r, cfg, svc::ROW_PATTERN, false, 0, 0);
+    epd.displayFull();
     setScreen("service_sd");
     epd.clear();
     svc::render(stickyHost.sharedCanvas(), r, cfg, svc::ROW_SD, false, 0, 0);

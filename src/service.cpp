@@ -32,6 +32,98 @@ constexpr uint32_t REPEAT_MS = 400;
 
 bool down(int pin) { return digitalRead(pin) == LOW; }
 
+// --- the test patterns --------------------------------------------------------
+// Full-screen panel diagnostics, stepped through with OK. Most are written
+// straight into the framebuffer in panel space -- these test the glass, not
+// the rotation code -- and the last one runs the grey waveform, so grey can be
+// judged and tuned right here with no card, no book, and no phone.
+constexpr int PATTERNS = 8;
+
+void fillPatternFb(int k) {
+  uint8_t* fb = epd.fb();
+  switch (k) {
+    case 0: memset(fb, 0x00, EPD_BUF_SIZE); break;  // solid black
+    case 1: memset(fb, 0xFF, EPD_BUF_SIZE); break;  // solid white
+    case 2:  // 1 px checkerboard: the panel's worst case
+      for (int y = 0; y < PANEL_H; y++)
+        memset(fb + (size_t)y * EPD_WB, (y & 1) ? 0x55 : 0xAA, EPD_WB);
+      break;
+    case 3: memset(fb, 0xAA, EPD_BUF_SIZE); break;  // 1 px vertical lines
+    case 4:  // 1 px horizontal lines
+      for (int y = 0; y < PANEL_H; y++)
+        memset(fb + (size_t)y * EPD_WB, (y & 1) ? 0x00 : 0xFF, EPD_WB);
+      break;
+    case 5:  // density ramp: black, 3/4, 1/2, 1/4, white, in five bands
+      for (int y = 0; y < PANEL_H; y++) {
+        const int band = (y * 5) / PANEL_H;
+        uint8_t v;
+        switch (band) {
+          case 0: v = 0x00; break;
+          case 1: v = (y & 1) ? 0x00 : 0x55; break;
+          case 2: v = (y & 1) ? 0x55 : 0xAA; break;
+          case 3: v = (y & 1) ? 0xFF : 0xAA; break;
+          default: v = 0xFF; break;
+        }
+        memset(fb + (size_t)y * EPD_WB, v, EPD_WB);
+      }
+      break;
+    default:  // frame and centre cross: edge clipping and geometry
+      memset(fb, 0xFF, EPD_BUF_SIZE);
+      for (int y = 0; y < PANEL_H; y++) {
+        uint8_t* row = fb + (size_t)y * EPD_WB;
+        if (y < 2 || y >= PANEL_H - 2 || y == PANEL_H / 2 || y == PANEL_H / 2 - 1) {
+          memset(row, 0x00, EPD_WB);
+          continue;
+        }
+        row[0] &= 0x3F;                    // left edge, 2 px
+        row[EPD_WB - 1] &= 0xFC;           // right edge
+        row[PANEL_W / 2 / 8] &= 0x3F;      // centre column
+      }
+      break;
+  }
+}
+
+void runPatterns() {
+  int k = 0;
+  auto show = [&](int p) {
+    if (p == PATTERNS - 1) {
+      // The grey bands. A 96 KB buffer for a moment, on a screen where
+      // nothing else is running; if the heap cannot spare it, the pattern is
+      // skipped rather than half-drawn.
+      uint8_t* g = (uint8_t*)malloc(96000);
+      if (!g) return false;
+      for (int y = 0; y < 800; y++)
+        for (int x = 0; x < 480; x++) {
+          const uint32_t i = (uint32_t)y * 480 + x;
+          g[i >> 2] = (uint8_t)((g[i >> 2] & ~(3 << (6 - 2 * (i & 3)))) |
+                                ((x / 120) << (6 - 2 * (i & 3))));
+        }
+      const bool ok = epd.displayGrey2bpp(g);
+      free(g);
+      return ok;
+    }
+    fillPatternFb(p);
+    epd.displayFull();
+    return true;
+  };
+  show(k);
+  // Wait for the OK press that got us here to end before listening again.
+  while (down(PIN_BTN_OK)) delay(10);
+  for (;;) {
+    if (down(PIN_BTN_UP) || down(PIN_BTN_DOWN)) break;
+    if (down(PIN_BTN_OK)) {
+      while (down(PIN_BTN_OK)) delay(10);
+      if (++k >= PATTERNS) break;
+      buzzer::tap();
+      if (!show(k)) break;
+      continue;
+    }
+    delay(20);
+  }
+  while (down(PIN_BTN_UP) || down(PIN_BTN_DOWN)) delay(10);
+  buzzer::confirm();
+}
+
 // Non-const because the tilt line has to be current: the whole point of it is
 // that you turn the device, press a button, and read what the chip now says.
 void paint(Report& r, const Config& cfg, int sel, bool haveCross, int cx, int cy,
@@ -150,6 +242,12 @@ void run() {
       if (sel == ROW_SAVE) {
         save(cfg);
         esp_restart();
+      } else if (sel == ROW_PATTERN) {
+        buzzer::confirm();
+        runPatterns();
+        // Whatever ran -- and especially the grey pass -- left the controller
+        // in its own state; come back with a full, absolute paint.
+        paint(r, cfg, sel, haveCross, cx, cy, true);
       } else if (sel == ROW_SD) {
         // Runs on demand only. Two devices on one bus is the least-tested thing
         // in this project, and a probe that ran at every boot would be taking

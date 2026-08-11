@@ -47,6 +47,9 @@ struct Config {
   bool swapXY = true, tFlipX = true, tFlipY = true;  // digitizer
 };
 
+// Ordered as a diagnosis reads: what the screen looks like, then how touch
+// maps onto it, then the two active tests (touch, panel patterns), then the
+// probes and the way out.
 enum Row : int {
   ROW_FLIP_X,
   ROW_FLIP_Y,
@@ -54,6 +57,7 @@ enum Row : int {
   ROW_TFX,
   ROW_TFY,
   ROW_TEST,
+  ROW_PATTERN,
   ROW_SD,
   ROW_SAVE,
   ROWS
@@ -67,6 +71,7 @@ inline const char* rowLabel(int i) {
     case ROW_TFX: return "TOUCH: FLIP LEFT/RIGHT";
     case ROW_TFY: return "TOUCH: FLIP UP/DOWN";
     case ROW_TEST: return "TOUCH TEST";
+    case ROW_PATTERN: return "TEST PATTERNS";
     case ROW_SD: return "TEST THE SD CARD";
     default: return "SAVE AND RESTART";
   }
@@ -93,10 +98,10 @@ inline void toggleRow(Config& c, int i) {
   }
 }
 
-// Eight rows now that the SD probe is one of them: 52 rather than 56, so the
-// list still ends above the band where its results are written. A row of
-// buttons that overlaps its own output is worse than a shorter row.
-inline constexpr int LIST_Y = 284, ROW_H = 52, ROW_GAP = 4;
+// Nine rows now that the pattern test is one of them: 44-px rows at a 48
+// step, so the list still ends above the band where the SD result is written.
+// These rows are driven by the buttons, not a finger, so they can be short.
+inline constexpr int LIST_Y = 276, ROW_H = 44, ROW_GAP = 4;
 inline constexpr int MARGIN = 20;
 
 // `cross` is the last touch this screen saw, in the coordinates the rest of the
@@ -189,6 +194,16 @@ inline void render(ToolsCanvas& c, const Report& r, const Config& cfg, int sel, 
       c.textCentered(W / 2, 754, "touch anywhere - the cross should land under your finger",
                      TS_SMALL, true);
     }
+    return;
+  }
+
+  // What the pattern row does, while it is selected. The patterns themselves
+  // are full-screen and drawn by service.cpp; the last one runs the grey
+  // waveform, which makes this the one place grey can be tested with no card,
+  // no book, and no phone.
+  if (sel == ROW_PATTERN) {
+    c.textCentered(W / 2, 740, "OK steps through 8 full-screen patterns", TS_SMALL, true);
+    c.textCentered(W / 2, 766, "the last is 4-level grey -- UP or DOWN leaves", TS_SMALL, true);
     return;
   }
 
