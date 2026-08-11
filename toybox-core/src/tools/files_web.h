@@ -321,6 +321,8 @@ select{font:inherit;padding:8px;border-radius:8px;border:1px solid #bbb;backgrou
 <div class="card">
   <h2 style="margin-top:0">On the card</h2>
   <div id="list"><p class="sub">reading&hellip;</p></div>
+  <div class="note">Renaming a book forgets which page you were on &mdash; the
+    device finds your place by the file name.</div>
 </div>
 
 <script>
@@ -359,7 +361,15 @@ async function remove(p){
 async function rename(p){
   if(busy)return;
   const bare=p.split('/').pop();
-  const to=prompt('New name',bare);
+  // The device finds a book's saved page by its file name -- an epub through
+  // the hash of its path, a tbk through the hash of its name -- so a rename
+  // starts that book from the beginning again. The warning belongs here, in
+  // the same dialog as the decision, not in a paragraph nobody reads.
+  const book=/\.(epub|tbk)$/i.test(bare);
+  const msg=book
+    ?'New name\n\nHeads up: the device finds your place by the file name, so renaming this book forgets which page you were on.'
+    :'New name';
+  const to=prompt(msg,bare);
   if(!to||to===bare)return;
   const r=await fetch('/mv?p='+encodeURIComponent(p)+'&to='+encodeURIComponent(to),{method:'POST'});
   if(!r.ok)alert('could not rename that — no slashes, and the name must be free');
