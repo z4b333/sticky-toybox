@@ -99,6 +99,11 @@ class StickyHost : public ToolsHost {
   void setSoundLevel(int lv) override;
   int soundLevels() const override { return buzzer::LEVEL_COUNT; }
 
+#ifndef TOYBOX_HOST
+  uint32_t heapFree() const override { return ESP.getFreeHeap(); }
+  uint32_t heapLargest() const override { return ESP.getMaxAllocHeap(); }
+#endif
+
   bool clockHHMM(int& hour, int& minute) const override {
     sensors::Clock ck;
     if (!sensors::readClock(ck)) return false;

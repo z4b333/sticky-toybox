@@ -218,8 +218,11 @@ class BookTool : public ToolApp {
   // Grown, never shrunk, while a book is open; released the moment one is
   // closed. Sized in whole pages so a grey book and a B/W book can follow one
   // another without a reallocation each time.
+  static uint32_t pageBufNeed(uint8_t bpp) {
+    return ToolsHost::BOOK_PAGE_BYTES * (bpp == 2 ? 2u : 1u);
+  }
   bool ensurePageBuf(uint8_t bpp) {
-    const uint32_t need = ToolsHost::BOOK_PAGE_BYTES * (bpp == 2 ? 2u : 1u);
+    const uint32_t need = pageBufNeed(bpp);
     if (_pageBuf && _pageBufBytes >= need) return true;
     freePageBuf();
     _pageBuf = (uint8_t*)malloc(need);
@@ -276,11 +279,16 @@ class BookTool : public ToolApp {
     // A buffer for THIS book: 48 KB for one bit, 96 KB for grey. Asking for
     // the grey size always was asking for twice what most books need.
     if (!ensurePageBuf(_books[i].bpp)) {
-      // And when it cannot be had, say so. This used to be a bare `return`,
-      // so a device short of memory answered a tap on a book with nothing at
-      // all -- no message, no beep, no repaint. Silence is the one response a
-      // person cannot act on.
-      _note = "not enough memory to open this book - try again after a restart";
+      // And when it cannot be had, say so WITH THE NUMBERS. This used to be a
+      // bare `return`, then a sentence with no figures in it -- which read
+      // like a diagnosis and was only a guess. What the allocator was asked
+      // for, and what it had at that instant, is the whole of the evidence,
+      // and it is free to print.
+      snprintf(_noteBuf, sizeof(_noteBuf), "wanted %lu KB - free %lu KB, biggest block %lu KB",
+               (unsigned long)(pageBufNeed(_books[i].bpp) / 1024),
+               (unsigned long)(host().heapFree() / 1024),
+               (unsigned long)(host().heapLargest() / 1024));
+      _note = _noteBuf;
       host().beep(2);
       host().refresh(true);
       return;
@@ -435,4 +443,5 @@ class BookTool : public ToolApp {
   uint8_t* _pageBuf = nullptr;
   uint32_t _pageBufBytes = 0;
   const char* _note = nullptr;
+  char _noteBuf[80] = {};
 };

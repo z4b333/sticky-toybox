@@ -295,6 +295,13 @@ class ToolsHost {
     (void)ext;
     return 0;  // a host with no folders simply has a flat shelf
   }
+  // What the allocator has, so a message about memory can say how much was
+  // wanted and how much there was. A number in a failure is the difference
+  // between a report somebody can act on and one more round trip. Zero from a
+  // host that cannot tell.
+  virtual uint32_t heapFree() const { return 0; }
+  virtual uint32_t heapLargest() const { return 0; }
+
   static constexpr uint32_t BOOK_PAGE_BYTES = 48000;
   // `dir` is "/books" for the top level (which also picks up books loose in
   // the card's root), or "/books/<series>" inside a folder.
