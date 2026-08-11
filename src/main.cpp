@@ -265,7 +265,9 @@ void handleSideButtons() {
     } else if (downNow && millis() - downSince >= RESUME_HOLD_MS) {
       fired = true;
       noteActivity();
-      if (toybox.resumeLast()) {
+      // Carry on READING: straight back into the last book at its saved page.
+      // With nothing read yet it falls through to reopening the last app.
+      if (toybox.carryOnReading()) {
         TB_LOG("home: DOWN held, carrying on\n");
         buzzer::confirm();
       } else {

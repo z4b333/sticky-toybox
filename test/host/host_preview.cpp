@@ -1092,8 +1092,21 @@ int main() {
     toybox.onButton(SideBtn::Ok);
     toybox.goHub();
     toybox.hostHub().goHome();
+
+    // The DOWN hold's new job: carry on READING. With recents present it
+    // lands inside the last book at its saved page, not on any list. The
+    // last book opened was the .tbk cover a moment ago, which is now the
+    // front of recents -- exactly the point.
+    if (!toybox.carryOnReading() || toybox.hostIdx() != 9 ||
+        static_cast<BookTool*>(toybox.hostActive())->hostScreen() != 1) {
+      printf("RECENTS FAIL: carry on reading did not land inside the book\n");
+      abort();
+    }
+    toybox.onButton(SideBtn::Ok);
+    toybox.goHub();
+    toybox.hostHub().goHome();
     g_dumpEnabled = true;
-    printf("recents ok (two covers, thumbnail stored, both reopen their book)\n");
+    printf("recents ok (covers reopen, thumbnail stored, DOWN carries on reading)\n");
   }
 
   // The battery icon, which had never been rendered here at all: it is drawn

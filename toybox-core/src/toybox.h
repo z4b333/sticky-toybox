@@ -46,6 +46,9 @@ class Toybox {
   // False means there is nothing to resume (or it is hidden), and the caller
   // owns the low beep that says so.
   bool resumeLast();
+  // The DOWN hold on home: back into the most recently read book, directly at
+  // its saved page. With nothing read yet it falls through to resumeLast().
+  bool carryOnReading();
 
   // True only on the home page itself, not the folder pages: the holds belong
   // to the screen with the hint marks on it.

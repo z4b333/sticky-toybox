@@ -117,6 +117,19 @@ bool Toybox::resumeLast() {
   return true;
 }
 
+bool Toybox::carryOnReading() {
+  recents::Entry rec[recents::MAX];
+  const int n = recents::list(_host->prefs(), rec);
+  if (n == 0) return resumeLast();  // nothing read yet: the old behaviour
+  const int idx = rec[0].kind == recents::KIND_EPUB ? 10 : 9;
+  _hub.openFolder(folderOf(false, idx));
+  open(false, idx);
+  // If the book is gone (card out, file renamed), the reader's list is now up
+  // and says so -- still the right screen to land on.
+  if (_active) _active->openDirect(rec[0].file);
+  return true;
+}
+
 void Toybox::openPairPicture() {
   // Notes is tool 6. If it will not build -- which here means the allocation
   // failed -- staying in settings is better than a blank screen, and the row
