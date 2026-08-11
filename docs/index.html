@@ -163,9 +163,11 @@
     <esp-web-install-button manifest="manifest.json" log-console></esp-web-install-button>
   </div>
   <p class="hint">Needs Chrome or Edge on a computer, and a USB-C data
-  cable. Erases the device. The serial console opens by itself when the write
-  finishes, so the first boot is captured from its first line &mdash; that log
-  is the most useful thing to send if anything goes wrong.</p>
+  cable. Your notes, decks, wallpaper and reading positions are kept &mdash;
+  installing writes the firmware and nothing else. The serial console opens by
+  itself when the write finishes, so the first boot is captured from its first
+  line &mdash; that log is the most useful thing to send if anything goes
+  wrong.</p>
 
   <div class="steps">
     <h2>After installing</h2>
@@ -235,6 +237,13 @@
     var manifest = {
       name: 'Toybox',
       version: '1.0',
+      // Never erase. The parts above are written at their own offsets --
+      // bootloader, partition table, app, and any font packs ticked -- and
+      // nothing else on the chip is touched. NVS (0x9000) keeps the settings
+      // and every book's saved page; LittleFS (0xB50000) keeps the notes,
+      // the decks and the pictures. The hint under the button promises this,
+      // so anything added here that would break it has to change that line
+      // too.
       new_install_prompt_erase: false,
       builds: [{ chipFamily: 'ESP32-S3', parts: parts }]
     };
