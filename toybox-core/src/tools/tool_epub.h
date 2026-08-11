@@ -87,7 +87,7 @@ class EpubTool : public ToolApp {
       }
       const int b = idx - _nf;
       const int y = shelf::Y0 + k * shelf::ROW_H;
-      c.text(24, y + 10, _books[b].title, TS_MED, true, true);
+      c.textClipped(24, y + 10, c.width() - 48, _books[b].title, TS_MED, true, true);
       c.text(24, y + 44, _books[b].cont ? "carries on where it stopped" : "from the start",
              TS_SMALL, true);
       if (shelf::rowSep(k, idx, total))
@@ -642,14 +642,18 @@ class EpubTool : public ToolApp {
     // The footer: where you are, on a plate the page shows through around.
     c.fillRect(0, 744, c.width(), 56, false);
     c.fillRect(0, 744, c.width(), 2, true);
-    c.text(16, 758, _books[_cur].title, TS_MED, true, true);
+    // Where you are is measured FIRST, because it is the part that must not be
+    // covered: a title runs to whatever length a publisher felt like, and the
+    // one on this card ran straight through the page number.
     char pos[40];
     if (_chapterPages > 0)
       snprintf(pos, sizeof(pos), "ch %d/%d · p %d/%d", _spine + 1, _book.spineCount(), _page + 1,
                _chapterPages);
     else
       snprintf(pos, sizeof(pos), "ch %d/%d · p %d", _spine + 1, _book.spineCount(), _page + 1);
-    c.text(c.width() - 16 - c.textWidth(pos, TS_MED), 758, pos, TS_MED, true);
+    const int pw = c.textWidth(pos, TS_MED);
+    c.textClipped(16, 758, c.width() - 32 - pw - 12, _books[_cur].title, TS_MED, true, true);
+    c.text(c.width() - 16 - pw, 758, pos, TS_MED, true);
   }
 
   Screen _screen = Screen::List;

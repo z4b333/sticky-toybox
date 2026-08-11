@@ -477,7 +477,18 @@ inline void drawLoading(ToolsHost& h, ToolsCanvas& c, const char* file, const ch
 
   c.drawRect(144, 200, 192, 300, 2, true);
   c.drawRect(152, 208, 176, 284, 1, true);  // a plate with a rule inside: a cover-to-be
-  c.textCentered(c.width() / 2, 560, title, TS_LARGE, true, true);
+  // Clipped: this is the one place a book's own title is set large, and a
+  // release filename is longer than the panel at that size.
+  {
+    const int maxW = c.width() - 48;
+    char cap[192];
+    snprintf(cap, sizeof(cap), "%s", title ? title : "");
+    if (c.textWidth(cap, TS_LARGE, true) > maxW) {
+      c.textClipped(24, 560, maxW, cap, TS_LARGE, true, true);
+    } else {
+      c.textCentered(c.width() / 2, 560, cap, TS_LARGE, true, true);
+    }
+  }
   c.textCentered(c.width() / 2, 620, "opening the book", TS_SMALL, true);
 }
 

@@ -1712,6 +1712,18 @@ int main() {
       abort();
     }
     toybox.onButton(SideBtn::Down);  // a turn, so progress lands on the card
+
+    // The footer, on the book with the punishing name. This is the render the
+    // overflow guard needed and never had: every other fixture is called
+    // "wind" or "Walden", so a title long enough to run over the page number
+    // -- which is what a real release filename does -- was never drawn here at
+    // all. The bug reached hardware because the harness only owned short books.
+    g_dumpEnabled = true;
+    setScreen("tool_epub_footer_long");
+    toybox.onTap(240, 400);  // the middle toggles the footer
+    g_dumpEnabled = false;
+    toybox.onTap(240, 400);  // and away again
+
     char dir[96];
     epubc::cacheDir(
         "/books/A Book With The Kind Of Very Long Release Filename Publishers Actually Use Vol 01.epub",
@@ -3120,6 +3132,8 @@ int main() {
     r.battMv = 3987;
     r.fontFaces = 3;
     r.psramKb = 8192;
+    r.heapKb = 137;
+    r.blockKb = 92;
     r.version = "toybox  Aug  8 2026  11:04:22";
     const svc::Config cfg;
 

@@ -87,6 +87,38 @@ class ToolsCanvas {
       textInBox(x, y, w, h, label, sz, true, false);
     }
   }
+  // Draws as much of `s` as fits in maxW, ending in "..." when it had to stop.
+  //
+  // Steps by codepoint, so a clipped Thai or CJK title never ends halfway
+  // through a character -- and the ellipsis is three dots rather than U+2026,
+  // because the generated faces do not all carry that glyph and a missing one
+  // would be worse than no ellipsis at all.
+  void textClipped(int x, int y, int maxW, const char* s, TSize sz, bool black,
+                   bool bold = false) {
+    if (maxW <= 0 || !s || !*s) return;
+    if (textWidth(s, sz, bold) <= maxW) {
+      text(x, y, s, sz, black, bold);
+      return;
+    }
+    const int dots = textWidth("...", sz, bold);
+    char buf[192];
+    int n = 0;
+    for (const char* p = s; *p;) {
+      const char* q = p;
+      uni::next(q);
+      const int add = (int)(q - p);
+      if (n + add > (int)sizeof(buf) - 4) break;
+      memcpy(buf + n, p, (size_t)add);
+      buf[n + add] = 0;
+      if (textWidth(buf, sz, bold) + dots > maxW) break;
+      n += add;
+      p = q;
+    }
+    buf[n] = 0;
+    memcpy(buf + n, "...", 4);
+    text(x, y, buf, sz, black, bold);
+  }
+
   // One glyph, for grids that place characters themselves.
   void textChar(int x, int y, char ch, TSize sz, bool black, bool bold = false) {
     const char s[2] = {ch, 0};

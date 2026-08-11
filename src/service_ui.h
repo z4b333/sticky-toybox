@@ -33,6 +33,11 @@ struct Report {
   int battMv = -1;
   int fontFaces = 0;
   uint32_t psramKb = 0;
+  // Free heap, and the largest single block in it. The second number is the
+  // one that matters: the reader needs 48 KB in one run, and a heap with
+  // plenty free and nothing contiguous is what a book failing to open looks
+  // like from the inside.
+  uint32_t heapKb = 0, blockKb = 0;
   // The SD probe, which only runs when somebody asks for it on that row.
   bool sdTried = false, sdMounted = false, sdPanelOk = false;
   uint64_t sdSizeMb = 0;
@@ -148,6 +153,11 @@ inline void render(ToolsCanvas& c, const Report& r, const Config& cfg, int sel, 
   else
     snprintf(buf, sizeof(buf), "battery  no gauge     psram  %lu KB",
              (unsigned long)r.psramKb);
+  c.text(MARGIN, y, buf, TS_MED, true);
+  y += 26;
+
+  snprintf(buf, sizeof(buf), "heap     %lu KB free, biggest block %lu KB",
+           (unsigned long)r.heapKb, (unsigned long)r.blockKb);
   c.text(MARGIN, y, buf, TS_MED, true);
   y += 26;
 

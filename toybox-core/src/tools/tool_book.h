@@ -46,8 +46,13 @@ class BookTool : public ToolApp {
     _note = nullptr;
     snprintf(_dir, sizeof(_dir), "%s", shelf::TOP);
     reload();
-    // Sized for a grey page; a B/W book simply uses the front half.
-    if (!_pageBuf) _pageBuf = (uint8_t*)malloc(ToolsHost::BOOK_PAGE_BYTES_GREY);
+    // The page buffer is NOT taken here. It used to be, at the grey size, for
+    // every book on the shelf whether or not one was ever opened -- 96 KB of
+    // contiguous heap, which is the largest single allocation the firmware
+    // makes, requested straight after a directory listing that had just
+    // allocated and freed several KB of its own. On a device with no PSRAM
+    // that is how you end up with plenty of free heap and no block big enough
+    // to put a page in. It is taken in openBook now, sized to the book.
   }
 
   void render(ToolsCanvas& c) override {
@@ -84,7 +89,7 @@ class BookTool : public ToolApp {
       }
       const int b = idx - _nf;
       const int y = shelf::Y0 + k * shelf::ROW_H;
-      c.text(24, y + 10, _books[b].title, TS_MED, true, true);
+      c.textClipped(24, y + 10, c.width() - 48, _books[b].title, TS_MED, true, true);
       char sub[64];
       const uint32_t at = savedPage(b);
       if (at > 0)
@@ -210,6 +215,23 @@ class BookTool : public ToolApp {
  private:
   enum class Screen : uint8_t { List, Loading, Page };
 
+  // Grown, never shrunk, while a book is open; released the moment one is
+  // closed. Sized in whole pages so a grey book and a B/W book can follow one
+  // another without a reallocation each time.
+  bool ensurePageBuf(uint8_t bpp) {
+    const uint32_t need = ToolsHost::BOOK_PAGE_BYTES * (bpp == 2 ? 2u : 1u);
+    if (_pageBuf && _pageBufBytes >= need) return true;
+    freePageBuf();
+    _pageBuf = (uint8_t*)malloc(need);
+    _pageBufBytes = _pageBuf ? need : 0;
+    return _pageBuf != nullptr;
+  }
+  void freePageBuf() {
+    free(_pageBuf);
+    _pageBuf = nullptr;
+    _pageBufBytes = 0;
+  }
+
   bool inFolder() const { return !shelf::isTop(_dir); }
   const char* seriesName() const {
     const char* s = strrchr(_dir, '/');
@@ -251,7 +273,18 @@ class BookTool : public ToolApp {
   }
 
   void openBook(int i) {
-    if (!_pageBuf) return;
+    // A buffer for THIS book: 48 KB for one bit, 96 KB for grey. Asking for
+    // the grey size always was asking for twice what most books need.
+    if (!ensurePageBuf(_books[i].bpp)) {
+      // And when it cannot be had, say so. This used to be a bare `return`,
+      // so a device short of memory answered a tap on a book with nothing at
+      // all -- no message, no beep, no repaint. Silence is the one response a
+      // person cannot act on.
+      _note = "not enough memory to open this book - try again after a restart";
+      host().beep(2);
+      host().refresh(true);
+      return;
+    }
     // The cover as the loading screen: painted before the card is touched,
     // so the open happens behind the book's own face rather than a stale list.
     _cur = i;
@@ -310,6 +343,7 @@ class BookTool : public ToolApp {
 
   void leaveBook() {
     host().bookClose();  // powers the card down and re-initialises the panel
+    freePageBuf();       // the shelf does not need 48 KB to draw a list
     _open = false;
     _screen = Screen::List;
     host().beep(0);
@@ -378,11 +412,12 @@ class BookTool : public ToolApp {
       // around. Tapping the middle again takes it away.
       c.fillRect(0, 744, c.width(), 56, false);
       c.fillRect(0, 744, c.width(), 2, true);
-      c.text(16, 758, _books[_cur].title, TS_MED, true, true);
       char pos[24];
       snprintf(pos, sizeof(pos), "%lu / %lu", (unsigned long)(_pageNo + 1),
                (unsigned long)_books[_cur].pages);
-      c.text(c.width() - 16 - c.textWidth(pos, TS_MED), 758, pos, TS_MED, true);
+      const int pw = c.textWidth(pos, TS_MED);
+      c.textClipped(16, 758, c.width() - 32 - pw - 12, _books[_cur].title, TS_MED, true, true);
+      c.text(c.width() - 16 - pw, 758, pos, TS_MED, true);
     }
   }
 
@@ -398,5 +433,6 @@ class BookTool : public ToolApp {
   bool _open = false;
   bool _chrome = false;
   uint8_t* _pageBuf = nullptr;
+  uint32_t _pageBufBytes = 0;
   const char* _note = nullptr;
 };

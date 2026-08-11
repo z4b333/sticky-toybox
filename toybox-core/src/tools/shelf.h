@@ -93,7 +93,9 @@ inline void drawFolderRow(ToolsCanvas& c, int rowOnPage, const char* name, int c
   // the two kinds of row read as one list rather than two.
   c.fillRect(24, y + 22, 20, 5, true);
   c.drawRect(24, y + 26, 44, 30, 2, true);
-  c.text(84, y + 10, name, TS_MED, true, true);
+  // Clear of the chevron on the right, which a long series name would
+  // otherwise run into.
+  c.textClipped(84, y + 10, SCREEN_W - 84 - 52, name, TS_MED, true, true);
   char sub[32];
   snprintf(sub, sizeof(sub), "%d book%s", count, count == 1 ? "" : "s");
   c.text(84, y + 44, sub, TS_SMALL, true);

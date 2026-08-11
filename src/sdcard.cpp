@@ -335,7 +335,11 @@ int epubList(EpubMeta* out, int max, const char* dir) {
   int n = 0;
   const bool top = strcmp(dir, "/books") == 0;
   const char* files[3] = {"/books/wind.epub", kFakeLongPath, "/books/Uketsu/strange-houses.epub"};
-  const char* titles[3] = {"wind", "the long-named book", "Strange Houses"};
+  // The middle title is what the DEVICE would derive -- the bare filename
+  // minus its extension, cut to the 40 bytes the field holds. It used to read
+  // "the long-named book", which is short, and a short title is precisely
+  // what let a footer that could not fit a long one reach hardware.
+  const char* titles[3] = {"wind", "A Book With The Kind Of Very Long Releas", "Strange Houses"};
   for (int i = 0; i < 3 && n < max; i++) {
     // The first two sit loose at the top level; the third is inside a series.
     if ((i < 2) != top) continue;
