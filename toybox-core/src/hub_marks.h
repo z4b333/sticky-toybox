@@ -48,16 +48,24 @@ inline void decide(ToolsCanvas& c, int cx, int cy, int s, bool black) {
 // An open book: two thin pages either side of a spine gap, a line of text on
 // each.
 inline void study(ToolsCanvas& c, int cx, int cy, int s, bool black) {
-  const int w = (s * 36) / 100, h = (s * 42) / 100, gap = (s * 6) / 100;
+  // An open book, front on: both page edges sag toward the spine, the way a
+  // book actually lies open. The old mark was two boxed panels that read as a
+  // window at dock size -- and the Epub tile wears that shape now anyway.
+  const int w = (s * 45) / 100;          // half-width of the spread
+  const int topO = cy - (s * 29) / 100;  // outer top corners
+  const int topC = cy - (s * 15) / 100;  // where the top edges meet the spine
+  const int botO = cy + (s * 15) / 100;
+  const int botC = cy + (s * 29) / 100;
   for (int sgn = -1; sgn <= 1; sgn += 2) {
-    const int x0 = sgn < 0 ? cx - gap - w : cx + gap;
-    c.drawRect(x0, cy - h / 2 - (s * 4) / 100, w, h, 2, black);
-    c.drawLine(x0 + (w * 20) / 100, cy - (s * 8) / 100, x0 + (w * 80) / 100,
-               cy - (s * 8) / 100, 2, black);
-    c.drawLine(x0 + (w * 20) / 100, cy + (s * 2) / 100, x0 + (w * 80) / 100,
-               cy + (s * 2) / 100, 2, black);
+    const int xo = cx + sgn * w;
+    c.drawLine(cx, topC, xo, topO, 2, black);  // top page edge
+    c.drawLine(xo, topO, xo, botO, 2, black);  // outer page edge
+    c.drawLine(xo, botO, cx, botC, 2, black);  // bottom page edge
+    // one line of text, following the page's slant
+    c.drawLine(cx + sgn * (s * 14) / 100, cy - (s * 3) / 100,
+               cx + sgn * (w - (s * 9) / 100), cy - (s * 7) / 100, 2, black);
   }
-  c.drawLine(cx, cy - h / 2 - (s * 4) / 100, cx, cy + h / 2 - (s * 4) / 100, 2, black);
+  c.drawLine(cx, topC, cx, botC, 2, black);  // the spine
 }
 
 inline void folder(ToolsCanvas& c, int f, int cx, int cy, int s, bool black) {
