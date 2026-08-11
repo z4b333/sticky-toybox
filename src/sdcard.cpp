@@ -227,23 +227,33 @@ struct FakeSide {
 FakeSide g_side[4];
 }  // namespace
 
+// The second invented book exists to exercise long paths: real release
+// filenames pass 64 bytes with the /books/ prefix, which is exactly how a
+// book on a real card silently failed to open (see EpubMeta::file).
+static const char kFakeLongPath[] =
+    "/books/A Book With The Kind Of Very Long Release Filename Publishers Actually Use Vol 01.epub";
+
 int epubList(EpubMeta* out, int max) {
-  if (max < 1) return 0;
-  EpubMeta m{};
-  strncpy(m.file, "/books/wind.epub", sizeof(m.file) - 1);
-  strncpy(m.title, "wind", sizeof(m.title) - 1);
-  char cache[96];
-  epubc::cacheDir(m.file, cache, sizeof(cache));
-  strncat(cache, "/progress.bin", sizeof(cache) - strlen(cache) - 1);
-  m.cont = false;
-  for (const FakeSide& s : g_side)
-    if (s.n > 0 && strcmp(s.path, cache) == 0) m.cont = true;
-  out[0] = m;
-  return 1;
+  int n = 0;
+  const char* files[2] = {"/books/wind.epub", kFakeLongPath};
+  const char* titles[2] = {"wind", "the long-named book"};
+  for (int i = 0; i < 2 && n < max; i++) {
+    EpubMeta m{};
+    strncpy(m.file, files[i], sizeof(m.file) - 1);
+    strncpy(m.title, titles[i], sizeof(m.title) - 1);
+    char cache[96];
+    epubc::cacheDir(m.file, cache, sizeof(cache));
+    strncat(cache, "/progress.bin", sizeof(cache) - strlen(cache) - 1);
+    m.cont = false;
+    for (const FakeSide& s : g_side)
+      if (s.n > 0 && strcmp(s.path, cache) == 0) m.cont = true;
+    out[n++] = m;
+  }
+  return n;
 }
 
 bool epubOpen(const char* path) {
-  if (strcmp(path, "/books/wind.epub") != 0) return false;
+  if (strcmp(path, "/books/wind.epub") != 0 && strcmp(path, kFakeLongPath) != 0) return false;
   buildFakeEpub();
   g_fakeEpubOpen = true;
   return true;
@@ -586,7 +596,11 @@ int epubList(EpubMeta* out, int max) {
       EpubMeta m{};
       const char* bare = strrchr(f.name(), '/');
       bare = bare ? bare + 1 : f.name();
-      snprintf(m.file, sizeof(m.file), "%s%s%s", dir, dir[1] ? "/" : "", bare);
+      const int need = snprintf(m.file, sizeof(m.file), "%s%s%s", dir, dir[1] ? "/" : "", bare);
+      // A truncated path could never open (and would hash to the wrong
+      // progress directory); leaving the book off the list beats listing a
+      // name that only fails when tapped.
+      if (need >= (int)sizeof(m.file)) continue;
       strncpy(m.title, bare, sizeof(m.title) - 1);
       char* dot = strrchr(m.title, '.');
       if (dot) *dot = 0;

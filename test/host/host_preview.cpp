@@ -1189,6 +1189,38 @@ int main() {
     printf("recents ok (covers reopen, thumbnail stored, DOWN carries on reading)\n");
   }
 
+  // --- long book paths -------------------------------------------------------
+  // The second invented epub's path is 93 bytes -- longer than the 64-byte
+  // buffers that silently truncated a real book's name on a real card. It has
+  // to list, open, read, and write its progress under the right hash.
+  {
+    g_dumpEnabled = false;
+    toybox.open(false, 10);
+    auto* et = static_cast<EpubTool*>(toybox.hostActive());
+    toybox.onTap(240, epubui::LIST_Y0 + epubui::LIST_ROW_H + 10);  // the second row
+    if (et->hostScreen() != 1 || et->hostSpine() != 0) {
+      printf("LONGPATH FAIL: the long-named book did not open\n");
+      abort();
+    }
+    toybox.onButton(SideBtn::Down);  // a turn, so progress lands on the card
+    char dir[96];
+    epubc::cacheDir(
+        "/books/A Book With The Kind Of Very Long Release Filename Publishers Actually Use Vol 01.epub",
+        dir, sizeof(dir));
+    char pp[128];
+    snprintf(pp, sizeof(pp), "%s/progress.bin", dir);
+    uint8_t buf[16];
+    if (stickyHost.sdReadFile(pp, buf, sizeof(buf)) != 10) {
+      printf("LONGPATH FAIL: progress not written under the full-path hash\n");
+      abort();
+    }
+    toybox.onButton(SideBtn::Ok);
+    toybox.goHub();
+    toybox.hostHub().goHome();
+    g_dumpEnabled = true;
+    printf("long paths ok (93-byte name lists, opens, and keeps its position)\n");
+  }
+
   // The battery icon, which had never been rendered here at all: it is drawn
   // only when a gauge answers, and the harness answers with no gauge, so it
   // went to hardware unlooked at.

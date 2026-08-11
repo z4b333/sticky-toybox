@@ -274,7 +274,7 @@ class ToolsHost {
   // file is the ABSOLUTE card path, because CrossPoint hashes that exact
   // string to find its progress directory.
   struct EpubInfo {
-    char file[64];
+    char file[128];  // absolute card path; real release filenames run long
     char title[41];
     bool cont = false;  // a reading position already exists on the card
   };

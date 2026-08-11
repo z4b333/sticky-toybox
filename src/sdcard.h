@@ -69,7 +69,10 @@ void bookClose();
 // book's ABSOLUTE card path ("/books/x.epub") because that exact string is
 // what CrossPoint hashes to find its progress directory -- see epubcore.h.
 struct EpubMeta {
-  char file[64];
+  // 128, not 64: real release filenames run long ("Classroom of the Elite
+  // Volume 01 Seven Seas..." is 60 bytes WITH the /books/ prefix), and a
+  // truncated path fails to open with no visible reason.
+  char file[128];
   char title[41];
   bool cont = false;  // a CrossPoint progress file exists for it
 };

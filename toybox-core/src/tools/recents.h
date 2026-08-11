@@ -18,13 +18,15 @@ inline constexpr uint8_t KIND_TBK = 0, KIND_EPUB = 1;
 
 struct Entry {
   uint8_t kind = KIND_TBK;
-  char file[64] = "";
+  char file[128] = "";  // must hold whatever the readers list books by
   char title[41] = "";
 };
 
+// The NVS key carries a 2 because the entry grew (file 64 -> 128 bytes) and
+// an old-layout blob must read as empty rather than as garbage titles.
 inline int list(Preferences& p, Entry* out) {
   Entry e[MAX];
-  const size_t got = p.getBytes("recents", e, sizeof(e));
+  const size_t got = p.getBytes("recents2", e, sizeof(e));
   const int n = (int)(got / sizeof(Entry));
   for (int i = 0; i < n && i < MAX; i++) out[i] = e[i];
   return n > MAX ? MAX : n;
@@ -42,7 +44,7 @@ inline void note(Preferences& p, uint8_t kind, const char* file, const char* tit
     if (old[i].kind == kind && strcmp(old[i].file, file) == 0) continue;  // moved to the front
     now[w++] = old[i];
   }
-  p.putBytes("recents", now, sizeof(Entry) * (size_t)w);
+  p.putBytes("recents2", now, sizeof(Entry) * (size_t)w);
 }
 
 }  // namespace recents
