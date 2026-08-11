@@ -1,9 +1,17 @@
-// Cover art, at two sizes and for two jobs.
+// Cover art, at two sizes, for two jobs, in two places.
 //
 // A book keeps a full panel-sized cover (480x800, one bit, dithered) for the
 // loading screen it opens behind, and a small one (96x160, thresholded) for
 // the hub's recently-read strip. Both are made once, on a book's first open,
 // and both come out of a single pass over the decoded image.
+//
+// The full-size ones live ON THE CARD, beside the books they belong to: they
+// are 48 KB each, the card has gigabytes where internal flash has four
+// megabytes, and naming them from the book's path means moving the card to
+// another Sticky brings the art along with the reading positions. The strip
+// thumbnails stay in internal flash, and have to: the hub draws them with no
+// card session open, and claiming the SD bus halfway through rendering a
+// screen would re-initialise the panel underneath it.
 //
 // The pass is streamed, and that is the whole trick. Averaging every source
 // pixel into its target cell needs a sum and a count PER CELL: at 96x160 that
@@ -37,11 +45,6 @@ inline constexpr int BYTES = W * H / 8;               // 1,920
 inline constexpr int BIG_W = 480, BIG_H = 800;        // the loading screen
 inline constexpr int BIG_BYTES = BIG_W * BIG_H / 8;   // 48,000
 inline constexpr int SCALE = BIG_W / W;               // 5, both ways
-// How many full-size covers the device keeps. Ten is about 500 KB of the
-// 4.7 MB partition; past that the oldest is dropped and simply made again
-// the next time that book is opened.
-inline constexpr int BIG_KEEP = 10;
-inline constexpr char INDEX_PATH[] = "/cv_index";
 
 inline uint32_t key(const char* file) {
   uint32_t h = 2166136261u;
@@ -52,11 +55,15 @@ inline uint32_t key(const char* file) {
 inline void path(const char* file, char* out, int cap) {
   snprintf(out, (size_t)cap, "/th_%08lx", (unsigned long)key(file));
 }
+// On the card, in a folder of our own. Hidden, so the phone's file list and
+// the readers' book lists both walk straight past it.
 inline void bigPath(const char* file, char* out, int cap) {
-  snprintf(out, (size_t)cap, "/cv_%08lx", (unsigned long)key(file));
+  snprintf(out, (size_t)cap, "/.toybox/covers/%08lx.tbc", (unsigned long)key(file));
 }
-inline void bigPathFor(uint32_t k, char* out, int cap) {
-  snprintf(out, (size_t)cap, "/cv_%08lx", (unsigned long)k);
+// Where the full-size covers used to live, before they moved to the card.
+// Swept as books are reopened rather than in a migration nobody would test.
+inline void staleFlashPath(const char* file, char* out, int cap) {
+  snprintf(out, (size_t)cap, "/cv_%08lx", (unsigned long)key(file));
 }
 
 inline bool have(const char* file) {
@@ -64,10 +71,11 @@ inline bool have(const char* file) {
   path(file, p, sizeof(p));
   return tfs::size(p) == (size_t)BYTES;
 }
-inline bool haveBig(const char* file) {
-  char p[20];
+inline bool haveBig(ToolsHost& h, const char* file) {
+  char p[48];
   bigPath(file, p, sizeof(p));
-  return tfs::size(p) == (size_t)BIG_BYTES;
+  uint8_t probe[4];
+  return h.sdReadWhole(p, probe, sizeof(probe)) == (int)sizeof(probe);
 }
 
 // Books whose cover would not decode get a marker instead of a retry on
@@ -98,44 +106,6 @@ inline bool load(const char* file, uint8_t* dst) {
   return ok;
 }
 
-// --- the keep list ------------------------------------------------------------
-// Insertion order, most recent first, so the cap drops the cover nobody has
-// looked at in the longest time. Kept in a file rather than NVS because it
-// belongs with the pictures it indexes, and because NVS pages wear.
-namespace detail {
-
-inline int loadIndex(uint32_t* out) {
-  size_t len = 0;
-  char* buf = tfs::readAlloc(INDEX_PATH, len);
-  if (!buf) return 0;
-  int n = (int)(len / sizeof(uint32_t));
-  if (n > BIG_KEEP) n = BIG_KEEP;
-  memcpy(out, buf, (size_t)n * sizeof(uint32_t));
-  free(buf);
-  return n;
-}
-
-// Records `k` as the newest cover and deletes whatever falls off the end.
-inline void remember(uint32_t k) {
-  uint32_t idx[BIG_KEEP + 1];
-  const int had = loadIndex(idx + 1);        // leave room to push at the front
-  uint32_t merged[BIG_KEEP + 1];
-  int n = 0;
-  merged[n++] = k;
-  for (int i = 0; i < had && n <= BIG_KEEP; i++)
-    if (idx[1 + i] != k) merged[n++] = idx[1 + i];
-  // Anything past the cap goes, picture and all.
-  for (int i = BIG_KEEP; i < n; i++) {
-    char p[20];
-    bigPathFor(merged[i], p, sizeof(p));
-    tfs::remove(p);
-  }
-  if (n > BIG_KEEP) n = BIG_KEEP;
-  tfs::write(INDEX_PATH, (const char*)merged, (size_t)n * sizeof(uint32_t));
-}
-
-}  // namespace detail
-
 // --- the streaming builder ----------------------------------------------------
 // Feed it the decoded image in whatever order the decoder produces, as long
 // as blocks arrive top to bottom: rows for PNG and the progressive DC pass,
@@ -155,8 +125,9 @@ class Builder {
   // more output rows than the band holds. Real covers are bigger than the
   // panel anyway -- it is the progressive path, which only ever yields the
   // image at an eighth, that needs this.
-  bool begin(const char* file, int srcW, int srcH, int maxUp = 1) {
+  bool begin(ToolsHost& h, const char* file, int srcW, int srcH, int maxUp = 1) {
     freeAll();
+    _host = &h;
     if (srcW < 1 || srcH < 1) return false;
     _srcW = srcW;
     _srcH = srcH;
@@ -190,8 +161,9 @@ class Builder {
     memset(_small, 255, (size_t)W * H);
     bigPath(file, _bigPath, sizeof(_bigPath));
     path(file, _smallPath, sizeof(_smallPath));
-    _key = key(file);
-    if (!_out.begin(_bigPath)) {
+    // The card holds the picture, so this only works while something already
+    // has the bus -- which, on a book's first open, something does.
+    if (!_host->sdStreamOpen(_bigPath)) {
       freeAll();
       return false;
     }
@@ -249,11 +221,8 @@ class Builder {
   bool finish() {
     if (!_live) return false;
     while (_nextOut < BIG_H) emitRow(_nextOut++);
-    const bool ok = _out.end();
-    if (ok) {
-      saveSmall();
-      detail::remember(_key);
-    }
+    const bool ok = _host->sdStreamClose(true);
+    if (ok) saveSmall();
     _live = false;
     freeAll();
     return ok;
@@ -261,7 +230,7 @@ class Builder {
 
   void abort() {
     if (!_live) return;
-    _out.abort();
+    _host->sdStreamClose(false);
     _live = false;
     freeAll();
   }
@@ -323,7 +292,7 @@ class Builder {
       nxt[x + 1] += (int16_t)((e * 5) / 16);
       nxt[x + 2] += (int16_t)(e / 16);
     }
-    _out.write(packed, sizeof(packed));
+    _host->sdStreamWrite(packed, sizeof(packed));
 
     memset(_sum + (size_t)(t % BAND) * BIG_W, 0, sizeof(uint16_t) * BIG_W);
     memset(_cnt + (size_t)(t % BAND) * BIG_W, 0, BIG_W);
@@ -369,7 +338,7 @@ class Builder {
     _small = nullptr;
   }
 
-  tfs::Out _out;
+  ToolsHost* _host = nullptr;
   uint16_t* _sum = nullptr;
   uint8_t* _cnt = nullptr;
   int16_t* _err = nullptr;
@@ -379,16 +348,15 @@ class Builder {
   int _srcW = 0, _srcH = 0, _outW = 0, _outH = 0, _xOff = 0, _yOff = 0;
   int _nextOut = 0, _smallRow = 0;
   bool _up = false;
-  uint32_t _key = 0;
-  char _bigPath[20] = {}, _smallPath[20] = {};
+  char _bigPath[48] = {}, _smallPath[20] = {};
   bool _live = false;
 };
 
 // A .tbk cover: the book's first page, which is already exactly panel-sized,
 // so this is the same pipeline with nothing to scale.
-inline void makeAndSave(const char* file, const uint8_t* page, int bpp) {
+inline void makeAndSave(ToolsHost& h, const char* file, const uint8_t* page, int bpp) {
   Builder b;
-  if (!b.begin(file, 480, 800)) return;
+  if (!b.begin(h, file, 480, 800)) return;
   uint8_t line[480];
   for (int y = 0; y < 800; y++) {
     for (int x = 0; x < 480; x++) {
@@ -410,15 +378,17 @@ inline void makeAndSave(const char* file, const uint8_t* page, int bpp) {
 // been dropped to make room, and a titled plate for a book being opened for
 // the very first time -- which is the one open where the cover does not exist
 // yet, because this is when it gets made.
-inline void drawLoading(ToolsCanvas& c, const char* file, const char* title) {
-  char p[20];
+inline void drawLoading(ToolsHost& h, ToolsCanvas& c, const char* file, const char* title) {
+  // Off the card, borrowing the bus for the read if the reader has not taken
+  // it yet. That costs about 150 ms and leaves the panel re-initialised,
+  // which is free here: this is drawn as part of a full refresh anyway.
+  char p[48];
   bigPath(file, p, sizeof(p));
-  size_t len = 0;
-  if (char* buf = tfs::readAlloc(p, len)) {
-    if (len == (size_t)BIG_BYTES) {
-      const uint8_t* bits = (const uint8_t*)buf;
+  if (uint8_t* buf = (uint8_t*)malloc(BIG_BYTES)) {
+    const bool got = h.sdReadWhole(p, buf, BIG_BYTES) == BIG_BYTES;
+    if (got) {
       for (int y = 0; y < BIG_H; y++) {
-        const uint8_t* row = bits + (size_t)y * (BIG_W / 8);
+        const uint8_t* row = buf + (size_t)y * (BIG_W / 8);
         for (int x = 0; x < BIG_W; x++)
           if (!(row[x >> 3] & (0x80 >> (x & 7)))) c.fillRect(x, y, 1, 1, true);
       }

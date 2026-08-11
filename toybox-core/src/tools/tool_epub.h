@@ -52,7 +52,7 @@ class EpubTool : public ToolApp {
 
   void render(ToolsCanvas& c) override {
     if (_screen == Screen::Loading) {
-      bthumb::drawLoading(c, _books[_cur].file, _books[_cur].title);
+      bthumb::drawLoading(host(), c, _books[_cur].file, _books[_cur].title);
       return;
     }
     if (_screen == Screen::Page) {
@@ -211,7 +211,8 @@ class EpubTool : public ToolApp {
     // a book's first open (a second or two for a big JPEG), never again --
     // and a cover that will not decode is marked so it is never retried.
     if (!bthumb::have(_books[i].file) && !bthumb::failed(_books[i].file)) {
-      if (!epubcov::makeThumb(_book, _books[i].file)) bthumb::markFailed(_books[i].file);
+      if (!epubcov::makeThumb(host(), _book, _books[i].file))
+        bthumb::markFailed(_books[i].file);
     }
 
     // Where were we? The card remembers, in CrossPoint's format.

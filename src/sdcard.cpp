@@ -3,6 +3,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef TOYBOX_HOST
+#include <map>
+#include <string>
+#endif
+
 #include "tools/epub/epubcore.h"
 #include "tools/lock_image.h"
 #include "tools/tiny_fs.h"
@@ -447,6 +452,46 @@ bool mgrWriteClose(bool keep) {
 
 uint32_t mgrFreeMb() { return g_mgrUp ? 121000 : 0; }
 
+// The card's own little filesystem, for everything written by path rather
+// than by name: cover art, and whatever else learns to live out here.
+namespace {
+std::map<std::string, std::string>& fakeCard() {
+  static std::map<std::string, std::string> fs;
+  return fs;
+}
+std::string g_streamPath;
+std::string g_streamBuf;
+bool g_streaming = false;
+}  // namespace
+
+bool busHeld() { return g_mgrUp || g_fakeEpubOpen || g_fakeOpenPages > 0; }
+
+bool streamOpen(const char* path) {
+  g_streamPath = path;
+  g_streamBuf.clear();
+  g_streaming = true;
+  return true;
+}
+bool streamWrite(const uint8_t* data, uint32_t n) {
+  if (!g_streaming) return false;
+  g_streamBuf.append((const char*)data, n);
+  return true;
+}
+bool streamClose(bool keep) {
+  if (!g_streaming) return false;
+  if (keep) fakeCard()[g_streamPath] = g_streamBuf;
+  g_streaming = false;
+  g_streamBuf.clear();
+  return keep;
+}
+int readWhole(const char* path, void* dst, int max) {
+  auto it = fakeCard().find(path);
+  if (it == fakeCard().end()) return -1;
+  const int n = (int)it->second.size() < max ? (int)it->second.size() : max;
+  memcpy(dst, it->second.data(), (size_t)n);
+  return n;
+}
+
 #else
 
 Report probe() {
@@ -838,6 +883,55 @@ bool mgrSafePath(const char* p) {
          (dirLen == 11 && strncmp(p, "/wallpapers", 11) == 0);
 }
 }  // namespace
+
+bool busHeld() { return g_epubBusUp || g_bookBusUp || g_mgrUp; }
+
+namespace {
+File g_stream;
+char g_streamPath[160] = "";
+}  // namespace
+
+bool streamOpen(const char* path) {
+  if (!busHeld() || !path || path[0] != '/') return false;
+  if (g_stream) g_stream.close();
+  makeParents(path);
+  strncpy(g_streamPath, path, sizeof(g_streamPath) - 1);
+  g_streamPath[sizeof(g_streamPath) - 1] = 0;
+  g_stream = SD.open(g_streamPath, FILE_WRITE);
+  return (bool)g_stream;
+}
+
+bool streamWrite(const uint8_t* data, uint32_t n) {
+  if (!g_stream) return false;
+  return g_stream.write(data, n) == n;
+}
+
+bool streamClose(bool keep) {
+  if (!g_stream) return false;
+  g_stream.close();
+  if (!keep && g_streamPath[0]) SD.remove(g_streamPath);
+  g_streamPath[0] = 0;
+  return keep;
+}
+
+int readWhole(const char* path, void* dst, int max) {
+  // Borrow the bus only if nobody else has it. Claiming costs the card's
+  // power-up and a controller reset -- about 150 ms, which disappears into
+  // the refresh that follows.
+  const bool mine = !busHeld();
+  if (mine && !busClaim()) {
+    busRelease();
+    return -1;
+  }
+  int got = -1;
+  File f = SD.open(path, FILE_READ);
+  if (f && !f.isDirectory()) {
+    got = f.read((uint8_t*)dst, max);
+    f.close();
+  }
+  if (mine) busRelease();
+  return got;
+}
 
 bool mgrOpen() {
   if (g_mgrUp) return true;

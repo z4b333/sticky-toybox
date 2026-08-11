@@ -49,7 +49,7 @@ class BookTool : public ToolApp {
 
   void render(ToolsCanvas& c) override {
     if (_screen == Screen::Loading) {
-      bthumb::drawLoading(c, _books[_cur].file, _books[_cur].title);
+      bthumb::drawLoading(host(), c, _books[_cur].file, _books[_cur].title);
       return;
     }
     if (_screen == Screen::Page) {
@@ -193,7 +193,7 @@ class BookTool : public ToolApp {
     // into flash, made once while the bus is already up. One extra page read
     // on the first-ever open of a book; nothing on every open after.
     if (!bthumb::have(_books[i].file) && host().bookPage(0, _pageBuf))
-      bthumb::makeAndSave(_books[i].file, _pageBuf, _books[i].bpp);
+      bthumb::makeAndSave(host(), _books[i].file, _pageBuf, _books[i].bpp);
     if (!host().bookPage(_pageNo, _pageBuf)) {
       leaveBook();
       return;

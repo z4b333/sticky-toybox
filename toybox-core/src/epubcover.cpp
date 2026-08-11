@@ -23,6 +23,7 @@ namespace {
 struct Ctx {
   epubc::Book* book;
   bthumb::Builder* out;
+  ToolsHost* host;
   const char* file;
   bool sized = false;
 };
@@ -65,7 +66,7 @@ bool streamSize(void* uctx, int w, int h) {
   // Row-at-a-time decoders may enlarge: the progressive path only ever hands
   // back the image at an eighth of its size, and a cover floating small in
   // the middle of the panel is not what a loading screen is for.
-  ctx->sized = ctx->out->begin(ctx->file, w, h, 6);
+  ctx->sized = ctx->out->begin(*ctx->host, ctx->file, w, h, 6);
   return ctx->sized;
 }
 
@@ -75,13 +76,13 @@ void streamRow(void* uctx, int y, const uint8_t* gray, int w) {
 
 }  // namespace
 
-bool makeThumb(epubc::Book& book, const char* bookFile) {
+bool makeThumb(ToolsHost& host, epubc::Book& book, const char* bookFile) {
   const int type = book.coverType();
   if (type == epubc::Book::COVER_NONE) return false;
   if (!book.coverOpen()) return false;
 
   bthumb::Builder builder;
-  Ctx ctx{&book, &builder, bookFile, false};
+  Ctx ctx{&book, &builder, &host, bookFile, false};
   bool ok = false;
 
   if (type == epubc::Book::COVER_JPEG) {
@@ -98,7 +99,7 @@ bool makeThumb(epubc::Book& book, const char* bookFile) {
       // enormous before it reaches us, which costs nothing and saves time.
       int scale = 0;
       while (scale < 3 && ((jd.width >> scale) > 1600 || (jd.height >> scale) > 2400)) scale++;
-      if (builder.begin(bookFile, jd.width >> scale, jd.height >> scale)) {
+      if (builder.begin(host, bookFile, jd.width >> scale, jd.height >> scale)) {
         ok = jd_decomp(&jd, jpegOut, (uint8_t)scale) == JDR_OK;
         ok = ok && builder.finish();
         if (!ok) builder.abort();

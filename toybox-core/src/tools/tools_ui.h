@@ -350,6 +350,32 @@ class ToolsHost {
   }
   virtual uint32_t sdMgrFreeMb() { return 0; }
 
+  // Files on the card addressed by path, for things the device makes rather
+  // than the owner: cover art. Writing streams, because a panel-sized cover
+  // is 48 KB and the heap it would have to be assembled in is already
+  // carrying a zip window and an image decoder.
+  virtual bool sdStreamOpen(const char* path) {
+    (void)path;
+    return false;
+  }
+  virtual bool sdStreamWrite(const uint8_t* data, uint32_t n) {
+    (void)data;
+    (void)n;
+    return false;
+  }
+  virtual bool sdStreamClose(bool keep) {
+    (void)keep;
+    return false;
+  }
+  // Reads a whole file, borrowing the bus if nothing else holds it -- in
+  // which case the panel is re-initialised and the next paint must be full.
+  virtual int sdReadWhole(const char* path, void* dst, int max) {
+    (void)path;
+    (void)dst;
+    (void)max;
+    return -1;
+  }
+
   // Y coordinate where a tool's own content may start (below the top bar).
   virtual int contentTop() const = 0;
 };

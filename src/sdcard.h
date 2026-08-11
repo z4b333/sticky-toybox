@@ -88,6 +88,21 @@ void epubClose();
 int readFileAt(const char* path, void* dst, int max);
 bool writeFileAtomic(const char* path, const void* data, int n);
 
+// Is any session -- a book, an epub, the phone -- currently holding the bus?
+bool busHeld();
+
+// A file on the card written a piece at a time, for anything too big to
+// assemble in RAM first. Only valid while something already holds the bus;
+// the cover builder streams into this while a book is being opened.
+bool streamOpen(const char* path);
+bool streamWrite(const uint8_t* data, uint32_t n);
+bool streamClose(bool keep);
+
+// Reads a whole file. If nothing holds the bus this claims it for the read
+// and gives it back -- which re-initialises the panel, so the caller's next
+// paint must be a full one. Returns bytes read, or -1.
+int readWhole(const char* path, void* dst, int max);
+
 // --- managing the card from a phone -----------------------------------------
 // The card is the only place books live, and until now the only way to put one
 // there was to take it out. This is the same bus discipline as a reading

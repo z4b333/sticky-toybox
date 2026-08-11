@@ -136,6 +136,12 @@ class StickyHost : public ToolsHost {
   }
   bool sdMgrWriteClose(bool keep) override { return sdcard::mgrWriteClose(keep); }
   uint32_t sdMgrFreeMb() override { return sdcard::mgrFreeMb(); }
+  bool sdStreamOpen(const char* path) override { return sdcard::streamOpen(path); }
+  bool sdStreamWrite(const uint8_t* d, uint32_t n) override { return sdcard::streamWrite(d, n); }
+  bool sdStreamClose(bool keep) override { return sdcard::streamClose(keep); }
+  int sdReadWhole(const char* path, void* dst, int max) override {
+    return sdcard::readWhole(path, dst, max);
+  }
 
   ToolsCanvas& sharedCanvas() { return _canvas; }
 

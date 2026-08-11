@@ -1124,9 +1124,12 @@ int main() {
   // panel (baseline JPEG) and much smaller (the progressive DC pass, which
   // only ever yields an eighth).
   {
+    // The card holds the full-size covers, so the builder needs a session
+    // holding the bus -- which on a real device is the book being opened.
+    stickyHost.sdMgrOpen();
     auto feed = [](const char* file, int w, int h, int maxUp) {
       bthumb::Builder b;
-      if (!b.begin(file, w, h, maxUp)) return false;
+      if (!b.begin(stickyHost, file, w, h, maxUp)) return false;
       uint8_t* line = (uint8_t*)malloc((size_t)w);
       for (int y = 0; y < h; y++) {
         // A frame around a diagonal: ink at the edges and on a line, so a
@@ -1143,31 +1146,31 @@ int main() {
     };
 
     // Shrinking: twice the panel in each direction.
-    if (!feed("/books/down.tbk", 960, 1600, 1) || !bthumb::haveBig("/books/down.tbk") ||
+    if (!feed("/books/down.tbk", 960, 1600, 1) || !bthumb::haveBig(stickyHost, "/books/down.tbk") ||
         !bthumb::have("/books/down.tbk")) {
       printf("COVER BUILD FAIL: a shrunk cover did not come out whole\n");
       abort();
     }
     // Growing: a DC-sized image, which must fill the panel rather than float
     // small in the middle of it.
-    if (!feed("/books/up.tbk", 176, 250, 6) || !bthumb::haveBig("/books/up.tbk")) {
+    if (!feed("/books/up.tbk", 176, 250, 6) || !bthumb::haveBig(stickyHost, "/books/up.tbk")) {
       printf("COVER BUILD FAIL: an enlarged cover did not come out whole\n");
       abort();
     }
     {
       // The enlarged one must actually reach the panel's edges: a frame two
       // pixels thick, spread 2.7x, has to leave ink on the outer columns.
-      size_t len = 0;
-      char p[24];
+      char p[48];
       bthumb::bigPath("/books/up.tbk", p, sizeof(p));
-      char* buf = tfs::readAlloc(p, len);
-      if (!buf || len != (size_t)bthumb::BIG_BYTES) {
-        printf("COVER BUILD FAIL: enlarged cover is %zu bytes\n", len);
+      uint8_t* buf = (uint8_t*)malloc(bthumb::BIG_BYTES);
+      const int len = stickyHost.sdReadWhole(p, buf, bthumb::BIG_BYTES);
+      if (len != bthumb::BIG_BYTES) {
+        printf("COVER BUILD FAIL: enlarged cover is %d bytes\n", len);
         abort();
       }
       int inkRows = 0;
       for (int y = 0; y < bthumb::BIG_H; y++) {
-        const uint8_t* row = (const uint8_t*)buf + (size_t)y * (bthumb::BIG_W / 8);
+        const uint8_t* row = buf + (size_t)y * (bthumb::BIG_W / 8);
         for (int x = 0; x < bthumb::BIG_W; x++)
           if (!(row[x >> 3] & (0x80 >> (x & 7)))) {
             inkRows++;
@@ -1183,33 +1186,36 @@ int main() {
       }
     }
 
-    // The keep list: full-size covers are capped, and the oldest goes first.
-    // The small thumbnails are not capped -- they are 1.9 KB and the strip
-    // needs them.
-    for (int i = 0; i < bthumb::BIG_KEEP + 2; i++) {
+    // The card has room for every book, so nothing is ever evicted -- the
+    // old ten-cover cap was there because internal flash did not.
+    for (int i = 0; i < 14; i++) {
       char name[32];
-      snprintf(name, sizeof(name), "/books/cap%02d.tbk", i);
+      snprintf(name, sizeof(name), "/books/many%02d.tbk", i);
       if (!feed(name, 240, 400, 1)) {
-        printf("COVER BUILD FAIL: cover %d of the cap run\n", i);
+        printf("COVER BUILD FAIL: cover %d of the long run\n", i);
         abort();
       }
     }
-    // "down" and "up" were made before the run, so the twelve that followed
-    // have pushed them both out.
-    if (bthumb::haveBig("/books/down.tbk") || bthumb::haveBig("/books/up.tbk")) {
-      printf("COVER BUILD FAIL: the cap kept more than %d covers\n", bthumb::BIG_KEEP);
+    if (!bthumb::haveBig(stickyHost, "/books/down.tbk") ||
+        !bthumb::haveBig(stickyHost, "/books/many00.tbk") ||
+        !bthumb::haveBig(stickyHost, "/books/many13.tbk")) {
+      printf("COVER BUILD FAIL: a cover went missing from the card\n");
       abort();
     }
+    // The strip thumbnails stay in internal flash: the hub draws them with no
+    // card session, and must never need one.
     if (!bthumb::have("/books/down.tbk")) {
-      printf("COVER BUILD FAIL: the cap took the small thumbnail too\n");
+      printf("COVER BUILD FAIL: the strip thumbnail is not in flash\n");
       abort();
     }
-    if (!bthumb::haveBig("/books/cap11.tbk") || !bthumb::haveBig("/books/cap02.tbk")) {
-      printf("COVER BUILD FAIL: the cap dropped a cover it should have kept\n");
+    stickyHost.sdMgrClose();
+    // ...and with the card handed back, reading a cover claims the bus by
+    // itself, which is what the loading screen relies on.
+    if (!bthumb::haveBig(stickyHost, "/books/down.tbk")) {
+      printf("COVER BUILD FAIL: a cover could not be read with no session open\n");
       abort();
     }
-    printf("cover builder ok (shrinks, grows to fill, and keeps the last %d)\n",
-           bthumb::BIG_KEEP);
+    printf("cover builder ok (shrinks, grows to fill, lives on the card)\n");
   }
 
   // --- the EPUB reader app ---------------------------------------------------
