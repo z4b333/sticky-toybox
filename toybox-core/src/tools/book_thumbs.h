@@ -161,6 +161,15 @@ class Builder {
     memset(_small, 255, (size_t)W * H);
     bigPath(file, _bigPath, sizeof(_bigPath));
     path(file, _smallPath, sizeof(_smallPath));
+    // Sweep this book's old flash cover, from before they moved to the card.
+    // Done here rather than as a migration pass, so it costs one remove on
+    // the open that was rebuilding the cover anyway.
+    {
+      char stale[20];
+      staleFlashPath(file, stale, sizeof(stale));
+      if (tfs::exists(stale)) tfs::remove(stale);
+      if (tfs::exists("/cv_index")) tfs::remove("/cv_index");
+    }
     // The card holds the picture, so this only works while something already
     // has the bus -- which, on a book's first open, something does.
     if (!_host->sdStreamOpen(_bigPath)) {
