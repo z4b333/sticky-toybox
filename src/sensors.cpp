@@ -75,6 +75,14 @@ void begin() {
 #ifndef TOYBOX_HOST
   Wire1.begin(PIN_SENS_SDA, PIN_SENS_SCL, 400000);
   g_gauge = probe(ADDR_GAUGE);
+  // Seen absent on two real boots and present after a restart both times: the
+  // BQ27220 is still waking when the bus first asks. One retry after its
+  // datasheet-scale settling time costs 60 ms on the boots where it is needed
+  // and nothing when it is not.
+  if (!g_gauge) {
+    delay(60);
+    g_gauge = probe(ADDR_GAUGE);
+  }
   g_rtc = probe(ADDR_RTC);
   g_sht = probe(ADDR_SHT);
   g_imu = probe(ADDR_IMU);

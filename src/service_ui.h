@@ -140,14 +140,14 @@ inline void render(ToolsCanvas& c, const Report& r, const Config& cfg, int sel, 
   c.text(MARGIN, y, buf, TS_MED, true);
   y += 26;
 
+  // One line for the pair: nine correction rows below need the height, and
+  // the version line was overlapping the first of them before this merge.
   if (r.battMv >= 0)
-    snprintf(buf, sizeof(buf), "battery  %d.%02d V", r.battMv / 1000, (r.battMv % 1000) / 10);
+    snprintf(buf, sizeof(buf), "battery  %d.%02d V     psram  %lu KB", r.battMv / 1000,
+             (r.battMv % 1000) / 10, (unsigned long)r.psramKb);
   else
-    snprintf(buf, sizeof(buf), "battery  no gauge");
-  c.text(MARGIN, y, buf, TS_MED, true);
-  y += 26;
-
-  snprintf(buf, sizeof(buf), "psram    %lu KB", (unsigned long)r.psramKb);
+    snprintf(buf, sizeof(buf), "battery  no gauge     psram  %lu KB",
+             (unsigned long)r.psramKb);
   c.text(MARGIN, y, buf, TS_MED, true);
   y += 26;
 
