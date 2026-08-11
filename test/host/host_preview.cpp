@@ -1117,6 +1117,101 @@ int main() {
     printf("epub covers ok (png rgb+palette, progressive DC extractor)\n");
   }
 
+  // --- the streaming cover builder -------------------------------------------
+  // The thing that lets a cover be panel-sized at all: rows go in, two
+  // pictures come out, and the memory in between is a band rather than the
+  // whole image. Both directions matter -- covers arrive larger than the
+  // panel (baseline JPEG) and much smaller (the progressive DC pass, which
+  // only ever yields an eighth).
+  {
+    auto feed = [](const char* file, int w, int h, int maxUp) {
+      bthumb::Builder b;
+      if (!b.begin(file, w, h, maxUp)) return false;
+      uint8_t* line = (uint8_t*)malloc((size_t)w);
+      for (int y = 0; y < h; y++) {
+        // A frame around a diagonal: ink at the edges and on a line, so a
+        // squashed or torn output is visible as a wrong count.
+        for (int x = 0; x < w; x++) {
+          const bool edge = x < 2 || y < 2 || x >= w - 2 || y >= h - 2;
+          const bool diag = (x * h / w) == y;
+          line[x] = (edge || diag) ? 0 : 255;
+        }
+        b.row(y, line, w);
+      }
+      free(line);
+      return b.finish();
+    };
+
+    // Shrinking: twice the panel in each direction.
+    if (!feed("/books/down.tbk", 960, 1600, 1) || !bthumb::haveBig("/books/down.tbk") ||
+        !bthumb::have("/books/down.tbk")) {
+      printf("COVER BUILD FAIL: a shrunk cover did not come out whole\n");
+      abort();
+    }
+    // Growing: a DC-sized image, which must fill the panel rather than float
+    // small in the middle of it.
+    if (!feed("/books/up.tbk", 176, 250, 6) || !bthumb::haveBig("/books/up.tbk")) {
+      printf("COVER BUILD FAIL: an enlarged cover did not come out whole\n");
+      abort();
+    }
+    {
+      // The enlarged one must actually reach the panel's edges: a frame two
+      // pixels thick, spread 2.7x, has to leave ink on the outer columns.
+      size_t len = 0;
+      char p[24];
+      bthumb::bigPath("/books/up.tbk", p, sizeof(p));
+      char* buf = tfs::readAlloc(p, len);
+      if (!buf || len != (size_t)bthumb::BIG_BYTES) {
+        printf("COVER BUILD FAIL: enlarged cover is %zu bytes\n", len);
+        abort();
+      }
+      int inkRows = 0;
+      for (int y = 0; y < bthumb::BIG_H; y++) {
+        const uint8_t* row = (const uint8_t*)buf + (size_t)y * (bthumb::BIG_W / 8);
+        for (int x = 0; x < bthumb::BIG_W; x++)
+          if (!(row[x >> 3] & (0x80 >> (x & 7)))) {
+            inkRows++;
+            break;
+          }
+      }
+      free(buf);
+      // 176x250 grown to fill 480 wide is 682 rows of picture in an 800-row
+      // panel; every one of them carries at least the frame's edge.
+      if (inkRows < 600) {
+        printf("COVER BUILD FAIL: enlarged cover only reached %d rows\n", inkRows);
+        abort();
+      }
+    }
+
+    // The keep list: full-size covers are capped, and the oldest goes first.
+    // The small thumbnails are not capped -- they are 1.9 KB and the strip
+    // needs them.
+    for (int i = 0; i < bthumb::BIG_KEEP + 2; i++) {
+      char name[32];
+      snprintf(name, sizeof(name), "/books/cap%02d.tbk", i);
+      if (!feed(name, 240, 400, 1)) {
+        printf("COVER BUILD FAIL: cover %d of the cap run\n", i);
+        abort();
+      }
+    }
+    // "down" and "up" were made before the run, so the twelve that followed
+    // have pushed them both out.
+    if (bthumb::haveBig("/books/down.tbk") || bthumb::haveBig("/books/up.tbk")) {
+      printf("COVER BUILD FAIL: the cap kept more than %d covers\n", bthumb::BIG_KEEP);
+      abort();
+    }
+    if (!bthumb::have("/books/down.tbk")) {
+      printf("COVER BUILD FAIL: the cap took the small thumbnail too\n");
+      abort();
+    }
+    if (!bthumb::haveBig("/books/cap11.tbk") || !bthumb::haveBig("/books/cap02.tbk")) {
+      printf("COVER BUILD FAIL: the cap dropped a cover it should have kept\n");
+      abort();
+    }
+    printf("cover builder ok (shrinks, grows to fill, and keeps the last %d)\n",
+           bthumb::BIG_KEEP);
+  }
+
   // --- the EPUB reader app ---------------------------------------------------
   // Open through the hub, read, turn, close; then the CrossPoint round-trip:
   // the position a turn writes must be the position a fresh open lands on,

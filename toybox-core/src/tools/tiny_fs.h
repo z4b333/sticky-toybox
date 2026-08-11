@@ -74,6 +74,37 @@ inline int list(const char* dir, const char* ext, char* names, int stride, int m
 
 inline void ensureDir(const char*) {}
 
+// A file written a piece at a time, for images too big to hold whole. The
+// host build just gathers the pieces, which is all a preview needs.
+class Out {
+ public:
+  bool begin(const char* path) {
+    _path = path;
+    _buf.clear();
+    _open = true;
+    return true;
+  }
+  bool write(const void* d, size_t n) {
+    if (!_open) return false;
+    _buf.append((const char*)d, n);
+    return true;
+  }
+  bool end() {
+    if (!_open) return false;
+    hostFs()[_path] = _buf;
+    _open = false;
+    return true;
+  }
+  void abort() {
+    _open = false;
+    _buf.clear();
+  }
+
+ private:
+  std::string _path, _buf;
+  bool _open = false;
+};
+
 #else
 
 inline bool begin() {
@@ -164,6 +195,42 @@ inline int list(const char* dir, const char* ext, char* names, int stride, int m
   }
   return n;
 }
+
+// A file written a piece at a time. A 48 KB cover would otherwise have to be
+// assembled in RAM before it could be saved, and during a book's first open
+// that RAM is already carrying a zip window and an image decoder.
+class Out {
+ public:
+  bool begin(const char* path) {
+    if (!tfs::begin()) return false;
+    strncpy(_path, path, sizeof(_path) - 1);
+    _path[sizeof(_path) - 1] = 0;
+    _f = LittleFS.open(_path, "w");
+    _ok = (bool)_f;
+    return _ok;
+  }
+  bool write(const void* d, size_t n) {
+    if (!_ok) return false;
+    if (_f.write((const uint8_t*)d, n) != n) _ok = false;
+    return _ok;
+  }
+  bool end() {
+    if (!_f) return false;
+    _f.close();
+    if (!_ok) LittleFS.remove(_path);  // a torn file is worse than none
+    return _ok;
+  }
+  void abort() {
+    if (_f) _f.close();
+    LittleFS.remove(_path);
+    _ok = false;
+  }
+
+ private:
+  File _f;
+  char _path[32] = {};
+  bool _ok = false;
+};
 
 #endif
 

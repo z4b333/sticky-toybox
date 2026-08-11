@@ -77,6 +77,19 @@ int main(int argc, char** argv) {
       fclose(out);
       printf("  wrote cover_thumb.pgm\n");
     }
+    // ...and the panel-sized one the loading screen blits.
+    {
+      char bp[24];
+      bthumb::bigPath("/books/cli.epub", bp, sizeof(bp));
+      size_t len = 0;
+      if (char* big = tfs::readAlloc(bp, len)) {
+        FILE* o = fopen("cover_big.bin", "wb");
+        fwrite(big, 1, len, o);
+        fclose(o);
+        free(big);
+        printf("  wrote cover_big.bin (%zu bytes)\n", len);
+      }
+    }
   }
 
   // every chapter: word count, offsets monotonic, timing; print a taste

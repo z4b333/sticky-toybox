@@ -1,4 +1,9 @@
 // The cover pipeline. See tools/epub/epub_cover.h.
+//
+// All three decode paths hand their output to one streaming builder, which
+// never holds more than a band of rows -- see book_thumbs.h for why that
+// matters. Nothing here knows what size the pictures come out; that is the
+// builder's business.
 #include "tools/epub/epub_cover.h"
 
 #include <stdlib.h>
@@ -15,58 +20,17 @@ extern "C" {
 namespace epubcov {
 namespace {
 
-// The accumulator: every decoded pixel lands in one target cell; the cell
-// averages when decoding ends. Sixteen-bit sums are safe because both
-// decoders cap their output around 1400x2240, which keeps any cell under
-// ~250 samples of at most 255 each.
-struct Acc {
-  uint16_t sum[bthumb::W * bthumb::H];
-  uint16_t cnt[bthumb::W * bthumb::H];
-  int srcW = 0, srcH = 0;   // decoded source size
-  int outW = 0, outH = 0;   // the fitted box inside 96x160
-  int xOff = 0, yOff = 0;
-
-  void fit(int w, int h) {
-    srcW = w;
-    srcH = h;
-    // largest box with the cover's aspect that fits the thumbnail
-    if ((int64_t)w * bthumb::H >= (int64_t)h * bthumb::W) {
-      outW = bthumb::W;
-      outH = (int)(((int64_t)h * bthumb::W + w / 2) / w);
-    } else {
-      outH = bthumb::H;
-      outW = (int)(((int64_t)w * bthumb::H + h / 2) / h);
-    }
-    if (outW < 1) outW = 1;
-    if (outH < 1) outH = 1;
-    xOff = (bthumb::W - outW) / 2;
-    yOff = (bthumb::H - outH) / 2;
-  }
-
-  void add(int x, int y, uint8_t v) {
-    const int tx = xOff + (int)((int64_t)x * outW / srcW);
-    const int ty = yOff + (int)((int64_t)y * outH / srcH);
-    const int i = ty * bthumb::W + tx;
-    sum[i] = (uint16_t)(sum[i] + v);
-    cnt[i]++;
-  }
-
-  void finish(uint8_t* gray) {
-    for (int i = 0; i < bthumb::W * bthumb::H; i++)
-      gray[i] = cnt[i] ? (uint8_t)(sum[i] / cnt[i]) : 255;  // white matte
-  }
-};
-
-// --- JPEG ---------------------------------------------------------------------
-
-struct JpegCtx {
+struct Ctx {
   epubc::Book* book;
-  Acc* acc;
-  int scale;  // 2^scale divisor tjpgd applies before we see pixels
+  bthumb::Builder* out;
+  const char* file;
+  bool sized = false;
 };
+
+// --- JPEG, baseline (TJpgDec) -------------------------------------------------
 
 size_t jpegIn(JDEC* jd, uint8_t* buf, size_t n) {
-  auto* ctx = (JpegCtx*)jd->device;
+  auto* ctx = (Ctx*)jd->device;
   if (buf) {
     const int got = ctx->book->coverRead(buf, (int)n);
     return got < 0 ? 0 : (size_t)got;
@@ -84,84 +48,29 @@ size_t jpegIn(JDEC* jd, uint8_t* buf, size_t n) {
 }
 
 int jpegOut(JDEC* jd, void* bitmap, JRECT* rect) {
-  auto* ctx = (JpegCtx*)jd->device;
-  const uint8_t* px = (const uint8_t*)bitmap;  // grayscale, JD_FORMAT 2
-  for (int y = rect->top; y <= rect->bottom; y++)
-    for (int x = rect->left; x <= rect->right; x++) ctx->acc->add(x, y, *px++);
+  auto* ctx = (Ctx*)jd->device;
+  ctx->out->block(rect->left, rect->top, rect->right - rect->left + 1,
+                  rect->bottom - rect->top + 1, (const uint8_t*)bitmap);
   return 1;
 }
 
-// The DC-extractor callbacks, shared shape with the PNG path.
-struct DcCtx {
-  epubc::Book* book;
-  Acc* acc;
-};
+// --- PNG and the progressive DC pass, both row at a time ----------------------
 
-int dcRead(void* pctx, uint8_t* dst, int n) {
-  return ((DcCtx*)pctx)->book->coverRead(dst, n);
+int streamRead(void* pctx, uint8_t* dst, int n) {
+  return ((Ctx*)pctx)->book->coverRead(dst, n);
 }
 
-bool dcSize(void* uctx, int w, int h) {
-  ((DcCtx*)uctx)->acc->fit(w, h);
-  return true;
+bool streamSize(void* uctx, int w, int h) {
+  auto* ctx = (Ctx*)uctx;
+  // Row-at-a-time decoders may enlarge: the progressive path only ever hands
+  // back the image at an eighth of its size, and a cover floating small in
+  // the middle of the panel is not what a loading screen is for.
+  ctx->sized = ctx->out->begin(ctx->file, w, h, 6);
+  return ctx->sized;
 }
 
-void dcRow(void* uctx, int y, const uint8_t* gray, int w) {
-  Acc* acc = ((DcCtx*)uctx)->acc;
-  for (int x = 0; x < w; x++) acc->add(x, y, gray[x]);
-}
-
-bool decodeJpeg(epubc::Book& book, Acc& acc) {
-  constexpr size_t WORK = 6500;  // JD_FASTDECODE=1 wants ~3.5 KB; headroom costs little
-  void* work = malloc(WORK);
-  if (!work) return false;
-  JpegCtx ctx{&book, &acc, 0};
-  JDEC jd;
-  const JRESULT prep = jd_prepare(&jd, jpegIn, work, WORK, &ctx);
-  if (prep == JDR_OK) {
-    // Baseline: tjpgd does the whole job. Scale big covers down before they
-    // reach the accumulator: past ~1200 px wide the extra samples add
-    // nothing a 96-px thumbnail can keep.
-    int scale = 0;
-    while (scale < 3 && ((jd.width >> scale) > 1200 || (jd.height >> scale) > 1920)) scale++;
-    acc.fit(jd.width >> scale, jd.height >> scale);
-    ctx.scale = scale;
-    const JRESULT r = jd_decomp(&jd, jpegOut, (uint8_t)scale);
-    free(work);
-    return r == JDR_OK;
-  }
-  free(work);
-  if (prep != JDR_FMT3) return false;  // corrupt, not merely progressive
-
-  // Progressive (JDR_FMT3): commercial covers often are. Restart the entry
-  // and stream just the first scan -- the DC coefficients -- which is the
-  // image at 1/8 scale, still bigger than the thumbnail wants.
-  book.coverClose();
-  if (!book.coverOpen()) return false;
-  DcCtx dctx{&book, &acc};
-  ejdc::In in{&dctx, dcRead};
-  return ejdc::decodeGray(in, dcSize, dcRow, &dctx);
-}
-
-// --- PNG ----------------------------------------------------------------------
-
-struct PngCtx {
-  epubc::Book* book;
-  Acc* acc;
-};
-
-int pngRead(void* pctx, uint8_t* dst, int n) {
-  return ((PngCtx*)pctx)->book->coverRead(dst, n);
-}
-
-bool pngSize(void* uctx, int w, int h) {
-  ((PngCtx*)uctx)->acc->fit(w, h);
-  return true;
-}
-
-void pngRow(void* uctx, int y, const uint8_t* gray, int w) {
-  Acc* acc = ((PngCtx*)uctx)->acc;
-  for (int x = 0; x < w; x++) acc->add(x, y, gray[x]);
+void streamRow(void* uctx, int y, const uint8_t* gray, int w) {
+  ((Ctx*)uctx)->out->row(y, gray, w);
 }
 
 }  // namespace
@@ -171,33 +80,55 @@ bool makeThumb(epubc::Book& book, const char* bookFile) {
   if (type == epubc::Book::COVER_NONE) return false;
   if (!book.coverOpen()) return false;
 
-  Acc* acc = (Acc*)calloc(1, sizeof(Acc));
-  if (!acc) {
-    book.coverClose();
-    return false;
-  }
-
+  bthumb::Builder builder;
+  Ctx ctx{&book, &builder, bookFile, false};
   bool ok = false;
-  if (type == epubc::Book::COVER_JPEG) {
-    ok = decodeJpeg(book, *acc);
-  } else {
-    PngCtx ctx{&book, acc};
-    epng::In in{&ctx, pngRead};
-    ok = epng::decodeGray(in, pngSize, pngRow, &ctx);
-  }
-  book.coverClose();
 
-  if (ok) {
-    uint8_t* gray = (uint8_t*)malloc(bthumb::W * bthumb::H);
-    if (gray) {
-      acc->finish(gray);
-      bthumb::saveGray(bookFile, gray);
-      free(gray);
-    } else {
-      ok = false;
+  if (type == epubc::Book::COVER_JPEG) {
+    constexpr size_t WORK = 6500;  // JD_FASTDECODE=1 wants ~3.5 KB; headroom costs little
+    void* work = malloc(WORK);
+    if (!work) {
+      book.coverClose();
+      return false;
     }
+    JDEC jd;
+    const JRESULT prep = jd_prepare(&jd, jpegIn, work, WORK, &ctx);
+    if (prep == JDR_OK) {
+      // Baseline: TJpgDec does the whole job. Its own scaler drops anything
+      // enormous before it reaches us, which costs nothing and saves time.
+      int scale = 0;
+      while (scale < 3 && ((jd.width >> scale) > 1600 || (jd.height >> scale) > 2400)) scale++;
+      if (builder.begin(bookFile, jd.width >> scale, jd.height >> scale)) {
+        ok = jd_decomp(&jd, jpegOut, (uint8_t)scale) == JDR_OK;
+        ok = ok && builder.finish();
+        if (!ok) builder.abort();
+      }
+      free(work);
+      book.coverClose();
+      return ok;
+    }
+    free(work);
+    if (prep != JDR_FMT3) {  // corrupt, not merely progressive
+      book.coverClose();
+      return false;
+    }
+    // Progressive: commercial covers usually are. The first scan is the DC
+    // coefficients -- the image at 1/8 -- which is still larger than the
+    // panel for any real cover.
+    book.coverClose();
+    if (!book.coverOpen()) return false;
+    ejdc::In in{&ctx, streamRead};
+    ok = ejdc::decodeGray(in, streamSize, streamRow, &ctx);
+  } else {
+    epng::In in{&ctx, streamRead};
+    ok = epng::decodeGray(in, streamSize, streamRow, &ctx);
   }
-  free(acc);
+
+  book.coverClose();
+  if (ok && ctx.sized)
+    ok = builder.finish();
+  else
+    builder.abort();
   return ok;
 }
 
