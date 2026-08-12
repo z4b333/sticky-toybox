@@ -1037,9 +1037,10 @@ int main() {
     setScreen("tool_books_options");
     stickyHost.refresh(true);
 
-    // Keep this page, and prove it reached the card rather than a variable.
+    // Keep this page, from the + on the bookmarks row, and prove it reached
+    // the card rather than a variable.
     g_dumpEnabled = false;
-    toybox.onTap(240, rmenu::rootRect(2, 480).y + 40);
+    toybox.onTap(rmenu::plusRect(1, 480).x + 40, rmenu::plusRect(1, 480).y + 40);
     if (bt->hostMarkCount() != 1) {
       printf("BOOK FAIL: keeping a page gave %d marks\n", bt->hostMarkCount());
       abort();
@@ -1049,7 +1050,7 @@ int main() {
       marks::path("/books/grey-test.tbk", mp, sizeof(mp));
       uint8_t raw[marks::FILE_BYTES];
       if (stickyHost.sdReadFile(mp, raw, sizeof(raw)) != marks::FILE_BYTES ||
-          memcmp(raw, "TBM1", 4) != 0 || raw[4] != 1) {
+          memcmp(raw, "TBM2", 4) != 0 || raw[4] != 1) {
         printf("BOOK FAIL: no bookmark file on the card at %s\n", mp);
         abort();
       }
@@ -1066,21 +1067,32 @@ int main() {
     stickyHost.refresh(true);
     g_dumpEnabled = false;
     {
-      // The grey book is three pages, so +10 has to stop at the last one
-      // rather than dialling past the end of the book.
-      const TRect plusTen = BookTool::hostDialRect(4, 480);
-      toybox.onTap(plusTen.x + plusTen.w / 2, plusTen.y + plusTen.h / 2);
+      // The keypad. The grey book is three pages, so a 9 is a typo and must be
+      // refused rather than clamped -- clamping a mis-key lands you somewhere
+      // you did not ask for and looks like the device deciding for itself.
+      auto key = [&](int i) {
+        const TRect r = BookTool::hostKeyRect(i, 480);
+        toybox.onTap(r.x + r.w / 2, r.y + r.h / 2);
+      };
+      const uint32_t before = bt->hostDialled();
+      key(8);  // "9", a typo in a three-page book
+      if (bt->hostDialled() != before) {
+        printf("BOOK FAIL: 9 was accepted in a 3-page book (%lu -> %lu)\n",
+               (unsigned long)before, (unsigned long)bt->hostDialled());
+        abort();
+      }
+      key(2);  // "3", the last page
       if (bt->hostDialled() != 2) {
-        printf("BOOK FAIL: +10 in a 3-page book dialled to %lu\n",
-               (unsigned long)bt->hostDialled());
+        printf("BOOK FAIL: keying 3 dialled %lu\n", (unsigned long)bt->hostDialled());
         abort();
       }
-      toybox.onButton(SideBtn::Up);  // one back
+      key(11);  // BACK, clearing it
+      key(1);   // "2"
       if (bt->hostDialled() != 1) {
-        printf("BOOK FAIL: UP did not step the dial\n");
+        printf("BOOK FAIL: BACK then 2 dialled %lu\n", (unsigned long)bt->hostDialled());
         abort();
       }
-      toybox.onTap(240, 588);  // GO
+      toybox.onTap(240, 680);  // GO
       if (bt->hostMenu() != 0 || bt->hostPage() != 1) {
         printf("BOOK FAIL: GO landed on page %lu (menu %d)\n", (unsigned long)bt->hostPage(),
                bt->hostMenu());
@@ -1090,12 +1102,12 @@ int main() {
 
     // And the way out is a row.
     toybox.onButton(SideBtn::Ok);
-    toybox.onTap(240, rmenu::rootRect(3, 480).y + 40);
+    toybox.onTap(240, rmenu::rootRect(2, 480).y + 40);
     if (bt->hostScreen() != 0) {
       printf("BOOK FAIL: CLOSE THE BOOK did not close it\n");
       abort();
     }
-    printf("tbk panel ok (page dial clamps, marks on the card, out by a row)\n");
+    printf("tbk panel ok (keypad refuses a typo, marks on the card, out by a row)\n");
     // ...and means nothing on the list, so main.cpp falls through to its own
     // uses of the button.
     if (toybox.onButton(SideBtn::Ok)) {
@@ -1880,11 +1892,68 @@ int main() {
       abort();
     }
 
-    // A place kept, on the card, where a reflash cannot reach it.
+    // A phrase kept, on the card, where a reflash cannot reach it. The pick
+    // needs words on the screen, so go to the chapter of them first.
     toybox.onButton(SideBtn::Ok);
-    toybox.onTap(240, rmenu::rootRect(2, 480).y + 40);  // KEEP THIS PLACE
-    if (et->hostMarkCount() != 1) {
-      printf("EPUB APP FAIL: keeping a place gave %d marks\n", et->hostMarkCount());
+    toybox.onTap(240, rmenu::rootRect(0, 480).y + 40);  // CONTENTS
+    toybox.onTap(240, shelf::Y0 + shelf::ROW_H + 20);   // the long chapter
+    if (et->hostSpine() != 1 || et->hostLineCount() < 3) {
+      printf("EPUB APP FAIL: no page of words to pick from (s%d, %d lines)\n", et->hostSpine(),
+             et->hostLineCount());
+      abort();
+    }
+    toybox.onButton(SideBtn::Ok);
+    toybox.onTap(rmenu::plusRect(1, 480).x + 40, rmenu::plusRect(1, 480).y + 40);
+    if (!et->hostPicking()) {
+      printf("EPUB APP FAIL: + did not start a phrase pick\n");
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_epub_pick");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    toybox.onTap(40, et->hostLineY(0) + 10);   // the first word of the page
+    if (!et->hostPicking()) {
+      printf("EPUB APP FAIL: the first word ended the pick\n");
+      abort();
+    }
+    toybox.onTap(200, et->hostLineY(1) + 10);  // ...and a word on the next line
+    if (et->hostMenu() != (int)rmenu::Page::Keep || !et->hostPhrase()[0]) {
+      printf("EPUB APP FAIL: the pick gave menu %d phrase '%s'\n", et->hostMenu(),
+             et->hostPhrase());
+      abort();
+    }
+    // The phrase must be the words themselves, in order, starting with the
+    // first word of the page -- not a page number wearing a costume.
+    if (strncmp(et->hostPhrase(), et->hostLine(0), 5) != 0) {
+      printf("EPUB APP FAIL: phrase '%s' does not start the line '%s'\n", et->hostPhrase(),
+             et->hostLine(0));
+      abort();
+    }
+    // ...and it must actually run ONTO the second line, since that is where
+    // the closing tap was. A phrase that stops at the line break would be a
+    // line, which is not what was asked for.
+    {
+      char firstOfNext[16] = "";
+      snprintf(firstOfNext, sizeof(firstOfNext), "%.5s", et->hostLine(1));
+      // ...unless the label ran out first and said so, which is the honest
+      // answer for a phrase longer than a bookmark: 40 bytes and an ellipsis.
+      const char* ph = et->hostPhrase();
+      const size_t pl = strlen(ph);
+      const bool cut = pl >= 3 && strcmp(ph + pl - 3, "...") == 0;
+      if (!strstr(ph, firstOfNext) && !cut) {
+        printf("EPUB APP FAIL: phrase '%s' never reached line two ('%s')\n", ph, firstOfNext);
+        abort();
+      }
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_epub_keep");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    toybox.onTap(120, 600);  // SAVE
+    if (et->hostMarkCount() != 1 || !et->hostMarkLabel(0)[0]) {
+      printf("EPUB APP FAIL: saving gave %d marks, label '%s'\n", et->hostMarkCount(),
+             et->hostMarkLabel(0));
       abort();
     }
     {
@@ -1892,17 +1961,22 @@ int main() {
       marks::path("/books/wind.epub", mp, sizeof(mp));
       uint8_t raw[marks::FILE_BYTES];
       if (stickyHost.sdReadFile(mp, raw, sizeof(raw)) != marks::FILE_BYTES ||
-          memcmp(raw, "TBM1", 4) != 0 || raw[4] != 1) {
-        printf("EPUB APP FAIL: no bookmark file on the card at %s\n", mp);
+          memcmp(raw, "TBM2", 4) != 0 || raw[4] != 1 || raw[14] == 0) {
+        printf("EPUB APP FAIL: no bookmark with a phrase on the card at %s\n", mp);
         abort();
       }
     }
-    // Asking twice for the same place must not fill the shelf with copies.
-    toybox.onTap(240, rmenu::rootRect(2, 480).y + 40);
+    // CANCEL on the confirmation keeps nothing.
+    toybox.onButton(SideBtn::Ok);
+    toybox.onTap(rmenu::plusRect(1, 480).x + 40, rmenu::plusRect(1, 480).y + 40);
+    toybox.onTap(40, et->hostLineY(0) + 10);
+    toybox.onTap(200, et->hostLineY(1) + 10);
+    toybox.onTap(360, 600);  // CANCEL
     if (et->hostMarkCount() != 1) {
-      printf("EPUB APP FAIL: the same place was kept twice\n");
+      printf("EPUB APP FAIL: CANCEL kept one anyway (%d marks)\n", et->hostMarkCount());
       abort();
     }
+    toybox.onButton(SideBtn::Ok);
     toybox.onTap(240, rmenu::rootRect(1, 480).y + 40);  // BOOKMARKS
     if (et->hostMenu() != (int)rmenu::Page::Marks) {
       printf("EPUB APP FAIL: the bookmark list did not open\n");
@@ -1923,16 +1997,8 @@ int main() {
     // stays where it was reading rather than where the page number was. Done
     // on a page of WORDS -- the jump above left us on a picture, which has no
     // lines to count.
-    toybox.onButton(SideBtn::Ok);
-    toybox.onTap(240, rmenu::rootRect(0, 480).y + 40);        // CONTENTS
-    toybox.onTap(240, shelf::Y0 + shelf::ROW_H + 20);          // the long chapter
-    if (et->hostSpine() != 1 || et->hostLineCount() == 0) {
-      printf("EPUB APP FAIL: the jump to the long chapter gave s%d, %d lines\n",
-             et->hostSpine(), et->hostLineCount());
-      abort();
-    }
     toybox.onButton(SideBtn::Ok);  // the panel again
-    toybox.onTap(240, rmenu::rootRect(3, 480).y + 40);
+    toybox.onTap(240, rmenu::rootRect(2, 480).y + 40);
     if (et->hostMenu() != (int)rmenu::Page::Text) {
       printf("EPUB APP FAIL: the text page did not open\n");
       abort();
@@ -1973,7 +2039,7 @@ int main() {
     toybox.onButton(SideBtn::Ok);  // back to the root
 
     // And the way out is a row, not the button.
-    toybox.onTap(240, rmenu::rootRect(4, 480).y + 40);
+    toybox.onTap(240, rmenu::rootRect(3, 480).y + 40);
     if (et->hostScreen() != 0) {
       printf("EPUB APP FAIL: CLOSE THE BOOK did not close it\n");
       abort();
@@ -2018,7 +2084,7 @@ int main() {
         abort();
       }
       toybox.onButton(SideBtn::Ok);                       // the panel
-      toybox.onTap(240, rmenu::rootRect(4, 480).y + 40);  // CLOSE THE BOOK
+      toybox.onTap(240, rmenu::rootRect(3, 480).y + 40);  // CLOSE THE BOOK
     }
 
     // --- a chapter that is one picture and no words -------------------------
@@ -2067,7 +2133,7 @@ int main() {
         abort();
       }
       toybox.onButton(SideBtn::Ok);                       // the panel
-      toybox.onTap(240, rmenu::rootRect(4, 480).y + 40);  // CLOSE THE BOOK
+      toybox.onTap(240, rmenu::rootRect(3, 480).y + 40);  // CLOSE THE BOOK
       printf("epub picture chapters ok (reachable both ways, never blank)\n");
     }
     toybox.goHub();

@@ -402,8 +402,10 @@ void buildFakeEpub() {
 struct FakeSide {
   char path[160];
   // Big enough for the largest thing written beside a book: CrossPoint's
-  // progress.bin is ten bytes, the KOReader sidecar is a couple of hundred.
-  uint8_t data[512];
+  // progress.bin is ten bytes, the KOReader sidecar a couple of hundred, and
+  // the bookmarks file 774 -- sixteen marks carrying the words they were made
+  // from.
+  uint8_t data[1024];
   int n = 0;
 };
 // Ten, not six: a book now carries a CrossPoint position, a KOReader sidecar

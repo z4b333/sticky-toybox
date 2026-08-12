@@ -243,7 +243,7 @@ class BookTool : public ToolApp {
   int hostMenu() const { return (int)_menu; }
   int hostMarkCount() const { return _nmarks; }
   uint32_t hostDialled() const { return _jump; }
-  static TRect hostDialRect(int i, int w) { return dialRect(i, w); }
+  static TRect hostKeyRect(int i, int w) { return keyRect(i, w); }
   const char* hostDir() const { return _dir; }
   int hostFolders() const { return _nf; }
   int hostItems() const { return items(); }
@@ -527,25 +527,60 @@ class BookTool : public ToolApp {
     host().refresh(true);
   }
 
-  // The jump dial. A .tbk has no chapters, so the only question is a number,
-  // and the only thing that matters is reaching page 300 of 400 without three
-  // hundred taps: ones, tens and fifties, and the buttons do ones.
+  // The jump. A .tbk has no chapters, so the only question is a number, and on
+  // a 400-page volume the answer is typed rather than stepped: twelve keys,
+  // 1-9 then a clear, 0 and a backspace, and the number reads back as it is
+  // built. The side buttons still step by one, for the reader who is nearly
+  // where they want to be.
+  //
+  // `_typed` is what has been keyed, -1 until a key is pressed, so the screen
+  // opens showing the page you are actually on rather than a zero.
   void dial(int by) {
-    const int64_t want = (int64_t)_jump + by;
+    const int64_t base = _typed >= 0 ? _typed : (int64_t)_pageNo;
+    const int64_t want = base + by;
     const int64_t last = (int64_t)_books[_cur].pages - 1;
-    _jump = (uint32_t)(want < 0 ? 0 : (want > last ? last : want));
+    _typed = (int32_t)(want < 0 ? 0 : (want > last ? last : want));
+    _jump = (uint32_t)_typed;
     host().beep(0);
     host().refresh(true);
   }
 
-  static constexpr int DIAL_STEPS = 6;
-  static int dialStep(int i) {
-    static const int kSteps[DIAL_STEPS] = {-50, -10, -1, 1, 10, 50};
-    return kSteps[i];
+  // 1..9, then clear, 0, backspace.
+  static constexpr int KEYS = 12;
+  static TRect keyRect(int i, int w) {
+    const int cw = (w - 48) / 3, ch = 84;
+    return {24 + (i % 3) * cw, 250 + (i / 3) * (ch + 10), cw - 10, ch};
   }
-  static TRect dialRect(int i, int w) {
-    const int cw = (w - 40) / 3;
-    return {20 + (i % 3) * cw, 300 + (i / 3) * 108, cw - 8, 96};
+  static const char* keyLabel(int i) {
+    static const char* const K[KEYS] = {"1", "2", "3", "4",     "5", "6",
+                                        "7", "8", "9", "CLEAR", "0", "BACK"};
+    return K[i];
+  }
+
+  void keyPress(int i) {
+    const uint32_t pages = _books[_cur].pages;
+    if (i == 9) {  // clear
+      _typed = -1;
+      _jump = _pageNo;
+    } else if (i == 11) {  // backspace
+      if (_typed > 0)
+        _typed /= 10;
+      else
+        _typed = -1;
+      _jump = _typed > 0 ? (uint32_t)(_typed - 1) : (_typed == 0 ? 0 : _pageNo);
+    } else {
+      const int digit = i == 10 ? 0 : i + 1;
+      const int64_t next = (_typed < 0 ? 0 : (int64_t)_typed) * 10 + digit;
+      // A page number longer than the book is a typo, not an instruction.
+      if (next > (int64_t)pages) {
+        host().beep(2);
+        return;
+      }
+      _typed = (int32_t)next;
+      _jump = (uint32_t)(next > 0 ? next - 1 : 0);
+    }
+    host().beep(0);
+    host().refresh(true);
   }
 
   void markLabel(const marks::Mark& m, char* out, int cap) {
@@ -554,23 +589,21 @@ class BookTool : public ToolApp {
 
   void renderMenu(ToolsCanvas& c) {
     if (_menu == rmenu::Page::Root) {
-      rmenu::Item items[4];
+      rmenu::Item items[3];
       items[0].label = "GO TO PAGE";
       snprintf(_rootSub[0], sizeof(_rootSub[0]), "page %lu of %lu",
                (unsigned long)(_pageNo + 1), (unsigned long)_books[_cur].pages);
       items[0].sub = _rootSub[0];
       items[1].label = "BOOKMARKS";
       if (_nmarks > 0)
-        snprintf(_rootSub[1], sizeof(_rootSub[1]), "%d kept", _nmarks);
+        snprintf(_rootSub[1], sizeof(_rootSub[1]), "%d kept  -  + keeps this page", _nmarks);
       else
-        snprintf(_rootSub[1], sizeof(_rootSub[1]), "none yet");
+        snprintf(_rootSub[1], sizeof(_rootSub[1]), "none yet  -  + keeps this page");
       items[1].sub = _rootSub[1];
-      items[2].label = "KEEP THIS PAGE";
-      snprintf(_rootSub[2], sizeof(_rootSub[2]), "page %lu", (unsigned long)(_pageNo + 1));
-      items[2].sub = _rootSub[2];
-      items[3].label = "CLOSE THE BOOK";
-      items[3].sub = _books[_cur].title;
-      rmenu::drawRoot(host(), c, "OPTIONS", items, 4);
+      items[1].plus = true;
+      items[2].label = "CLOSE THE BOOK";
+      items[2].sub = _books[_cur].title;
+      rmenu::drawRoot(host(), c, "OPTIONS", items, 3);
       return;
     }
 
@@ -578,17 +611,15 @@ class BookTool : public ToolApp {
       host().topBar("GO TO PAGE", false, "OPTIONS");
       char buf[40];
       snprintf(buf, sizeof(buf), "%lu", (unsigned long)(_jump + 1));
-      c.textCentered(c.width() / 2, 150, buf, TS_HUGE, true);
+      c.textCentered(c.width() / 2, 120, buf, TS_HUGE, true);
       snprintf(buf, sizeof(buf), "of %lu", (unsigned long)_books[_cur].pages);
-      c.textCentered(c.width() / 2, 220, buf, TS_MED, true);
-      for (int i = 0; i < DIAL_STEPS; i++) {
-        const TRect r = dialRect(i, c.width());
-        const int step = dialStep(i);
-        snprintf(buf, sizeof(buf), "%s%d", step > 0 ? "+" : "", step);
-        c.button(r.x, r.y, r.w, r.h, buf, false);
+      c.textCentered(c.width() / 2, 186, buf, TS_MED, true);
+      for (int i = 0; i < KEYS; i++) {
+        const TRect r = keyRect(i, c.width());
+        c.button(r.x, r.y, r.w, r.h, keyLabel(i), false);
       }
-      c.button(60, 540, c.width() - 120, 96, "GO", true);
-      c.textCentered(c.width() / 2, 680, "UP and DOWN step one page at a time", TS_SMALL, true);
+      c.button(24, 640, c.width() - 48, 88, "GO", true);
+      c.textCentered(c.width() / 2, 756, "UP and DOWN step one page at a time", TS_SMALL, true);
       return;
     }
 
@@ -619,10 +650,16 @@ class BookTool : public ToolApp {
       return;
     }
     if (_menu == rmenu::Page::Root) {
-      switch (rmenu::hitRoot(x, y, 4, host().canvas().width())) {
+      const int W = host().canvas().width();
+      if (rmenu::hitPlus(x, y, 1, W)) {
+        keepPage();
+        return;
+      }
+      switch (rmenu::hitRoot(x, y, 3, W)) {
         case 0:
           _menu = rmenu::Page::Contents;
           _jump = _pageNo;
+          _typed = -1;
           host().beep(0);
           host().refresh(true);
           return;
@@ -632,15 +669,7 @@ class BookTool : public ToolApp {
           host().beep(0);
           host().refresh(true);
           return;
-        case 2: {
-          marks::Mark m{marks::TBK_SPINE, (uint16_t)_pageNo, 0};
-          const bool added = marks::add(_marks, _nmarks, m) >= 0;
-          if (added) marks::save(host(), _books[_cur].file, _marks, _nmarks);
-          host().beep(added ? 1 : 2);
-          host().refresh(true);
-          return;
-        }
-        case 3:
+        case 2:
           _menu = rmenu::Page::None;
           leaveBook();
           return;
@@ -650,12 +679,12 @@ class BookTool : public ToolApp {
     }
 
     if (_menu == rmenu::Page::Contents) {
-      for (int i = 0; i < DIAL_STEPS; i++)
-        if (dialRect(i, host().canvas().width()).hit(x, y)) {
-          dial(dialStep(i));
+      for (int i = 0; i < KEYS; i++)
+        if (keyRect(i, host().canvas().width()).hit(x, y)) {
+          keyPress(i);
           return;
         }
-      if (y >= 540 && y < 636) jumpTo(_jump);
+      if (y >= 640 && y < 728) jumpTo(_jump);
       return;
     }
 
@@ -682,6 +711,18 @@ class BookTool : public ToolApp {
       return;
     }
     jumpTo(_marks[idx].page);
+  }
+
+  // A .tbk page is a picture: there are no words in it this firmware can read,
+  // so the page number is the whole of the mark and there is nothing to pick.
+  void keepPage() {
+    marks::Mark m{};
+    m.spine = marks::TBK_SPINE;
+    m.page = (uint16_t)_pageNo;
+    const bool added = marks::add(_marks, _nmarks, m) >= 0;
+    if (added) marks::save(host(), _books[_cur].file, _marks, _nmarks);
+    host().beep(added ? 1 : 2);
+    host().refresh(true);
   }
 
   void jumpTo(uint32_t page) {
@@ -768,7 +809,8 @@ class BookTool : public ToolApp {
 
   rmenu::Page _menu = rmenu::Page::None;
   int _mpage = 0;
-  uint32_t _jump = 0;              // the page being dialled on the jump screen
+  uint32_t _jump = 0;              // the page the jump screen would go to
+  int32_t _typed = -1;             // what has been keyed, -1 until a key is
   marks::Mark _marks[marks::MAX];
   int _nmarks = 0;
   char _rootSub[3][48] = {};

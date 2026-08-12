@@ -95,6 +95,10 @@ class EpubTool : public ToolApp {
       return;
     }
     if (_screen == Screen::Page) {
+      if (_picking) {
+        renderPick(c);
+        return;
+      }
       if (_menu != rmenu::Page::None) {
         renderMenu(c);
         return;
@@ -177,6 +181,10 @@ class EpubTool : public ToolApp {
       openBook(idx - _nf);
       return;
     }
+    if (_picking) {
+      pickTap(x, y);
+      return;
+    }
     if (_menu != rmenu::Page::None) {
       menuTap(x, y);
       return;
@@ -205,6 +213,10 @@ class EpubTool : public ToolApp {
   bool onButton(SideBtn b) override {
     if (_screen != Screen::Page) return false;
     if (b == SideBtn::Ok) {
+      if (_picking) {
+        pickCancel();
+        return true;
+      }
       if (_menu == rmenu::Page::None)
         menuOpen();
       else if (_menu == rmenu::Page::Root)
@@ -246,6 +258,10 @@ class EpubTool : public ToolApp {
   uint32_t hostPageOffset() const { return curOffset(); }
   const char* hostPageImage() const { return _pageImage; }
   int hostMenu() const { return (int)_menu; }
+  bool hostPicking() const { return _picking; }
+  const char* hostPhrase() const { return _phrase; }
+  int hostLineY(int i) const { return i < _lineN ? _lines[i].y : -1; }
+  const char* hostMarkLabel(int i) const { return i < _nmarks ? _marks[i].label : ""; }
   int hostMarkCount() const { return _nmarks; }
   int hostTextSize() const { return _size; }
   int hostTocCount() { return _ntoc; }
@@ -397,6 +413,7 @@ class EpubTool : public ToolApp {
     }
     _open = true;
     _menu = rmenu::Page::None;
+    _picking = false;
     _ntoc = -1;
     _nmarks = 0;
     recents::note(prefs(), recents::KIND_EPUB, _books[i].file, _books[i].title);
@@ -973,34 +990,264 @@ class EpubTool : public ToolApp {
   }
 
   void markLabel(const marks::Mark& m, char* out, int cap) {
-    snprintf(out, (size_t)cap, "ch %u  -  page %u", (unsigned)(m.spine + 1),
-             (unsigned)(m.page + 1));
+    if (m.label[0])
+      snprintf(out, (size_t)cap, "%s", m.label);
+    else
+      snprintf(out, (size_t)cap, "chapter %u, page %u", (unsigned)(m.spine + 1),
+               (unsigned)(m.page + 1));
+  }
+
+  // --- keeping a phrase --------------------------------------------------------
+  // A bookmark that says "ch 7, page 12" is a memory of nothing, and page 12
+  // stops being page 12 the moment the type changes. So a mark carries the
+  // words that were on the page, and the reader points at them: the page stays
+  // where it is, the first tap opens the phrase, the second closes it, and a
+  // third screen shows what will be kept before it is kept.
+
+  int lineStepNow() {
+    ToolsCanvas& c = host().canvas();
+    return c.textHeight(epubui::sizeAt(_size)) + epubui::leadAir(_lead);
+  }
+
+  // Which word of a line a tap landed on, measured from the same string the
+  // page was drawn from. -1 when the tap is past the end of the line.
+  int wordAt(const char* line, int tapX) {
+    ToolsCanvas& c = host().canvas();
+    const TSize ts = epubui::sizeAt(_size);
+    char probe[200];
+    int i = 0, word = 0;
+    while (line[i]) {
+      int j = i;
+      while (line[j] && line[j] != ' ') j++;
+      const int n = j - i > (int)sizeof(probe) - 1 ? (int)sizeof(probe) - 1 : j - i;
+      memcpy(probe, line, (size_t)(i + n) > sizeof(probe) - 1 ? sizeof(probe) - 1 : (size_t)(i + n));
+      probe[(size_t)(i + n) > sizeof(probe) - 1 ? sizeof(probe) - 1 : (size_t)(i + n)] = 0;
+      if (epubui::MARGIN + c.textWidth(probe, ts) > tapX) return word;
+      while (line[j] == ' ') j++;
+      i = j;
+      word++;
+    }
+    return word > 0 ? word - 1 : -1;
+  }
+
+  // The x span of word `w` in `line`, for the underline.
+  void wordSpan(const char* line, int w, int& x0, int& x1) {
+    ToolsCanvas& c = host().canvas();
+    const TSize ts = epubui::sizeAt(_size);
+    char probe[200];
+    int i = 0, word = 0;
+    x0 = x1 = epubui::MARGIN;
+    while (line[i]) {
+      int j = i;
+      while (line[j] && line[j] != ' ') j++;
+      if (word == w) {
+        const size_t pre = (size_t)i < sizeof(probe) ? (size_t)i : sizeof(probe) - 1;
+        memcpy(probe, line, pre);
+        probe[pre] = 0;
+        x0 = epubui::MARGIN + c.textWidth(probe, ts);
+        const size_t upto = (size_t)j < sizeof(probe) ? (size_t)j : sizeof(probe) - 1;
+        memcpy(probe, line, upto);
+        probe[upto] = 0;
+        x1 = epubui::MARGIN + c.textWidth(probe, ts);
+        return;
+      }
+      while (line[j] == ' ') j++;
+      i = j;
+      word++;
+    }
+  }
+
+  // Everything from (l0,w0) to (l1,w1), joined by single spaces and cut to the
+  // label's length -- a bookmark is a reminder, not a quotation.
+  void buildPhrase() {
+    _phrase[0] = 0;
+    int used = 0;
+    for (int l = _pickL0; l <= _pickL1 && l < _lineN; l++) {
+      const char* line = _lines[l].t;
+      int i = 0, word = 0;
+      while (line[i]) {
+        int j = i;
+        while (line[j] && line[j] != ' ') j++;
+        const bool after = l > _pickL0 || word >= _pickW0;
+        const bool before = l < _pickL1 || word <= _pickW1;
+        if (after && before) {
+          const int room = (int)sizeof(_phrase) - 1 - used;
+          if (room <= 1) {
+            // Out of label: say so with an ellipsis rather than stopping mid-word.
+            if (used > (int)sizeof(_phrase) - 5) used = (int)sizeof(_phrase) - 5;
+            snprintf(_phrase + used, 5, "...");
+            return;
+          }
+          if (used) _phrase[used++] = ' ';
+          const int n = j - i < room - 1 ? j - i : room - 1;
+          memcpy(_phrase + used, line + i, (size_t)n);
+          used += n;
+          _phrase[used] = 0;
+        }
+        while (line[j] == ' ') j++;
+        i = j;
+        word++;
+      }
+    }
+  }
+
+  void pickStart() {
+    if (_pageImage[0] || _lineN == 0) {
+      // A picture has no words to pick, so the page itself is the mark.
+      keepMark("");
+      return;
+    }
+    _menu = rmenu::Page::None;
+    _picking = true;
+    _pickL0 = _pickL1 = -1;
+    _phrase[0] = 0;
+    host().beep(0);
+    host().refresh(true);
+  }
+
+  void pickCancel() {
+    _picking = false;
+    _pickL0 = _pickL1 = -1;
+    host().beep(2);
+    host().refresh(true);
+  }
+
+  void keepMark(const char* label) {
+    marks::Mark m{};
+    m.spine = (uint16_t)_spine;
+    m.page = (uint16_t)_page;
+    m.off = curOffset();
+    snprintf(m.label, sizeof(m.label), "%s", label && label[0] ? label : "");
+    const bool added = marks::add(_marks, _nmarks, m) >= 0;
+    if (added) marks::save(host(), _books[_cur].file, _marks, _nmarks);
+    _picking = false;
+    _pickL0 = _pickL1 = -1;
+    _menu = rmenu::Page::None;
+    host().beep(added ? 1 : 2);
+    host().refresh(true);
+  }
+
+  // A tap while picking. The first lands the opening word, the second closes
+  // the phrase and puts the confirmation up.
+  void pickTap(int x, int y) {
+    // The corner is NOT the way out here: the first line of the page sits at
+    // the top of the glass, and a corner that swallowed it would make the
+    // first word of a page unkeepable. The band at the bottom -- the one
+    // saying what to do -- is the way out, and so is the power button.
+    if (y >= 744) {
+      pickCancel();
+      return;
+    }
+    const int step = lineStepNow();
+    int line = -1;
+    for (int i = 0; i < _lineN; i++)
+      if (y >= _lines[i].y - 6 && y < _lines[i].y + step) {
+        line = i;
+        break;
+      }
+    if (line < 0) return;
+    const int word = wordAt(_lines[line].t, x);
+    if (word < 0) return;
+    if (_pickL0 < 0) {
+      _pickL0 = line;
+      _pickW0 = word;
+      host().beep(0);
+      host().refresh(false);
+      return;
+    }
+    // Backwards is allowed: people read backwards to find where a thought
+    // started, and refusing the tap teaches nothing.
+    if (line < _pickL0 || (line == _pickL0 && word < _pickW0)) {
+      _pickL1 = _pickL0;
+      _pickW1 = _pickW0;
+      _pickL0 = line;
+      _pickW0 = word;
+    } else {
+      _pickL1 = line;
+      _pickW1 = word;
+    }
+    buildPhrase();
+    _picking = false;
+    _menu = rmenu::Page::Keep;
+    host().beep(0);
+    host().refresh(true);
+  }
+
+  void renderPick(ToolsCanvas& c) {
+    renderPage(c);
+    // The chosen words, underlined. Nothing is inverted: on a page of text an
+    // inverted word is a hole, and this has to be readable while it is chosen.
+    if (_pickL0 >= 0) {
+      int x0 = 0, x1 = 0;
+      wordSpan(_lines[_pickL0].t, _pickW0, x0, x1);
+      const int y = _lines[_pickL0].y + lineStepNow() - 4;
+      c.fillRect(x0, y, x1 - x0, 3, true);
+    }
+    c.fillRect(0, 744, c.width(), 56, false);
+    c.fillRect(0, 744, c.width(), 2, true);
+    c.textCentered(c.width() / 2, 752,
+                   _pickL0 < 0 ? "tap the first word to keep" : "now tap the last word", TS_MED,
+                   true);
+    c.textCentered(c.width() / 2, 778, "tap this bar to stop", TS_SMALL, true);
   }
 
   void renderMenu(ToolsCanvas& c) {
     char buf[64];
     if (_menu == rmenu::Page::Root) {
-      rmenu::Item items[5];
+      rmenu::Item items[4];
       items[0].label = "CONTENTS";
       snprintf(_rootSub[0], sizeof(_rootSub[0]), "chapter %d of %d", _spine + 1,
                _book.spineCount());
       items[0].sub = _rootSub[0];
       items[1].label = "BOOKMARKS";
       if (_nmarks > 0)
-        snprintf(_rootSub[1], sizeof(_rootSub[1]), "%d kept", _nmarks);
+        snprintf(_rootSub[1], sizeof(_rootSub[1]), "%d kept  -  + keeps a phrase", _nmarks);
       else
-        snprintf(_rootSub[1], sizeof(_rootSub[1]), "none yet");
+        snprintf(_rootSub[1], sizeof(_rootSub[1]), "none yet  -  + keeps a phrase");
       items[1].sub = _rootSub[1];
-      items[2].label = "KEEP THIS PLACE";
-      snprintf(_rootSub[2], sizeof(_rootSub[2]), "ch %d, page %d", _spine + 1, _page + 1);
-      items[2].sub = _rootSub[2];
-      items[3].label = "TEXT";
-      snprintf(_rootSub[3], sizeof(_rootSub[3]), "%s, %s spacing", epubui::sizeName(_size),
+      items[1].plus = true;
+      items[2].label = "TEXT";
+      snprintf(_rootSub[2], sizeof(_rootSub[2]), "%s, %s spacing", epubui::sizeName(_size),
                epubui::leadName(_lead));
-      items[3].sub = _rootSub[3];
-      items[4].label = "CLOSE THE BOOK";
-      items[4].sub = _books[_cur].title;
-      rmenu::drawRoot(host(), c, "OPTIONS", items, 5);
+      items[2].sub = _rootSub[2];
+      items[3].label = "CLOSE THE BOOK";
+      items[3].sub = _books[_cur].title;
+      rmenu::drawRoot(host(), c, "OPTIONS", items, 4);
+      return;
+    }
+
+    if (_menu == rmenu::Page::Keep) {
+      host().topBar("KEEP THIS?", false, "BACK");
+      c.textCentered(c.width() / 2, 150, "the phrase to keep", TS_SMALL, true);
+      // The phrase itself, wrapped a word at a time. Measuring the whole
+      // string and cutting it backwards is the obvious way and it is wrong:
+      // the cut shortens the string being measured, so the second line is
+      // decided from a length that no longer exists.
+      {
+        char line[marks::LABEL] = "", cand[marks::LABEL + 8];
+        int y = 210;
+        const char* p = _phrase;
+        while (*p && y < 470) {
+          const char* e = p;
+          while (*e && *e != ' ') e++;
+          snprintf(cand, sizeof(cand), "%s%s%.*s", line, line[0] ? " " : "", (int)(e - p), p);
+          if (line[0] && c.textWidth(cand, TS_LARGE) > c.width() - 80) {
+            c.textCentered(c.width() / 2, y, line, TS_LARGE, true);
+            y += 44;
+            line[0] = 0;
+            continue;  // the word that did not fit starts the next line
+          }
+          snprintf(line, sizeof(line), "%s", cand);
+          p = e;
+          while (*p == ' ') p++;
+        }
+        if (line[0]) c.textCentered(c.width() / 2, y, line, TS_LARGE, true);
+      }
+      char where[48];
+      snprintf(where, sizeof(where), "chapter %d, page %d", _spine + 1, _page + 1);
+      c.textCentered(c.width() / 2, 470, where, TS_SMALL, true);
+      c.button(40, 560, (c.width() - 100) / 2, 96, "SAVE", true);
+      c.button(c.width() / 2 + 10, 560, (c.width() - 100) / 2, 96, "CANCEL", false);
       return;
     }
 
@@ -1044,10 +1291,12 @@ class EpubTool : public ToolApp {
         snprintf(buf, sizeof(buf), "chapter %d", spine + 1);
         rmenu::drawRow(c, k, label, buf, shelf::rowSep(k, idx, total), spine == _spine);
       } else {
-        char label[48];
+        char label[48], where[40];
         markLabel(_marks[idx], label, sizeof(label));
-        rmenu::drawRow(c, k, label, "tap to go there, hold nothing to remove it",
-                       shelf::rowSep(k, idx, total), false);
+        snprintf(where, sizeof(where), "chapter %u, page %u", (unsigned)(_marks[idx].spine + 1),
+                 (unsigned)(_marks[idx].page + 1));
+        rmenu::drawRow(c, k, label, where, shelf::rowSep(k, idx, total),
+                       _marks[idx].spine == (uint16_t)_spine && _marks[idx].page == (uint16_t)_page);
       }
     }
     shelf::drawPager(c, _mpage, total);
@@ -1065,7 +1314,12 @@ class EpubTool : public ToolApp {
       return;
     }
     if (_menu == rmenu::Page::Root) {
-      switch (rmenu::hitRoot(x, y, 5, host().canvas().width())) {
+      const int W = host().canvas().width();
+      if (rmenu::hitPlus(x, y, 1, W)) {
+        pickStart();
+        return;
+      }
+      switch (rmenu::hitRoot(x, y, 4, W)) {
         case 0:
           _menu = rmenu::Page::Contents;
           _mpage = pageOfSpine();
@@ -1078,26 +1332,28 @@ class EpubTool : public ToolApp {
           host().beep(0);
           host().refresh(true);
           return;
-        case 2: {
-          marks::Mark m{(uint16_t)_spine, (uint16_t)_page, curOffset()};
-          const bool added = marks::add(_marks, _nmarks, m) >= 0;
-          if (added) marks::save(host(), _books[_cur].file, _marks, _nmarks);
-          host().beep(added ? 1 : 2);
-          host().refresh(true);
-          return;
-        }
-        case 3:
+        case 2:
           _menu = rmenu::Page::Text;
           host().beep(0);
           host().refresh(true);
           return;
-        case 4:
+        case 3:
           _menu = rmenu::Page::None;
           closeBook(true);
           return;
         default:
           return;
       }
+    }
+
+    if (_menu == rmenu::Page::Keep) {
+      if (y >= 560 && y < 656) {
+        if (x < host().canvas().width() / 2)
+          keepMark(_phrase);
+        else
+          pickCancel();
+      }
+      return;
     }
 
     if (_menu == rmenu::Page::Text) {
@@ -1240,6 +1496,13 @@ class EpubTool : public ToolApp {
   bool _pendImageValid = false;
   bool _streamLost = false;        // a picture was read out of the same zip
   rmenu::Page _menu = rmenu::Page::None;
+  // Picking a phrase to keep: -1 nowhere, then the first word, then the last.
+  // Line and word indices into _lines, which is what the page IS -- so the
+  // pick is re-measured from the same strings the page was drawn from and
+  // needs no table of word boxes anywhere.
+  int _pickL0 = -1, _pickW0 = 0, _pickL1 = -1, _pickW1 = 0;
+  bool _picking = false;
+  char _phrase[marks::LABEL] = {};
   int _mpage = 0;                  // which page of the contents or the marks
   int _ntoc = -1;                  // -1 until the book's contents are read
   marks::Mark _marks[marks::MAX];

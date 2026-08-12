@@ -21,7 +21,7 @@
 namespace rmenu {
 
 // Which page of the panel is showing. `None` means the book itself.
-enum class Page : uint8_t { None, Root, Contents, Marks, Text };
+enum class Page : uint8_t { None, Root, Contents, Marks, Text, Keep };
 
 // The root is buttons, not rows: five things, each worth a thumb.
 inline constexpr int ROOT_Y0 = 120, ROOT_H = 104, ROOT_GAP = 12;
@@ -36,7 +36,15 @@ inline TRect rootRect(int i, int w) {
 struct Item {
   const char* label;
   const char* sub;
+  bool plus = false;  // a square at the right end that does the obvious thing
 };
+
+// The + on a row. Big enough to hit without looking, inset far enough that a
+// thumb going for the row itself does not land on it.
+inline TRect plusRect(int i, int w) {
+  const TRect r = rootRect(i, w);
+  return {r.x + r.w - 92, r.y + 12, 80, r.h - 24};
+}
 
 inline void drawRoot(ToolsHost& h, ToolsCanvas& c, const char* title, const Item* items, int n) {
   h.topBar(title, false, "READ");
@@ -44,8 +52,16 @@ inline void drawRoot(ToolsHost& h, ToolsCanvas& c, const char* title, const Item
     const TRect r = rootRect(i, c.width());
     c.drawRect(r.x, r.y, r.w, r.h, 2, true);
     c.text(r.x + 22, r.y + 22, items[i].label, TS_LARGE, true);
+    const int subW = r.w - 44 - (items[i].plus ? 92 : 0);
     if (items[i].sub && items[i].sub[0])
-      c.textClipped(r.x + 22, r.y + 62, r.w - 44, items[i].sub, TS_SMALL, true);
+      c.textClipped(r.x + 22, r.y + 62, subW, items[i].sub, TS_SMALL, true);
+    if (items[i].plus) {
+      const TRect p = plusRect(i, c.width());
+      c.drawRect(p.x, p.y, p.w, p.h, 2, true);
+      const int cx = p.x + p.w / 2, cy = p.y + p.h / 2;
+      c.fillRect(cx - 20, cy - 3, 40, 6, true);
+      c.fillRect(cx - 3, cy - 20, 6, 40, true);
+    }
   }
 }
 
@@ -54,6 +70,10 @@ inline int hitRoot(int x, int y, int n, int w) {
     if (rootRect(i, w).hit(x, y)) return i;
   return -1;
 }
+
+// True when the tap landed on that row's +, which means something different
+// from the row: the row opens the list, the + adds to it.
+inline bool hitPlus(int x, int y, int i, int w) { return plusRect(i, w).hit(x, y); }
 
 // A list page: the same seven rows and the same pager as a shelf, with a
 // second line per row for whatever the row is about.
