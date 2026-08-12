@@ -399,7 +399,11 @@ class Builder {
   // The strip thumbnail: stretched and thresholded, because at 96 px a
   // dither is speckle and a threshold is a woodcut.
   void saveSmall() {
-    uint32_t hist[256] = {};
+    // Static, not local: 1 KB of histogram and 2 KB of output on the loop
+    // task's stack is most of a crash, and only one cover is ever built at a
+    // time. See SET_LOOP_TASK_STACK_SIZE in main.cpp for the other half.
+    static uint32_t hist[256];
+    memset(hist, 0, sizeof(hist));
     for (int i = 0; i < W * H; i++) hist[_small[i]]++;
     const uint32_t clip = (uint32_t)(W * H) / 50;  // 2%
     int lo = 0, hi = 255;
@@ -416,7 +420,7 @@ class Builder {
       hi = 255;  // a flat image: leave it alone
     }
     const int cut = lo + (hi - lo) / 2;
-    uint8_t out[BYTES];
+    static uint8_t out[BYTES];
     memset(out, 0xFF, sizeof(out));
     for (int y = 0; y < H; y++)
       for (int x = 0; x < W; x++)
@@ -480,38 +484,126 @@ inline bool sidecarPath(const char* file, char* out, int cap) {
 // The freshness check is 64 bytes from each: replacing the .tbi on the card
 // should show up on the device, and re-reading two small chunks per open is
 // cheaper than either rebuilding blindly or never noticing.
+// Forty rows of the sidecar at a time -- eight thumbnail rows exactly, so an
+// output row never straddles two reads. Static, not a local: this runs inside
+// openBook on the loop task's 8 KB stack, and a 2,400-byte array there is how
+// the first version of this function crashed the device.
+inline uint8_t g_scBand[BAND_ROW_BYTES * 40];
+inline constexpr int SC_ROWS = 40;
+
+// One row of the strip thumbnail from one band: each output pixel is the mean
+// of a 5x5 block of the sidecar's bits, which is the same "average, never
+// sample" rule the builder follows when it shrinks a decoded cover.
+inline void scSmallRow(const uint8_t* band, int r0, uint8_t* out96) {
+  for (int x = 0; x < W; x++) {
+    int sum = 0;
+    for (int dy = 0; dy < SCALE; dy++) {
+      const uint8_t* src = band + (size_t)(r0 + dy) * BAND_ROW_BYTES;
+      for (int dx = 0; dx < SCALE; dx++) {
+        const int sx = x * SCALE + dx;
+        if (src[sx >> 3] & (0x80 >> (sx & 7))) sum += 255;  // 1 = white
+      }
+    }
+    out96[x] = (uint8_t)(sum / (SCALE * SCALE));
+  }
+}
+
 inline bool coverFromSidecar(ToolsHost& h, const char* file) {
   char sc[160];
   if (!sidecarPath(file, sc, sizeof(sc))) return false;
   uint8_t head[64];
   if (h.sdReadSlice(sc, tbimg::HEADER, head, sizeof(head)) != (int)sizeof(head)) return false;
 
+  // Is the cover on the card already this picture? Sampled at four places
+  // rather than one, and none of them the top: almost every cover starts with
+  // a band of white margin, so two completely different covers agree on their
+  // first 64 bytes far more often than not -- which made "replace the .tbi and
+  // reopen" quietly do nothing. These four are a fifth, a half, three quarters
+  // and near the end of the picture, where the ink is.
   char big[48];
   bigPath(file, big, sizeof(big));
-  uint8_t stored[64];
-  if (have(file) && h.sdReadSlice(big, 0, stored, sizeof(stored)) == (int)sizeof(stored) &&
-      memcmp(head, stored, sizeof(head)) == 0)
-    return true;  // already the cover on the card
-
-  Builder b;
-  if (!b.begin(h, file, BIG_W, BIG_H)) return true;  // a bad moment, not a bad cover
-  uint8_t band[BAND_ROW_BYTES * 40];
-  uint8_t line[BIG_W];
-  for (int y0 = 0; y0 < BIG_H; y0 += 40) {
-    const int rows = (BIG_H - y0) < 40 ? (BIG_H - y0) : 40;
-    if (h.sdReadSlice(sc, tbimg::HEADER + (uint32_t)y0 * BAND_ROW_BYTES, band,
-                      rows * BAND_ROW_BYTES) != rows * BAND_ROW_BYTES) {
-      b.abort();
-      return true;
+  {
+    static const uint32_t kProbe[4] = {9600, 24000, 36000, 45600};
+    bool same = have(file);
+    for (int i = 0; same && i < 4; i++) {
+      uint8_t a[64], b[64];
+      same = h.sdReadSlice(sc, tbimg::HEADER + kProbe[i], a, sizeof(a)) == (int)sizeof(a) &&
+             h.sdReadSlice(big, kProbe[i], b, sizeof(b)) == (int)sizeof(b) &&
+             memcmp(a, b, sizeof(a)) == 0;
     }
-    for (int r = 0; r < rows; r++) {
-      const uint8_t* src = band + (size_t)r * BAND_ROW_BYTES;
-      for (int x = 0; x < BIG_W; x++)
-        line[x] = (src[x >> 3] & (0x80 >> (x & 7))) ? 255 : 0;  // 1 = white
-      b.row(y0 + r, line, BIG_W);
+    if (same) return true;  // already the cover on the card
+  }
+
+  // The builder is deliberately NOT used here. A sidecar is already the
+  // finished picture -- 480x800, one bit, the framebuffer's own convention --
+  // so there is nothing to scale and nothing to dither, and running it through
+  // the builder meant 46 KB of heap, a re-dither of an image the owner already
+  // dithered on a real machine, and a stack frame that overflowed the task.
+  // Copy the pixels; average the thumbnail out of them on the way past.
+  {
+    // This book's cover from before covers lived on the card, swept on the
+    // open that was rebuilding it anyway.
+    char stale[20];
+    staleFlashPath(file, stale, sizeof(stale));
+    if (tfs::exists(stale)) tfs::remove(stale);
+  }
+  if (!h.sdStreamOpen(big)) return true;  // a bad moment, not a bad cover
+  uint8_t row96[W];
+  static uint32_t hist[256];
+  memset(hist, 0, sizeof(hist));
+  for (int y0 = 0; y0 < BIG_H; y0 += SC_ROWS) {
+    const uint32_t n = (uint32_t)SC_ROWS * BAND_ROW_BYTES;
+    if (h.sdReadSlice(sc, tbimg::HEADER + (uint32_t)y0 * BAND_ROW_BYTES, g_scBand, (int)n) !=
+            (int)n ||
+        !h.sdStreamWrite(g_scBand, n)) {
+      h.sdStreamClose(false);
+      return true;  // a short or unreadable sidecar: try again next open
+    }
+    for (int r = 0; r < SC_ROWS; r += SCALE) {
+      scSmallRow(g_scBand, r, row96);
+      for (int x = 0; x < W; x++) hist[row96[x]]++;
     }
   }
-  b.finish();
+  if (!h.sdStreamClose(true)) return true;
+
+  // The strip thumbnail: stretched and thresholded, not dithered, exactly as
+  // the builder does it -- at 96 px a dither is speckle and a threshold is a
+  // woodcut. The cut needs the whole picture's histogram, which is why the
+  // bands are read a second time rather than kept: 48 KB of card beats 15 KB
+  // of RAM held for the life of the firmware.
+  const uint32_t clip = (uint32_t)(W * H) / 50;  // 2%
+  int lo = 0, hi = 255;
+  for (uint32_t acc = 0; lo < 255; lo++) {
+    acc += hist[lo];
+    if (acc > clip) break;
+  }
+  for (uint32_t acc = 0; hi > 0; hi--) {
+    acc += hist[hi];
+    if (acc > clip) break;
+  }
+  if (hi - lo < 32) {
+    lo = 0;
+    hi = 255;  // a flat picture: leave it alone
+  }
+  const int cut = lo + (hi - lo) / 2;
+
+  static uint8_t out[BYTES];
+  memset(out, 0xFF, sizeof(out));
+  int sy = 0;
+  for (int y0 = 0; y0 < BIG_H; y0 += SC_ROWS) {
+    const uint32_t n = (uint32_t)SC_ROWS * BAND_ROW_BYTES;
+    if (h.sdReadSlice(sc, tbimg::HEADER + (uint32_t)y0 * BAND_ROW_BYTES, g_scBand, (int)n) !=
+        (int)n)
+      return true;  // the big one is written; the strip can wait for next open
+    for (int r = 0; r < SC_ROWS && sy < H; r += SCALE, sy++) {
+      scSmallRow(g_scBand, r, row96);
+      for (int x = 0; x < W; x++)
+        if (row96[x] < cut) out[(size_t)sy * (W / 8) + (x >> 3)] &= (uint8_t)~(0x80 >> (x & 7));
+    }
+  }
+  char smallPath[20];
+  path(file, smallPath, sizeof(smallPath));
+  tfs::write(smallPath, (const char*)out, sizeof(out));
   return true;
 }
 

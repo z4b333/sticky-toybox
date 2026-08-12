@@ -140,6 +140,11 @@ bool streamClose(bool keep);
 // Test hook: make the next streamClose(true) fail, so the harness can walk
 // the path a full card takes without a card.
 void hostFailNextStreamClose();
+// Test hooks for files the OWNER puts on the card -- a cover beside a book.
+// The harness needs to put one there and then read back what the device made
+// of it, which is the whole of what a sidecar cover is.
+void hostPutCardFile(const char* path, const void* data, int n);
+int hostCardFileSize(const char* path);
 #endif
 
 // Reads a whole file. If nothing holds the bus this claims it for the read

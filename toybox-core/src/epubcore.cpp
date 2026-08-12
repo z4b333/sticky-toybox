@@ -465,10 +465,12 @@ bool Book::parseOpf(const char* opfPath) {
   _coverType = 0;
   scanTags([&](const char* name, const char* attrs, bool close) {
     if (!close && nameIs(name, "item")) {
-      char id[128], href[192];
+      // Static: this lambda is inlined into scanTags, and its locals landed on
+      // the loop task's stack every time a book was opened.
+      static char id[128], href[192];
       if (attrValue(attrs, "id", id, sizeof(id)) && attrValue(attrs, "href", href, sizeof(href))) {
         const uint32_t idHash = fnv(id, strlen(id));
-        char full[256];
+        static char full[256];
         resolveHref(_opfDir, href, full, sizeof(full));
         const uint32_t pathHash = fnv(full, strlen(full));
         for (int i = 0; i < _spineN; i++)
@@ -477,7 +479,8 @@ bool Book::parseOpf(const char* opfPath) {
             _spine[i].ok = 1;
           }
         if (_coverPathHash == 0) {
-          char props[128] = "";
+          static char props[128];
+          props[0] = 0;
           attrValue(attrs, "properties", props, sizeof(props));
           const bool isCover =
               (coverIdHash != 0 && idHash == coverIdHash) || strstr(props, "cover-image") != nullptr;

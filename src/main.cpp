@@ -318,6 +318,19 @@ void handleLowBattery() {
 }
 }  // namespace
 
+// The Arduino loop task gets 8 KB by default, and everything this firmware
+// does on a tap runs inside it: a tool's tick, a cover build, a page of a
+// book. Two crashes have now come from that ceiling -- the phone's file list
+// (8,448 bytes in one local array) and the sidecar cover builder (a 3,968-byte
+// frame) -- and both times the symptom was a silent restart that looked like
+// anything but a stack.
+//
+// The rule stands: nothing over about a kilobyte goes on the stack, and the
+// preview harness fails a build that puts it there. This is the belt to that
+// pair of braces, and 8 KB of internal RAM is a cheap price for a device that
+// restarts instead of telling you why.
+SET_LOOP_TASK_STACK_SIZE(16 * 1024);
+
 void setup() {
   // Power latch FIRST or the board dies when USB is unplugged.
   gpio_hold_dis((gpio_num_t)PIN_PWR_HOLD);

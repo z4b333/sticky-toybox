@@ -14,6 +14,10 @@ cd "$(dirname "$0")/.."
 
 pio run
 
+# Nothing ships with a stack frame big enough to restart the device. Two builds
+# already did; the check costs a second and reads what the compiler wrote down.
+python tools/check_stack.py
+
 BUILD=.pio/build/sticky
 BOOT_APP0=$(find "$HOME/.platformio" -name boot_app0.bin | head -1)
 

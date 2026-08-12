@@ -1040,6 +1040,72 @@ int main() {
     g_dumpEnabled = true;
     printf("book reader ok (list, rtl turns, buttons, ends, position, grey fallback)\n");
     printf("tbk covers ok (embedded beats page 0, a failed build retries cleanly)\n");
+
+    // --- a cover the owner put beside the book ------------------------------
+    // This path shipped in beta.26 with no guard at all and crashed the device
+    // on the first book that used it: it ran the finished picture through the
+    // cover BUILDER, which meant 46 KB of heap and a 3,968-byte stack frame on
+    // an 8 KB task. The assertion that would have caught it is the one below --
+    // the cover on the card must be the sidecar's own bytes, unchanged. A
+    // builder cannot produce that: it re-dithers, and a re-dither of a dithered
+    // picture is never bit-identical.
+    {
+      const char* kBook = "/books/walden.tbk";
+      uint8_t side[tbimg::FILE_SIZE];
+      auto paint = [&](int seed) {
+        side[0] = 'T'; side[1] = 'B'; side[2] = 'I'; side[3] = '1';
+        side[4] = 480 & 255; side[5] = 480 >> 8;
+        side[6] = 800 & 255; side[7] = 800 >> 8;
+        uint8_t* bits = side + tbimg::HEADER;
+        memset(bits, 0xFF, tbimg::BITS);
+        // A wedge, so the thumbnail has both tones and the stretch has work.
+        for (int y = 0; y < 800; y++)
+          for (int xb = 0; xb < 60; xb++)
+            if (xb < (y + seed * 40) * 60 / 800) bits[(size_t)y * 60 + xb] = 0x00;
+      };
+      paint(0);
+      sdcard::hostPutCardFile("/books/walden.cover.tbi", side, sizeof(side));
+
+      if (!bthumb::coverFromSidecar(stickyHost, kBook)) {
+        printf("SIDECAR FAIL: a sidecar beside the book was not picked up\n");
+        abort();
+      }
+      char big[48];
+      bthumb::bigPath(kBook, big, sizeof(big));
+      if (sdcard::hostCardFileSize(big) != bthumb::BIG_BYTES) {
+        printf("SIDECAR FAIL: the cover on the card is %d bytes\n",
+               sdcard::hostCardFileSize(big));
+        abort();
+      }
+      uint8_t got[600];
+      for (int off = 0; off < bthumb::BIG_BYTES; off += (int)sizeof(got)) {
+        if (stickyHost.sdReadSlice(big, (uint32_t)off, got, sizeof(got)) != (int)sizeof(got) ||
+            memcmp(got, side + tbimg::HEADER + off, sizeof(got)) != 0) {
+          {
+            int k = 0;
+            while (k < (int)sizeof(got) && got[k] == side[tbimg::HEADER + off + k]) k++;
+            printf("SIDECAR FAIL: differs at byte %d (+%d): card %02x want %02x\n", off, k,
+                   got[k], side[tbimg::HEADER + off + k]);
+          }
+          abort();
+        }
+      }
+      if (!bthumb::have(kBook)) {
+        printf("SIDECAR FAIL: no strip thumbnail was written\n");
+        abort();
+      }
+      // Replacing the file on the card must show up: the owner iterating on a
+      // cover should not have to delete a cache they cannot see.
+      paint(1);
+      sdcard::hostPutCardFile("/books/walden.cover.tbi", side, sizeof(side));
+      bthumb::coverFromSidecar(stickyHost, kBook);
+      if (stickyHost.sdReadSlice(big, 0, got, sizeof(got)) != (int)sizeof(got) ||
+          memcmp(got, side + tbimg::HEADER, sizeof(got)) != 0) {
+        printf("SIDECAR FAIL: a replaced sidecar was not picked up\n");
+        abort();
+      }
+      printf("sidecar covers ok (copied byte for byte, replaced when it changes)\n");
+    }
   }
 
   // --- the .tbk header ---------------------------------------------------------

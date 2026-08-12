@@ -703,6 +703,15 @@ int readSlice(const char* path, uint32_t off, void* dst, int n) {
   return n;
 }
 
+void hostPutCardFile(const char* path, const void* data, int n) {
+  fakeCard()[path] = std::string((const char*)data, (size_t)n);
+}
+
+int hostCardFileSize(const char* path) {
+  auto it = fakeCard().find(path);
+  return it == fakeCard().end() ? -1 : (int)it->second.size();
+}
+
 #else
 
 Report probe() {
