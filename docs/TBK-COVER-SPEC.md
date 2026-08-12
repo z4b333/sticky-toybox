@@ -184,3 +184,74 @@ book, survives renames, and needs no hash.
 
 The card's `/books` folder, or a series folder under it
 (`/books/One Piece/vol01.tbk`) — the readers show those folders as series.
+
+---
+
+# Artwork inside an EPUB
+
+Light novels carry character art and story illustrations, and the reader can
+show them. Same principle as the cover sidecar: **the desktop makes the
+picture, the device blits it.**
+
+## What the app adds to the book
+
+For every image the device should display, add ONE extra entry to the EPUB's
+zip, at the original entry's path with a `toybox/` prefix and a `.tbi`
+extension:
+
+```
+OEBPS/images/insert-01.jpg          <- the original, left exactly as it is
+toybox/OEBPS/images/insert-01.tbi   <- what the device draws
+```
+
+Nothing else in the book changes. The XHTML keeps its ordinary
+`<img src="images/insert-01.jpg">`, the original image stays where it is, and
+every other reader ignores the extra entry — a zip may carry files the OPF
+manifest never mentions. **The book stays a valid EPUB.**
+
+Store the `.tbi` entries **uncompressed** (zip method 0) if your library lets
+you choose. They are already 1-bit and compress by only a few percent, and a
+stored entry means the device seeks straight to the pixels instead of
+inflating 48 KB to find them.
+
+## The .tbi itself
+
+Identical to a cover sidecar — the same format as a wallpaper:
+
+```
+offset  0   char[4]  "TBI1"
+        4   u16      width  = 480     (little-endian)
+        6   u16      height = 800
+        8   ...      48,000 bytes of 1-bit pixels
+```
+
+Row-major, 60 bytes a row, MSB first, **1 = white, 0 = black**. Exactly
+**48,008 bytes**.
+
+## Preparing the picture
+
+An illustration gets **its own page** on the device — 480×800, the whole
+glass, with the text resuming after it. So fit the artwork into 480×800 and
+centre it on white, exactly as for a cover.
+
+The one thing worth doing differently from the cover recipe: **choose the
+treatment to match the art.** Photographic art wants Floyd–Steinberg with no
+contrast stretch. Line art, screentoned manga panels and flat-coloured
+character art usually want a contrast stretch first, and sometimes a plain
+threshold instead of a dither — a dither turns large flat areas into visible
+texture. Your app can show the result before it writes it; the device cannot.
+
+## What the device does without one
+
+If an image has no `toybox/` counterpart, the reader decodes the original —
+baseline JPEG, progressive JPEG and PNG are all supported. It works, but it
+costs a second or two the first time and the dithering is the device's own.
+Anything you care about the look of is worth pre-rendering.
+
+## What the device ignores
+
+- Images inside `<head>`, or in any non-visible element.
+- SVG. There is no vector renderer, and there will not be one.
+- An entry that is not exactly 48,008 bytes, or whose header is not `TBI1`
+  480×800 — it falls back to decoding the original rather than drawing
+  something wrong.
