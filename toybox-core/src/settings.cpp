@@ -485,9 +485,19 @@ bool SettingsScreen::tapLock(ToolsHost& host, int x, int y) {
     // shell would otherwise do.
     recents::Entry rec[recents::MAX];
     const int n = recents::list(host.prefs(), rec);
-    _note = (n > 0 && bthumb::stashForLock(host, rec[0].file))
-                ? nullptr
-                : "no cover yet - open a book and it will appear here";
+    if (n > 0 && bthumb::stashForLock(host, rec[0].file)) {
+      _note = nullptr;
+    } else if (n <= 0) {
+      _note = "no cover yet - open a book and it will appear here";
+    } else {
+      // A book HAS been read, so the copy failing is about memory or the
+      // card, not about having nothing to copy. Say which.
+      snprintf(_coverNote, sizeof(_coverNote),
+               "could not copy the cover - free %lu KB, biggest %lu KB",
+               (unsigned long)(host.heapFree() / 1024),
+               (unsigned long)(host.heapLargest() / 1024));
+      _note = _coverNote;
+    }
     host.refresh(true);
     return false;
   }

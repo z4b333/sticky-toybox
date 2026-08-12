@@ -309,7 +309,9 @@ bool Book::open(IO& io) {
 
   _spine = (Ent*)calloc(MAX_SPINE, sizeof(Ent));
   if (!_spine) {
-    _err = "out of memory";
+    // Named apart from the other one: 6 KB failing and 32 KB failing are
+    // different diseases, and "out of memory" alone said neither.
+    _err = "no memory for the spine (6 KB)";
     return false;
   }
 
@@ -536,7 +538,9 @@ bool Book::entryOpen(const Ent& e) {
     if (!_window) _window = (uint8_t*)malloc(WIN_SIZE);
     if (!_inBuf) _inBuf = (uint8_t*)malloc(2048);
     if (!_inflator || !_window || !_inBuf) {
-      _err = "out of memory";
+      // The 32 KB one. DEFLATE's dictionary is 32 KB by definition, so this
+      // is the floor -- it cannot be made smaller, only found earlier.
+      _err = "no memory to unzip (32 KB block)";
       return false;
     }
     tinfl_init((tinfl_decompressor*)_inflator);

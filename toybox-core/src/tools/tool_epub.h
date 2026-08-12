@@ -198,6 +198,17 @@ class EpubTool : public ToolApp {
  private:
   enum class Screen : uint8_t { List, Loading, Page };
 
+  // Any failure that might be about memory carries the numbers. Guessing at
+  // this cost two round trips already; the allocator knows and it is free to
+  // ask.
+  const char* withHeap(const char* why) {
+    const uint32_t free = host().heapFree(), big = host().heapLargest();
+    if (free == 0 && big == 0) return why;  // a host that cannot tell
+    snprintf(_noteBuf, sizeof(_noteBuf), "%s - free %lu KB, biggest %lu KB", why,
+             (unsigned long)(free / 1024), (unsigned long)(big / 1024));
+    return _noteBuf;
+  }
+
   bool inFolder() const { return !shelf::isTop(_dir); }
   const char* seriesName() const {
     const char* s = strrchr(_dir, '/');
@@ -306,7 +317,7 @@ class EpubTool : public ToolApp {
     }
     _io.h = _host;
     if (!_book.open(_io)) {
-      _note = _book.error();
+      _note = withHeap(_book.error());
       host().epubClose();
       _cur = -1;
       _screen = Screen::List;
@@ -345,7 +356,7 @@ class EpubTool : public ToolApp {
     host().beep(1);
     if (!gotoPlace(spine, off)) {
       // A book whose first chapter will not parse is a book we cannot show.
-      _note = _book.error()[0] ? _book.error() : "could not read the chapter";
+      _note = withHeap(_book.error()[0] ? _book.error() : "could not read the chapter");
       closeBook(false);
       host().beep(2);
       host().refresh(true);
@@ -667,6 +678,7 @@ class EpubTool : public ToolApp {
   bool _open = false;
   bool _chrome = false;
   const char* _note = nullptr;
+  char _noteBuf[96] = {};
 
   HostIO _io;
   epubc::Book _book;

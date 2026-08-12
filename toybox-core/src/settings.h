@@ -131,6 +131,7 @@ class SettingsScreen {
   // screen: the button asks, and any other tap takes the question away.
   bool _armed = false;
   const char* _note = nullptr;
+  char _coverNote[96] = {};
   uint8_t _page = 0;  // 0 = settings, 1 = lock, 2 = wallpaper, 3 = apps, 4 = files
   lock::Config _lock;
   // The card's offerings, read once on entering the page: the card is powered
