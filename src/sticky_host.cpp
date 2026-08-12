@@ -65,6 +65,21 @@ namespace {
 constexpr int LIST_MAX = 32;
 sdcard::BookMeta g_bookScratch[LIST_MAX];
 sdcard::EpubMeta g_epubScratch[LIST_MAX];
+
+// And the phone's file list, for a blunter reason. sdcard::FileEntry is 132
+// bytes and MGR_MAX_FILES is 64, so this array is 8,448 bytes -- against a
+// loop task stack of 8,192. It used to be a local, which meant the array
+// alone overflowed the stack before the rest of the frame was even laid down,
+// and the device rebooted the moment a phone loaded the file page and its
+// script asked for /ls. Nothing about that failure looked like a stack: the
+// WiFi came up, the page arrived, and then the panel restarted.
+//
+// The rule this one is here to keep: anything above about a kilobyte does not
+// go on the stack in this firmware. files_web.h's own list was already static
+// for exactly this reason; only the forwarder was not.
+sdcard::FileEntry g_mgrScratch[sdcard::MGR_MAX_FILES];
+static_assert(sizeof(g_mgrScratch) > 8192,
+              "kept as a reminder: this array is bigger than the loop task's stack");
 }  // namespace
 
 int StickyHost::bookList(BookInfo* out, int max, const char* dir) {
@@ -144,7 +159,7 @@ bool StickyHost::sdWriteFileAtomic(const char* path, const void* data, int n) {
 }
 
 int StickyHost::sdMgrList(SdFile* out, int max) {
-  sdcard::FileEntry ents[sdcard::MGR_MAX_FILES];
+  sdcard::FileEntry* ents = g_mgrScratch;
   const int cap = max < sdcard::MGR_MAX_FILES ? max : sdcard::MGR_MAX_FILES;
   const int n = sdcard::mgrList(ents, cap);
   for (int i = 0; i < (n < 0 ? 0 : n); i++) {
