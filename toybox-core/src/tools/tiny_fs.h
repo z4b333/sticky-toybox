@@ -32,7 +32,33 @@ inline bool write(const char* path, const char* data, size_t len) {
   return true;
 }
 inline bool remove(const char* path) { return hostFs().erase(path) > 0; }
+inline std::string& appendPath() {
+  static std::string p;
+  return p;
+}
+inline bool appendOpen(const char* path) {
+  appendPath() = path;
+  hostFs()[path].clear();
+  return true;
+}
+inline bool appendChunk(const void* data, size_t n) {
+  if (appendPath().empty()) return false;
+  hostFs()[appendPath()].append((const char*)data, n);
+  return true;
+}
+inline bool appendClose() {
+  if (appendPath().empty()) return false;
+  appendPath().clear();
+  return true;
+}
 inline bool exists(const char* path) { return hostFs().count(path) > 0; }
+inline bool rename(const char* from, const char* to) {
+  auto it = hostFs().find(from);
+  if (it == hostFs().end()) return false;
+  hostFs()[to] = it->second;
+  hostFs().erase(it);
+  return true;
+}
 inline size_t size(const char* path) {
   auto it = hostFs().find(path);
   return it == hostFs().end() ? 0 : it->second.size();
@@ -135,6 +161,32 @@ inline bool write(const char* path, const char* data, size_t len) {
 inline bool remove(const char* path) {
   if (!begin()) return false;
   return LittleFS.remove(path);
+}
+
+// A file written in pieces. The lock screen's cover copy is 48,008 bytes and
+// used to want all of them in RAM at once to hand to write() -- a transient
+// allocation that big is how a heap gets chopped up, and on this device the
+// chopping is what stops books opening. Open, feed, close.
+inline File g_appendFile;
+inline bool appendOpen(const char* path) {
+  if (!begin()) return false;
+  if (g_appendFile) g_appendFile.close();
+  g_appendFile = LittleFS.open(path, "w");
+  return (bool)g_appendFile;
+}
+inline bool appendChunk(const void* data, size_t n) {
+  if (!g_appendFile) return false;
+  return g_appendFile.write((const uint8_t*)data, n) == n;
+}
+inline bool appendClose() {
+  if (!g_appendFile) return false;
+  g_appendFile.close();
+  return true;
+}
+inline bool rename(const char* from, const char* to) {
+  if (!begin()) return false;
+  LittleFS.remove(to);  // LittleFS will not rename over an existing name
+  return LittleFS.rename(from, to);
 }
 
 // Asked before opening, wherever a file is expected to be missing.

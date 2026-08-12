@@ -146,6 +146,8 @@ void hostFailNextStreamClose();
 // and gives it back -- which re-initialises the panel, so the caller's next
 // paint must be a full one. Returns bytes read, or -1.
 int readWhole(const char* path, void* dst, int max);
+// n bytes from `off`, same bus rules. For anything too big to want whole.
+int readSlice(const char* path, uint32_t off, void* dst, int n);
 
 // --- managing the card from a phone -----------------------------------------
 // The card is the only place books live, and until now the only way to put one

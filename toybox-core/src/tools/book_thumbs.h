@@ -78,6 +78,8 @@ inline void staleFlashPath(const char* file, char* out, int cap) {
 // One file, overwritten. Keeping a copy per book would be 48 KB each for
 // covers only ever shown one at a time.
 inline constexpr const char* LOCK_PATH = "/lockcover.tbi";
+inline constexpr const char* LOCK_TMP = "/lockcover.tmp";
+inline constexpr uint32_t BAND_BYTES = 4800;  // 80 rows of the big cover
 
 inline bool haveLock() { return tbimg::have(LOCK_PATH); }
 
@@ -88,16 +90,36 @@ inline bool haveLock() { return tbimg::have(LOCK_PATH); }
 inline bool stashForLock(ToolsHost& h, const char* file) {
   char p[48];
   bigPath(file, p, sizeof(p));
-  uint8_t* buf = (uint8_t*)malloc(tbimg::FILE_SIZE);
+  // 48,008 bytes, and not one of them in a buffer of its own. This used to
+  // malloc the whole picture to hand to tfs::write, which is a transient
+  // allocation the same size as the one that fragments this device's heap
+  // into a state where books stop opening. Read a band, write a band.
+  uint8_t* buf = (uint8_t*)malloc(BAND_BYTES);
   if (!buf) return false;
-  bool ok = h.sdReadWhole(p, buf + tbimg::HEADER, BIG_BYTES) == BIG_BYTES;
+  // Into a temporary name, renamed over on success. Writing straight to the
+  // real one truncates it the moment we start, so a copy that then failed --
+  // a card pulled mid-read, say -- would take the perfectly good cover from
+  // the last book with it, and the sleeping panel would fall back to GOODBYE
+  // for no reason the owner could see.
+  bool ok = tfs::appendOpen(LOCK_TMP);
   if (ok) {
-    buf[0] = 'T'; buf[1] = 'B'; buf[2] = 'I'; buf[3] = '1';
-    buf[4] = (uint8_t)(BIG_W & 255); buf[5] = (uint8_t)(BIG_W >> 8);
-    buf[6] = (uint8_t)(BIG_H & 255); buf[7] = (uint8_t)(BIG_H >> 8);
-    ok = tfs::write(LOCK_PATH, (const char*)buf, tbimg::FILE_SIZE);
+    uint8_t hdr[tbimg::HEADER];
+    hdr[0] = 'T'; hdr[1] = 'B'; hdr[2] = 'I'; hdr[3] = '1';
+    hdr[4] = (uint8_t)(BIG_W & 255); hdr[5] = (uint8_t)(BIG_W >> 8);
+    hdr[6] = (uint8_t)(BIG_H & 255); hdr[7] = (uint8_t)(BIG_H >> 8);
+    ok = tfs::appendChunk(hdr, sizeof(hdr));
   }
+  for (uint32_t off = 0; ok && off < (uint32_t)BIG_BYTES; off += BAND_BYTES) {
+    const uint32_t n = (uint32_t)BIG_BYTES - off < BAND_BYTES ? (uint32_t)BIG_BYTES - off
+                                                              : BAND_BYTES;
+    ok = h.sdReadSlice(p, off, buf, n) == (int)n && tfs::appendChunk(buf, n);
+  }
+  tfs::appendClose();
   free(buf);
+  if (ok)
+    ok = tfs::rename(LOCK_TMP, LOCK_PATH);
+  else
+    tfs::remove(LOCK_TMP);  // half a picture is not a lock screen
   return ok;
 }
 

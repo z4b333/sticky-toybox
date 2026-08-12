@@ -458,6 +458,16 @@ class ToolsHost {
   }
   // Reads a whole file, borrowing the bus if nothing else holds it -- in
   // which case the panel is re-initialised and the next paint must be full.
+  // Part of a file, from an offset. Same bus discipline as sdReadWhole -- it
+  // borrows the bus when nobody holds it -- but it lets a caller work through
+  // something large without a buffer the size of the whole thing.
+  virtual int sdReadSlice(const char* path, uint32_t off, void* dst, int n) {
+    (void)path;
+    (void)off;
+    (void)dst;
+    (void)n;
+    return -1;
+  }
   virtual int sdReadWhole(const char* path, void* dst, int max) {
     (void)path;
     (void)dst;

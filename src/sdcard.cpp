@@ -643,6 +643,13 @@ int readWhole(const char* path, void* dst, int max) {
   return n;
 }
 
+int readSlice(const char* path, uint32_t off, void* dst, int n) {
+  auto it = fakeCard().find(path);
+  if (it == fakeCard().end() || off + (uint32_t)n > it->second.size()) return -1;
+  memcpy(dst, it->second.data() + off, (size_t)n);
+  return n;
+}
+
 #else
 
 Report probe() {
@@ -1125,6 +1132,27 @@ int readWhole(const char* path, void* dst, int max) {
     got = f.read((uint8_t*)dst, max);
     f.close();
   }
+  if (mine) busRelease();
+  return got;
+}
+
+int readSlice(const char* path, uint32_t off, void* dst, int n) {
+  const bool mine = !busHeld();
+  if (mine && !busClaim()) {
+    busRelease();
+    return -1;
+  }
+  int got = -1;
+  File f = SD.open(path, FILE_READ);
+  if (f && !f.isDirectory() && f.seek(off)) {
+    got = 0;
+    while (got < n) {
+      const int r = f.read((uint8_t*)dst + got, n - got);
+      if (r <= 0) break;
+      got += r;
+    }
+  }
+  if (f) f.close();
   if (mine) busRelease();
   return got;
 }

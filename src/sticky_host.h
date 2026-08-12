@@ -152,6 +152,9 @@ class StickyHost : public ToolsHost {
   bool sdStreamOpen(const char* path) override { return sdcard::streamOpen(path); }
   bool sdStreamWrite(const uint8_t* d, uint32_t n) override { return sdcard::streamWrite(d, n); }
   bool sdStreamClose(bool keep) override { return sdcard::streamClose(keep); }
+  int sdReadSlice(const char* path, uint32_t off, void* dst, int n) override {
+    return sdcard::readSlice(path, off, dst, n);
+  }
   int sdReadWhole(const char* path, void* dst, int max) override {
     return sdcard::readWhole(path, dst, max);
   }

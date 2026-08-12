@@ -184,6 +184,24 @@ int utf8Encode(uint32_t cp, char* out) {
 
 constexpr uint32_t WIN_SIZE = 32768;  // tinfl's dictionary; power of two
 
+// The window is STATIC, not heap, and this is the third time this device has
+// taught the same lesson.
+//
+// DEFLATE's dictionary is 32 KB by definition -- it cannot be made smaller,
+// only found. And on a chip with no PSRAM, running a UI that allocates and
+// frees a 48 KB cover buffer on the way into every book, 32 KB contiguous is
+// exactly the size that stops being findable. The device reported 79 KB free
+// with a largest block of 30 KB: not short of memory, just short of anywhere
+// to put this. A book that will not open because the heap is in pieces is a
+// worse failure than 32 KB of BSS is a cost.
+//
+// One reader exists at a time and only one book is open in it, so one window
+// is all there ever is. If the CrossPoint port (which has PSRAM configured)
+// would rather have this back, it is one #ifdef away -- but it should measure
+// before assuming its own heap is any less fragmented than this one.
+uint8_t g_window[WIN_SIZE];
+bool g_windowTaken = false;
+
 }  // namespace
 
 // --- CrossPoint sidecar ------------------------------------------------------
@@ -340,7 +358,7 @@ void Book::close() {
   _spineN = 0;
   free(_inflator);
   _inflator = nullptr;
-  free(_window);
+  if (_window == g_window) g_windowTaken = false;  // the static one goes back
   _window = nullptr;
   free(_inBuf);
   _inBuf = nullptr;
@@ -535,7 +553,10 @@ bool Book::entryOpen(const Ent& e) {
   _winPos = _winAvail = _winRead = 0;
   if (_method == 8) {
     if (!_inflator) _inflator = malloc(sizeof(tinfl_decompressor));
-    if (!_window) _window = (uint8_t*)malloc(WIN_SIZE);
+    if (!_window && !g_windowTaken) {
+      _window = g_window;
+      g_windowTaken = true;
+    }
     if (!_inBuf) _inBuf = (uint8_t*)malloc(2048);
     if (!_inflator || !_window || !_inBuf) {
       // The 32 KB one. DEFLATE's dictionary is 32 KB by definition, so this
