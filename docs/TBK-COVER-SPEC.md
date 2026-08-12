@@ -1,4 +1,4 @@
-# Where a .tbk cover goes
+# Where a book cover goes
 
 Handoff spec for a PC-side tool that generates manga/book covers for Toybox
 (Seeed reTerminal Sticky). Self-contained: everything needed to write a cover
@@ -8,6 +8,41 @@ Reference implementation: `tools/make_tbk.py --cover` in the `sticky-toybox`
 repo. If your output ever disagrees with the device, diff against that.
 
 ---
+
+## Two ways, and the sidecar is the better one
+
+**A `.cover.tbi` beside the book** works for **both** `.epub` and `.tbk`, wins
+over anything inside the file, and is picked up whenever it changes. This is
+the recommended route: a desktop has the whole image, a real dithering
+library and no memory ceiling, where the device has a streaming decoder and a
+band of RAM. Line art especially comes out badly on-device — Floyd–Steinberg
+is a photographic algorithm and turns a flat grey background into a field of
+worms. It also makes the book open faster, because there is nothing to decode.
+
+    /books/Uketsu/strange-houses.epub
+    /books/Uketsu/strange-houses.cover.tbi      <- same stem, ".cover.tbi"
+
+The file is the same format as a wallpaper or lock screen picture:
+
+```
+offset  0   char[4]  "TBI1"
+        4   u16      width  = 480     (little-endian)
+        6   u16      height = 800
+        8   ...      48,000 bytes of 1-bit pixels
+```
+
+Pixels are exactly as described below for the embedded cover: row-major,
+60 bytes a row, MSB first, **1 = white, 0 = black**. Total file size is
+**48,008 bytes**.
+
+The device compares 64 bytes of the sidecar against the cover it has stored,
+so replacing the `.tbi` on the card is picked up the next time the book is
+opened. No need to delete anything.
+
+The rest of this document describes the **embedded** cover — carried inside a
+`.tbk`. It is still supported and still useful (it survives the book being
+moved, and needs no second file), but for anything where the artwork matters,
+the sidecar is easier to iterate on.
 
 ## The short answer
 

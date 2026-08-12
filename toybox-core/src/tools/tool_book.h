@@ -374,7 +374,9 @@ class BookTool : public ToolApp {
     // A build that fails leaves have() false and is tried again next time,
     // which is right for this reader: nothing here decodes, so every failure
     // is a passing one. See makeAndSave.
-    if (!bthumb::have(_books[i].file)) {
+    // Most explicit first: a .cover.tbi beside the book, then a cover the
+    // converter put inside the file, then page 0 as the last resort.
+    if (!bthumb::coverFromSidecar(host(), _books[i].file) && !bthumb::have(_books[i].file)) {
       bool made = false;
       if (_books[i].cover) {
         // The embedded cover is 48,000 bytes of one bit and wants a buffer

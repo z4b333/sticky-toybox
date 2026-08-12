@@ -80,6 +80,7 @@ inline void staleFlashPath(const char* file, char* out, int cap) {
 inline constexpr const char* LOCK_PATH = "/lockcover.tbi";
 inline constexpr const char* LOCK_TMP = "/lockcover.tmp";
 inline constexpr uint32_t BAND_BYTES = 4800;  // 80 rows of the big cover
+inline constexpr int BAND_ROW_BYTES = BIG_W / 8;  // 60, one row of a 1-bit cover
 
 inline bool haveLock() { return tbimg::have(LOCK_PATH); }
 
@@ -451,6 +452,69 @@ class Builder {
 
 // A .tbk cover: the book's first page, which is already exactly panel-sized,
 // so this is the same pipeline with nothing to scale.
+// --- a cover the owner supplied ----------------------------------------------
+// "<book stem>.cover.tbi", beside the book on the card, in the same 480x800
+// one-bit format as a wallpaper or a lock screen picture.
+//
+// This beats everything else, for both kinds of book. A desktop has the whole
+// image, a real dithering library and no 150 KB ceiling; the device has a
+// streaming decoder and a band of RAM. Line art in particular comes out badly
+// here -- Floyd-Steinberg is a photographic algorithm and it turns a flat grey
+// background into a field of worms -- and no amount of cleverness on this chip
+// beats somebody choosing the treatment on a monitor.
+//
+// It also makes a book open faster, because there is nothing to decode.
+inline bool sidecarPath(const char* file, char* out, int cap) {
+  const char* dot = strrchr(file, '.');
+  const char* slash = strrchr(file, '/');
+  if (!dot || (slash && dot < slash)) return false;
+  const int stem = (int)(dot - file);
+  return snprintf(out, (size_t)cap, "%.*s.cover.tbi", stem, file) < cap;
+}
+
+// Builds the cover from the sidecar when there is one and the stored copy is
+// not already it. False means no sidecar -- decode the book's own cover
+// instead. True means the cover is now current, whether it was rebuilt or was
+// already right.
+//
+// The freshness check is 64 bytes from each: replacing the .tbi on the card
+// should show up on the device, and re-reading two small chunks per open is
+// cheaper than either rebuilding blindly or never noticing.
+inline bool coverFromSidecar(ToolsHost& h, const char* file) {
+  char sc[160];
+  if (!sidecarPath(file, sc, sizeof(sc))) return false;
+  uint8_t head[64];
+  if (h.sdReadSlice(sc, tbimg::HEADER, head, sizeof(head)) != (int)sizeof(head)) return false;
+
+  char big[48];
+  bigPath(file, big, sizeof(big));
+  uint8_t stored[64];
+  if (have(file) && h.sdReadSlice(big, 0, stored, sizeof(stored)) == (int)sizeof(stored) &&
+      memcmp(head, stored, sizeof(head)) == 0)
+    return true;  // already the cover on the card
+
+  Builder b;
+  if (!b.begin(h, file, BIG_W, BIG_H)) return true;  // a bad moment, not a bad cover
+  uint8_t band[BAND_ROW_BYTES * 40];
+  uint8_t line[BIG_W];
+  for (int y0 = 0; y0 < BIG_H; y0 += 40) {
+    const int rows = (BIG_H - y0) < 40 ? (BIG_H - y0) : 40;
+    if (h.sdReadSlice(sc, tbimg::HEADER + (uint32_t)y0 * BAND_ROW_BYTES, band,
+                      rows * BAND_ROW_BYTES) != rows * BAND_ROW_BYTES) {
+      b.abort();
+      return true;
+    }
+    for (int r = 0; r < rows; r++) {
+      const uint8_t* src = band + (size_t)r * BAND_ROW_BYTES;
+      for (int x = 0; x < BIG_W; x++)
+        line[x] = (src[x >> 3] & (0x80 >> (x & 7))) ? 255 : 0;  // 1 = white
+      b.row(y0 + r, line, BIG_W);
+    }
+  }
+  b.finish();
+  return true;
+}
+
 // True when both pictures were written. The caller is expected to look: a
 // cover that did not get made leaves `have()` false, and the next open of the
 // book tries again.

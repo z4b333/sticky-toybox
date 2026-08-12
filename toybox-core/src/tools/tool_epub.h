@@ -331,7 +331,10 @@ class EpubTool : public ToolApp {
     // The cover thumbnail for the hub's recently-read strip: decoded once on
     // a book's first open (a second or two for a big JPEG), never again --
     // and a cover that will not decode is marked so it is never retried.
-    if (!bthumb::have(_books[i].file) && !bthumb::failed(_books[i].file)) {
+    // A cover the owner put beside the book wins over the one inside it: they
+    // chose it, on a machine that could do the picture justice.
+    if (!bthumb::coverFromSidecar(host(), _books[i].file) &&
+        !bthumb::have(_books[i].file) && !bthumb::failed(_books[i].file)) {
       bool transient = false;
       if (!epubcov::makeThumb(host(), _book, _books[i].file, &transient) && !transient)
         bthumb::markFailed(_books[i].file);
