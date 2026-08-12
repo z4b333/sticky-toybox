@@ -39,8 +39,26 @@ const SPISettings kSpi(10000000, MSBFIRST, SPI_MODE0);  // conservative 10 MHz
 }  // namespace
 
 bool Epd::begin() {
-  _fb = (uint8_t*)malloc(EPD_BUF_SIZE);
-  _prev = (uint8_t*)malloc(EPD_BUF_SIZE);
+  // Both framebuffers go to PSRAM when there is any.
+  //
+  // They are 48 KB each and live for the whole run, so on a device with only
+  // internal RAM they were 96 KB of permanently-occupied heap sitting in the
+  // middle of everything else -- the reason a 32 KB inflate window, a 48 KB
+  // page and an SD mount all found the heap in pieces rather than short. Out
+  // in PSRAM they cost the internal heap nothing at all.
+  //
+  // PSRAM is slower per access, which matters here in one place: drawing is
+  // per-pixel through fillRect. Against a panel refresh of 1.7 seconds it is
+  // not expected to be visible, and if it ever is, the shadow buffer (_prev,
+  // which is only ever memcpy'd and streamed out) can stay out there while
+  // the live one comes home.
+  //
+  // ps_malloc falls back to internal automatically when there is no PSRAM, so
+  // a board without it behaves exactly as before.
+  _fb = (uint8_t*)ps_malloc(EPD_BUF_SIZE);
+  _prev = (uint8_t*)ps_malloc(EPD_BUF_SIZE);
+  if (!_fb) _fb = (uint8_t*)malloc(EPD_BUF_SIZE);
+  if (!_prev) _prev = (uint8_t*)malloc(EPD_BUF_SIZE);
   if (!_fb || !_prev) return false;
   memset(_fb, 0xFF, EPD_BUF_SIZE);
   memset(_prev, 0xFF, EPD_BUF_SIZE);

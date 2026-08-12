@@ -189,6 +189,7 @@ void run() {
   r.fontFaces = gfx::loadedFaceCount();
   r.psramKb = (uint32_t)(ESP.getPsramSize() / 1024);
   r.heapKb = (uint32_t)(ESP.getFreeHeap() / 1024);
+  r.psramFreeKb = (uint32_t)(ESP.getFreePsram() / 1024);
   r.blockKb = (uint32_t)(ESP.getMaxAllocHeap() / 1024);
 #ifdef TB_VERSION
   r.version = "toybox " TB_VERSION "  ·  " TB_DATE;

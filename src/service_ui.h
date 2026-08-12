@@ -37,7 +37,7 @@ struct Report {
   // one that matters: the reader needs 48 KB in one run, and a heap with
   // plenty free and nothing contiguous is what a book failing to open looks
   // like from the inside.
-  uint32_t heapKb = 0, blockKb = 0;
+  uint32_t heapKb = 0, blockKb = 0, psramFreeKb = 0;
   // The SD probe, which only runs when somebody asks for it on that row.
   bool sdTried = false, sdMounted = false, sdPanelOk = false;
   uint64_t sdSizeMb = 0;
@@ -156,8 +156,9 @@ inline void render(ToolsCanvas& c, const Report& r, const Config& cfg, int sel, 
   c.text(MARGIN, y, buf, TS_MED, true);
   y += 26;
 
-  snprintf(buf, sizeof(buf), "heap     %lu KB free, biggest block %lu KB",
-           (unsigned long)r.heapKb, (unsigned long)r.blockKb);
+  snprintf(buf, sizeof(buf), "heap     %lu KB free, biggest %lu KB, psram %lu KB free",
+           (unsigned long)r.heapKb, (unsigned long)r.blockKb,
+           (unsigned long)r.psramFreeKb);
   c.text(MARGIN, y, buf, TS_MED, true);
   y += 26;
 
