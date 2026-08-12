@@ -10,8 +10,6 @@
 #include <cstdio>
 #include <cstring>
 
-#include "tools/book_thumbs.h"
-#include "tools/epub/epub_cover.h"
 #include "tools/epub/epubcore.h"
 
 namespace {
@@ -58,39 +56,10 @@ int main(int argc, char** argv) {
   printf("cover: type %d (0 none, 1 jpeg, 2 png), %u bytes compressed source\n",
          book.coverType(), book.coverSize());
 
-  // the cover pipeline, into the fake flash store, dumped as a PGM
-  t0 = std::chrono::steady_clock::now();
-  const bool cov = epubcov::makeThumb(book, "/books/cli.epub");
-  t1 = std::chrono::steady_clock::now();
-  printf("cover thumb: %s, %.1f ms\n", cov ? "ok" : "FAILED", ms(t0, t1));
-  if (cov) {
-    uint8_t bits[bthumb::BYTES];
-    if (bthumb::load("/books/cli.epub", bits)) {
-      FILE* out = fopen("cover_thumb.pgm", "wb");
-      fprintf(out, "P5\n%d %d\n255\n", bthumb::W, bthumb::H);
-      for (int y = 0; y < bthumb::H; y++)
-        for (int x = 0; x < bthumb::W; x++) {
-          const uint8_t v =
-              (bits[(size_t)y * (bthumb::W / 8) + (x >> 3)] & (0x80 >> (x & 7))) ? 255 : 0;
-          fwrite(&v, 1, 1, out);
-        }
-      fclose(out);
-      printf("  wrote cover_thumb.pgm\n");
-    }
-    // ...and the panel-sized one the loading screen blits.
-    {
-      char bp[24];
-      bthumb::bigPath("/books/cli.epub", bp, sizeof(bp));
-      size_t len = 0;
-      if (char* big = tfs::readAlloc(bp, len)) {
-        FILE* o = fopen("cover_big.bin", "wb");
-        fwrite(big, 1, len, o);
-        fclose(o);
-        free(big);
-        printf("  wrote cover_big.bin (%zu bytes)\n", len);
-      }
-    }
-  }
+  // The cover PIPELINE is not run here any more: it needs a ToolsHost (the
+  // card, the flash store, the heap figures), which only the preview harness
+  // has. `preview` covers it. This tool is about the zip, the word stream and
+  // the artwork, which need nothing but the file.
 
   // every chapter: word count, offsets monotonic, timing; print a taste
   char w[epubc::WORD_CAP];
@@ -102,7 +71,7 @@ int main(int argc, char** argv) {
       printf("ch %02d: OPEN FAILED (%s)\n", s, book.error());
       continue;
     }
-    uint32_t words = 0, paras = 0, lastOff = 0;
+    uint32_t words = 0, paras = 0, lastOff = 0, pics = 0, ready = 0;
     bool mono = true;
     char first[epubc::WORD_CAP] = "", last[epubc::WORD_CAP] = "";
     t0 = std::chrono::steady_clock::now();
@@ -117,6 +86,38 @@ int main(int argc, char** argv) {
         paras++;
         continue;
       }
+      if (t == epubc::TOK_IMAGE) {
+        // An illustration, and whether this book carries the picture the
+        // device would actually draw: same entry, "toybox/" prefix, ".tbi".
+        pics++;
+        char entry[256];
+        snprintf(entry, sizeof(entry), "toybox/%s", book.imageName());
+        char* dot = strrchr(entry, '.');
+        const char* slash = strrchr(entry, '/');
+        if (dot && (!slash || dot > slash)) *dot = 0;
+        strncat(entry, ".tbi", sizeof(entry) - strlen(entry) - 1);
+        // The chapter stream is spent by opening another entry, so this run
+        // reopens the chapter afterwards -- exactly as the reader does.
+        const uint32_t here = off;
+        bool ok = false;
+        if (book.blobOpen(entry)) {
+          uint8_t head[8];
+          ok = book.blobSize() == 48008u && book.blobRead(head, 8) == 8 &&
+               memcmp(head, "TBI1", 4) == 0 && head[4] == (480 & 255) && head[5] == (480 >> 8) &&
+               head[6] == (800 & 255) && head[7] == (800 >> 8);
+          book.blobClose();
+        }
+        if (ok) ready++;
+        printf("       image %-52s %s\n", book.imageName(), ok ? "prepared" : "-- plate");
+        // Replay to where we were, the way a turn off a picture does.
+        if (!book.chapterOpen(s)) break;
+        uint32_t o2 = 0;
+        while (o2 < here) {
+          const int t2 = book.next(w, o2);
+          if (t2 == epubc::TOK_END || t2 == epubc::TOK_ERR) break;
+        }
+        continue;
+      }
       if (off < lastOff) mono = false;
       lastOff = off;
       if (first[0] == 0) strcpy(first, w);
@@ -126,8 +127,10 @@ int main(int argc, char** argv) {
     t1 = std::chrono::steady_clock::now();
     totalWords += words;
     totalMs += ms(t0, t1);
-    printf("ch %02d: %6u words %5u paras  %7.1f ms  %s  first '%s' last '%s'\n", s, words,
-           paras, ms(t0, t1), mono ? "offsets ok" : "OFFSETS NOT MONOTONIC", first, last);
+    printf("ch %02d: %6u words %5u paras %2u pics (%u prepared) %7.1f ms  %s  first '%s' last "
+           "'%s'\n",
+           s, words, paras, pics, ready, ms(t0, t1),
+           mono ? "offsets ok" : "OFFSETS NOT MONOTONIC", first, last);
   }
   printf("total: %llu words, %.0f ms on this machine\n", (unsigned long long)totalWords,
          totalMs);
