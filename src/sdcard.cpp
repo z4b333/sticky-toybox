@@ -236,6 +236,20 @@ static const char kFakeCh3[] =
     "<body><div><img src=\"images/plate.png\" alt=\"a plate\"/></div></body>\n"
     "</html>\n";
 
+// An EPUB3 navigation document, the real shape: a nav marked toc, an ordered
+// list, one <a> per chapter. The reader's contents list is built from this, and
+// the third entry points at the picture-only chapter, so a jump has to land on
+// a page that is a picture.
+static const char kFakeNav[] =
+    "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+    "<html xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:epub=\"http://www.idpf.org/2007/ops\">\n"
+    "<body><nav epub:type=\"toc\"><ol>\n"
+    "  <li><a href=\"ch1.xhtml\">One two three</a></li>\n"
+    "  <li><a href=\"ch2.xhtml#top\">\n     The long one\n  </a></li>\n"
+    "  <li><a href=\"ch3.xhtml\">A plate</a></li>\n"
+    "</ol></nav></body>\n"
+    "</html>\n";
+
 static const char kFakeContainer[] =
     "<?xml version=\"1.0\"?>\n"
     "<container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">\n"
@@ -254,6 +268,8 @@ static const char kFakeOpf[] =
     "    <item id=\"c1\" href=\"ch1.xhtml\" media-type=\"application/xhtml+xml\"/>\n"
     "    <item id=\"c2\" href=\"ch2.xhtml\" media-type=\"application/xhtml+xml\"/>\n"
     "    <item id=\"c3\" href=\"ch3.xhtml\" media-type=\"application/xhtml+xml\"/>\n"
+    "    <item id=\"nav\" href=\"nav.xhtml\" media-type=\"application/xhtml+xml\" "
+    "properties=\"nav\"/>\n"
     "    <item id=\"cov\" href=\"cover.jpg\" media-type=\"image/jpeg\"/>\n"
     "    <item id=\"img\" href=\"images/plate.png\" media-type=\"image/png\"/>\n"
     "    <item id=\"img2\" href=\"images/missing.png\" media-type=\"image/png\"/>\n"
@@ -316,7 +332,7 @@ void buildFakeEpub() {
     uint32_t lho;
   };
   const uint32_t tbiLen = fakeTbiBuild();
-  E ents[9] = {
+  E ents[10] = {
       {"META-INF/container.xml", (const uint8_t*)kFakeContainer, (uint32_t)strlen(kFakeContainer),
        (uint32_t)strlen(kFakeContainer), 0, 0},
       {"OEBPS/content.opf", (const uint8_t*)kFakeOpf, (uint32_t)strlen(kFakeOpf),
@@ -336,6 +352,8 @@ void buildFakeEpub() {
       {"toybox/OEBPS/images/plate.tbi", g_fakeTbi, tbiLen, tbiLen, 0, 0},
       {"OEBPS/images/missing.png", kFakePlatePng, (uint32_t)sizeof(kFakePlatePng),
        (uint32_t)sizeof(kFakePlatePng), 0, 0},
+      {"OEBPS/nav.xhtml", (const uint8_t*)kFakeNav, (uint32_t)strlen(kFakeNav),
+       (uint32_t)strlen(kFakeNav), 0, 0},
   };
   uint32_t total = 22;
   for (const E& e : ents) total += 30 + 46 + 2 * (uint32_t)strlen(e.name) + e.csize;
@@ -388,7 +406,9 @@ struct FakeSide {
   uint8_t data[512];
   int n = 0;
 };
-FakeSide g_side[6];
+// Ten, not six: a book now carries a CrossPoint position, a KOReader sidecar
+// and a bookmarks file, and the harness opens more than one book.
+FakeSide g_side[10];
 }  // namespace
 
 // The second invented book exists to exercise long paths: real release

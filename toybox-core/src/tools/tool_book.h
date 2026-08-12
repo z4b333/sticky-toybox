@@ -12,6 +12,8 @@
 // how fast a page can turn.
 #pragma once
 #include "book_thumbs.h"
+#include "bookmarks.h"
+#include "reader_menu.h"
 #include "recents.h"
 #include "shelf.h"
 #include "tools_ui.h"
@@ -65,6 +67,10 @@ class BookTool : public ToolApp {
   }
 
   void render(ToolsCanvas& c) override {
+    if (_screen == Screen::Page && _menu != rmenu::Page::None) {
+      renderMenu(c);
+      return;
+    }
     if (_screen == Screen::Loading) {
       bthumb::drawLoading(host(), c, _books[_cur].file, _books[_cur].title);
       return;
@@ -155,6 +161,10 @@ class BookTool : public ToolApp {
       return;
     }
 
+    if (_menu != rmenu::Page::None) {
+      menuTap(x, y);
+      return;
+    }
     // The page view. Corner out, thirds turn, middle toggles the footer.
     if (x < 110 && y < 50) {
       leaveBook();
@@ -186,9 +196,24 @@ class BookTool : public ToolApp {
   bool onButton(SideBtn b) override {
     if (_screen != Screen::Page) return false;
     if (b == SideBtn::Ok) {
-      leaveBook();
+      if (_menu == rmenu::Page::None)
+        menuOpen();
+      else if (_menu == rmenu::Page::Root)
+        menuClose();
+      else
+        menuBack();
       return true;
     }
+    if (_menu == rmenu::Page::Marks) {
+      menuScroll(b == SideBtn::Down ? 1 : -1);
+      return true;
+    }
+    if (_menu == rmenu::Page::Contents) {
+      // On the jump screen the side buttons are the fastest dial there is.
+      dial(b == SideBtn::Down ? 1 : -1);
+      return true;
+    }
+    if (_menu != rmenu::Page::None) return true;
     turn(b == SideBtn::Down ? 1 : -1);
     return true;
   }
@@ -215,6 +240,10 @@ class BookTool : public ToolApp {
 #ifdef TOYBOX_HOST
   int hostScreen() const { return _screen == Screen::Page ? 1 : 0; }
   uint32_t hostPage() const { return _pageNo; }
+  int hostMenu() const { return (int)_menu; }
+  int hostMarkCount() const { return _nmarks; }
+  uint32_t hostDialled() const { return _jump; }
+  static TRect hostDialRect(int i, int w) { return dialRect(i, w); }
   const char* hostDir() const { return _dir; }
   int hostFolders() const { return _nf; }
   int hostItems() const { return items(); }
@@ -365,6 +394,8 @@ class BookTool : public ToolApp {
     _open = true;
     _pageNo = savedPage(i);
     _chrome = false;
+    _menu = rmenu::Page::None;
+    _nmarks = 0;
     recents::note(prefs(), recents::KIND_TBK, _books[i].file, _books[i].title);
     // The cover thumbnail for the hub's recently-read strip, made once while
     // the bus is already up: the file's own cover if the converter put one
@@ -424,6 +455,7 @@ class BookTool : public ToolApp {
   }
 
   void leaveBook() {
+    _menu = rmenu::Page::None;
     host().bookClose();  // powers the card down and re-initialises the panel
     freePageBuf();       // the shelf does not need 48 KB to draw a list
     _open = false;
@@ -453,6 +485,223 @@ class BookTool : public ToolApp {
     host().beep(0);
     // Full refresh either way: a page of a book changes every region of the
     // panel, and partials would stack ghosts of the last page under this one.
+    showPage();
+  }
+
+  // --- the panel --------------------------------------------------------------
+  // The same panel the EPUB reader has, minus the two things a .tbk has no
+  // opinion about: it has no chapters to list and no type to set, because its
+  // pages are pictures. What is left is where am I, keep this, go there, out.
+
+  void menuOpen() {
+    _menu = rmenu::Page::Root;
+    _mpage = 0;
+    _jump = _pageNo;
+    _nmarks = marks::load(host(), _books[_cur].file, _marks);
+    host().beep(0);
+    host().refresh(true);
+  }
+
+  void menuClose() {
+    _menu = rmenu::Page::None;
+    host().beep(0);
+    showPage();  // back to the page, through the grey path if it is a grey book
+  }
+
+  void menuBack() {
+    _menu = rmenu::Page::Root;
+    _mpage = 0;
+    host().beep(0);
+    host().refresh(true);
+  }
+
+  void menuScroll(int dir) {
+    const int pages = shelf::pageCount(_nmarks);
+    const int want = _mpage + dir;
+    if (_nmarks <= 0 || want < 0 || want >= pages) {
+      host().beep(2);
+      return;
+    }
+    _mpage = want;
+    host().beep(0);
+    host().refresh(true);
+  }
+
+  // The jump dial. A .tbk has no chapters, so the only question is a number,
+  // and the only thing that matters is reaching page 300 of 400 without three
+  // hundred taps: ones, tens and fifties, and the buttons do ones.
+  void dial(int by) {
+    const int64_t want = (int64_t)_jump + by;
+    const int64_t last = (int64_t)_books[_cur].pages - 1;
+    _jump = (uint32_t)(want < 0 ? 0 : (want > last ? last : want));
+    host().beep(0);
+    host().refresh(true);
+  }
+
+  static constexpr int DIAL_STEPS = 6;
+  static int dialStep(int i) {
+    static const int kSteps[DIAL_STEPS] = {-50, -10, -1, 1, 10, 50};
+    return kSteps[i];
+  }
+  static TRect dialRect(int i, int w) {
+    const int cw = (w - 40) / 3;
+    return {20 + (i % 3) * cw, 300 + (i / 3) * 108, cw - 8, 96};
+  }
+
+  void markLabel(const marks::Mark& m, char* out, int cap) {
+    snprintf(out, (size_t)cap, "page %lu", (unsigned long)(m.page + 1));
+  }
+
+  void renderMenu(ToolsCanvas& c) {
+    if (_menu == rmenu::Page::Root) {
+      rmenu::Item items[4];
+      items[0].label = "GO TO PAGE";
+      snprintf(_rootSub[0], sizeof(_rootSub[0]), "page %lu of %lu",
+               (unsigned long)(_pageNo + 1), (unsigned long)_books[_cur].pages);
+      items[0].sub = _rootSub[0];
+      items[1].label = "BOOKMARKS";
+      if (_nmarks > 0)
+        snprintf(_rootSub[1], sizeof(_rootSub[1]), "%d kept", _nmarks);
+      else
+        snprintf(_rootSub[1], sizeof(_rootSub[1]), "none yet");
+      items[1].sub = _rootSub[1];
+      items[2].label = "KEEP THIS PAGE";
+      snprintf(_rootSub[2], sizeof(_rootSub[2]), "page %lu", (unsigned long)(_pageNo + 1));
+      items[2].sub = _rootSub[2];
+      items[3].label = "CLOSE THE BOOK";
+      items[3].sub = _books[_cur].title;
+      rmenu::drawRoot(host(), c, "OPTIONS", items, 4);
+      return;
+    }
+
+    if (_menu == rmenu::Page::Contents) {
+      host().topBar("GO TO PAGE", false, "OPTIONS");
+      char buf[40];
+      snprintf(buf, sizeof(buf), "%lu", (unsigned long)(_jump + 1));
+      c.textCentered(c.width() / 2, 150, buf, TS_HUGE, true);
+      snprintf(buf, sizeof(buf), "of %lu", (unsigned long)_books[_cur].pages);
+      c.textCentered(c.width() / 2, 220, buf, TS_MED, true);
+      for (int i = 0; i < DIAL_STEPS; i++) {
+        const TRect r = dialRect(i, c.width());
+        const int step = dialStep(i);
+        snprintf(buf, sizeof(buf), "%s%d", step > 0 ? "+" : "", step);
+        c.button(r.x, r.y, r.w, r.h, buf, false);
+      }
+      c.button(60, 540, c.width() - 120, 96, "GO", true);
+      c.textCentered(c.width() / 2, 680, "UP and DOWN step one page at a time", TS_SMALL, true);
+      return;
+    }
+
+    host().topBar("BOOKMARKS", false, "OPTIONS");
+    if (_nmarks <= 0) {
+      rmenu::drawEmpty(c, "no bookmarks yet", "KEEP THIS PAGE puts one here");
+      return;
+    }
+    for (int k = 0; k < shelf::PER_PAGE; k++) {
+      const int idx = _mpage * shelf::PER_PAGE + k;
+      if (idx >= _nmarks) break;
+      char label[40];
+      markLabel(_marks[idx], label, sizeof(label));
+      rmenu::drawRow(c, k, label, _marks[idx].page == (uint16_t)_pageNo ? "you are here" : "",
+                     shelf::rowSep(k, idx, _nmarks), _marks[idx].page == (uint16_t)_pageNo);
+    }
+    shelf::drawPager(c, _mpage, _nmarks);
+    c.textCentered(c.width() / 2, 770, "a second tap on the page you are on removes it", TS_SMALL,
+                   true);
+  }
+
+  void menuTap(int x, int y) {
+    if (host().isBackTap(x, y)) {
+      if (_menu == rmenu::Page::Root)
+        menuClose();
+      else
+        menuBack();
+      return;
+    }
+    if (_menu == rmenu::Page::Root) {
+      switch (rmenu::hitRoot(x, y, 4, host().canvas().width())) {
+        case 0:
+          _menu = rmenu::Page::Contents;
+          _jump = _pageNo;
+          host().beep(0);
+          host().refresh(true);
+          return;
+        case 1:
+          _menu = rmenu::Page::Marks;
+          _mpage = 0;
+          host().beep(0);
+          host().refresh(true);
+          return;
+        case 2: {
+          marks::Mark m{marks::TBK_SPINE, (uint16_t)_pageNo, 0};
+          const bool added = marks::add(_marks, _nmarks, m) >= 0;
+          if (added) marks::save(host(), _books[_cur].file, _marks, _nmarks);
+          host().beep(added ? 1 : 2);
+          host().refresh(true);
+          return;
+        }
+        case 3:
+          _menu = rmenu::Page::None;
+          leaveBook();
+          return;
+        default:
+          return;
+      }
+    }
+
+    if (_menu == rmenu::Page::Contents) {
+      for (int i = 0; i < DIAL_STEPS; i++)
+        if (dialRect(i, host().canvas().width()).hit(x, y)) {
+          dial(dialStep(i));
+          return;
+        }
+      if (y >= 540 && y < 636) jumpTo(_jump);
+      return;
+    }
+
+    const int pages = shelf::pageCount(_nmarks);
+    if (y >= shelf::PAGER_Y && pages > 1) {
+      if (_mpage > 0 && shelf::prevRect().hit(x, y)) {
+        _mpage--;
+        host().beep(0);
+        host().refresh(true);
+      } else if (_mpage < pages - 1 && shelf::nextRect().hit(x, y)) {
+        _mpage++;
+        host().beep(0);
+        host().refresh(true);
+      }
+      return;
+    }
+    const int idx = shelf::hitRow(x, y, _nmarks, _mpage);
+    if (idx < 0) return;
+    if (_marks[idx].page == (uint16_t)_pageNo) {
+      marks::remove(_marks, _nmarks, idx);
+      marks::save(host(), _books[_cur].file, _marks, _nmarks);
+      host().beep(1);
+      host().refresh(true);
+      return;
+    }
+    jumpTo(_marks[idx].page);
+  }
+
+  void jumpTo(uint32_t page) {
+    if (_cur < 0 || page >= _books[_cur].pages) {
+      host().beep(2);
+      return;
+    }
+    const uint32_t was = _pageNo;
+    _pageNo = page;
+    if (!readCurrentPage()) {
+      _pageNo = was;
+      _note = "the card stopped answering";
+      leaveBook();
+      return;
+    }
+    char k[12];
+    posKey(_cur, k);
+    prefs().putUInt(k, _pageNo);
+    _menu = rmenu::Page::None;
+    host().beep(1);
     showPage();
   }
 
@@ -516,6 +765,13 @@ class BookTool : public ToolApp {
       c.text(c.width() - 16 - pw, 758, pos, TS_MED, true);
     }
   }
+
+  rmenu::Page _menu = rmenu::Page::None;
+  int _mpage = 0;
+  uint32_t _jump = 0;              // the page being dialled on the jump screen
+  marks::Mark _marks[marks::MAX];
+  int _nmarks = 0;
+  char _rootSub[3][48] = {};
 
   Screen _screen = Screen::List;
   char _dir[128] = "/books";

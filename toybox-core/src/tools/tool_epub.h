@@ -18,7 +18,9 @@
 #include "epub/epub_cover.h"
 #include "epub/epubcore.h"
 #include "epub/koreader_sdr.h"
+#include "bookmarks.h"
 #include "lock_image.h"
+#include "reader_menu.h"
 #include "recents.h"
 #include "shelf.h"
 #include "tools_ui.h"
@@ -27,9 +29,20 @@ namespace epubui {
 inline constexpr int MARGIN = 24;
 inline constexpr int TOP = 18;
 inline constexpr int BOTTOM = 770;   // the footer band starts below this
-inline constexpr int LINE_STEP = 34; // 24 px type with air; ~22 lines a page
+// The reader's own type, chosen from the panel. Three sizes and three leadings,
+// and nothing SMALLER than the body size the whole firmware settled on: 24 px
+// is 2.6 mm on this 235 DPI panel, already about seven point, and the one time
+// this project shipped smaller text than that nobody could read the screen.
+inline constexpr int SIZES = 3, LEADS = 3;
+inline TSize sizeAt(int i) { return i <= 0 ? TS_MED : (i == 1 ? TS_LARGE : TS_HUGE); }
+inline const char* sizeName(int i) { return i <= 0 ? "normal" : (i == 1 ? "large" : "largest"); }
+inline const char* leadName(int i) { return i <= 0 ? "tight" : (i == 1 ? "normal" : "airy"); }
+inline int leadAir(int i) { return i <= 0 ? 6 : (i == 1 ? 10 : 18); }
 inline constexpr int PARA_GAP = 14;
-inline constexpr int MAX_LINES = 24;
+// Enough for the smallest type at the tightest leading: 752 px of page over a
+// 30 px step is 25 lines, and a page that runs out of Line slots stops early
+// with a gap at the bottom that nothing explains.
+inline constexpr int MAX_LINES = 28;
 inline constexpr int TURN_W = 160;   // tap thirds, same as the .tbk reader
 // The list itself is shelf.h's: series folders, then books, a page at a time.
 inline constexpr int LIST_Y0 = shelf::Y0, LIST_ROW_H = shelf::ROW_H;
@@ -47,6 +60,11 @@ inline constexpr uint32_t pageOff(uint32_t v) { return v & ~PAGE_IMG; }
 // bus in 50 reads and never needs 48 KB of anything.
 inline constexpr int IMG_BAND_ROWS = 16;
 inline uint8_t g_imgBand[IMG_BAND_ROWS * (480 / 8)];
+// The book's contents, read once per book. Static because it is 3 KB and one
+// book is open at a time; sized so that a light novel's chapter list fits and
+// a reference work's is truncated rather than refused.
+inline constexpr int MAX_TOC = 64;
+inline epubc::Book::TocEntry g_toc[MAX_TOC];
 }  // namespace epubui
 
 class EpubTool : public ToolApp {
@@ -64,6 +82,10 @@ class EpubTool : public ToolApp {
     _note = nullptr;
     snprintf(_dir, sizeof(_dir), "%s", shelf::TOP);
     reload();
+    _size = (uint8_t)prefs().getUInt("rd_size", 0);
+    _lead = (uint8_t)prefs().getUInt("rd_lead", 1);
+    if (_size >= epubui::SIZES) _size = 0;
+    if (_lead >= epubui::LEADS) _lead = 1;
     if (!_lut) _lut = (uint32_t*)malloc(sizeof(uint32_t) * epubui::MAX_PAGES);
   }
 
@@ -73,6 +95,10 @@ class EpubTool : public ToolApp {
       return;
     }
     if (_screen == Screen::Page) {
+      if (_menu != rmenu::Page::None) {
+        renderMenu(c);
+        return;
+      }
       renderPage(c);
       return;
     }
@@ -151,6 +177,10 @@ class EpubTool : public ToolApp {
       openBook(idx - _nf);
       return;
     }
+    if (_menu != rmenu::Page::None) {
+      menuTap(x, y);
+      return;
+    }
     // The page. Corner out, thirds turn, middle toggles the footer.
     if (x < 110 && y < 50) {
       closeBook(true);
@@ -167,12 +197,26 @@ class EpubTool : public ToolApp {
     turn(right ? 1 : -1);
   }
 
-  // DOWN is always forward, matching the .tbk reader; a short press of the
-  // power button (Ok) closes the book, also matching.
+  // DOWN is always forward, matching the .tbk reader. The power button's short
+  // press opens the panel -- contents, marks, type, and the way out -- because
+  // a hand holding the device by its edge has one control and the book has
+  // more than one thing to ask of it. A hold still powers off; that is
+  // main.cpp's, not ours.
   bool onButton(SideBtn b) override {
     if (_screen != Screen::Page) return false;
     if (b == SideBtn::Ok) {
-      closeBook(true);
+      if (_menu == rmenu::Page::None)
+        menuOpen();
+      else if (_menu == rmenu::Page::Root)
+        menuClose();
+      else
+        menuBack();
+      return true;
+    }
+    if (_menu != rmenu::Page::None) {
+      // In a list, the side buttons page it; on the root they do nothing,
+      // because there is nothing under the five buttons to scroll to.
+      menuScroll(b == SideBtn::Down ? 1 : -1);
       return true;
     }
     turn(b == SideBtn::Down ? 1 : -1);
@@ -199,10 +243,16 @@ class EpubTool : public ToolApp {
   int hostScreen() const { return _screen == Screen::Page ? 1 : 0; }
   int hostSpine() const { return _spine; }
   int hostPage() const { return _page; }
-  uint32_t hostPageOffset() const {
-    return _page < _lutN ? epubui::pageOff(_lut[_page]) : 0;
-  }
+  uint32_t hostPageOffset() const { return curOffset(); }
   const char* hostPageImage() const { return _pageImage; }
+  int hostMenu() const { return (int)_menu; }
+  int hostMarkCount() const { return _nmarks; }
+  int hostTextSize() const { return _size; }
+  int hostTocCount() { return _ntoc; }
+  // The contents fallback -- chapters named by their own first words -- only
+  // happens in books with no navigation document, and the fixture has one. So
+  // the harness throws it away to walk the other path.
+  void hostDropToc() { _ntoc = 0; }
   const char* hostLine(int i) const { return i < _lineN ? _lines[i].t : ""; }
   int hostLineCount() const { return _lineN; }
   const char* hostDir() const { return _dir; }
@@ -224,6 +274,10 @@ class EpubTool : public ToolApp {
              (unsigned long)(free / 1024), (unsigned long)(big / 1024));
     return _noteBuf;
   }
+
+  // Where the reader is, in the only terms that survive a change of type or a
+  // change of firmware: the visible-codepoint offset of the page's first word.
+  uint32_t curOffset() const { return _page < _lutN ? epubui::pageOff(_lut[_page]) : 0; }
 
   bool inFolder() const { return !shelf::isTop(_dir); }
   const char* seriesName() const {
@@ -342,6 +396,9 @@ class EpubTool : public ToolApp {
       return;
     }
     _open = true;
+    _menu = rmenu::Page::None;
+    _ntoc = -1;
+    _nmarks = 0;
     recents::note(prefs(), recents::KIND_EPUB, _books[i].file, _books[i].title);
 
     // The cover thumbnail for the hub's recently-read strip: decoded once on
@@ -386,6 +443,7 @@ class EpubTool : public ToolApp {
   }
 
   void closeBook(bool beep) {
+    _menu = rmenu::Page::None;
     if (_open) {
       saveProgress();
       _book.close();
@@ -422,6 +480,8 @@ class EpubTool : public ToolApp {
   // words placed (0 means the chapter had nothing left).
   int layoutPage() {
     ToolsCanvas& c = host().canvas();
+    const TSize ts = epubui::sizeAt(_size);
+    const int step = c.textHeight(ts) + epubui::leadAir(_lead);
     const int lineW = c.width() - 2 * epubui::MARGIN;
     // What is on the glass right now, kept in case this call finds nothing.
     // A chapter announces its end by a layout that places nothing, and until
@@ -452,22 +512,22 @@ class EpubTool : public ToolApp {
       if (_lutN < epubui::MAX_PAGES) _lut[_lutN++] = pageStart | epubui::PAGE_IMG;
       return 1;
     }
-    const int spaceW = c.textWidth(" ", TS_MED) > 0 ? c.textWidth(" ", TS_MED) : 8;
+    const int spaceW = c.textWidth(" ", ts) > 0 ? c.textWidth(" ", ts) : 8;
 
     auto flushLine = [&]() -> bool {  // false: the page is full
       if (curLen == 0) return true;
-      if (y + epubui::LINE_STEP > epubui::BOTTOM || _lineN >= epubui::MAX_LINES) return false;
+      if (y + step > epubui::BOTTOM || _lineN >= epubui::MAX_LINES) return false;
       memcpy(_lines[_lineN].t, cur, (size_t)curLen);
       _lines[_lineN].t[curLen] = 0;
       _lines[_lineN].y = (short)y;
       _lineN++;
-      y += epubui::LINE_STEP;
+      y += step;
       curLen = 0;
       curW = 0;
       return true;
     };
     auto roomForLine = [&]() {
-      return y + epubui::LINE_STEP <= epubui::BOTTOM && _lineN < epubui::MAX_LINES;
+      return y + step <= epubui::BOTTOM && _lineN < epubui::MAX_LINES;
     };
 
     char w[epubc::WORD_CAP];
@@ -517,7 +577,7 @@ class EpubTool : public ToolApp {
       }
 
       // a word
-      const int ww = c.textWidth(w, TS_MED);
+      const int ww = c.textWidth(w, ts);
       if (!started) {
         pageStart = off;
         started = true;
@@ -580,7 +640,7 @@ class EpubTool : public ToolApp {
           else if (lead >= 0xC0) step = 2;
           memcpy(probe, rest, (size_t)(fitBytes + step));
           probe[fitBytes + step] = 0;
-          if (c.textWidth(probe, TS_MED) > lineW) break;
+          if (c.textWidth(probe, ts) > lineW) break;
           fitBytes += step;
         }
         if (fitBytes == 0) fitBytes = 1;  // a glyph wider than the line still moves on
@@ -588,7 +648,7 @@ class EpubTool : public ToolApp {
         curLen = fitBytes;
         memcpy(probe, rest, (size_t)fitBytes);
         probe[fitBytes] = 0;
-        curW = c.textWidth(probe, TS_MED);
+        curW = c.textWidth(probe, ts);
         rest += fitBytes;
         if (*rest && !flushLine()) {
           strcpy(_pend, rest);
@@ -828,6 +888,310 @@ class EpubTool : public ToolApp {
     c.textCentered(W / 2, 496, "the PC app adds one under toybox/", TS_SMALL, true);
   }
 
+  // --- the panel --------------------------------------------------------------
+  // Opened by the power button. Everything in here is about the book you are
+  // in the middle of, which is why none of it lives in settings.
+
+  void menuOpen() {
+    _menu = rmenu::Page::Root;
+    _mpage = 0;
+    _nmarks = marks::load(host(), _books[_cur].file, _marks);
+    host().beep(0);
+    host().refresh(true);
+  }
+
+  void menuClose() {
+    _menu = rmenu::Page::None;
+    ensureStream();  // the contents list reads other entries out of the zip
+    host().beep(0);
+    host().refresh(true);
+  }
+
+  void menuBack() {
+    _menu = rmenu::Page::Root;
+    _mpage = 0;
+    host().beep(0);
+    host().refresh(true);
+  }
+
+  void menuScroll(int dir) {
+    const int total = _menu == rmenu::Page::Contents  ? tocCount()
+                      : _menu == rmenu::Page::Marks   ? _nmarks
+                                                      : 0;
+    const int pages = shelf::pageCount(total);
+    const int want = _mpage + dir;
+    if (total <= 0 || want < 0 || want >= pages) {
+      host().beep(2);
+      return;
+    }
+    _mpage = want;
+    host().beep(0);
+    host().refresh(true);
+  }
+
+  // The contents, read once per book and kept until it closes. Books with no
+  // usable contents fall back to their own chapters, named by the first words
+  // in them -- which costs one chapter open per row shown, and only for the
+  // rows actually on the screen.
+  int tocCount() {
+    if (_ntoc < 0) {
+      _ntoc = _book.tocRead(epubui::g_toc, epubui::MAX_TOC);
+      _streamLost = true;  // reading the contents spent the chapter stream
+    }
+    return _ntoc > 0 ? _ntoc : _book.spineCount();
+  }
+
+  // What to call row `i` of the contents list, and where it goes.
+  void tocRow(int i, char* label, int cap, int& spine) {
+    if (_ntoc > 0) {
+      spine = epubui::g_toc[i].spine;
+      snprintf(label, (size_t)cap, "%s", epubui::g_toc[i].title);
+      return;
+    }
+    spine = i;
+    // No contents in the book: the chapter says its own name, in its own first
+    // words. Only the visible rows are opened, and only far enough to pull a
+    // few words out of the first block.
+    char taste[64] = "";
+    int used = 0;
+    if (_book.chapterOpen(i)) {
+      char w[epubc::WORD_CAP];
+      uint32_t off = 0;
+      for (int k = 0; k < 6 && used < (int)sizeof(taste) - 2; k++) {
+        const int t = _book.next(w, off);
+        if (t == epubc::TOK_END || t == epubc::TOK_ERR) break;
+        if (t != epubc::TOK_WORD) continue;
+        if (used) taste[used++] = ' ';
+        used += snprintf(taste + used, sizeof(taste) - used, "%s", w);
+      }
+      _streamLost = true;
+    }
+    if (taste[0])
+      snprintf(label, (size_t)cap, "ch %d - %s", i + 1, taste);
+    else
+      snprintf(label, (size_t)cap, "chapter %d", i + 1);
+  }
+
+  void markLabel(const marks::Mark& m, char* out, int cap) {
+    snprintf(out, (size_t)cap, "ch %u  -  page %u", (unsigned)(m.spine + 1),
+             (unsigned)(m.page + 1));
+  }
+
+  void renderMenu(ToolsCanvas& c) {
+    char buf[64];
+    if (_menu == rmenu::Page::Root) {
+      rmenu::Item items[5];
+      items[0].label = "CONTENTS";
+      snprintf(_rootSub[0], sizeof(_rootSub[0]), "chapter %d of %d", _spine + 1,
+               _book.spineCount());
+      items[0].sub = _rootSub[0];
+      items[1].label = "BOOKMARKS";
+      if (_nmarks > 0)
+        snprintf(_rootSub[1], sizeof(_rootSub[1]), "%d kept", _nmarks);
+      else
+        snprintf(_rootSub[1], sizeof(_rootSub[1]), "none yet");
+      items[1].sub = _rootSub[1];
+      items[2].label = "KEEP THIS PLACE";
+      snprintf(_rootSub[2], sizeof(_rootSub[2]), "ch %d, page %d", _spine + 1, _page + 1);
+      items[2].sub = _rootSub[2];
+      items[3].label = "TEXT";
+      snprintf(_rootSub[3], sizeof(_rootSub[3]), "%s, %s spacing", epubui::sizeName(_size),
+               epubui::leadName(_lead));
+      items[3].sub = _rootSub[3];
+      items[4].label = "CLOSE THE BOOK";
+      items[4].sub = _books[_cur].title;
+      rmenu::drawRoot(host(), c, "OPTIONS", items, 5);
+      return;
+    }
+
+    if (_menu == rmenu::Page::Text) {
+      host().topBar("TEXT", false, "OPTIONS");
+      const char* labels[2] = {"SIZE", "SPACING"};
+      const char* values[2] = {epubui::sizeName(_size), epubui::leadName(_lead)};
+      for (int r = 0; r < 2; r++) {
+        const int y = 110 + r * 120;
+        c.text(28, y, labels[r], TS_MED, true);
+        c.button(28, y + 34, 92, 68, "-", false);
+        c.button(c.width() - 120, y + 34, 92, 68, "+", false);
+        c.textCentered(c.width() / 2, y + 54, values[r], TS_LARGE, true);
+      }
+      // The sample is the point: nobody can picture 32 px with airy leading.
+      c.drawLine(24, 380, c.width() - 24, 380, 1, true);
+      const TSize ts = epubui::sizeAt(_size);
+      const int step = c.textHeight(ts) + epubui::leadAir(_lead);
+      static const char* kSample[4] = {"The quick brown fox jumps", "over the lazy dog, and",
+                                       "the page turns after about", "this many lines of it."};
+      for (int i = 0; i < 4; i++) c.text(28, 410 + i * step, kSample[i], ts, true);
+      c.textCentered(c.width() / 2, 748, "the page you are on is kept when this changes", TS_SMALL,
+                     true);
+      return;
+    }
+
+    const bool contents = _menu == rmenu::Page::Contents;
+    host().topBar(contents ? "CONTENTS" : "BOOKMARKS", false, "OPTIONS");
+    const int total = contents ? tocCount() : _nmarks;
+    if (total <= 0) {
+      rmenu::drawEmpty(c, "no bookmarks yet", "KEEP THIS PLACE puts one here");
+      return;
+    }
+    for (int k = 0; k < shelf::PER_PAGE; k++) {
+      const int idx = _mpage * shelf::PER_PAGE + k;
+      if (idx >= total) break;
+      if (contents) {
+        char label[64];
+        int spine = 0;
+        tocRow(idx, label, sizeof(label), spine);
+        snprintf(buf, sizeof(buf), "chapter %d", spine + 1);
+        rmenu::drawRow(c, k, label, buf, shelf::rowSep(k, idx, total), spine == _spine);
+      } else {
+        char label[48];
+        markLabel(_marks[idx], label, sizeof(label));
+        rmenu::drawRow(c, k, label, "tap to go there, hold nothing to remove it",
+                       shelf::rowSep(k, idx, total), false);
+      }
+    }
+    shelf::drawPager(c, _mpage, total);
+    if (!contents)
+      c.textCentered(c.width() / 2, 770, "a second tap on the row you are on removes it", TS_SMALL,
+                     true);
+  }
+
+  void menuTap(int x, int y) {
+    if (host().isBackTap(x, y)) {
+      if (_menu == rmenu::Page::Root)
+        menuClose();
+      else
+        menuBack();
+      return;
+    }
+    if (_menu == rmenu::Page::Root) {
+      switch (rmenu::hitRoot(x, y, 5, host().canvas().width())) {
+        case 0:
+          _menu = rmenu::Page::Contents;
+          _mpage = pageOfSpine();
+          host().beep(0);
+          host().refresh(true);
+          return;
+        case 1:
+          _menu = rmenu::Page::Marks;
+          _mpage = 0;
+          host().beep(0);
+          host().refresh(true);
+          return;
+        case 2: {
+          marks::Mark m{(uint16_t)_spine, (uint16_t)_page, curOffset()};
+          const bool added = marks::add(_marks, _nmarks, m) >= 0;
+          if (added) marks::save(host(), _books[_cur].file, _marks, _nmarks);
+          host().beep(added ? 1 : 2);
+          host().refresh(true);
+          return;
+        }
+        case 3:
+          _menu = rmenu::Page::Text;
+          host().beep(0);
+          host().refresh(true);
+          return;
+        case 4:
+          _menu = rmenu::Page::None;
+          closeBook(true);
+          return;
+        default:
+          return;
+      }
+    }
+
+    if (_menu == rmenu::Page::Text) {
+      for (int r = 0; r < 2; r++) {
+        const int y0 = 110 + r * 120 + 34;
+        if (y < y0 || y >= y0 + 68) continue;
+        uint8_t& v = r == 0 ? _size : _lead;
+        const int lim = r == 0 ? epubui::SIZES : epubui::LEADS;
+        int nv = v;
+        if (x < 120)
+          nv--;
+        else if (x >= host().canvas().width() - 120)
+          nv++;
+        else
+          return;
+        if (nv < 0 || nv >= lim) {
+          host().beep(2);
+          return;
+        }
+        v = (uint8_t)nv;
+        prefs().putUInt(r == 0 ? "rd_size" : "rd_lead", v);
+        // The page is re-derived from where the reader IS, not from the page
+        // number, because the page number means nothing once the type changes.
+        restyle();
+        host().beep(0);
+        host().refresh(true);
+        return;
+      }
+      return;
+    }
+
+    const bool contents = _menu == rmenu::Page::Contents;
+    const int total = contents ? tocCount() : _nmarks;
+    const int pages = shelf::pageCount(total);
+    if (y >= shelf::PAGER_Y && pages > 1) {
+      if (_mpage > 0 && shelf::prevRect().hit(x, y)) {
+        _mpage--;
+        host().beep(0);
+        host().refresh(true);
+      } else if (_mpage < pages - 1 && shelf::nextRect().hit(x, y)) {
+        _mpage++;
+        host().beep(0);
+        host().refresh(true);
+      }
+      return;
+    }
+    const int idx = shelf::hitRow(x, y, total, _mpage);
+    if (idx < 0) return;
+    if (contents) {
+      char label[64];
+      int spine = 0;
+      tocRow(idx, label, sizeof(label), spine);
+      jumpTo(spine, 0);
+      return;
+    }
+    // A bookmark you are already standing on is one you are asking to remove:
+    // there is nowhere else for that tap to mean anything.
+    if (_marks[idx].spine == _spine && _marks[idx].page == _page) {
+      marks::remove(_marks, _nmarks, idx);
+      marks::save(host(), _books[_cur].file, _marks, _nmarks);
+      host().beep(1);
+      host().refresh(true);
+      return;
+    }
+    jumpTo(_marks[idx].spine, _marks[idx].off);
+  }
+
+  int pageOfSpine() {
+    if (_ntoc <= 0) return _spine / shelf::PER_PAGE;
+    for (int i = 0; i < _ntoc; i++)
+      if (epubui::g_toc[i].spine >= _spine) return i / shelf::PER_PAGE;
+    return 0;
+  }
+
+  void jumpTo(int spine, uint32_t off) {
+    _streamLost = false;  // gotoPlace opens the chapter itself
+    if (!gotoPlace(spine, off)) {
+      host().beep(2);
+      return;
+    }
+    _menu = rmenu::Page::None;
+    saveProgress();
+    host().beep(1);
+    host().refresh(true);
+  }
+
+  // Type changed: lay the chapter out again and land on the page holding the
+  // place we were reading. Nothing about the position is a page number.
+  void restyle() {
+    const uint32_t off = curOffset();
+    _streamLost = false;
+    gotoPlace(_spine, off);
+  }
+
   void renderPage(ToolsCanvas& c) {
     if (_pageImage[0]) {
       if (!drawImagePage(c)) drawImagePlate(c);
@@ -835,7 +1199,7 @@ class EpubTool : public ToolApp {
       return;
     }
     for (int i = 0; i < _lineN; i++)
-      c.text(epubui::MARGIN, _lines[i].y, _lines[i].t, TS_MED, true);
+      c.text(epubui::MARGIN, _lines[i].y, _lines[i].t, epubui::sizeAt(_size), true);
     if (!_chrome) return;
     renderFooter(c);
   }
@@ -875,6 +1239,13 @@ class EpubTool : public ToolApp {
   uint32_t _pendImageOff = 0;
   bool _pendImageValid = false;
   bool _streamLost = false;        // a picture was read out of the same zip
+  rmenu::Page _menu = rmenu::Page::None;
+  int _mpage = 0;                  // which page of the contents or the marks
+  int _ntoc = -1;                  // -1 until the book's contents are read
+  marks::Mark _marks[marks::MAX];
+  int _nmarks = 0;
+  char _rootSub[4][48] = {};
+  uint8_t _size = 0, _lead = 1;    // the reader's type, remembered in prefs
 
   HostIO _io;
   epubc::Book _book;

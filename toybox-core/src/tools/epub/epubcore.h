@@ -87,6 +87,23 @@ class Book {
   // so anything that means to open it should ask here.
   const char* imageName() const { return _imgName; }
 
+  // --- the table of contents ---------------------------------------------
+  // Where the book says its chapters begin. EPUB3 keeps it in an XHTML nav
+  // document, EPUB2 in an NCX file, and plenty of books carry both; either is
+  // read here into the same little table, with each entry resolved to the
+  // spine index it lands in so a jump is the same call as a resume.
+  //
+  // Titles are what a publisher wrote, so they are trimmed, folded to one line
+  // and cut to fit -- a chapter list is for finding a place, not for reading.
+  struct TocEntry {
+    char title[44];
+    uint16_t spine;
+  };
+  // Fills `out` in document order and returns how many. Zero means the book
+  // has no usable contents, and the reader falls back to the chapters
+  // themselves. No chapter may be open across this: it reads another entry.
+  int tocRead(TocEntry* out, int max);
+
   bool blobOpen(const char* entryName);
   int blobRead(uint8_t* dst, int n) { return entryRead(dst, n); }
   void blobClose() { entryClose(); }
@@ -143,6 +160,11 @@ class Book {
   char _imgName[192] = "";   // the image a TOK_IMAGE is about
   bool _imgReady = false;
   uint32_t _coverPathHash = 0;
+  uint32_t _navPathHash = 0;   // EPUB3 nav document, properties="nav"
+  uint32_t _ncxPathHash = 0;   // EPUB2 <spine toc="...">
+  Ent _toc{};
+  uint8_t _tocKind = 0;        // 0 none, 1 ncx, 2 nav (nav wins)
+  char _tocDir[128] = "";      // the contents file's own folder, for its hrefs
   uint8_t _coverType = 0;
   bool _coverOk = false;
 

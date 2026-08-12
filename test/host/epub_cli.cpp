@@ -61,6 +61,16 @@ int main(int argc, char** argv) {
   // has. `preview` covers it. This tool is about the zip, the word stream and
   // the artwork, which need nothing but the file.
 
+  // the contents, as the reader's jump list will show it
+  {
+    static epubc::Book::TocEntry toc[64];
+    const int n = book.tocRead(toc, 64);
+    printf("contents: %d entries\n", n);
+    for (int i = 0; i < n && i < 12; i++)
+      printf("   ch %02d  %s\n", toc[i].spine, toc[i].title);
+    if (n > 12) printf("   ... and %d more\n", n - 12);
+  }
+
   // every chapter: word count, offsets monotonic, timing; print a taste
   char w[epubc::WORD_CAP];
   uint32_t off = 0;

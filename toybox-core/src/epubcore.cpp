@@ -437,7 +437,7 @@ bool Book::parseOpf(const char* opfPath) {
   // and the EPUB2 cover declaration, a <meta name="cover" content="id">.
   if (!entryOpen(opf)) return false;
   _spineN = 0;
-  uint32_t coverIdHash = 0;
+  uint32_t coverIdHash = 0, ncxIdHash = 0;
   scanTags([&](const char* name, const char* attrs, bool close) {
     if (close) return false;
     if (nameIs(name, "itemref") && _spineN < MAX_SPINE) {
@@ -447,6 +447,10 @@ bool Book::parseOpf(const char* opfPath) {
         _spine[_spineN].ok = 0;
         _spineN++;
       }
+    } else if (nameIs(name, "spine")) {
+      // EPUB2 points at its NCX from here: <spine toc="ncx">.
+      char toc[128];
+      if (attrValue(attrs, "toc", toc, sizeof(toc))) ncxIdHash = fnv(toc, strlen(toc));
     } else if (nameIs(name, "meta") && coverIdHash == 0) {
       char nm[32], content[128];
       if (attrValue(attrs, "name", nm, sizeof(nm)) && strcmp(nm, "cover") == 0 &&
@@ -478,6 +482,25 @@ bool Book::parseOpf(const char* opfPath) {
             _spine[i].hrefHash = pathHash;
             _spine[i].ok = 1;
           }
+        // The contents document, either spelling. EPUB3 marks it in the
+        // manifest, EPUB2 names it from the spine; a book carrying both gets
+        // the nav one, because it is the one with real titles in it.
+        if (idHash == ncxIdHash && ncxIdHash != 0) _ncxPathHash = pathHash;
+        {
+          static char navProps[128];
+          navProps[0] = 0;
+          attrValue(attrs, "properties", navProps, sizeof(navProps));
+          // "nav" as a whole word: "cover-image" and "scripted" live in the
+          // same attribute and a substring test would take half of them.
+          for (const char* q = strstr(navProps, "nav"); q; q = strstr(q + 1, "nav")) {
+            const bool leftOk = q == navProps || q[-1] == ' ';
+            const bool rightOk = q[3] == 0 || q[3] == ' ';
+            if (leftOk && rightOk) {
+              _navPathHash = pathHash;
+              break;
+            }
+          }
+        }
         if (_coverPathHash == 0) {
           static char props[128];
           props[0] = 0;
@@ -523,9 +546,164 @@ bool Book::parseOpf(const char* opfPath) {
       _cover = e;
       _coverOk = true;
     }
+    // The contents file, and the folder its own hrefs are relative to.
+    const uint8_t kind = (_navPathHash && h == _navPathHash)   ? 2
+                         : (_ncxPathHash && h == _ncxPathHash) ? 1
+                                                               : 0;
+    if (kind > _tocKind) {
+      _toc = e;
+      _tocKind = kind;
+      const char* slash = strrchr(name, '/');
+      const int dl = slash ? (int)(slash - name) + 1 : 0;
+      if (dl > 0 && dl < (int)sizeof(_tocDir)) {
+        memcpy(_tocDir, name, (size_t)dl);
+        _tocDir[dl] = 0;
+      } else {
+        _tocDir[0] = 0;
+      }
+    }
   });
   if (!_coverOk) _coverType = 0;
   return true;
+}
+
+// --- the table of contents ---------------------------------------------------
+// One parser for both formats, because both say the same two things in the
+// same order: a title, then where it points.
+//
+//   EPUB3 nav:  <a href="ch1.xhtml">Chapter One</a>
+//   EPUB2 ncx:  <navLabel><text>Chapter One</text></navLabel>
+//               <content src="ch1.xhtml"/>
+//
+// So: collect text inside <a> or <text>, and emit when the tag that closes it
+// arrives -- </a> for the first, <content src> for the second.
+//
+// Entries pointing into a chapter that is already listed are dropped. A ToC
+// with three headings inside one file would otherwise offer three rows that
+// all go to the same page: this reader jumps to chapters, not to fragments,
+// and a list that lies about where it lands is worse than a shorter one.
+int Book::tocRead(TocEntry* out, int max) {
+  if (!_io || _tocKind == 0 || max <= 0) return 0;
+  if (!entryOpen(_toc)) return 0;
+
+  int n = 0;
+  uint8_t buf[256];
+  int have = 0, pos = 0;
+  auto nextByte = [&]() -> int {
+    if (pos >= have) {
+      have = entryRead(buf, sizeof(buf));
+      pos = 0;
+      if (have <= 0) return -1;
+    }
+    return buf[pos++];
+  };
+
+  char title[96];
+  int tl = 0;
+  bool collecting = false;
+  char href[192] = "";
+  char held[96] = "";  // an ncx title, waiting for the <content> that follows
+
+  auto tidy = [&]() {
+    // One line, no runs of space, no edges: publishers put newlines and two
+    // spaces of indentation inside a <text> element and mean none of it.
+    int o = 0;
+    bool sp = false;
+    for (int i = 0; i < tl; i++) {
+      const char ch = wsByte((uint8_t)title[i]) ? ' ' : title[i];
+      if (ch == ' ') {
+        sp = true;
+        continue;
+      }
+      if (sp && o > 0 && o < (int)sizeof(title) - 1) title[o++] = ' ';
+      sp = false;
+      if (o < (int)sizeof(title) - 1) title[o++] = ch;
+    }
+    title[o] = 0;
+    tl = o;
+  };
+
+  auto emit = [&](const char* label, const char* target) {
+    if (n >= max || !label[0] || !target[0]) return;
+    char full[256];
+    resolveHref(_tocDir, target, full, sizeof(full));
+    const uint32_t h = fnv(full, strlen(full));
+    for (int i = 0; i < _spineN; i++) {
+      if (_spine[i].ok != 2 || _spine[i].hrefHash != h) continue;
+      for (int k = 0; k < n; k++)
+        if (out[k].spine == (uint16_t)i) return;  // already listed
+      snprintf(out[n].title, sizeof(out[n].title), "%s", label);
+      out[n].spine = (uint16_t)i;
+      n++;
+      return;
+    }
+  };
+
+  int b = nextByte();
+  while (b >= 0 && n < max) {
+    if (b != '<') {
+      if (collecting && tl < (int)sizeof(title) - 1) title[tl++] = (char)b;
+      b = nextByte();
+      continue;
+    }
+    // a tag: name, then the rest of it
+    char name[32];
+    int nl = 0;
+    b = nextByte();
+    const bool closing = b == '/';
+    if (closing) b = nextByte();
+    while (b >= 0 && b != '>' && !wsByte(b) && b != '/') {
+      if (nl < (int)sizeof(name) - 1) name[nl++] = (char)b;
+      b = nextByte();
+    }
+    name[nl] = 0;
+    char attrs[256];
+    int al = 0;
+    char quote = 0;
+    while (b >= 0 && (quote || b != '>')) {
+      if (quote) {
+        if (b == quote) quote = 0;
+      } else if (b == '"' || b == '\'') {
+        quote = (char)b;
+      }
+      if (al < (int)sizeof(attrs) - 1) attrs[al++] = (char)b;
+      b = nextByte();
+    }
+    attrs[al] = 0;
+    if (b < 0) break;
+    b = nextByte();  // step past '>'
+
+    if (closing) {
+      if (nameIs(name, "a") && collecting) {
+        collecting = false;
+        tidy();
+        emit(title, href);
+      } else if (nameIs(name, "text") && collecting) {
+        collecting = false;
+        tidy();
+        snprintf(held, sizeof(held), "%s", title);
+      }
+      continue;
+    }
+    if (nameIs(name, "a")) {
+      href[0] = 0;
+      attrValue(attrs, "href", href, sizeof(href));
+      collecting = true;
+      tl = 0;
+    } else if (nameIs(name, "text")) {
+      collecting = true;
+      tl = 0;
+    } else if (nameIs(name, "content")) {
+      char src[192] = "";
+      attrValue(attrs, "src", src, sizeof(src));
+      emit(held, src);
+      held[0] = 0;
+    } else if (nameIs(name, "navpoint")) {
+      held[0] = 0;
+    }
+  }
+  entryClose();
+  return n;
 }
 
 bool Book::coverOpen() {

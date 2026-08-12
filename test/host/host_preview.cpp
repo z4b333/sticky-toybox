@@ -26,6 +26,8 @@
 #include "tools/note_store.h"
 #include "tools/tool_book.h"
 #include "tools/tool_dice.h"
+#include "tools/bookmarks.h"
+#include "tools/reader_menu.h"
 #include "tools/tool_epub.h"
 #include "tools/epub/epubcore.h"
 #include "tools/epub/koreader_sdr.h"
@@ -1024,11 +1026,76 @@ int main() {
       printf("BOOK FAIL: the grey book did not turn\n");
       abort();
     }
-    // The power button's short press closes the book from the page view...
-    if (!toybox.onButton(SideBtn::Ok) || bt->hostScreen() != 0) {
-      printf("BOOK FAIL: OK did not close the book\n");
+    // --- the panel behind the power button ----------------------------------
+    // The same panel the EPUB reader carries, minus the two things a .tbk has
+    // no opinion about: no chapters to list, no type to set.
+    g_dumpEnabled = true;
+    if (!toybox.onButton(SideBtn::Ok) || bt->hostMenu() == 0) {
+      printf("BOOK FAIL: OK did not open the panel\n");
       abort();
     }
+    setScreen("tool_books_options");
+    stickyHost.refresh(true);
+
+    // Keep this page, and prove it reached the card rather than a variable.
+    g_dumpEnabled = false;
+    toybox.onTap(240, rmenu::rootRect(2, 480).y + 40);
+    if (bt->hostMarkCount() != 1) {
+      printf("BOOK FAIL: keeping a page gave %d marks\n", bt->hostMarkCount());
+      abort();
+    }
+    {
+      char mp[48];
+      marks::path("/books/grey-test.tbk", mp, sizeof(mp));
+      uint8_t raw[marks::FILE_BYTES];
+      if (stickyHost.sdReadFile(mp, raw, sizeof(raw)) != marks::FILE_BYTES ||
+          memcmp(raw, "TBM1", 4) != 0 || raw[4] != 1) {
+        printf("BOOK FAIL: no bookmark file on the card at %s\n", mp);
+        abort();
+      }
+    }
+
+    // The jump dial: fifties, tens and ones, and the side buttons do ones.
+    toybox.onTap(240, rmenu::rootRect(0, 480).y + 40);
+    if (bt->hostMenu() != (int)rmenu::Page::Contents) {
+      printf("BOOK FAIL: the jump screen did not open\n");
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_books_jump");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    {
+      // The grey book is three pages, so +10 has to stop at the last one
+      // rather than dialling past the end of the book.
+      const TRect plusTen = BookTool::hostDialRect(4, 480);
+      toybox.onTap(plusTen.x + plusTen.w / 2, plusTen.y + plusTen.h / 2);
+      if (bt->hostDialled() != 2) {
+        printf("BOOK FAIL: +10 in a 3-page book dialled to %lu\n",
+               (unsigned long)bt->hostDialled());
+        abort();
+      }
+      toybox.onButton(SideBtn::Up);  // one back
+      if (bt->hostDialled() != 1) {
+        printf("BOOK FAIL: UP did not step the dial\n");
+        abort();
+      }
+      toybox.onTap(240, 588);  // GO
+      if (bt->hostMenu() != 0 || bt->hostPage() != 1) {
+        printf("BOOK FAIL: GO landed on page %lu (menu %d)\n", (unsigned long)bt->hostPage(),
+               bt->hostMenu());
+        abort();
+      }
+    }
+
+    // And the way out is a row.
+    toybox.onButton(SideBtn::Ok);
+    toybox.onTap(240, rmenu::rootRect(3, 480).y + 40);
+    if (bt->hostScreen() != 0) {
+      printf("BOOK FAIL: CLOSE THE BOOK did not close it\n");
+      abort();
+    }
+    printf("tbk panel ok (page dial clamps, marks on the card, out by a row)\n");
     // ...and means nothing on the list, so main.cpp falls through to its own
     // uses of the button.
     if (toybox.onButton(SideBtn::Ok)) {
@@ -1331,6 +1398,26 @@ int main() {
         abort();
       }
     }
+    // The contents, as the panel's jump list will show them: an EPUB3 nav
+    // document, hrefs resolved to spine indices, a fragment (#top) ignored,
+    // and the whitespace a publisher leaves inside an <a> folded away.
+    {
+      epubc::Book::TocEntry toc[8];
+      const int n = book.tocRead(toc, 8);
+      const struct { const char* title; int spine; } WANT_TOC[] = {
+          {"One two three", 0}, {"The long one", 1}, {"A plate", 2}};
+      if (n != 3) {
+        printf("TOC FAIL: %d entries, wanted 3\n", n);
+        abort();
+      }
+      for (int i = 0; i < 3; i++)
+        if (strcmp(toc[i].title, WANT_TOC[i].title) != 0 || toc[i].spine != WANT_TOC[i].spine) {
+          printf("TOC FAIL: entry %d is '%s' -> ch %d\n", i, toc[i].title, toc[i].spine);
+          abort();
+        }
+      printf("epub contents ok (nav parsed, fragments dropped, titles tidied)\n");
+    }
+
     // Chapter two through tinfl: 800 numbered words plus a five-word coda,
     // first word at offset 1 (the newline after <body> is offset 0).
     if (!book.chapterOpen(1)) {
@@ -1761,11 +1848,137 @@ int main() {
       abort();
     }
 
-    // OK closes the book; the list must know the book now carries a position.
-    if (!toybox.onButton(SideBtn::Ok) || et->hostScreen() != 0) {
-      printf("EPUB APP FAIL: OK did not close the book\n");
+    // --- the panel behind the power button ----------------------------------
+    // OK used to close the book. It now opens the options panel, and closing
+    // the book is a row in it.
+    g_dumpEnabled = true;
+    if (!toybox.onButton(SideBtn::Ok) || et->hostMenu() == 0) {
+      printf("EPUB APP FAIL: OK did not open the panel\n");
       abort();
     }
+    setScreen("tool_epub_options");
+    stickyHost.refresh(true);
+
+    // Contents: the book's own nav document, and a jump that lands where the
+    // row says -- including the chapter that is nothing but a picture.
+    g_dumpEnabled = false;
+    toybox.onTap(240, rmenu::rootRect(0, 480).y + 40);
+    if (et->hostMenu() != (int)rmenu::Page::Contents || et->hostTocCount() != 3) {
+      printf("EPUB APP FAIL: contents shows menu %d with %d entries\n", et->hostMenu(),
+             et->hostTocCount());
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_epub_contents");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    toybox.onTap(240, shelf::Y0 + 2 * shelf::ROW_H + 20);  // the third chapter
+    if (et->hostMenu() != 0 || et->hostSpine() != 2 ||
+        strcmp(et->hostPageImage(), "OEBPS/images/plate.png") != 0) {
+      printf("EPUB APP FAIL: the contents jump landed on s%d img '%s'\n", et->hostSpine(),
+             et->hostPageImage());
+      abort();
+    }
+
+    // A place kept, on the card, where a reflash cannot reach it.
+    toybox.onButton(SideBtn::Ok);
+    toybox.onTap(240, rmenu::rootRect(2, 480).y + 40);  // KEEP THIS PLACE
+    if (et->hostMarkCount() != 1) {
+      printf("EPUB APP FAIL: keeping a place gave %d marks\n", et->hostMarkCount());
+      abort();
+    }
+    {
+      char mp[48];
+      marks::path("/books/wind.epub", mp, sizeof(mp));
+      uint8_t raw[marks::FILE_BYTES];
+      if (stickyHost.sdReadFile(mp, raw, sizeof(raw)) != marks::FILE_BYTES ||
+          memcmp(raw, "TBM1", 4) != 0 || raw[4] != 1) {
+        printf("EPUB APP FAIL: no bookmark file on the card at %s\n", mp);
+        abort();
+      }
+    }
+    // Asking twice for the same place must not fill the shelf with copies.
+    toybox.onTap(240, rmenu::rootRect(2, 480).y + 40);
+    if (et->hostMarkCount() != 1) {
+      printf("EPUB APP FAIL: the same place was kept twice\n");
+      abort();
+    }
+    toybox.onTap(240, rmenu::rootRect(1, 480).y + 40);  // BOOKMARKS
+    if (et->hostMenu() != (int)rmenu::Page::Marks) {
+      printf("EPUB APP FAIL: the bookmark list did not open\n");
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_epub_marks");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    // Standing on it already, so this tap removes it.
+    toybox.onTap(240, shelf::Y0 + 20);
+    if (et->hostMarkCount() != 0) {
+      printf("EPUB APP FAIL: the second tap did not remove the bookmark\n");
+      abort();
+    }
+
+    // Type: bigger text re-derives the page from the offset, so the reader
+    // stays where it was reading rather than where the page number was. Done
+    // on a page of WORDS -- the jump above left us on a picture, which has no
+    // lines to count.
+    toybox.onButton(SideBtn::Ok);
+    toybox.onTap(240, rmenu::rootRect(0, 480).y + 40);        // CONTENTS
+    toybox.onTap(240, shelf::Y0 + shelf::ROW_H + 20);          // the long chapter
+    if (et->hostSpine() != 1 || et->hostLineCount() == 0) {
+      printf("EPUB APP FAIL: the jump to the long chapter gave s%d, %d lines\n",
+             et->hostSpine(), et->hostLineCount());
+      abort();
+    }
+    toybox.onButton(SideBtn::Ok);  // the panel again
+    toybox.onTap(240, rmenu::rootRect(3, 480).y + 40);
+    if (et->hostMenu() != (int)rmenu::Page::Text) {
+      printf("EPUB APP FAIL: the text page did not open\n");
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_epub_text");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    {
+      const uint32_t before = et->hostPageOffset();
+      const int lines = et->hostLineCount();
+      toybox.onTap(440, 110 + 34 + 20);  // SIZE +
+      if (et->hostTextSize() != 1) {
+        printf("EPUB APP FAIL: the size did not change (%d)\n", et->hostTextSize());
+        abort();
+      }
+      if (et->hostPageOffset() > before) {
+        printf("EPUB APP FAIL: bigger type moved the reader forward (%u -> %u)\n", before,
+               et->hostPageOffset());
+        abort();
+      }
+      if (et->hostLineCount() >= lines) {
+        printf("EPUB APP FAIL: bigger type gave %d lines, was %d\n", et->hostLineCount(), lines);
+        abort();
+      }
+      toybox.onTap(40, 110 + 34 + 20);  // SIZE -, back to normal
+    }
+
+    // The contents fallback: a book with no navigation document names its
+    // chapters by their own first words.
+    et->hostDropToc();
+    toybox.onButton(SideBtn::Ok);
+    toybox.onTap(240, rmenu::rootRect(0, 480).y + 40);
+    g_dumpEnabled = true;
+    setScreen("tool_epub_contents_plain");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    toybox.onButton(SideBtn::Ok);  // back to the root
+
+    // And the way out is a row, not the button.
+    toybox.onTap(240, rmenu::rootRect(4, 480).y + 40);
+    if (et->hostScreen() != 0) {
+      printf("EPUB APP FAIL: CLOSE THE BOOK did not close it\n");
+      abort();
+    }
+    printf("epub panel ok (contents jump, marks on the card, type re-derives)\n");
     toybox.goHub();
 
     // The CrossPoint round-trip: a position written by "another firmware"
@@ -1804,7 +2017,8 @@ int main() {
                et2->hostPageOffset());
         abort();
       }
-      toybox.onButton(SideBtn::Ok);
+      toybox.onButton(SideBtn::Ok);                       // the panel
+      toybox.onTap(240, rmenu::rootRect(4, 480).y + 40);  // CLOSE THE BOOK
     }
 
     // --- a chapter that is one picture and no words -------------------------
@@ -1823,7 +2037,10 @@ int main() {
       cp.hasOffset = true;
       uint8_t buf[10];
       const int n = epubc::encodeProgress(cp, buf);
-      stickyHost.sdWriteFileAtomic("/.crosspoint/epub_836526750/progress.bin", buf, n);
+      if (!stickyHost.sdWriteFileAtomic("/.crosspoint/epub_836526750/progress.bin", buf, n)) {
+        printf("EPUB APP FAIL: could not plant the picture-chapter position\n");
+        abort();
+      }
       toybox.open(false, 10);
       auto* et3 = static_cast<EpubTool*>(toybox.hostActive());
       toybox.onTap(240, epubui::LIST_Y0 + epubui::LIST_ROW_H + 10);
@@ -1849,7 +2066,8 @@ int main() {
                et3->hostSpine(), et3->hostPageImage());
         abort();
       }
-      toybox.onButton(SideBtn::Ok);
+      toybox.onButton(SideBtn::Ok);                       // the panel
+      toybox.onTap(240, rmenu::rootRect(4, 480).y + 40);  // CLOSE THE BOOK
       printf("epub picture chapters ok (reachable both ways, never blank)\n");
     }
     toybox.goHub();
