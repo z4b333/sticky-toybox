@@ -152,6 +152,28 @@ inline void markFailed(const char* file) {
   strncat(p, "f", sizeof(p) - strlen(p) - 1);
   tfs::write(p, "x", 1);
 }
+// Throws away every "this cover will not decode" marker.
+//
+// Called once when the firmware version changes, because a marker is only as
+// trustworthy as the build that wrote it -- and builds of this firmware have
+// marked covers permanently failed for reasons that were really a heap in
+// pieces. A book whose cover was condemned by a bug should get its day back
+// after the bug is fixed, and the cost of being wrong is one cover rebuilt.
+inline int sweepFailed() {
+  constexpr int MAX = 64, LEN = 24;
+  static char names[MAX][LEN + 1];
+  const int n = tfs::list("", "f", &names[0][0], LEN + 1, MAX, LEN);
+  int gone = 0;
+  for (int i = 0; i < n; i++) {
+    // Only ours: "th_" + 8 hex + the "f" that list() stripped.
+    if (strncmp(names[i], "th_", 3) != 0) continue;
+    char p[32];
+    snprintf(p, sizeof(p), "/%sf", names[i]);
+    if (tfs::remove(p)) gone++;
+  }
+  return gone;
+}
+
 inline bool failed(const char* file) {
   char p[24];
   path(file, p, sizeof(p));

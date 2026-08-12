@@ -466,6 +466,19 @@ void setup() {
   // Bounded, and any button also dismisses it: this sits between the panel and
   // the hub, and a welcome screen that could not be got past would be a worse
   // bug than the one it exists to catch.
+  // Cover verdicts do not survive a firmware change. See bthumb::sweepFailed:
+  // several builds condemned covers for running out of heap, which is a fact
+  // about the build rather than the book.
+  {
+    char seen[40] = {};
+    if (prefs.isKey("cvsweep")) prefs.getString("cvsweep", seen, sizeof(seen));
+    if (strncmp(seen, welcome::version(), sizeof(seen) - 1) != 0) {
+      const int gone = bthumb::sweepFailed();
+      prefs.putString("cvsweep", welcome::version());
+      if (gone) TB_LOG("cover markers cleared: %d\n", gone);
+    }
+  }
+
   if (welcome::pending(prefs)) {
     const bool updated = prefs.isKey("welcome");
     ToolsCanvas& c = stickyHost.sharedCanvas();

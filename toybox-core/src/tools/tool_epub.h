@@ -332,7 +332,8 @@ class EpubTool : public ToolApp {
     // a book's first open (a second or two for a big JPEG), never again --
     // and a cover that will not decode is marked so it is never retried.
     if (!bthumb::have(_books[i].file) && !bthumb::failed(_books[i].file)) {
-      if (!epubcov::makeThumb(host(), _book, _books[i].file))
+      bool transient = false;
+      if (!epubcov::makeThumb(host(), _book, _books[i].file, &transient) && !transient)
         bthumb::markFailed(_books[i].file);
     }
     // ...and, if the sleeping panel is set to wear a cover, this book's goes

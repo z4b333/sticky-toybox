@@ -76,9 +76,11 @@ void streamRow(void* uctx, int y, const uint8_t* gray, int w) {
 
 }  // namespace
 
-bool makeThumb(ToolsHost& host, epubc::Book& book, const char* bookFile) {
+bool makeThumb(ToolsHost& host, epubc::Book& book, const char* bookFile, bool* transient) {
+  if (transient) *transient = false;
   const int type = book.coverType();
   if (type == epubc::Book::COVER_NONE) return false;
+  // A cover that will not open is the zip's business, not the heap's.
   if (!book.coverOpen()) return false;
 
   bthumb::Builder builder;
@@ -89,6 +91,7 @@ bool makeThumb(ToolsHost& host, epubc::Book& book, const char* bookFile) {
     constexpr size_t WORK = 6500;  // JD_FASTDECODE=1 wants ~3.5 KB; headroom costs little
     void* work = malloc(WORK);
     if (!work) {
+      if (transient) *transient = true;
       book.coverClose();
       return false;
     }
@@ -103,6 +106,10 @@ bool makeThumb(ToolsHost& host, epubc::Book& book, const char* bookFile) {
         ok = jd_decomp(&jd, jpegOut, (uint8_t)scale) == JDR_OK;
         ok = ok && builder.finish();
         if (!ok) builder.abort();
+      } else if (transient) {
+        // The builder's bands are ~46 KB. Failing to get them is a bad
+        // moment, not a bad picture.
+        *transient = true;
       }
       free(work);
       book.coverClose();
@@ -126,10 +133,14 @@ bool makeThumb(ToolsHost& host, epubc::Book& book, const char* bookFile) {
   }
 
   book.coverClose();
-  if (ok && ctx.sized)
+  if (ok && ctx.sized) {
     ok = builder.finish();
-  else
+  } else {
+    // ctx.sized false means Builder::begin refused, which on this device is
+    // always about memory.
+    if (!ctx.sized && transient) *transient = true;
     builder.abort();
+  }
   return ok;
 }
 

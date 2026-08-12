@@ -191,7 +191,17 @@ class FilesServer {
 
   void listFiles() {
     WebServer& s = _portal.server();
-    if (!claim()) return s.send(503, "application/json", "{\"card\":0}");
+    if (!claim()) {
+      // Not just "no card". Claiming needs the SD library to mount, which
+      // needs heap, and this page runs with a softAP and a web server already
+      // holding a good deal of it -- so a card that is plainly in the slot can
+      // still fail to open. The numbers say which it was.
+      char why[96];
+      snprintf(why, sizeof(why), "{\"card\":0,\"free\":%lu,\"big\":%lu}",
+               (unsigned long)(_host->heapFree() / 1024),
+               (unsigned long)(_host->heapLargest() / 1024));
+      return s.send(503, "application/json", why);
+    }
     static ToolsHost::SdFile files[LIST_MAX];
     const int n = _host->sdMgrList(files, LIST_MAX);
     String out;
@@ -334,7 +344,8 @@ async function load(){
   try{
     const r=await fetch('/ls',{cache:'no-store'});
     const j=await r.json();
-    if(!j.card){$('#free').innerHTML='<span class="err">no card in the slot</span>';return}
+    if(!j.card){$('#free').innerHTML='<span class="err">could not open the card &mdash; free '
+      +j.free+' KB, biggest '+j.big+' KB</span>';return}
     $('#free').textContent=j.files.length+' files · '+j.freeMb+' MB free';
     const l=$('#list');
     if(!j.files.length){l.innerHTML='<p class="sub">nothing here yet</p>';return}
