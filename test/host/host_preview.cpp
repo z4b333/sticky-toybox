@@ -3149,8 +3149,11 @@ int main() {
     r.battMv = 3987;
     r.fontFaces = 3;
     r.psramKb = 8192;
-    r.heapKb = 137;
-    r.blockKb = 92;
+    // Real figures from the device, so the overflow guard sees the widest
+    // line this block can produce rather than a comfortable one.
+    r.heapKb = 215;
+    r.blockKb = 151;
+    r.psramFreeKb = 8000;
     r.version = "toybox  Aug  8 2026  11:04:22";
     const svc::Config cfg;
 

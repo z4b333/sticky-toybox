@@ -122,43 +122,45 @@ inline void render(ToolsCanvas& c, const Report& r, const Config& cfg, int sel, 
 
   // --- what answered -----------------------------------------------------
   int y = 60;
-  c.text(MARGIN, y, "WHAT ANSWERED AT BOOT", TS_MED, true);
+  // The sensors read as four digits in a fixed order, which is why the key is
+  // in the heading: four labelled pairs did not fit beside anything else, and
+  // this line is read as "are they all 1".
+  c.text(MARGIN, y, "AT BOOT   (sensors: gauge rtc temp tilt)", TS_MED, true);
   y += 28;
   c.drawLine(MARGIN, y, W - MARGIN, y, 1, true);
   y += 10;
 
   // First, because if this one says no then everything under it is being read
   // off a screen that should not be showing anything.
-  snprintf(buf, sizeof(buf), "panel    %s", r.panelOk ? "answered" : "NO ANSWER");
+  // Five lines, not eight. This block grew a line every time something new
+  // was worth knowing at boot, and by the time PSRAM arrived it had pushed
+  // the version stamp into the first correction row and run the heap figures
+  // off the right edge. What each line is FOR decides what shares it: the two
+  // chips that must answer or nothing works, the four that only matter when
+  // one is missing, and the two memories, which are only ever read together.
+  snprintf(buf, sizeof(buf), "panel    %s      touch  %s", r.panelOk ? "ok" : "NO ANSWER",
+           r.touchOk ? "ok" : "NOT FOUND");
   c.text(MARGIN, y, buf, TS_MED, true);
   y += 26;
 
-  if (r.touchOk)
-    snprintf(buf, sizeof(buf), "touch    found at 0x%02X", r.touchAddr);
-  else
-    snprintf(buf, sizeof(buf), "touch    NOT FOUND");
+  snprintf(buf, sizeof(buf), "sensors  %d%d%d%d   fonts %d", r.gauge ? 1 : 0, r.rtc ? 1 : 0,
+           r.sht ? 1 : 0, r.imu ? 1 : 0, r.fontFaces);
   c.text(MARGIN, y, buf, TS_MED, true);
   y += 26;
 
-  snprintf(buf, sizeof(buf), "sensors  gauge %d   clock %d   temp %d   tilt %d", r.gauge ? 1 : 0,
-           r.rtc ? 1 : 0, r.sht ? 1 : 0, r.imu ? 1 : 0);
-  c.text(MARGIN, y, buf, TS_MED, true);
-  y += 26;
-
-  // One line for the pair: nine correction rows below need the height, and
-  // the version line was overlapping the first of them before this merge.
   if (r.battMv >= 0)
-    snprintf(buf, sizeof(buf), "battery  %d.%02d V     psram  %lu KB", r.battMv / 1000,
-             (r.battMv % 1000) / 10, (unsigned long)r.psramKb);
+    snprintf(buf, sizeof(buf), "battery  %d.%02d V", r.battMv / 1000, (r.battMv % 1000) / 10);
   else
-    snprintf(buf, sizeof(buf), "battery  no gauge     psram  %lu KB",
-             (unsigned long)r.psramKb);
+    snprintf(buf, sizeof(buf), "battery  no gauge");
   c.text(MARGIN, y, buf, TS_MED, true);
   y += 26;
 
-  snprintf(buf, sizeof(buf), "heap     %lu KB free, biggest %lu KB, psram %lu KB free",
+  // Free and biggest are different questions -- a heap can have plenty of the
+  // first and none of the second, which is what four bugs on this device
+  // turned out to be -- so both stay, abbreviated rather than dropped.
+  snprintf(buf, sizeof(buf), "memory   %lu free / %lu big      psram %lu of %lu",
            (unsigned long)r.heapKb, (unsigned long)r.blockKb,
-           (unsigned long)r.psramFreeKb);
+           (unsigned long)r.psramFreeKb / 1024, (unsigned long)r.psramKb / 1024);
   c.text(MARGIN, y, buf, TS_MED, true);
   y += 26;
 
@@ -169,11 +171,8 @@ inline void render(ToolsCanvas& c, const Report& r, const Config& cfg, int sel, 
     y += 26;
   }
 
-  snprintf(buf, sizeof(buf), "fonts    %d extra face%s", r.fontFaces,
-           r.fontFaces == 1 ? "" : "s");
-  c.text(MARGIN, y, buf, TS_MED, true);
-  y += 26;
-
+  // The font count moved up onto the sensors line; this is where it used to
+  // be its own.
   c.text(MARGIN, y, r.version, TS_SMALL, true);
 
   // --- the corrections ---------------------------------------------------
