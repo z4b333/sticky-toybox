@@ -713,12 +713,37 @@ void Book::scanTags(F cb) {
 
 // --- the chapter tokenizer ---------------------------------------------------
 
+bool Book::blobOpen(const char* entryName) {
+  if (!_io || !entryName || !*entryName) return false;
+  if (!findEntry(entryName, _blob)) return false;
+  return entryOpen(_blob);
+}
+
 bool Book::chapterOpen(int spineIdx) {
   chapterClose();
   if (!_io || spineIdx < 0 || spineIdx >= _spineN) return false;
   if (_spine[spineIdx].ok != 2) {
     _err = "chapter missing from the zip";
     return false;
+  }
+  // The chapter's own directory, because an <img src> is relative to the file
+  // it appears in and nothing else knew where that file was. One extra walk of
+  // the central directory per chapter open, matching the resolved-path hash
+  // the OPF pass already stored -- the alternative was keeping every spine
+  // entry's name in RAM, which is 300 books' worth of strings for one string
+  // at a time.
+  _chapDir[0] = 0;
+  {
+    const uint32_t want = _spine[spineIdx].hrefHash;
+    walkCD([&](const char* name, const Ent&) {
+      if (_chapDir[0] || fnv(name, strlen(name)) != want) return;
+      const char* slash = strrchr(name, '/');
+      const int n = slash ? (int)(slash - name) + 1 : 0;
+      if (n > 0 && n < (int)sizeof(_chapDir)) {
+        memcpy(_chapDir, name, (size_t)n);
+        _chapDir[n] = 0;
+      }
+    });
   }
   if (!entryOpen(_spine[spineIdx])) return false;
   _chapterOpenF = true;
@@ -734,6 +759,8 @@ bool Book::chapterOpen(int spineIdx) {
   _outReady = false;
   _wordSinceBreak = false;
   _queued = 0;
+  _imgReady = false;
+  _imgName[0] = 0;
   return true;
 }
 
@@ -806,7 +833,12 @@ void Book::tokEmitCp(uint32_t cp, const char* utf8, int len) {
 
 // Pumps bytes until the output slot fills or the chapter ends. next() drains.
 int Book::tokPump() {
-  while (!_outReady && !_queued) {
+  // _imgReady ends the pump for the same reason a word does. An <img> between
+  // two block tags flushes nothing and queues nothing, so without this the
+  // loop would run straight past it and the picture would be reported after
+  // the word that follows it -- one page late, which is exactly the page it
+  // was supposed to open.
+  while (!_outReady && !_queued && !_imgReady) {
     int b = tokNextByte();
     if (b < 0) {
       _ended = true;
@@ -875,8 +907,16 @@ int Book::tokPump() {
       }
       name[nl] = 0;
       bool selfClose = (b == '/');
+      // Attributes are normally scanned past and dropped -- nothing above the
+      // tokenizer has ever wanted one. An image is the exception, so its
+      // attribute region is kept, and only its own.
+      const bool wantAttrs = !closeTag && _insideBody && _nonVisibleDepth == 0 &&
+                             (nameIs(name, "img") || nameIs(name, "image"));
+      char attrs[256];
+      int al = 0;
       char quote = 0;
       while (b >= 0 && (quote || b != '>')) {
+        if (wantAttrs && al < (int)sizeof(attrs) - 1) attrs[al++] = (char)b;
         if (quote) {
           if (b == quote) quote = 0;
         } else if (b == '"' || b == '\'') {
@@ -905,6 +945,22 @@ int Book::tokPump() {
         if (skip) _nonVisibleDepth++;
         if (_insideBody && _nonVisibleDepth == 0 && isBlockTag(name)) tokBlockBreak();
         if (selfClose && skip) _nonVisibleDepth--;
+        if (wantAttrs) {
+          attrs[al] = 0;
+          char href[192];
+          // SVG's <image> uses xlink:href; attrValue strips the prefix, so one
+          // lookup covers both spellings.
+          if (attrValue(attrs, "src", href, sizeof(href)) ||
+              attrValue(attrs, "href", href, sizeof(href))) {
+            resolveHref(_chapDir, href, _imgName, sizeof(_imgName));
+            // An image ends the block it sits in, the same as a <br> would --
+            // otherwise the words either side of it run together.
+            if (_imgName[0]) {
+              tokBlockBreak();
+              _imgReady = true;
+            }
+          }
+        }
       }
       continue;
     }
@@ -984,12 +1040,27 @@ int Book::tokPump() {
   }
 
   if (_outReady) return TOK_WORD;
-  const int q = _queued;
-  _queued = 0;
-  return q;
+  if (_queued) {
+    const int q = _queued;
+    _queued = 0;
+    return q;
+  }
+  if (_imgReady) {
+    _imgReady = false;
+    return TOK_IMAGE;  // next() fills the name and the offset
+  }
+  return TOK_END;
 }
 
 int Book::next(char* word, uint32_t& startOff) {
+  // An image beats the queue: it was seen at this point in the stream and the
+  // page that shows it has to break here.
+  if (_imgReady && !_outReady) {
+    _imgReady = false;
+    startOff = _offset;
+    snprintf(word, WORD_CAP, "%s", _imgName);
+    return TOK_IMAGE;
+  }
   if (!_chapterOpenF) return TOK_ERR;
   if (_outReady) {
     strcpy(word, _outWord);
@@ -1008,6 +1079,9 @@ int Book::next(char* word, uint32_t& startOff) {
     strcpy(word, _outWord);
     startOff = _outStart;
     _outReady = false;
+  } else if (r == TOK_IMAGE) {
+    startOff = _offset;
+    snprintf(word, WORD_CAP, "%s", _imgName);
   }
   return r;
 }

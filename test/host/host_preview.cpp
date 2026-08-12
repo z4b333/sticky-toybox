@@ -1236,7 +1236,14 @@ int main() {
     static const Tok WANT[] = {{epubc::TOK_WORD, "One", 1},   {epubc::TOK_WORD, "two three", 5},
                                {epubc::TOK_PARA, "", 0},      {epubc::TOK_WORD, "caf\xC3\xA9", 15},
                                {epubc::TOK_WORD, "&", 20},    {epubc::TOK_WORD, "more", 22},
-                               {epubc::TOK_PARA, "", 0},      {epubc::TOK_WORD, "ende", 27},
+                               {epubc::TOK_PARA, "", 0},
+                               // The picture, and then "ende" STILL at 27: an
+                               // <img> adds no codepoints, which is the whole
+                               // reason artwork could be added to this reader
+                               // without moving anyone's CrossPoint bookmark.
+                               {epubc::TOK_IMAGE, "OEBPS/images/plate.png", 27},
+                               {epubc::TOK_IMAGE, "OEBPS/images/missing.png", 27},
+                               {epubc::TOK_WORD, "ende", 27},
                                {epubc::TOK_PARA, "", 0},      {epubc::TOK_END, "", 0}};
     if (!book.chapterOpen(0)) {
       printf("EPUB FAIL: chapter one did not open\n");
@@ -1246,6 +1253,12 @@ int main() {
     uint32_t off = 0;
     for (const Tok& want : WANT) {
       const int t = book.next(w, off);
+      if (t == epubc::TOK_IMAGE &&
+          (strcmp(book.imageName(), want.w) != 0 || off != want.off || want.t != t)) {
+        printf("EPUB FAIL: image '%s'@%u, expected '%s'@%u\n", book.imageName(), off, want.w,
+               want.off);
+        abort();
+      }
       if (t != want.t || (t == epubc::TOK_WORD && (strcmp(w, want.w) != 0 || off != want.off))) {
         printf("EPUB FAIL: expected %d '%s'@%u, got %d '%s'@%u\n", want.t, want.w, want.off, t,
                w, off);
@@ -1511,8 +1524,93 @@ int main() {
     setScreen("tool_epub_page");
     stickyHost.refresh(true);
 
-    // Forward: chapter one is one page, so DOWN lands on chapter two.
+    // Forward: chapter one's text is one page, and the illustration at the end
+    // of it is the second -- a picture gets the whole glass rather than a
+    // corner of a page of text.
     g_dumpEnabled = false;
+    toybox.onButton(SideBtn::Down);
+    if (et->hostSpine() != 0 || et->hostPage() != 1 ||
+        strcmp(et->hostPageImage(), "OEBPS/images/plate.png") != 0) {
+      printf("EPUB APP FAIL: DOWN did not land on the illustration (s%d p%d img '%s')\n",
+             et->hostSpine(), et->hostPage(), et->hostPageImage());
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_epub_art");
+    stickyHost.refresh(true);
+    {
+      // The picture is drawn, not merely announced: the fixture's .tbi is a
+      // frame, both diagonals and a blob, so a page that fell back to the
+      // "no picture prepared" plate carries a small fraction of this ink --
+      // and a picture read a band short carries most of it, which is why the
+      // guard also asks that the bottom rows are inked.
+      int ink = 0;
+      for (uint32_t i = 0; i < EPD_BUF_SIZE; i++) ink += __builtin_popcount((uint8_t)~epd.fb()[i]);
+      // The panel's own buffer is 800 across by 480 down, whichever way the
+      // canvas is turned; the picture fills all but the 20-pixel margin its
+      // frame leaves, so it inks about 440 of those 480 lines.
+      int inkRows = 0;
+      for (int y = 0; y < 480; y++)
+        for (int xb = 0; xb < 100; xb++)
+          if ((uint8_t)~epd.fb()[(size_t)y * 100 + xb]) {
+            inkRows++;
+            break;
+          }
+      if (ink < 9000 || inkRows < 400) {
+        printf("EPUB APP FAIL: the illustration drew %d px over %d rows\n", ink, inkRows);
+        abort();
+      }
+    }
+
+    // The next picture is one the book carries no .tbi for, so the reader says
+    // so by name rather than showing a blank page. Rendered here because a
+    // plate is text, and text is what runs off the edge of a 480-pixel panel.
+    g_dumpEnabled = false;
+    toybox.onButton(SideBtn::Down);
+    if (et->hostPage() != 2 || strcmp(et->hostPageImage(), "OEBPS/images/missing.png") != 0) {
+      printf("EPUB APP FAIL: the unprepared picture is p%d img '%s'\n", et->hostPage(),
+             et->hostPageImage());
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_epub_art_missing");
+    stickyHost.refresh(true);
+
+    // Back one: the two pictures share an offset with each other and with the
+    // word after them, so only the count of pictures already passed says which
+    // page this is. Get that wrong and the drawn one is unreachable.
+    g_dumpEnabled = false;
+    toybox.onButton(SideBtn::Up);
+    if (et->hostPage() != 1 || strcmp(et->hostPageImage(), "OEBPS/images/plate.png") != 0) {
+      printf("EPUB APP FAIL: UP between two pictures landed on p%d img '%s'\n", et->hostPage(),
+             et->hostPageImage());
+      abort();
+    }
+    toybox.onButton(SideBtn::Down);  // back onto the unprepared one
+
+    // The text resumes after the picture. This is the turn that has to rebuild
+    // the chapter stream the picture spent reading itself out of the same zip.
+    g_dumpEnabled = false;
+    toybox.onButton(SideBtn::Down);
+    if (et->hostSpine() != 0 || et->hostPage() != 3 || et->hostPageImage()[0] ||
+        strcmp(et->hostLine(0), "ende") != 0) {
+      printf("EPUB APP FAIL: the text did not resume after the picture (s%d p%d '%s')\n",
+             et->hostSpine(), et->hostPage(), et->hostLine(0));
+      abort();
+    }
+    // And UP finds the picture again. A page is replayed from its recorded
+    // start offset, and an <img> shares its offset with the word after it, so
+    // without the flag in that table this turn would land on "ende" twice and
+    // the picture would be unreachable backwards.
+    toybox.onButton(SideBtn::Up);
+    if (et->hostPage() != 2 || strcmp(et->hostPageImage(), "OEBPS/images/missing.png") != 0) {
+      printf("EPUB APP FAIL: UP did not find the illustration again (p%d img '%s')\n",
+             et->hostPage(), et->hostPageImage());
+      abort();
+    }
+    toybox.onButton(SideBtn::Down);  // back onto "ende"
+
+    // And on again into chapter two.
     toybox.onButton(SideBtn::Down);
     if (et->hostSpine() != 1 || et->hostPage() != 0) {
       printf("EPUB APP FAIL: DOWN did not cross into chapter two (s%d p%d)\n", et->hostSpine(),

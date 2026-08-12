@@ -215,7 +215,14 @@ static const char kFakeCh1[] =
     "<body>\n"
     "<p>One two&nbsp;three</p>\n"
     "<p>caf&#233; &amp; more</p>\n"
-    "<p>ende</p>\n"
+    // The illustration, deliberately on the same line as the paragraph after
+    // it: an <img> carries no codepoints, so "ende" must still start at 27,
+    // and a newline here would have moved it and hidden that.
+    "<div><img src=\"images/plate.png\" alt=\"a plate\"/>"
+    // A second picture, at the same offset as the first and as "ende", whose
+    // toybox/ counterpart the book does NOT carry: the reader draws its plate
+    // instead, and a back-turn still has to tell the two of them apart.
+    "<img src=\"images/missing.png\" alt=\"unprepared\"/></div><p>ende</p>\n"
     "</body>\n"
     "</html>\n";
 
@@ -237,6 +244,8 @@ static const char kFakeOpf[] =
     "    <item id=\"c1\" href=\"ch1.xhtml\" media-type=\"application/xhtml+xml\"/>\n"
     "    <item id=\"c2\" href=\"ch2.xhtml\" media-type=\"application/xhtml+xml\"/>\n"
     "    <item id=\"cov\" href=\"cover.jpg\" media-type=\"image/jpeg\"/>\n"
+    "    <item id=\"img\" href=\"images/plate.png\" media-type=\"image/png\"/>\n"
+    "    <item id=\"img2\" href=\"images/missing.png\" media-type=\"image/png\"/>\n"
     "    <item id=\"css\" href=\"style.css\" media-type=\"text/css\"/>\n"
     "  </manifest>\n"
     "  <spine><itemref idref=\"c1\"/><itemref idref=\"c2\"/></spine>\n"
@@ -246,10 +255,45 @@ uint8_t* g_fakeEpub = nullptr;
 uint32_t g_fakeEpubLen = 0;
 bool g_fakeEpubOpen = false;
 
+
 void put16(uint8_t* p, uint32_t v) { p[0] = v & 255; p[1] = (v >> 8) & 255; }
 void put32(uint8_t* p, uint32_t v) {
   p[0] = v & 255; p[1] = (v >> 8) & 255; p[2] = (v >> 16) & 255; p[3] = (v >> 24) & 255;
 }
+
+// The pre-rendered artwork the reader is supposed to find: "TBI1", 480x800,
+// 1 = white, exactly what the PC app writes under toybox/. A frame, both
+// diagonals and a blob, so a picture drawn upside down or half a band out
+// looks wrong on the screenshot instead of merely dark.
+uint8_t* g_fakeTbi = nullptr;
+uint32_t fakeTbiBuild() {
+  const int W = 480, H = 800, STRIDE = W / 8;
+  const uint32_t len = 8u + (uint32_t)STRIDE * H;
+  if (g_fakeTbi) return len;
+  g_fakeTbi = (uint8_t*)malloc(len);
+  g_fakeTbi[0] = 'T'; g_fakeTbi[1] = 'B'; g_fakeTbi[2] = 'I'; g_fakeTbi[3] = '1';
+  put16(g_fakeTbi + 4, (uint32_t)W);
+  put16(g_fakeTbi + 6, (uint32_t)H);
+  uint8_t* bits = g_fakeTbi + 8;
+  memset(bits, 0xFF, (size_t)STRIDE * H);  // white
+  auto ink = [&](int x, int y) {
+    if (x < 0 || y < 0 || x >= W || y >= H) return;
+    bits[(size_t)y * STRIDE + (x >> 3)] &= (uint8_t)~(0x80 >> (x & 7));
+  };
+  for (int x = 20; x < W - 20; x++) { ink(x, 20); ink(x, 21); ink(x, H - 22); ink(x, H - 21); }
+  for (int y = 20; y < H - 20; y++) { ink(20, y); ink(21, y); ink(W - 22, y); ink(W - 21, y); }
+  for (int y = 0; y < H; y++) {
+    const int x = 20 + (y * (W - 40)) / H;
+    ink(x, y);
+    ink(W - 1 - x, y);
+  }
+  for (int y = 360; y < 440; y++)
+    for (int x = 200; x < 280; x++) ink(x, y);
+  return len;
+}
+// A stand-in for the original image the book still carries. Nothing decodes
+// it in pass one; it is here so the entry the .tbi shadows actually exists.
+const uint8_t kFakePlatePng[] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
 
 void buildFakeEpub() {
   if (g_fakeEpub) return;
@@ -260,7 +304,8 @@ void buildFakeEpub() {
     uint16_t method;
     uint32_t lho;
   };
-  E ents[5] = {
+  const uint32_t tbiLen = fakeTbiBuild();
+  E ents[8] = {
       {"META-INF/container.xml", (const uint8_t*)kFakeContainer, (uint32_t)strlen(kFakeContainer),
        (uint32_t)strlen(kFakeContainer), 0, 0},
       {"OEBPS/content.opf", (const uint8_t*)kFakeOpf, (uint32_t)strlen(kFakeOpf),
@@ -270,6 +315,14 @@ void buildFakeEpub() {
       {"OEBPS/ch2.xhtml", kFakeCh2Deflate, (uint32_t)sizeof(kFakeCh2Deflate), kFakeCh2Raw, 8, 0},
       {"OEBPS/cover.jpg", kFakeCoverJpeg, (uint32_t)sizeof(kFakeCoverJpeg),
        (uint32_t)sizeof(kFakeCoverJpeg), 0, 0},
+      // The illustration, and beside it the picture the device actually draws.
+      // Both stored, which is how the PC app is asked to write the .tbi: the
+      // device seeks straight to the pixels instead of inflating 48 KB.
+      {"OEBPS/images/plate.png", kFakePlatePng, (uint32_t)sizeof(kFakePlatePng),
+       (uint32_t)sizeof(kFakePlatePng), 0, 0},
+      {"toybox/OEBPS/images/plate.tbi", g_fakeTbi, tbiLen, tbiLen, 0, 0},
+      {"OEBPS/images/missing.png", kFakePlatePng, (uint32_t)sizeof(kFakePlatePng),
+       (uint32_t)sizeof(kFakePlatePng), 0, 0},
   };
   uint32_t total = 22;
   for (const E& e : ents) total += 30 + 46 + 2 * (uint32_t)strlen(e.name) + e.csize;
@@ -304,8 +357,8 @@ void buildFakeEpub() {
   const uint32_t cdSize = (uint32_t)(p - g_fakeEpub) - cdOfs;
   memset(p, 0, 22);
   put32(p, 0x06054b50u);
-  put16(p + 8, 5);
-  put16(p + 10, 5);
+  put16(p + 8, (uint32_t)(sizeof(ents) / sizeof(ents[0])));
+  put16(p + 10, (uint32_t)(sizeof(ents) / sizeof(ents[0])));
   put32(p + 12, cdSize);
   put32(p + 16, cdOfs);
   p += 22;

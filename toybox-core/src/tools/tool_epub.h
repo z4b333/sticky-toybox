@@ -18,6 +18,7 @@
 #include "epub/epub_cover.h"
 #include "epub/epubcore.h"
 #include "epub/koreader_sdr.h"
+#include "lock_image.h"
 #include "recents.h"
 #include "shelf.h"
 #include "tools_ui.h"
@@ -34,6 +35,18 @@ inline constexpr int TURN_W = 160;   // tap thirds, same as the .tbk reader
 inline constexpr int LIST_Y0 = shelf::Y0, LIST_ROW_H = shelf::ROW_H;
 inline constexpr int MAX_BOOKS = shelf::MAX_ITEMS;
 inline constexpr int MAX_PAGES = 2048;  // per chapter; ~90x any real chapter
+// A page-start offset with its top bit set is an illustration's page. The
+// offsets are visible-codepoint counts, so the bit is free: a chapter with two
+// billion characters in it does not exist. The flag is needed because an <img>
+// adds no codepoints, which leaves a picture and the text after it sharing one
+// offset -- and a back-turn that only knows the offset would land on the text
+// both times and the picture never.
+inline constexpr uint32_t PAGE_IMG = 0x80000000u;
+inline constexpr uint32_t pageOff(uint32_t v) { return v & ~PAGE_IMG; }
+// One band of a .tbi as it is blitted: 16 rows, so a 48 KB picture crosses the
+// bus in 50 reads and never needs 48 KB of anything.
+inline constexpr int IMG_BAND_ROWS = 16;
+inline uint8_t g_imgBand[IMG_BAND_ROWS * (480 / 8)];
 }  // namespace epubui
 
 class EpubTool : public ToolApp {
@@ -186,7 +199,10 @@ class EpubTool : public ToolApp {
   int hostScreen() const { return _screen == Screen::Page ? 1 : 0; }
   int hostSpine() const { return _spine; }
   int hostPage() const { return _page; }
-  uint32_t hostPageOffset() const { return _page < _lutN ? _lut[_page] : 0; }
+  uint32_t hostPageOffset() const {
+    return _page < _lutN ? epubui::pageOff(_lut[_page]) : 0;
+  }
+  const char* hostPageImage() const { return _pageImage; }
   const char* hostLine(int i) const { return i < _lineN ? _lines[i].t : ""; }
   int hostLineCount() const { return _lineN; }
   const char* hostDir() const { return _dir; }
@@ -256,7 +272,7 @@ class EpubTool : public ToolApp {
     p.spine = (uint16_t)_spine;
     p.page = (uint16_t)_page;
     p.pageCount = (uint16_t)(_chapterPages > 0 ? _chapterPages : 0);
-    p.offset = _lut[_page];
+    p.offset = epubui::pageOff(_lut[_page]);
     p.hasOffset = true;
     uint8_t buf[10];
     const int n = epubc::encodeProgress(p, buf);
@@ -395,6 +411,9 @@ class EpubTool : public ToolApp {
     _lutN = 0;
     _chapterPages = -1;
     _pendValid = false;
+    _pendImageValid = false;
+    _pageImage[0] = 0;
+    _streamLost = false;  // the chapter stream is whole again
     _atEnd = false;
     return true;
   }
@@ -412,6 +431,17 @@ class EpubTool : public ToolApp {
     int placed = 0;
     uint32_t pageStart = 0;
     bool started = false;
+    // An illustration gets the whole glass. A picture squeezed between two
+    // paragraphs on a 480x800 panel is worth less than the paragraphs it
+    // displaced, and this is how the books themselves are laid out.
+    _pageImage[0] = 0;
+    if (_pendImageValid) {
+      snprintf(_pageImage, sizeof(_pageImage), "%s", _pendImage);
+      _pendImageValid = false;
+      pageStart = _pendImageOff;
+      if (_lutN < epubui::MAX_PAGES) _lut[_lutN++] = pageStart | epubui::PAGE_IMG;
+      return 1;
+    }
     const int spaceW = c.textWidth(" ", TS_MED) > 0 ? c.textWidth(" ", TS_MED) : 8;
 
     auto flushLine = [&]() -> bool {  // false: the page is full
@@ -446,6 +476,24 @@ class EpubTool : public ToolApp {
       if (tok == epubc::TOK_END || tok == epubc::TOK_ERR) {
         _atEnd = true;
         flushLine();
+        break;
+      }
+      if (tok == epubc::TOK_IMAGE) {
+        if (!started) {
+          // A fresh page: this one is the picture.
+          snprintf(_pageImage, sizeof(_pageImage), "%s", _book.imageName());
+          pageStart = off;
+          placed++;
+          break;
+        }
+        // The page already has text, so the picture opens the next one. Note
+        // that both pages then start at the same offset -- an image adds no
+        // codepoints -- which resume handles the way it handles any tie.
+        snprintf(_pendImage, sizeof(_pendImage), "%s", _book.imageName());
+        _pendImageOff = off;
+        _pendImageValid = true;
+        flushLine();
+        _atEnd = false;
         break;
       }
       if (tok == epubc::TOK_PARA) {
@@ -543,7 +591,8 @@ class EpubTool : public ToolApp {
     }
 
     if (placed > 0) {
-      if (_lutN < epubui::MAX_PAGES) _lut[_lutN++] = pageStart;
+      if (_lutN < epubui::MAX_PAGES)
+        _lut[_lutN++] = pageStart | (_pageImage[0] ? epubui::PAGE_IMG : 0u);
       if (_atEnd && !_pendValid) _chapterPages = _lutN;
     } else if (_atEnd) {
       _chapterPages = _lutN;
@@ -556,7 +605,14 @@ class EpubTool : public ToolApp {
   // stream, so the replayed page breaks identically to when it was first
   // seen. Costs one re-inflate of the chapter, invisible next to the panel.
   bool showPageAt(int pageIdx) {
-    const uint32_t target = _lut[pageIdx];
+    const uint32_t target = epubui::pageOff(_lut[pageIdx]);
+    const bool wantImage = (_lut[pageIdx] & epubui::PAGE_IMG) != 0;
+    // Pictures carry no codepoints, so a run of them shares one offset with
+    // the text that follows. Counting how many of this offset's pictures are
+    // already behind us says which one this page is.
+    int skipImages = 0;
+    for (int j = 0; j < pageIdx; j++)
+      if ((_lut[j] & epubui::PAGE_IMG) && epubui::pageOff(_lut[j]) == target) skipImages++;
     const int keepPages = _chapterPages;
     if (!chapterStart(_spine)) return false;
     _chapterPages = keepPages;
@@ -566,6 +622,16 @@ class EpubTool : public ToolApp {
       const int tok = _book.next(w, off);
       if (tok == epubc::TOK_END || tok == epubc::TOK_ERR) {
         _atEnd = true;
+        break;
+      }
+      if (wantImage && tok == epubc::TOK_IMAGE && off >= target) {
+        if (skipImages > 0) {
+          skipImages--;
+          continue;
+        }
+        snprintf(_pendImage, sizeof(_pendImage), "%s", _book.imageName());
+        _pendImageOff = off;
+        _pendImageValid = true;
         break;
       }
       if (tok != epubc::TOK_WORD) continue;  // page tops swallow paragraph gaps
@@ -596,7 +662,7 @@ class EpubTool : public ToolApp {
         return _lutN > 0;
       }
       _page = _lutN - 1;
-      if (_lutN >= 2 && _lut[_lutN - 1] > off) {
+      if (_lutN >= 2 && epubui::pageOff(_lut[_lutN - 1]) > off) {
         // overshot by one: the page before this one contains `off`
         return showPageAt(_lutN - 2);
       }
@@ -604,8 +670,21 @@ class EpubTool : public ToolApp {
     }
   }
 
+  // Drawing an illustration reads another entry out of the same zip, and this
+  // core keeps one entry open at a time, so the chapter stream is spent by the
+  // time the picture is on the glass. Rebuilding it costs one re-inflate --
+  // the same one a back-turn already pays -- so it is put off until a turn
+  // actually needs the stream, and never paid at all by a reader who looks at
+  // a picture and puts the device down.
+  void ensureStream() {
+    if (!_streamLost) return;
+    _streamLost = false;
+    if (_page < _lutN) showPageAt(_page);
+  }
+
   void turn(int dir) {
     if (!_open) return;
+    ensureStream();
     if (dir > 0) {
       if (_pendValid || !_atEnd) {
         if (layoutPage() > 0) {
@@ -650,10 +729,98 @@ class EpubTool : public ToolApp {
     host().refresh(true);
   }
 
+  // The pre-rendered picture beside an image: same path inside the zip, with a
+  // "toybox/" prefix and a .tbi extension, which is what the PC app writes.
+  void tbiEntryFor(const char* img, char* out, int cap) {
+    char stem[200];
+    snprintf(stem, sizeof(stem), "toybox/%s", img);
+    char* dot = strrchr(stem, '.');
+    const char* slash = strrchr(stem, '/');
+    if (dot && (!slash || dot > slash)) *dot = 0;  // ".jpg" goes, a dotted folder stays
+    snprintf(out, (size_t)cap, "%s.tbi", stem);
+  }
+
+  bool blobReadFull(uint8_t* dst, int n) {
+    int got = 0;
+    while (got < n) {
+      const int r = _book.blobRead(dst + got, n - got);
+      if (r <= 0) return false;
+      got += r;
+    }
+    return true;
+  }
+
+  // Blits the picture for this page, a band at a time. The whole picture is
+  // 48 KB and this device has no 48 KB to spare, so it never exists whole:
+  // 16 rows arrive, 16 rows are drawn, and the buffer is reused 50 times.
+  bool drawImagePage(ToolsCanvas& c) {
+    char entry[224];
+    tbiEntryFor(_pageImage, entry, sizeof(entry));
+    // Reading another entry spends the chapter stream; ensureStream() rebuilds
+    // it when a turn next needs it.
+    _book.chapterClose();
+    _streamLost = true;
+    if (!_book.blobOpen(entry)) return false;
+    if (_book.blobSize() != tbimg::FILE_SIZE) {
+      _book.blobClose();
+      return false;
+    }
+    uint8_t head[tbimg::HEADER];
+    if (!blobReadFull(head, sizeof(head))) {
+      _book.blobClose();
+      return false;
+    }
+    const uint32_t magic = (uint32_t)head[0] | ((uint32_t)head[1] << 8) |
+                           ((uint32_t)head[2] << 16) | ((uint32_t)head[3] << 24);
+    const int w = head[4] | (head[5] << 8), h = head[6] | (head[7] << 8);
+    if (magic != tbimg::MAGIC || w != tbimg::W || h != tbimg::H) {
+      _book.blobClose();
+      return false;  // a .tbi that is not this panel's picture: the plate, not a guess
+    }
+    for (int y0 = 0; y0 < tbimg::H; y0 += epubui::IMG_BAND_ROWS) {
+      const int rows =
+          (tbimg::H - y0) < epubui::IMG_BAND_ROWS ? (tbimg::H - y0) : epubui::IMG_BAND_ROWS;
+      if (!blobReadFull(epubui::g_imgBand, rows * tbimg::STRIDE)) break;  // half a picture
+      for (int r = 0; r < rows; r++) {
+        const uint8_t* row = epubui::g_imgBand + (size_t)r * tbimg::STRIDE;
+        for (int xb = 0; xb < tbimg::STRIDE; xb++) {
+          const uint8_t v = row[xb];
+          if (v == 0xFF) continue;  // a run of white, which is most of most art
+          for (int k = 0; k < 8; k++)
+            if (!(v & (0x80 >> k))) c.fillRect(xb * 8 + k, y0 + r, 1, 1, true);
+        }
+      }
+    }
+    _book.blobClose();
+    return true;
+  }
+
+  // What an illustration looks like when the book carries no picture for it.
+  // Named, because "there is a picture here and you cannot see it" is worth
+  // more than a blank page, and the name is what the PC app needs to hear.
+  void drawImagePlate(ToolsCanvas& c) {
+    const int W = c.width();
+    c.drawRect(40, 220, W - 80, 360, 2, true);
+    c.textCentered(W / 2, 320, "an illustration", TS_LARGE, true);
+    c.textCentered(W / 2, 372, "this book has no picture prepared for it", TS_SMALL, true);
+    const char* base = strrchr(_pageImage, '/');
+    c.textClipped(60, 430, W - 120, base ? base + 1 : _pageImage, TS_SMALL, true);
+    c.textCentered(W / 2, 496, "the PC app adds one under toybox/", TS_SMALL, true);
+  }
+
   void renderPage(ToolsCanvas& c) {
+    if (_pageImage[0]) {
+      if (!drawImagePage(c)) drawImagePlate(c);
+      if (_chrome) renderFooter(c);
+      return;
+    }
     for (int i = 0; i < _lineN; i++)
       c.text(epubui::MARGIN, _lines[i].y, _lines[i].t, TS_MED, true);
     if (!_chrome) return;
+    renderFooter(c);
+  }
+
+  void renderFooter(ToolsCanvas& c) {
     // The footer: where you are, on a plate the page shows through around.
     c.fillRect(0, 744, c.width(), 56, false);
     c.fillRect(0, 744, c.width(), 2, true);
@@ -683,6 +850,11 @@ class EpubTool : public ToolApp {
   bool _chrome = false;
   const char* _note = nullptr;
   char _noteBuf[96] = {};
+  char _pageImage[192] = {};       // this page IS this picture, if set
+  char _pendImage[192] = {};       // ...and this one opens the next page
+  uint32_t _pendImageOff = 0;
+  bool _pendImageValid = false;
+  bool _streamLost = false;        // a picture was read out of the same zip
 
   HostIO _io;
   epubc::Book _book;

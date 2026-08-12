@@ -38,6 +38,11 @@ enum Token : int {
   TOK_END = 0,    // chapter finished
   TOK_WORD = 1,   // a word (whitespace-delimited run) and its start offset
   TOK_PARA = 2,   // a paragraph boundary
+  // An illustration. `word` comes back holding the image's zip entry name, and
+  // the offset is unchanged -- an <img> carries no character data, so it adds
+  // nothing to the count CrossPoint shares. That is the whole reason pictures
+  // could be added to this reader at all without moving anybody's bookmark.
+  TOK_IMAGE = 3,
   TOK_ERR = -1,
 };
 
@@ -73,6 +78,19 @@ class Book {
   // bytes); `startOff` the visible-codepoint offset of the word's first
   // codepoint, in CrossPoint's counting.
   int next(char* word, uint32_t& startOff);
+
+  // Reads an arbitrary zip entry by name -- the pre-rendered artwork beside an
+  // image, or the image itself. Same one-at-a-time rule as the cover: no
+  // chapter may be open across it.
+  // The full entry name behind the last TOK_IMAGE. `next()` also copies it
+  // into `word`, but WORD_CAP is 96 bytes and a real image path can be longer,
+  // so anything that means to open it should ask here.
+  const char* imageName() const { return _imgName; }
+
+  bool blobOpen(const char* entryName);
+  int blobRead(uint8_t* dst, int n) { return entryRead(dst, n); }
+  void blobClose() { entryClose(); }
+  uint32_t blobSize() const { return _blob.usize; }
 
   // The cover image, found the two ways EPUBs declare one: an EPUB2
   // <meta name="cover"> pointing at a manifest id, or an EPUB3 item with
@@ -120,6 +138,10 @@ class Book {
   const char* _err = "";
   char _opfDir[128] = "";
   Ent _cover{};
+  Ent _blob{};
+  char _chapDir[128] = "";   // the open chapter's folder, for resolving <img>
+  char _imgName[192] = "";   // the image a TOK_IMAGE is about
+  bool _imgReady = false;
   uint32_t _coverPathHash = 0;
   uint8_t _coverType = 0;
   bool _coverOk = false;

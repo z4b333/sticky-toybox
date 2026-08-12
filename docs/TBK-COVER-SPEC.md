@@ -243,10 +243,17 @@ texture. Your app can show the result before it writes it; the device cannot.
 
 ## What the device does without one
 
-If an image has no `toybox/` counterpart, the reader decodes the original —
-baseline JPEG, progressive JPEG and PNG are all supported. It works, but it
-costs a second or two the first time and the dithering is the device's own.
-Anything you care about the look of is worth pre-rendering.
+Today: the page says so. The reader shows a plate naming the image it cannot
+draw — "this book has no picture prepared for it" — rather than a blank page
+or a silently skipped illustration, because a reader who can see the name can
+go and prepare it.
+
+Decoding the original on the device (baseline JPEG, progressive JPEG and PNG
+are all already decodable here — that is how EPUB covers are built) is the
+next step, and the format above does not change when it arrives: a `toybox/`
+entry will still win, because a picture dithered on a desktop beats one
+dithered in a 2 KB band. Anything you care about the look of is worth
+pre-rendering either way.
 
 ## What the device ignores
 
