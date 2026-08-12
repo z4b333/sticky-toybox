@@ -226,6 +226,16 @@ static const char kFakeCh1[] =
     "</body>\n"
     "</html>\n";
 
+// Chapter three is the shape a real book's cover page and its colour gallery
+// take: an illustration and not one word. It produces exactly one page and
+// then lays out empty, which the reader used to read as "an empty chapter,
+// skip it" -- and once past it, could not turn back into.
+static const char kFakeCh3[] =
+    "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+    "<html xmlns=\"http://www.w3.org/1999/xhtml\">\n"
+    "<body><div><img src=\"images/plate.png\" alt=\"a plate\"/></div></body>\n"
+    "</html>\n";
+
 static const char kFakeContainer[] =
     "<?xml version=\"1.0\"?>\n"
     "<container version=\"1.0\" xmlns=\"urn:oasis:names:tc:opendocument:xmlns:container\">\n"
@@ -243,12 +253,13 @@ static const char kFakeOpf[] =
     "  <manifest>\n"
     "    <item id=\"c1\" href=\"ch1.xhtml\" media-type=\"application/xhtml+xml\"/>\n"
     "    <item id=\"c2\" href=\"ch2.xhtml\" media-type=\"application/xhtml+xml\"/>\n"
+    "    <item id=\"c3\" href=\"ch3.xhtml\" media-type=\"application/xhtml+xml\"/>\n"
     "    <item id=\"cov\" href=\"cover.jpg\" media-type=\"image/jpeg\"/>\n"
     "    <item id=\"img\" href=\"images/plate.png\" media-type=\"image/png\"/>\n"
     "    <item id=\"img2\" href=\"images/missing.png\" media-type=\"image/png\"/>\n"
     "    <item id=\"css\" href=\"style.css\" media-type=\"text/css\"/>\n"
     "  </manifest>\n"
-    "  <spine><itemref idref=\"c1\"/><itemref idref=\"c2\"/></spine>\n"
+    "  <spine><itemref idref=\"c1\"/><itemref idref=\"c2\"/><itemref idref=\"c3\"/></spine>\n"
     "</package>\n";
 
 uint8_t* g_fakeEpub = nullptr;
@@ -305,7 +316,7 @@ void buildFakeEpub() {
     uint32_t lho;
   };
   const uint32_t tbiLen = fakeTbiBuild();
-  E ents[8] = {
+  E ents[9] = {
       {"META-INF/container.xml", (const uint8_t*)kFakeContainer, (uint32_t)strlen(kFakeContainer),
        (uint32_t)strlen(kFakeContainer), 0, 0},
       {"OEBPS/content.opf", (const uint8_t*)kFakeOpf, (uint32_t)strlen(kFakeOpf),
@@ -313,6 +324,8 @@ void buildFakeEpub() {
       {"OEBPS/ch1.xhtml", (const uint8_t*)kFakeCh1, (uint32_t)strlen(kFakeCh1),
        (uint32_t)strlen(kFakeCh1), 0, 0},
       {"OEBPS/ch2.xhtml", kFakeCh2Deflate, (uint32_t)sizeof(kFakeCh2Deflate), kFakeCh2Raw, 8, 0},
+      {"OEBPS/ch3.xhtml", (const uint8_t*)kFakeCh3, (uint32_t)strlen(kFakeCh3),
+       (uint32_t)strlen(kFakeCh3), 0, 0},
       {"OEBPS/cover.jpg", kFakeCoverJpeg, (uint32_t)sizeof(kFakeCoverJpeg),
        (uint32_t)sizeof(kFakeCoverJpeg), 0, 0},
       // The illustration, and beside it the picture the device actually draws.

@@ -1290,7 +1290,7 @@ int main() {
       abort();
     }
     epubc::Book book;
-    if (!book.open(mio) || book.spineCount() != 2) {
+    if (!book.open(mio) || book.spineCount() != 3) {
       printf("EPUB FAIL: open: %s (spine %d)\n", book.error(), book.spineCount());
       abort();
     }
@@ -1805,6 +1805,52 @@ int main() {
         abort();
       }
       toybox.onButton(SideBtn::Ok);
+    }
+
+    // --- a chapter that is one picture and no words -------------------------
+    // A cover page, a colour gallery, a character-art plate: real books are
+    // full of chapters with an <img> and nothing else. Such a chapter lays out
+    // exactly one page and then comes back empty, and the reader used to read
+    // that emptiness as "an empty chapter, move on" -- so the page was skipped
+    // on the way in and unreachable on the way back, and the layout that found
+    // nothing had already blanked the page that was showing.
+    {
+      epubc::Progress cp;
+      cp.spine = 2;
+      cp.page = 0;
+      cp.pageCount = 1;
+      cp.offset = 0;
+      cp.hasOffset = true;
+      uint8_t buf[10];
+      const int n = epubc::encodeProgress(cp, buf);
+      stickyHost.sdWriteFileAtomic("/.crosspoint/epub_836526750/progress.bin", buf, n);
+      toybox.open(false, 10);
+      auto* et3 = static_cast<EpubTool*>(toybox.hostActive());
+      toybox.onTap(240, epubui::LIST_Y0 + epubui::LIST_ROW_H + 10);
+      if (et3->hostScreen() != 1 || et3->hostSpine() != 2 ||
+          strcmp(et3->hostPageImage(), "OEBPS/images/plate.png") != 0) {
+        printf("EPUB APP FAIL: the picture-only chapter opened as s%d img '%s'\n",
+               et3->hostSpine(), et3->hostPageImage());
+        abort();
+      }
+      // Back out of it, into the chapter of words before it...
+      toybox.onButton(SideBtn::Up);
+      if (et3->hostSpine() != 1 || et3->hostPageImage()[0] || et3->hostLineCount() == 0) {
+        printf("EPUB APP FAIL: UP out of the picture chapter gave s%d, %d lines, img '%s'\n",
+               et3->hostSpine(), et3->hostLineCount(), et3->hostPageImage());
+        abort();
+      }
+      // ...and forward into it again, which is the turn that used to arrive on
+      // a blank sheet.
+      toybox.onButton(SideBtn::Down);
+      if (et3->hostSpine() != 2 ||
+          strcmp(et3->hostPageImage(), "OEBPS/images/plate.png") != 0) {
+        printf("EPUB APP FAIL: DOWN back into the picture chapter gave s%d img '%s'\n",
+               et3->hostSpine(), et3->hostPageImage());
+        abort();
+      }
+      toybox.onButton(SideBtn::Ok);
+      printf("epub picture chapters ok (reachable both ways, never blank)\n");
     }
     toybox.goHub();
     toybox.hostHub().goHome();

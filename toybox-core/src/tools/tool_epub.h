@@ -423,6 +423,16 @@ class EpubTool : public ToolApp {
   int layoutPage() {
     ToolsCanvas& c = host().canvas();
     const int lineW = c.width() - 2 * epubui::MARGIN;
+    // What is on the glass right now, kept in case this call finds nothing.
+    // A chapter announces its end by a layout that places nothing, and until
+    // the caller decides where to go next, the page it was called on is still
+    // the page being read. Blanking it here is what turned "back one page" at
+    // a chapter boundary into a blank sheet -- and an illustration-only
+    // chapter, where the second layout always comes back empty, into a page
+    // that erased itself the moment it was reached.
+    const int keepLines = _lineN;
+    char keepImage[sizeof(_pageImage)];
+    memcpy(keepImage, _pageImage, sizeof(keepImage));
     _lineN = 0;
     int y = epubui::TOP;
     char cur[256];
@@ -594,8 +604,10 @@ class EpubTool : public ToolApp {
       if (_lutN < epubui::MAX_PAGES)
         _lut[_lutN++] = pageStart | (_pageImage[0] ? epubui::PAGE_IMG : 0u);
       if (_atEnd && !_pendValid) _chapterPages = _lutN;
-    } else if (_atEnd) {
-      _chapterPages = _lutN;
+    } else {
+      if (_atEnd) _chapterPages = _lutN;
+      _lineN = keepLines;  // nothing new: the page that was showing still is
+      memcpy(_pageImage, keepImage, sizeof(_pageImage));
     }
     return placed;
   }
@@ -655,11 +667,19 @@ class EpubTool : public ToolApp {
     while (true) {
       const int placed = layoutPage();
       if (placed == 0) {
-        // an empty chapter: step forward if there is anywhere to go
+        // Nothing left in this chapter. That is only an EMPTY chapter if it
+        // never produced a page at all -- a chapter holding one illustration
+        // and no words produces exactly one page and then comes back empty,
+        // and reading "empty" as "skip to the next chapter" is what made the
+        // cover page, the gallery and the character art unreachable.
+        if (_lutN > 0) {
+          _page = _lutN - 1;
+          return true;
+        }
         if (spineIdx + 1 < _book.spineCount()) return gotoPlace(spineIdx + 1, 0);
         _lineN = 0;
         _page = 0;
-        return _lutN > 0;
+        return false;
       }
       _page = _lutN - 1;
       if (_lutN >= 2 && epubui::pageOff(_lut[_lutN - 1]) > off) {
