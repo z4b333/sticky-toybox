@@ -56,12 +56,12 @@ void checkbox(ToolsCanvas& c, int x, int y, bool on) {
 // A host with only a switch reports two levels and gets the two words it can
 // mean; one with a real volume gets four.
 const char* soundLabel(const ToolsHost& host) {
-  if (host.soundLevels() <= 2) return host.soundOn() ? "SOUND: ON" : "SOUND: OFF";
+  if (host.soundLevels() <= 2) return host.soundOn() ? "Sound: on" : "Sound: off";
   switch (host.soundLevel()) {
-    case 0: return "SOUND: MUTE";
-    case 1: return "SOUND: LOW";
-    case 2: return "SOUND: MEDIUM";
-    default: return "SOUND: HIGH";
+    case 0: return "Sound: mute";
+    case 1: return "Sound: low";
+    case 2: return "Sound: medium";
+    default: return "Sound: high";
   }
 }
 
@@ -150,7 +150,7 @@ void SettingsScreen::renderWall(ToolsHost& host, ToolsCanvas& c) {
   } else {
     for (int i = 0; i < _wallN; i++) {
       const TRect r = wallRect(i);
-      c.button(r.x, r.y, r.w, r.h, _wallNames[i], false, TS_MED);
+      c.listRow(r.x, r.y, r.w, r.h, _wallNames[i]);
     }
   }
 
@@ -289,14 +289,14 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
   const TRect s1 = actionRect(ACT_LOCK), s0 = actionRect(ACT_SOUND);
   const TRect sf = actionRect(ACT_FILES);
   const TRect s2 = actionRect(ACT_CARDS), s3 = actionRect(ACT_RESET);
-  c.button(sa.x, sa.y, sa.w, sa.h, "APPS ON THE HUB...", false, TS_MED);
-  c.button(sw.x, sw.y, sw.w, sw.h, "WALLPAPER...", false, TS_MED);
-  c.button(s1.x, s1.y, s1.w, s1.h, "LOCK SCREEN...", false, TS_MED);
-  c.button(sf.x, sf.y, sf.w, sf.h, "FILES OVER WIFI...", false, TS_MED);
-  c.button(s0.x, s0.y, s0.w, s0.h, soundLabel(host), false, TS_MED);
-  c.button(s2.x, s2.y, s2.w, s2.h, "SHOW HOW TO PLAY AGAIN", false, TS_MED);
-  c.button(s3.x, s3.y, s3.w, s3.h,
-           _armed ? "TAP AGAIN TO ERASE SCORES" : "RESET STATS AND TALLIES", _armed, TS_MED);
+  c.listRow(sa.x, sa.y, sa.w, sa.h, "Apps on the hub...");
+  c.listRow(sw.x, sw.y, sw.w, sw.h, "Wallpaper...");
+  c.listRow(s1.x, s1.y, s1.w, s1.h, "Lock screen...");
+  c.listRow(sf.x, sf.y, sf.w, sf.h, "Files over WiFi...");
+  c.listRow(s0.x, s0.y, s0.w, s0.h, soundLabel(host));
+  c.listRow(s2.x, s2.y, s2.w, s2.h, "Show how to play again");
+  c.listRow(s3.x, s3.y, s3.w, s3.h,
+            _armed ? "Tap again to erase scores" : "Reset stats and tallies", false, _armed);
 
   c.textCentered(SCREEN_W / 2, 776, _note ? _note : "rows ending in ... open a page of their own",
                  TS_SMALL, true);

@@ -76,6 +76,15 @@ class ToolsCanvas {
     textCentered(x + w / 2, y + (h - textHeight(sz)) / 2 + (b - t) / 2, s, sz, black, bold);
   }
   // Filled = black background + white label (primary action).
+  // A button is a hairline and a word. The border used to be two pixels, and
+  // two pixels on a 235 DPI panel is a heavy black frame around everything --
+  // eight of them on a screen and the screen is a grid of boxes rather than a
+  // page with things on it. The hub never drew a box in its life and reads as
+  // the calmest screen in the firmware; this brings the rest closer to it.
+  //
+  // `filled` stays for the one action on a screen that is THE action, and it
+  // is worth using rarely: on e-paper a filled slab is the loudest mark
+  // available and it flashes on every partial refresh.
   void button(int x, int y, int w, int h, const char* label, bool filled,
               TSize sz = TS_MED) {
     if (filled) {
@@ -83,10 +92,25 @@ class ToolsCanvas {
       textInBox(x, y, w, h, label, sz, false, true);
     } else {
       fillRect(x, y, w, h, false);
-      drawRect(x, y, w, h, 2, true);
+      drawRect(x, y, w, h, 1, true);
       textInBox(x, y, w, h, label, sz, true, false);
     }
   }
+  // A row in a list of choices: the label, left-aligned, and a hairline under
+  // it. No box. This is the hub's language -- dividers between things rather
+  // than frames around them -- and it is what a stack of seven of these should
+  // look like on a page that is mostly white.
+  //
+  // `armed` is for a row that is one tap from doing something irreversible: it
+  // gets a hairline all the way round instead of a fill, because a black slab
+  // on e-paper is a shout and this only needs to be a raised eyebrow.
+  void listRow(int x, int y, int w, int h, const char* label, bool rule = true,
+               bool armed = false, TSize sz = TS_MED) {
+    if (armed) drawRect(x, y, w, h, 1, true);
+    textClipped(x + 12, y + (h - textHeight(sz)) / 2, w - 24, label, sz, true, armed);
+    if (rule && !armed) fillRect(x, y + h - 1, w, 1, true);
+  }
+
   // Draws as much of `s` as fits in maxW, ending in "..." when it had to stop.
   //
   // Steps by codepoint, so a clipped Thai or CJK title never ends halfway

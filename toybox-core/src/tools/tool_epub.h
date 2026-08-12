@@ -1195,24 +1195,24 @@ class EpubTool : public ToolApp {
     char buf[64];
     if (_menu == rmenu::Page::Root) {
       rmenu::Item items[4];
-      items[0].label = "CONTENTS";
+      items[0].label = "Contents";
       snprintf(_rootSub[0], sizeof(_rootSub[0]), "chapter %d of %d", _spine + 1,
                _book.spineCount());
       items[0].sub = _rootSub[0];
-      items[1].label = "BOOKMARKS";
+      items[1].label = "Bookmarks";
       if (_nmarks > 0)
         snprintf(_rootSub[1], sizeof(_rootSub[1]), "%d kept  -  + keeps a phrase", _nmarks);
       else
         snprintf(_rootSub[1], sizeof(_rootSub[1]), "none yet  -  + keeps a phrase");
       items[1].sub = _rootSub[1];
       items[1].plus = true;
-      items[2].label = "TEXT";
+      items[2].label = "Text";
       snprintf(_rootSub[2], sizeof(_rootSub[2]), "%s, %s spacing", epubui::sizeName(_size),
                epubui::leadName(_lead));
       items[2].sub = _rootSub[2];
-      items[3].label = "CLOSE THE BOOK";
+      items[3].label = "Close the book";
       items[3].sub = _books[_cur].title;
-      rmenu::drawRoot(host(), c, "OPTIONS", items, 4);
+      rmenu::drawRoot(host(), c, "Options", items, 4);
       return;
     }
 
@@ -1246,21 +1246,31 @@ class EpubTool : public ToolApp {
       char where[48];
       snprintf(where, sizeof(where), "chapter %d, page %d", _spine + 1, _page + 1);
       c.textCentered(c.width() / 2, 470, where, TS_SMALL, true);
-      c.button(40, 560, (c.width() - 100) / 2, 96, "SAVE", true);
-      c.button(c.width() / 2 + 10, 560, (c.width() - 100) / 2, 96, "CANCEL", false);
+      // Save is the one this screen exists for, so it is the heavier word --
+      // weight rather than a black slab, which on e-paper shouts.
+      c.drawRect(40, 560, (c.width() - 100) / 2, 96, 1, true);
+      c.textInBox(40, 560, (c.width() - 100) / 2, 96, "Save", TS_LARGE, true, true);
+      c.button(c.width() / 2 + 10, 560, (c.width() - 100) / 2, 96, "Cancel", false);
       return;
     }
 
     if (_menu == rmenu::Page::Text) {
       host().topBar("TEXT", false, "OPTIONS");
-      const char* labels[2] = {"SIZE", "SPACING"};
+      const char* labels[2] = {"Size", "Spacing"};
       const char* values[2] = {epubui::sizeName(_size), epubui::leadName(_lead)};
       for (int r = 0; r < 2; r++) {
         const int y = 110 + r * 120;
-        c.text(28, y, labels[r], TS_MED, true);
-        c.button(28, y + 34, 92, 68, "-", false);
-        c.button(c.width() - 120, y + 34, 92, 68, "+", false);
-        c.textCentered(c.width() / 2, y + 54, values[r], TS_LARGE, true);
+        // Circles, matching the + that keeps a bookmark: the same gesture
+        // deserves the same mark, and a hairline circle is the quietest
+        // control this panel has.
+        c.text(28, y, labels[r], TS_SMALL, true);
+        const int cy = y + 64;
+        c.drawCircle(66, cy, 34, 1, true);
+        c.fillRect(66 - 15, cy - 1, 30, 2, true);
+        c.drawCircle(c.width() - 66, cy, 34, 1, true);
+        c.fillRect(c.width() - 66 - 15, cy - 1, 30, 2, true);
+        c.fillRect(c.width() - 66 - 1, cy - 15, 2, 30, true);
+        c.textCentered(c.width() / 2, cy - c.textHeight(TS_LARGE) / 2, values[r], TS_LARGE, true);
       }
       // The sample is the point: nobody can picture 32 px with airy leading.
       c.drawLine(24, 380, c.width() - 24, 380, 1, true);
@@ -1275,7 +1285,7 @@ class EpubTool : public ToolApp {
     }
 
     const bool contents = _menu == rmenu::Page::Contents;
-    host().topBar(contents ? "CONTENTS" : "BOOKMARKS", false, "OPTIONS");
+    host().topBar(contents ? "Contents" : "Bookmarks", false, "OPTIONS");
     const int total = contents ? tocCount() : _nmarks;
     if (total <= 0) {
       rmenu::drawEmpty(c, "no bookmarks yet", "KEEP THIS PLACE puts one here");
@@ -1358,7 +1368,7 @@ class EpubTool : public ToolApp {
 
     if (_menu == rmenu::Page::Text) {
       for (int r = 0; r < 2; r++) {
-        const int y0 = 110 + r * 120 + 34;
+        const int y0 = 110 + r * 120 + 30;
         if (y < y0 || y >= y0 + 68) continue;
         uint8_t& v = r == 0 ? _size : _lead;
         const int lim = r == 0 ? epubui::SIZES : epubui::LEADS;

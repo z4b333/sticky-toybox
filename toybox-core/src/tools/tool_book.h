@@ -553,7 +553,7 @@ class BookTool : public ToolApp {
   }
   static const char* keyLabel(int i) {
     static const char* const K[KEYS] = {"1", "2", "3", "4",     "5", "6",
-                                        "7", "8", "9", "CLEAR", "0", "BACK"};
+                                        "7", "8", "9", "Clear", "0", "Back"};
     return K[i];
   }
 
@@ -590,20 +590,20 @@ class BookTool : public ToolApp {
   void renderMenu(ToolsCanvas& c) {
     if (_menu == rmenu::Page::Root) {
       rmenu::Item items[3];
-      items[0].label = "GO TO PAGE";
+      items[0].label = "Go to page";
       snprintf(_rootSub[0], sizeof(_rootSub[0]), "page %lu of %lu",
                (unsigned long)(_pageNo + 1), (unsigned long)_books[_cur].pages);
       items[0].sub = _rootSub[0];
-      items[1].label = "BOOKMARKS";
+      items[1].label = "Bookmarks";
       if (_nmarks > 0)
         snprintf(_rootSub[1], sizeof(_rootSub[1]), "%d kept  -  + keeps this page", _nmarks);
       else
         snprintf(_rootSub[1], sizeof(_rootSub[1]), "none yet  -  + keeps this page");
       items[1].sub = _rootSub[1];
       items[1].plus = true;
-      items[2].label = "CLOSE THE BOOK";
+      items[2].label = "Close the book";
       items[2].sub = _books[_cur].title;
-      rmenu::drawRoot(host(), c, "OPTIONS", items, 3);
+      rmenu::drawRoot(host(), c, "Options", items, 3);
       return;
     }
 
@@ -614,11 +614,16 @@ class BookTool : public ToolApp {
       c.textCentered(c.width() / 2, 120, buf, TS_HUGE, true);
       snprintf(buf, sizeof(buf), "of %lu", (unsigned long)_books[_cur].pages);
       c.textCentered(c.width() / 2, 186, buf, TS_MED, true);
+      // A grid of hairlines with numbers in it, rather than twelve boxes: the
+      // keys are found by their positions, which a phone taught everybody
+      // twenty years ago, and twelve frames on one screen is a cage.
       for (int i = 0; i < KEYS; i++) {
         const TRect r = keyRect(i, c.width());
-        c.button(r.x, r.y, r.w, r.h, keyLabel(i), false);
+        if (i % 3) c.fillRect(r.x - 5, r.y + 8, 1, r.h - 16, true);
+        if (i >= 3) c.fillRect(r.x, r.y - 5, r.w, 1, true);
+        c.textInBox(r.x, r.y, r.w, r.h, keyLabel(i), i == 9 || i == 11 ? TS_MED : TS_LARGE, true);
       }
-      c.button(24, 640, c.width() - 48, 88, "GO", true);
+      c.button(24, 640, c.width() - 48, 88, "Go", false, TS_LARGE);
       c.textCentered(c.width() / 2, 756, "UP and DOWN step one page at a time", TS_SMALL, true);
       return;
     }
