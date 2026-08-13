@@ -31,21 +31,24 @@ static_assert(NGROUPS == 3, "the dock draws exactly three folders");
 // frame, nub, bolt and number take the halo, and the bar itself is laid on
 // afterwards as solid black inside a white rim -- readable over a white home,
 // a black mountain, and everything between.
-constexpr int CHARGE_W = 16;  // the bolt beside the percentage, when charging
+// Nothing is drawn for charging. The board has an LED beside the charging
+// port that is already lit while it charges, and it is lit whether the panel
+// is awake, asleep or showing something else -- which a mark on a screen that
+// costs 1.7 s to redraw can never be. Two indicators for one fact means one of
+// them is wrong at some point, and the one that can be wrong is this one.
 
-// The number, and nothing around it.
+// The number, and nothing else at all.
 //
 // There used to be a drawn cell with a bar in it beside the percentage, which
 // is two ways of saying one thing -- and the drawn one is the vaguer of the
-// two on a 28-pixel-wide glyph. The charging mark stays, because that is the
-// one thing the number cannot say: a device at 61 % going up and a device at
-// 61 % going down want different decisions from their owner.
+// two on 28 pixels of width. There used to be a charging bolt as well; the LED
+// by the port says that, always, without a refresh.
 int batteryWidth(ToolsCanvas& c, const ToolsHost& host) {
   const int pct = host.batteryPercent();
   if (pct < 0) return 0;
   char buf[8];
   snprintf(buf, sizeof(buf), "%d%%", pct);
-  return c.textWidth(buf, TS_SMALL) + (host.charging() ? CHARGE_W : 0);
+  return c.textWidth(buf, TS_SMALL);
 }
 
 void batteryFrame(ToolsCanvas& c, const ToolsHost& host, int right, int top, bool black) {
@@ -53,14 +56,7 @@ void batteryFrame(ToolsCanvas& c, const ToolsHost& host, int right, int top, boo
   if (pct < 0) return;  // no gauge answered: a number would be a lie
   char buf[8];
   snprintf(buf, sizeof(buf), "%d%%", pct);
-  const int w = c.textWidth(buf, TS_SMALL);
-  c.text(right - w, top - 1, buf, TS_SMALL, black);
-  if (host.charging()) {
-    // A bolt, left of the number: two triangles meeting at the waist.
-    const int bx = right - w - CHARGE_W + 4, by = top + 1;
-    decor::triangle(c, bx + 6, by - 2, bx - 1, by + 8, bx + 5, by + 8, black);
-    decor::triangle(c, bx, by + 16, bx + 7, by + 6, bx + 1, by + 6, black);
-  }
+  c.text(right - c.textWidth(buf, TS_SMALL), top - 1, buf, TS_SMALL, black);
 }
 
 void batteryFill(ToolsCanvas& c, const ToolsHost& host, int right, int top) {

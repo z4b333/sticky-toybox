@@ -2292,12 +2292,16 @@ int main() {
       printf("BATTERY FAIL: the percentage drew %d px\n", plain);
       abort();
     }
+    // Charging draws NOTHING extra: the board's own LED by the port says that,
+    // lit whether the panel is awake or asleep, which no mark on a 1.7-second
+    // screen can match. Two indicators for one fact means one of them is
+    // eventually wrong.
     sensors::hostSetBattery(89, true);
     epd.clear();
     hubHostBattery(stickyHost.sharedCanvas(), stickyHost, RIGHT, TOP, true);
     const int charging = inkNear(RIGHT - 90, RIGHT + 4);
-    if (charging <= plain) {
-      printf("BATTERY FAIL: charging drew %d px, same as %d not charging\n", charging, plain);
+    if (charging != plain) {
+      printf("BATTERY FAIL: charging drew %d px where not charging drew %d\n", charging, plain);
       abort();
     }
     sensors::hostSetBattery(89, false);
@@ -2312,7 +2316,7 @@ int main() {
     sensors::hostSetBattery(-1, false);
     toybox.goHub();
     g_dumpEnabled = true;
-    printf("battery ok (a number, drawn only when the gauge answered)\n");
+    printf("battery ok (a number only, and charging is the LED's job)\n");
   }
 
   setScreen("hub_hidden");
