@@ -3730,6 +3730,49 @@ int main() {
     }
   }
 
+  // --- accented Latin in the baked faces ------------------------------------
+  // An e-acute inside 44 px text used to drop to the 32 px international face,
+  // centred in the taller box -- "resume" read as a ransom note, and the
+  // largest size (the one the owner reads at) was the worst hit. The baked
+  // DejaVu faces carry the accents at every size now. The detector is ink
+  // position: E and E-acute must start their ink within a couple of rows of
+  // each other at 44 px; the old fallback started six rows down before the
+  // accent was even considered.
+#ifndef TOYBOX_CP_FONTS
+  // Skipped under CrossPoint's faces: that firmware really does fall back to
+  // the international tables for accents, and this guard is about ours.
+  {
+    int l, r, tE, b, tEa;
+    gfx::textInk("E", TS_HUGE, false, 0, l, r, tE, b);
+    gfx::textInk("\xC3\x89", TS_HUGE, false, 0, l, r, tEa, b);  // É
+    if (tEa > tE) {
+      printf("FONT FAIL: 44 px E-acute starts its ink at row %d, E at %d -- fallback?\n",
+             tEa, tE);
+      abort();
+    }
+    // And the advance matches its unaccented sibling, which the intl face's
+    // metrics never quite did.
+    for (int sz = TS_SMALL; sz <= TS_HUGE; sz++) {
+      const int we = gfx::textWidth("e", sz, false, 0);
+      const int wa = gfx::textWidth("\xC3\xA9", sz, false, 0);  // é
+      if (wa < we - 2 || wa > we + 2) {
+        printf("FONT FAIL: size %d e is %d px wide, e-acute %d\n", sz, we, wa);
+        abort();
+      }
+    }
+    setScreen("fonts_accents");
+    epd.clear();
+    gfx::drawText(10, 40, "resume r\xC3\xA9sum\xC3\xA9", TS_HUGE, 0, false);
+    gfx::drawText(10, 100, "\xC3\x89l\xC3\xA8ve na\xC3\xAFve gar\xC3\xA7on", TS_HUGE, 0, true);
+    gfx::drawText(10, 170, "caf\xC3\xA9 \xC5\x92uvre \xC5\xA0kola \xC5\xBDivot s\xC3\xB8ster",
+                  TS_LARGE, 0, false);
+    gfx::drawText(10, 220, "\xC3\xBC\x62\x65r ni\xC3\xB1o fian\xC3\xA7\x61ille a\xC3\xA7\x61\xC3\xAD",
+                  TS_MED, 0, false);
+    epd.displayFull();
+    printf("accents ok (44 px E-acute leads with its accent, widths match)\n");
+  }
+#endif
+
   // --- resume, rotation, battery -------------------------------------------
   // Three device-shaped behaviours that only the host can exercise cheaply.
   {

@@ -12,6 +12,11 @@ from PIL import Image, ImageDraw, ImageFont
 import sys
 
 FIRST, LAST = 32, 126
+# Accented Latin, appended after the ASCII run in every face. Without these,
+# an e-acute inside 44 px text dropped to the 32 px international face and
+# "resume" read as a ransom note. Latin-1's letters plus the handful of
+# Extended-A that western European text actually uses.
+EXTRAS = [c for c in range(0xC0, 0x100)] + [0x152, 0x153, 0x160, 0x161, 0x17D, 0x17E, 0x178]
 # Ink is any pixel darker than this on a white ground, so a higher number pulls
 # more of the antialiased edge into the glyph and thickens every stroke without
 # changing the typeface or moving a single layout.
@@ -62,7 +67,7 @@ def build(path, px):
     asc, desc = font.getmetrics()
     top = (px - (asc + desc)) // 2  # centre whatever slack is left over
     glyphs = []
-    for code in range(FIRST, LAST + 1):
+    for code in list(range(FIRST, LAST + 1)) + EXTRAS:
         ch = chr(code)
         adv = max(int(round(font.getlength(ch))), 1)
         im = Image.new('L', (adv + px, px + px), 255)
@@ -129,6 +134,13 @@ def main():
     print('  uint8_t height;  // line box, and the number of rows per glyph')
     print('  const FontGlyph* glyphs;')
     print('  const uint8_t* bits;')
+    print('};')
+    print()
+    print('#define UI_HAS_EXTRAS 1')
+    print('// Codepoints appended after ASCII index 94, same order in every face.')
+    print('constexpr int UI_EXTRA_COUNT = %d;' % len(EXTRAS))
+    print('const uint16_t UI_EXTRA_CPS[UI_EXTRA_COUNT] PROGMEM = {')
+    print('    ' + ''.join('0x%04X,' % c for c in EXTRAS))
     print('};')
     print()
     total = 0

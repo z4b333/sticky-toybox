@@ -64,13 +64,28 @@ const UiFont* faceFor(int px, bool bold) {
   }
 }
 
-int glyphIndex(char c) {
-  if (c < 32 || c > 126) c = '?';
-  return c - 32;
+#ifndef UI_HAS_EXTRAS
+// A stand-in face (the CrossPoint pass) carries only ASCII; accents fall
+// through to the international tables, as they do on that firmware.
+constexpr int UI_EXTRA_COUNT = 0;
+const uint16_t UI_EXTRA_CPS[1] PROGMEM = {0};
+#endif
+
+// The baked faces carry ASCII at indices 0..94 and the accented-Latin
+// extras after them, in UI_EXTRA_CPS order. -1 means the face does not have
+// it and the caller falls through to the international tables.
+int glyphIndex(uint32_t cp) {
+  if (cp >= 32 && cp <= 126) return (int)cp - 32;
+  if (cp < 0xC0 || cp > 0x17E) return -1;  // cheap bounds before the scan
+  for (int i = 0; i < UI_EXTRA_COUNT; i++)
+    if (pgm_read_word(&UI_EXTRA_CPS[i]) == cp) return 95 + i;
+  return -1;
 }
 
-FontGlyph glyphOf(const UiFont* f, char c) {
-  const FontGlyph* src = &f->glyphs[glyphIndex(c)];
+FontGlyph glyphOf(const UiFont* f, uint32_t cp) {
+  int idx = glyphIndex(cp);
+  if (idx < 0) idx = (int)'?' - 32;
+  const FontGlyph* src = &f->glyphs[idx];
   FontGlyph g;
   g.width = pgm_read_byte(&src->width);
   g.offset = pgm_read_word(&src->offset);
@@ -185,8 +200,8 @@ int drawText(int x, int y, const char* s, int scale, uint8_t color, bool bold, i
   uint32_t prev = 0;
   for (const char* p = s; *p;) {
     const uint32_t cp = uni::next(p);
-    if (cp < 128) {
-      const FontGlyph g = glyphOf(f, (char)cp);
+    if (glyphIndex(cp) >= 0) {
+      const FontGlyph g = glyphOf(f, cp);
       blit(f, g, cx, y, color);
       cx += g.width + spacing;
       prev = cp;
@@ -227,8 +242,8 @@ int textWidth(const char* s, int scale, bool bold, int spacing) {
   int w = 0;
   for (const char* p = s; *p;) {
     const uint32_t cp = uni::next(p);
-    if (cp < 128) {
-      w += glyphOf(f, (char)cp).width + spacing;
+    if (glyphIndex(cp) >= 0) {
+      w += glyphOf(f, cp).width + spacing;
       continue;
     }
     const int adv = intlAdvance(scale, cp);
@@ -258,8 +273,10 @@ void textInk(const char* s, int scale, bool bold, int spacing, int& left, int& r
   int inkL = 0, inkR = 0, inkT = h, inkB = -1;
   bool any = false;
   int x = 0;
-  for (const char* p = s; *p; p++) {
-    const FontGlyph g = glyphOf(f, *p);
+  for (const char* p = s; *p;) {
+    const uint32_t cp = uni::next(p);
+    if (glyphIndex(cp) < 0) continue;  // intl glyphs fill their boxes anyway
+    const FontGlyph g = glyphOf(f, cp);
     const int adv = g.width;
     const int stride = (adv + 7) / 8;
     int gl = adv, gr = -1, gt = h, gb = -1;
