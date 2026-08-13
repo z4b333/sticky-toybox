@@ -908,12 +908,9 @@ class EpubTool : public ToolApp {
   // A cosmetic repaint: fast unless the owner turned that off. Never used
   // where the panel MUST be clean -- opening or closing a book releases the
   // card bus and re-initialises the controller, and those still ask for full.
-  void paint() {
-    if (rmenu::fastTurns(prefs()))
-      host().refreshFast();
-    else
-      host().refresh(true);
-  }
+  void paint() { host().refreshFast(rmenu::cleanEvery(mode())); }
+
+  rmenu::Refresh mode() { return rmenu::refreshMode(prefs(), true); }
 
   // --- the panel --------------------------------------------------------------
   // Opened by the power button. Everything in here is about the book you are
@@ -1282,16 +1279,15 @@ class EpubTool : public ToolApp {
         c.fillRect(c.width() - 66 - 1, cy - 15, 2, 30, true);
         c.textCentered(c.width() / 2, cy - c.textHeight(TS_LARGE) / 2, values[r], TS_LARGE, true);
       }
-      // Fast turns, and the way to switch them off. A row rather than a
-      // stepper: it is one of two things, and a circle either side of a word
-      // would be pretending otherwise.
+      // Page turns: three cadences, cycled by tapping the row. A row rather
+      // than a stepper because there is no scale here to step along -- the
+      // three are named things, and arrows either side of one would suggest a
+      // continuum that does not exist. This reader's setting only; the .tbk
+      // reader has its own, on its own options panel.
       c.fillRect(24, TURNS_Y - 12, c.width() - 48, 1, true);
       c.text(28, TURNS_Y + 14, "Page turns", TS_SMALL, true);
-      c.text(28, TURNS_Y + 40, rmenu::fastTurns(prefs()) ? "fast" : "clean", TS_LARGE, true);
-      c.textClipped(180, TURNS_Y + 48, c.width() - 210,
-                    rmenu::fastTurns(prefs()) ? "0.3 s a page, clean every 8th"
-                                              : "1.7 s a page, never a ghost",
-                    TS_SMALL, true);
+      c.text(28, TURNS_Y + 40, rmenu::refreshLabel(mode()), TS_LARGE, true);
+      c.textClipped(180, TURNS_Y + 48, c.width() - 210, rmenu::refreshSub(mode()), TS_SMALL, true);
       c.fillRect(24, TURNS_Y + 92, c.width() - 48, 1, true);
 
       // The sample is the point: nobody can picture 32 px with airy leading.
@@ -1389,7 +1385,7 @@ class EpubTool : public ToolApp {
 
     if (_menu == rmenu::Page::Text) {
       if (y >= TURNS_Y - 12 && y < TURNS_Y + 92) {
-        rmenu::setFastTurns(prefs(), !rmenu::fastTurns(prefs()));
+        rmenu::setRefreshMode(prefs(), true, rmenu::nextRefresh(mode()));
         host().beep(0);
         host().refresh(true);  // the row itself changed; show it cleanly
         return;
@@ -1426,14 +1422,16 @@ class EpubTool : public ToolApp {
     const int total = contents ? tocCount() : _nmarks;
     const int pages = shelf::pageCount(total);
     if (y >= shelf::PAGER_Y && pages > 1) {
+      // Same rule as the shelf: a list of rows moving under a fixed frame is
+      // the easiest thing on this device to draw partially.
       if (_mpage > 0 && shelf::prevRect().hit(x, y)) {
         _mpage--;
         host().beep(0);
-        host().refresh(true);
+        paint();
       } else if (_mpage < pages - 1 && shelf::nextRect().hit(x, y)) {
         _mpage++;
         host().beep(0);
-        host().refresh(true);
+        paint();
       }
       return;
     }

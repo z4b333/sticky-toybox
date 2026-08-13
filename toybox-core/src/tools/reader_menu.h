@@ -23,12 +23,58 @@
 
 namespace rmenu {
 
-// Fast turns: a partial refresh instead of a full one, 0.3 s against 1.7 s,
-// with the host cleaning up every eighth. A preference because ghosting is a
-// matter of taste and of eyes, and one preference for both readers because it
-// is one device and the answer cannot sensibly differ between two books.
-inline bool fastTurns(Preferences& p) { return p.getUInt("rd_fast", 1) != 0; }
-inline void setFastTurns(Preferences& p, bool on) { p.putUInt("rd_fast", on ? 1 : 0); }
+// How a page reaches the glass. There is no third KIND of refresh on this
+// panel -- partial costs 0.3 s and leaves ghosting, full costs 1.7 s and does
+// not, and that is the whole menu. What a setting can choose is how often a
+// full one gets mixed in, so these three are three cadences and nothing more.
+//
+// Two of them, because the two readers show different things. A page of text
+// is mostly white paper and ghosts so faintly that sixteen turns between
+// cleans is comfortable; a page of 1-bit artwork has large black areas and
+// shows the previous page behind them several turns earlier. Same panel, same
+// eyes, different content -- so the answer is allowed to differ, and each
+// reader keeps its own.
+enum class Refresh : uint8_t { Fast = 0, Normal = 1, Best = 2 };
+
+// Best is "clean every page", which is the same thing as a full refresh every
+// time -- so one number covers all three and the host needs no special case.
+inline int cleanEvery(Refresh r) {
+  return r == Refresh::Fast ? 16 : r == Refresh::Normal ? 8 : 1;
+}
+
+inline const char* refreshLabel(Refresh r) {
+  return r == Refresh::Fast ? "fast" : r == Refresh::Normal ? "normal" : "best";
+}
+inline const char* refreshSub(Refresh r) {
+  return r == Refresh::Fast    ? "0.3 s a page, clean every 16th"
+         : r == Refresh::Normal ? "0.3 s a page, clean every 8th"
+                                : "1.7 s a page, never any ghosting";
+}
+
+inline Refresh nextRefresh(Refresh r) {
+  return r == Refresh::Fast ? Refresh::Normal : r == Refresh::Normal ? Refresh::Best : Refresh::Fast;
+}
+
+// NVS keys are short by law, and these two have to be told apart at a glance
+// in a dump: ep for the EPUB reader, bk for the .tbk one.
+inline const char* refreshKey(bool epub) { return epub ? "rd_ref_ep" : "rd_ref_bk"; }
+
+inline Refresh refreshMode(Preferences& p, bool epub) {
+  const uint32_t v = p.getUInt(refreshKey(epub), 0xFF);
+  if (v <= (uint32_t)Refresh::Best) return (Refresh)v;
+  // No per-reader answer stored yet. A device coming from a build that had one
+  // switch for both keeps what that switch was set to, so nothing changes
+  // underneath somebody on an update; a device that never touched it gets the
+  // default for the kind of thing this reader shows.
+  const uint32_t old = p.getUInt("rd_fast", 0xFF);
+  if (old == 0) return Refresh::Best;
+  if (old == 1) return Refresh::Normal;
+  return epub ? Refresh::Fast : Refresh::Normal;
+}
+
+inline void setRefreshMode(Preferences& p, bool epub, Refresh r) {
+  p.putUInt(refreshKey(epub), (uint32_t)r);
+}
 
 // Which page of the panel is showing. `None` means the book itself.
 enum class Page : uint8_t { None, Root, Contents, Marks, Text, Keep };

@@ -140,14 +140,18 @@ class BookTool : public ToolApp {
       if (total <= 0) return;
       const int pages = shelf::pageCount(total);
       if (y >= shelf::PAGER_Y && pages > 1) {
+        // Paging a list is the same act as turning a page and gets the same
+        // treatment: a list is text on white, which is the kindest thing a
+        // partial refresh can be asked to draw, and this is a tap you make
+        // several times in a row looking for one title.
         if (_lpage > 0 && shelf::prevRect().hit(x, y)) {
           _lpage--;
           host().beep(0);
-          host().refresh(true);
+          paint();
         } else if (_lpage < pages - 1 && shelf::nextRect().hit(x, y)) {
           _lpage++;
           host().beep(0);
-          host().refresh(true);
+          paint();
         }
         return;
       }
@@ -446,12 +450,9 @@ class BookTool : public ToolApp {
   // Same rule as the EPUB reader, with one hardware exception: a grey page
   // goes through the four-level waveform, which IS a full sequence -- there is
   // no partial version of it, and asking for one would show nothing.
-  void paint() {
-    if (rmenu::fastTurns(prefs()))
-      host().refreshFast();
-    else
-      host().refresh(true);
-  }
+  void paint() { host().refreshFast(rmenu::cleanEvery(mode())); }
+
+  rmenu::Refresh mode() { return rmenu::refreshMode(prefs(), false); }
 
   void showPage() {
     if (_books[_cur].bpp == 2 && !_chrome) {
@@ -555,6 +556,11 @@ class BookTool : public ToolApp {
     paint();
   }
 
+  // Go to page, bookmarks, page turns, close. Four rows at 116 px starting at
+  // 116 ends at 580, which leaves the bottom fifth of the panel empty -- the
+  // panel is a list of four decisions, not a form to be filled.
+  static constexpr int ROOT_N = 4;
+
   // 1..9, then clear, 0, backspace.
   static constexpr int KEYS = 12;
   static TRect keyRect(int i, int w) {
@@ -599,7 +605,7 @@ class BookTool : public ToolApp {
 
   void renderMenu(ToolsCanvas& c) {
     if (_menu == rmenu::Page::Root) {
-      rmenu::Item items[3];
+      rmenu::Item items[ROOT_N];
       items[0].label = "Go to page";
       snprintf(_rootSub[0], sizeof(_rootSub[0]), "page %lu of %lu",
                (unsigned long)(_pageNo + 1), (unsigned long)_books[_cur].pages);
@@ -611,9 +617,16 @@ class BookTool : public ToolApp {
         snprintf(_rootSub[1], sizeof(_rootSub[1]), "none yet  -  + keeps this page");
       items[1].sub = _rootSub[1];
       items[1].plus = true;
-      items[2].label = "Close the book";
-      items[2].sub = _books[_cur].title;
-      rmenu::drawRoot(host(), c, "Options", items, 3);
+      // The .tbk reader has no text settings -- a page is a picture and there
+      // is nothing to lay out -- so the one thing it does share with the EPUB
+      // reader sits on the root rather than behind a screen of its own.
+      items[2].label = "Page turns";
+      snprintf(_rootSub[2], sizeof(_rootSub[2]), "%s  -  %s", rmenu::refreshLabel(mode()),
+               rmenu::refreshSub(mode()));
+      items[2].sub = _rootSub[2];
+      items[3].label = "Close the book";
+      items[3].sub = _books[_cur].title;
+      rmenu::drawRoot(host(), c, "Options", items, ROOT_N);
       return;
     }
 
@@ -670,7 +683,7 @@ class BookTool : public ToolApp {
         keepPage();
         return;
       }
-      switch (rmenu::hitRoot(x, y, 3, W)) {
+      switch (rmenu::hitRoot(x, y, ROOT_N, W)) {
         case 0:
           _menu = rmenu::Page::Contents;
           _jump = _pageNo;
@@ -685,6 +698,13 @@ class BookTool : public ToolApp {
           host().refresh(true);
           return;
         case 2:
+          // Cycles in place. The row says what it is set to, so the panel is
+          // both the control and the answer, and there is nowhere to go.
+          rmenu::setRefreshMode(prefs(), false, rmenu::nextRefresh(mode()));
+          host().beep(0);
+          host().refresh(true);  // the row itself changed; show it cleanly
+          return;
+        case 3:
           _menu = rmenu::Page::None;
           leaveBook();
           return;
@@ -705,14 +725,16 @@ class BookTool : public ToolApp {
 
     const int pages = shelf::pageCount(_nmarks);
     if (y >= shelf::PAGER_Y && pages > 1) {
+      // Same rule as the shelf: a list of rows moving under a fixed frame is
+      // the easiest thing on this device to draw partially.
       if (_mpage > 0 && shelf::prevRect().hit(x, y)) {
         _mpage--;
         host().beep(0);
-        host().refresh(true);
+        paint();
       } else if (_mpage < pages - 1 && shelf::nextRect().hit(x, y)) {
         _mpage++;
         host().beep(0);
-        host().refresh(true);
+        paint();
       }
       return;
     }
@@ -828,7 +850,7 @@ class BookTool : public ToolApp {
   int32_t _typed = -1;             // what has been keyed, -1 until a key is
   marks::Mark _marks[marks::MAX];
   int _nmarks = 0;
-  char _rootSub[3][48] = {};
+  char _rootSub[ROOT_N - 1][48] = {};
 
   Screen _screen = Screen::List;
   char _dir[128] = "/books";

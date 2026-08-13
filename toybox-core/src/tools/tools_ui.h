@@ -224,9 +224,19 @@ class ToolsHost {
   // panel MUST be clean: after the SD bus was released (the controller was
   // re-initialised), after a grey page, and on the way out of a book.
   //
+  // `cleanEvery` is how many of these the caller wants between full refreshes;
+  // 1 means every one of them, which is a full refresh and the honest way to
+  // say "best quality" without a second entry point.
+  //
   // The default is a plain partial, which is what a host with no ghosting
   // policy of its own should do.
-  virtual void refreshFast() { refresh(false); }
+  virtual void refreshFast(int cleanEvery) {
+    if (cleanEvery <= 1) {
+      refresh(true);
+      return;
+    }
+    refresh(false);
+  }
   virtual void beep(uint8_t kind) = 0;  // 0 tap, 1 confirm, 2 reject, 3 alarm
   virtual void goHub() = 0;
   // Opens the notes tool straight into its pairing screen, where the phone's

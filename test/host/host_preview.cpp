@@ -1149,9 +1149,27 @@ int main() {
       }
     }
 
-    // And the way out is a row.
+    // Page turns is a row that cycles in place: three taps must come back to
+    // where it started, and none of them may leave the panel.
     toybox.onButton(SideBtn::Ok);
-    toybox.onTap(240, rmenu::rootRect(2, 480).y + 40);
+    {
+      const rmenu::Refresh was = rmenu::refreshMode(stickyHost.prefs(), false);
+      for (int i = 0; i < 3; i++) {
+        toybox.onTap(240, rmenu::rootRect(2, 480).y + 40);
+        if (bt->hostMenu() == 0) {
+          printf("BOOK FAIL: the page turns row left the panel\n");
+          abort();
+        }
+      }
+      if (rmenu::refreshMode(stickyHost.prefs(), false) != was) {
+        printf("BOOK FAIL: three taps on page turns did not come back to %s\n",
+               rmenu::refreshLabel(was));
+        abort();
+      }
+    }
+
+    // And the way out is the row under it.
+    toybox.onTap(240, rmenu::rootRect(3, 480).y + 40);
     if (bt->hostScreen() != 0) {
       printf("BOOK FAIL: CLOSE THE BOOK did not close it\n");
       abort();
@@ -1172,7 +1190,7 @@ int main() {
              bt->hostMarkCount());
       abort();
     }
-    toybox.onTap(240, rmenu::rootRect(2, 480).y + 40);  // close it again
+    toybox.onTap(240, rmenu::rootRect(3, 480).y + 40);  // close it again
     printf("tbk panel ok (keypad refuses a typo, marks survive the book closing)\n");
     // ...and means nothing on the list, so main.cpp falls through to its own
     // uses of the button.
@@ -1926,34 +1944,64 @@ int main() {
       abort();
     }
 
-    // --- fast turns ----------------------------------------------------------
+    // --- page turns ----------------------------------------------------------
     // A page turn is a PARTIAL refresh -- 0.3 s against 1.7 s -- with the host
-    // promoting itself to a clean full one every eighth. That cadence is the
-    // whole feature: too rare and the ghosts pile up, too often and it is not
-    // fast any more. Eight turns must therefore cost exactly one full.
+    // promoting itself to a clean full one every so often. The cadence IS the
+    // feature: too rare and the ghosts pile up, too often and it is not fast
+    // any more. So each of the three settings is walked and counted, because a
+    // setting whose name is the only thing that changes is worse than no
+    // setting at all.
     {
       g_dumpEnabled = false;
+      struct Case {
+        rmenu::Refresh mode;
+        int turns, fulls, partials;
+      };
+      static const Case kCases[3] = {
+          {rmenu::Refresh::Fast, 16, 1, 15},
+          {rmenu::Refresh::Normal, 8, 1, 7},
+          {rmenu::Refresh::Best, 3, 3, 0},
+      };
+      // The cadences, counted at the host. Driving these through sixteen real
+      // page turns would need a book long enough to survive them, and a turn
+      // that falls off the end of one repaints nothing -- which reads as a
+      // cadence failure and is not one.
+      for (const Case& t : kCases) {
+        stickyHost.resetFastCount();
+        const int f0 = g_fullCount, p0 = g_partialCount;
+        for (int i = 0; i < t.turns; i++) stickyHost.refreshFast(rmenu::cleanEvery(t.mode));
+        const int fulls = g_fullCount - f0, partials = g_partialCount - p0;
+        if (fulls != t.fulls || partials != t.partials) {
+          printf("EPUB APP FAIL: %s, %d turns cost %d full and %d partial, wanted %d and %d\n",
+                 rmenu::refreshLabel(t.mode), t.turns, fulls, partials, t.fulls, t.partials);
+          abort();
+        }
+      }
+
+      // And the reader is actually wired to it: eight real turns on the
+      // middle setting, which is the one a book in this harness is long
+      // enough to survive.
+      rmenu::setRefreshMode(stickyHost.prefs(), true, rmenu::Refresh::Normal);
       stickyHost.resetFastCount();
-      const int fullBefore = g_fullCount, partialBefore = g_partialCount;
+      const int f0 = g_fullCount, p0 = g_partialCount;
       for (int i = 0; i < 8; i++) toybox.onButton(SideBtn::Down);
-      const int fulls = g_fullCount - fullBefore, partials = g_partialCount - partialBefore;
-      if (fulls != 1 || partials != 7) {
-        printf("EPUB APP FAIL: eight turns cost %d full and %d partial refreshes\n", fulls,
-               partials);
+      if (g_fullCount - f0 != 1 || g_partialCount - p0 != 7) {
+        printf("EPUB APP FAIL: eight turns cost %d full and %d partial refreshes\n",
+               g_fullCount - f0, g_partialCount - p0);
         abort();
       }
-      // ...and with fast turns switched off, every one of them is a full.
-      rmenu::setFastTurns(stickyHost.prefs(), false);
-      const int fullBefore2 = g_fullCount, partialBefore2 = g_partialCount;
-      for (int i = 0; i < 3; i++) toybox.onButton(SideBtn::Up);
-      if (g_fullCount - fullBefore2 != 3 || g_partialCount != partialBefore2) {
-        printf("EPUB APP FAIL: with fast turns off, 3 turns cost %d full %d partial\n",
-               g_fullCount - fullBefore2, g_partialCount - partialBefore2);
+
+      // The two readers keep their own answer. One preference for both would
+      // pass every count above and still be the wrong feature.
+      rmenu::setRefreshMode(stickyHost.prefs(), true, rmenu::Refresh::Fast);
+      rmenu::setRefreshMode(stickyHost.prefs(), false, rmenu::Refresh::Best);
+      if (rmenu::refreshMode(stickyHost.prefs(), true) != rmenu::Refresh::Fast ||
+          rmenu::refreshMode(stickyHost.prefs(), false) != rmenu::Refresh::Best) {
+        printf("EPUB APP FAIL: the two readers share one refresh setting\n");
         abort();
       }
-      rmenu::setFastTurns(stickyHost.prefs(), true);
       stickyHost.resetFastCount();
-      printf("fast turns ok (seven partials to a full, and off means off)\n");
+      printf("page turns ok (three cadences count out, and the readers keep their own)\n");
     }
 
     // --- the panel behind the power button ----------------------------------

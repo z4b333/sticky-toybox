@@ -77,13 +77,19 @@ class StickyHost : public ToolsHost {
     else
       epd.displayPartial();
   }
-  // Every eighth fast refresh is a full one. Eight is what commercial readers
-  // settle on: one 1.7-second pause per eight turns, and the page never gets
-  // visibly dirty. The driver has its own backstop at forty partials, which is
-  // ghost control for the whole firmware rather than a reading cadence.
-  static constexpr int CLEAN_EVERY = 8;
-  void refreshFast() override {
-    if (++_fastCount >= CLEAN_EVERY) {
+  // One full refresh every `cleanEvery` fast ones. The caller decides the
+  // number -- it is a reading cadence and belongs to the reader, not here --
+  // and the driver keeps its own backstop at forty partials, which is ghost
+  // control for the whole firmware rather than a matter of taste.
+  void refreshFast(int cleanEvery) override {
+    // Every page, which is to say a full refresh. The counter is reset with it
+    // so that turning the setting back down does not clean again immediately.
+    if (cleanEvery <= 1) {
+      _fastCount = 0;
+      refresh(true);
+      return;
+    }
+    if (++_fastCount >= cleanEvery) {
       _fastCount = 0;
       refresh(true);
       return;
