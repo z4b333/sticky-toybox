@@ -237,11 +237,70 @@ first words.
 ### The cover
 
 Found the two standard ways: EPUB2 `<meta name="cover" content="id">`, or an
-EPUB3 manifest item whose `properties` contains `cover-image`. Baseline JPEG,
-progressive JPEG and PNG all decode on the device.
+EPUB3 manifest item whose `properties` contains `cover-image`. Baseline JPEG
+and PNG decode at full resolution; **progressive JPEG decodes at one eighth**,
+which is the next section and is the thing worth acting on.
 
 It is decoded **once**, on the book's first open, and cached. It costs a second
 or two, and the dithering is the device's own — see §6 for the better route.
+
+### Progressive JPEG covers lose seven eighths of their detail
+
+This is the single strongest reason to ship a sidecar, and it is invisible
+until you look at the result.
+
+The device's baseline-JPEG decoder (TJpgDec) **refuses progressive JPEGs**.
+Rather than showing nothing, the firmware falls back to its own extractor,
+which reads only the **DC coefficients** of the first scan — one value per
+8 × 8 block. That is the image at **1/8 scale**, and the cover builder then
+enlarges it to fill 480 × 800.
+
+Measured on a real book (*Classroom of the Elite* vol 1, Seven Seas):
+
+| | |
+|---|---|
+| cover in the EPUB | progressive JPEG, 1404 × 2000 |
+| what the device decodes | **175 × 250** |
+| what it then draws | that, enlarged **2.7×**, dithered |
+
+Big shapes survive. Type does not: the author and illustrator credits under
+the title are legible from a PC-made `.tbi` and illegible from the device's
+own build of the same file.
+
+**Commercial ebook covers are usually progressive** — it is what a web-oriented
+export pipeline produces — so this is the common case, not the corner case. In
+that same book, the cover *and* all ten interior illustrations are progressive;
+the only baseline JPEG in the file is the publisher's logo. Assume the art you
+care about is the art the device would see least of.
+
+What a converter should do:
+
+- **Detect it and act on it.** Walk the JPEG markers: `FFC0`/`FFC1` is
+  baseline, **`FFC2` is progressive**. Skip `FFD8`, and skip `FFD0`–`FFD7`;
+  every other marker carries a big-endian u16 length you can jump over.
+- If the cover is progressive — or simply always — **write the `.cover.tbi`
+  sidecar** (§6). It costs 48 KB beside a book that is already megabytes.
+- The same applies to any **artwork** inside the book: a progressive insert
+  with no `toybox/` counterpart would be decoded the same way. Pre-render it.
+
+```python
+def jpeg_is_progressive(data: bytes) -> bool:
+    i = 2
+    while i < len(data) - 1:
+        if data[i] != 0xFF:
+            i += 1
+            continue
+        m = data[i + 1]
+        if m in (0xC0, 0xC1):
+            return False
+        if m == 0xC2:
+            return True
+        if m == 0xD8 or 0xD0 <= m <= 0xD7:
+            i += 2
+            continue
+        i += 2 + ((data[i + 2] << 8) | data[i + 3])
+    return False
+```
 
 ---
 
@@ -321,6 +380,11 @@ library, and no memory ceiling; the device has a streaming decoder and a band
 of RAM. Line art especially suffers on-device — Floyd–Steinberg is a
 photographic algorithm and turns a flat grey background into a field of worms.
 A sidecar also makes the book open faster, because there is nothing to decode.
+
+And for a **progressive** JPEG cover it is not a matter of taste: the device
+sees that cover at 1/8 scale and enlarges it (§4). A 1404 × 2000 cover reaches
+the panel from a 175 × 250 decode. Most commercial ebook covers are
+progressive. **If your app writes one file beside a book, make it this one.**
 
 ### What the device does with a cover
 
@@ -402,6 +466,7 @@ replacing; both are rebuilt or simply lost, and neither breaks anything.
 
 - [ ] full path on the card ≤ 127 bytes
 - [ ] sidecar `.cover.tbi` (if any) shares the book's stem exactly and is 48,008 bytes
+- [ ] any EPUB whose cover is a **progressive** JPEG ships a `.cover.tbi` (§4)
 
 ### Testing without a device
 
