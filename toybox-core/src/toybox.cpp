@@ -1,5 +1,7 @@
 #include "toybox.h"
 
+#include "tools/lock_image.h"
+
 #include "game2048.h"
 #include "nonogram.h"
 #include "tools/tool_book.h"
@@ -102,7 +104,10 @@ void Toybox::openSettings() {
   release();
   _settings.enter();
   _where = Where::Settings;
-  _host->refresh(true);
+  // Partial: settings is text on white, the kindest case the panel has. The
+  // one exception is a wallpapered home behind it -- a photograph ghosts
+  // through a partial in a way hairlines never do, so that entry stays clean.
+  _host->refresh(wallimg::have());
 }
 
 bool Toybox::resumeLast() {
@@ -170,6 +175,7 @@ void Toybox::onTap(int x, int y) {
     if (_host->isBackTap(x, y)) {
       // Settings gets first refusal: it has a second page, and back there means
       // up one rather than out.
+      const bool wasFiles = _settings.onBusPage();
       if (_settings.back()) {
         _host->beep(1);
         _host->refresh(true);
@@ -195,15 +201,18 @@ void Toybox::onTap(int x, int y) {
       // Guest hosts only: the standalone device reaches this by holding UP.
       _settings.enter();
       _where = Where::Settings;
-      _host->refresh(true);
+      _host->refresh(wallimg::have());
       return;
     case HubScreen::Tap::Folder:
+      // The drawer over the home screen, and home again after it: partial on
+      // a plain device, full when a photograph is under (or about to be under)
+      // the ink -- pictures are what partials visibly smear.
       _hub.openFolder(t.idx);
-      _host->refresh(true);
+      _host->refresh(wallimg::have());
       return;
     case HubScreen::Tap::Home:
       _hub.goHome();
-      _host->refresh(true);
+      _host->refresh(wallimg::have());
       return;
     case HubScreen::Tap::Recent: {
       // A recently-read cover: open its reader, then the book itself, which

@@ -19,6 +19,7 @@
 #include "epub/epubcore.h"
 #include "epub/koreader_sdr.h"
 #include "bookmarks.h"
+#include "help.h"
 #include "lock_image.h"
 #include "reader_menu.h"
 #include "recents.h"
@@ -79,6 +80,7 @@ class EpubTool : public ToolApp {
   void enter(ToolsHost& h) override {
     ToolApp::enter(h);
     _screen = Screen::List;
+    _help = !help::suppressed(prefs(), "ep");
     _note = nullptr;
     snprintf(_dir, sizeof(_dir), "%s", shelf::TOP);
     reload();
@@ -108,7 +110,11 @@ class EpubTool : public ToolApp {
     }
     // Inside a series the bar carries the series name, because that is the
     // only thing on the screen that says where you are.
-    host().topBar(inFolder() ? seriesName() : title(), false, inFolder() ? title() : "HUB");
+    host().topBar(inFolder() ? seriesName() : title(), true, inFolder() ? title() : "HUB");
+    if (_help) {
+      help::render(c, help::EPUB, "HOW TO READ");
+      return;
+    }
     if (_n < 0) {
       c.textCentered(c.width() / 2, 320, "no card found", TS_LARGE, true);
       c.textCentered(c.width() / 2, 364, "is one in the slot?", TS_MED, true);
@@ -155,6 +161,21 @@ class EpubTool : public ToolApp {
         } else {
           host().goHub();
         }
+        return;
+      }
+      if (host().isHelpTap(x, y)) {
+        _help = !_help;
+        host().beep(1);
+        paint();
+        return;
+      }
+      if (_help) {
+        const help::Tap t = help::hit(x, y);
+        if (t == help::Tap::None) return;
+        if (t == help::Tap::Never) help::suppress(prefs(), "ep");
+        _help = false;
+        host().beep(1);
+        paint();
         return;
       }
       const int total = items();
@@ -1109,14 +1130,14 @@ class EpubTool : public ToolApp {
     _pickL0 = _pickL1 = -1;
     _phrase[0] = 0;
     host().beep(0);
-    host().refresh(true);
+    paint();
   }
 
   void pickCancel() {
     _picking = false;
     _pickL0 = _pickL1 = -1;
     host().beep(2);
-    host().refresh(true);
+    paint();
   }
 
   void keepMark(const char* label) {
@@ -1131,7 +1152,7 @@ class EpubTool : public ToolApp {
     _pickL0 = _pickL1 = -1;
     _menu = rmenu::Page::None;
     host().beep(added ? 1 : 2);
-    host().refresh(true);
+    paint();
   }
 
   // A tap while picking. The first lands the opening word, the second closes
@@ -1177,7 +1198,7 @@ class EpubTool : public ToolApp {
     _picking = false;
     _menu = rmenu::Page::Keep;
     host().beep(0);
-    host().refresh(true);
+    paint();
   }
 
   void renderPick(ToolsCanvas& c) {
@@ -1351,18 +1372,18 @@ class EpubTool : public ToolApp {
           _menu = rmenu::Page::Contents;
           _mpage = pageOfSpine();
           host().beep(0);
-          host().refresh(true);
+          paint();
           return;
         case 1:
           _menu = rmenu::Page::Marks;
           _mpage = 0;
           host().beep(0);
-          host().refresh(true);
+          paint();
           return;
         case 2:
           _menu = rmenu::Page::Text;
           host().beep(0);
-          host().refresh(true);
+          paint();
           return;
         case 3:
           _menu = rmenu::Page::None;
@@ -1387,7 +1408,7 @@ class EpubTool : public ToolApp {
       if (y >= TURNS_Y - 12 && y < TURNS_Y + 92) {
         rmenu::setRefreshMode(prefs(), true, rmenu::nextRefresh(mode()));
         host().beep(0);
-        host().refresh(true);  // the row itself changed; show it cleanly
+        paint();
         return;
       }
       for (int r = 0; r < 2; r++) {
@@ -1412,7 +1433,7 @@ class EpubTool : public ToolApp {
         // number, because the page number means nothing once the type changes.
         restyle();
         host().beep(0);
-        host().refresh(true);
+        paint();
         return;
       }
       return;
@@ -1450,7 +1471,7 @@ class EpubTool : public ToolApp {
       marks::remove(_marks, _nmarks, idx);
       marks::save(host(), _books[_cur].file, _marks, _nmarks);
       host().beep(1);
-      host().refresh(true);
+      paint();
       return;
     }
     jumpTo(_marks[idx].spine, _marks[idx].off);
@@ -1474,7 +1495,7 @@ class EpubTool : public ToolApp {
     _menu = rmenu::Page::None;
     saveProgress();
     host().beep(1);
-    host().refresh(true);
+    paint();
   }
 
   // Type changed: lay the chapter out again and land on the page holding the
@@ -1526,6 +1547,7 @@ class EpubTool : public ToolApp {
   bool _open = false;
   bool _chrome = false;
   const char* _note = nullptr;
+  bool _help = false;  // the HOW TO READ card, once per device
   char _noteBuf[96] = {};
   char _pageImage[192] = {};       // this page IS this picture, if set
   char _pendImage[192] = {};       // ...and this one opens the next page

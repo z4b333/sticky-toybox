@@ -13,6 +13,7 @@
 #pragma once
 #include "book_thumbs.h"
 #include "bookmarks.h"
+#include "help.h"
 #include "reader_menu.h"
 #include "recents.h"
 #include "shelf.h"
@@ -53,6 +54,7 @@ class BookTool : public ToolApp {
   void enter(ToolsHost& h) override {
     ToolApp::enter(h);
     _screen = Screen::List;
+    _help = !help::suppressed(prefs(), "bk");
     _open = false;
     _note = nullptr;
     snprintf(_dir, sizeof(_dir), "%s", shelf::TOP);
@@ -81,7 +83,11 @@ class BookTool : public ToolApp {
     }
     // Inside a series the bar carries the series name, because that is the
     // only thing on the screen that says where you are.
-    host().topBar(inFolder() ? seriesName() : title(), false, inFolder() ? title() : "HUB");
+    host().topBar(inFolder() ? seriesName() : title(), true, inFolder() ? title() : "HUB");
+    if (_help) {
+      help::render(c, help::BOOKS, "HOW TO READ");
+      return;
+    }
     if (_n < 0) {
       c.textCentered(c.width() / 2, 320, "no card found", TS_LARGE, true);
       c.textCentered(c.width() / 2, 364, "is one in the slot?", TS_MED, true);
@@ -134,6 +140,21 @@ class BookTool : public ToolApp {
         } else {
           host().goHub();
         }
+        return;
+      }
+      if (host().isHelpTap(x, y)) {
+        _help = !_help;
+        host().beep(1);
+        paint();
+        return;
+      }
+      if (_help) {
+        const help::Tap t = help::hit(x, y);
+        if (t == help::Tap::None) return;
+        if (t == help::Tap::Never) help::suppress(prefs(), "bk");
+        _help = false;
+        host().beep(1);
+        paint();
         return;
       }
       const int total = items();
@@ -689,20 +710,20 @@ class BookTool : public ToolApp {
           _jump = _pageNo;
           _typed = -1;
           host().beep(0);
-          host().refresh(true);
+          paint();
           return;
         case 1:
           _menu = rmenu::Page::Marks;
           _mpage = 0;
           host().beep(0);
-          host().refresh(true);
+          paint();
           return;
         case 2:
           // Cycles in place. The row says what it is set to, so the panel is
           // both the control and the answer, and there is nowhere to go.
           rmenu::setRefreshMode(prefs(), false, rmenu::nextRefresh(mode()));
           host().beep(0);
-          host().refresh(true);  // the row itself changed; show it cleanly
+          paint();
           return;
         case 3:
           _menu = rmenu::Page::None;
@@ -744,7 +765,7 @@ class BookTool : public ToolApp {
       marks::remove(_marks, _nmarks, idx);
       marks::save(host(), _books[_cur].file, _marks, _nmarks);
       host().beep(1);
-      host().refresh(true);
+      paint();
       return;
     }
     jumpTo(_marks[idx].page);
@@ -759,7 +780,7 @@ class BookTool : public ToolApp {
     const bool added = marks::add(_marks, _nmarks, m) >= 0;
     if (added) marks::save(host(), _books[_cur].file, _marks, _nmarks);
     host().beep(added ? 1 : 2);
-    host().refresh(true);
+    paint();
   }
 
   void jumpTo(uint32_t page) {
@@ -866,5 +887,6 @@ class BookTool : public ToolApp {
   uint8_t* _pageBuf = nullptr;
   uint32_t _pageBufBytes = 0;
   const char* _note = nullptr;
+  bool _help = false;  // the HOW TO READ card, once per device
   char _noteBuf[80] = {};
 };

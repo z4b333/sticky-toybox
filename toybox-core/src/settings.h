@@ -105,6 +105,10 @@ class SettingsScreen {
   // The shell offers the back tap here first. True means it was consumed going
   // up a page rather than out of settings altogether.
   bool back();
+  // True while on the one page whose leaving can release the card's bus (and
+  // with it re-initialise the panel). The shell asks before calling back(), so
+  // it knows whether the repaint after it must be a full one.
+  bool onBusPage() const { return _page == 4; }
   // Leaving settings altogether, however that happens: the files page owns a
   // running access point and a possibly-claimed SD bus, and neither may
   // outlive the screen that started them.

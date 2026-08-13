@@ -45,8 +45,8 @@ inline void card1(ToolsCanvas& c) {
   header(c, 0, "THE DOCK");
   struct Row { const char* name; const char* sub; };
   static constexpr Row R[3] = {{"PLAY", "six games, one at a time"},
-                               {"DECIDE", "coin, dice, shuffle, picker"},
-                               {"STUDY", "flashcards, notes, timer"}};
+                               {"DECIDE", "coin, dice, picker, timer"},
+                               {"STUDY", "books, ebooks, cards, notes"}};
   int y = 180;
   for (int i = 0; i < 3; i++) {
     hubmarks::folder(c, i, 64, y + 18, 56, true);
@@ -95,9 +95,9 @@ inline void card2(ToolsCanvas& c) {
 inline void card3(ToolsCanvas& c) {
   header(c, 2, "SETTINGS");
   c.text(18, 168, "What you can change", TS_LARGE, true, true);
-  static const char* K[3] = {"the picture behind the home screen",
+  static const char* K[3] = {"the wallpaper and the lock screen",
                              "what shows when you switch off",
-                             "beep volume, and which apps show"};
+                             "apps, sound, and files over WiFi"};
   for (int i = 0; i < 3; i++) {
     c.fillCircle(30, 224 + i * 36 + 10, 4, true);
     c.text(46, 224 + i * 36, K[i], TS_MED, true);
@@ -134,8 +134,8 @@ inline void card4(ToolsCanvas& c) {
   c.text(210, 342, "thing on the glass.", TS_MED, true);
 
   c.text(18, 420, "You choose what, in settings:", TS_MED, true);
-  static const char* K[4] = {"a note you pinned", "a goodbye card",
-                             "one of your pictures", "nothing at all"};
+  static const char* K[4] = {"a note you pinned", "one of your pictures",
+                             "the cover you were reading", "a goodbye card, or nothing"};
   for (int i = 0; i < 4; i++) {
     c.fillCircle(30, 466 + i * 36 + 10, 4, true);
     c.text(46, 466 + i * 36, K[i], TS_MED, true);

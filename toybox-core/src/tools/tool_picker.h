@@ -93,13 +93,15 @@ class PickerTool : public ToolApp {
 
     // --- item list ---------------------------------------------------------
     if (_count == 0) {
-      c.drawRect(LIST_X, LIST_Y, LIST_W, 4 * ROW_H, 1, true);
+
       c.textInBox(LIST_X, LIST_Y, LIST_W, 4 * ROW_H, "no items yet", TS_MED, true);
     }
     for (int i = 0; i < _count; i++) {
       const TRect r = rowRect(i);
       const bool spent = _removeMode && _used[i];
-      c.drawRect(r.x, r.y, r.w, r.h, spent ? 1 : 2, true);
+      // Hairlines between rows rather than a frame per item; a spent item is
+      // already struck through, which says more than a thinner border did.
+      if (i + 1 < _count) c.fillRect(r.x, r.y + r.h + 1, r.w, 1, true);
       const TSize nsz = scriptFloor(_items[i], TS_MED);
       c.text(r.x + 10, r.y + (r.h - c.textHeight(nsz)) / 2, _items[i], nsz, true);
       if (spent) {  // struck through once it has been drawn
@@ -107,7 +109,6 @@ class PickerTool : public ToolApp {
         c.drawLine(r.x + 8, my, r.x + r.w - DEL_W - 12, my, 2, true);
       }
       const TRect d = delRect(i);
-      c.drawRect(d.x, d.y, d.w, d.h, 1, true);
       c.textInBox(d.x, d.y, d.w, d.h, "x", TS_MED, true);
     }
 

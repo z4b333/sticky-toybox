@@ -69,8 +69,11 @@ const char* nameOf(const applist::Item& it) {
   return it.game ? gicons::NAMES[it.idx] : ticons::NAMES[it.idx];
 }
 
-// Must match the names the games pass to help::suppressed().
-constexpr const char* HELP_KEYS[] = {"h_wrd", "h_non", "h_g20", "h_xo", "h_sea", "h_sud"};
+// Must match the names the apps pass to help::suppressed(). The flashcards
+// and reader cards live here too: the row says "how to play", but what it
+// means is "show me the first-time cards again", all of them.
+constexpr const char* HELP_KEYS[] = {"h_wrd", "h_non", "h_g20", "h_xo",
+                                     "h_sea", "h_sud", "h_fc",  "h_bk", "h_ep"};
 
 }  // namespace
 

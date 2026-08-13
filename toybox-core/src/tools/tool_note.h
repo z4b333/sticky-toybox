@@ -272,14 +272,18 @@ class NoteTool : public ToolApp {
   void renderList(ToolsCanvas& c) {
     using namespace nui;
     if (_count == 0) {
-      c.drawRect(LIST_X, LIST_Y, LIST_W, 4 * ROW_H, 1, true);
       c.textInBox(LIST_X, LIST_Y, LIST_W, 4 * ROW_H, "no notes yet", TS_MED, true);
     }
     char buf[40];
     for (int i = 0; i < _count; i++) {
       const TRect r = rowRect(i);
       const bool pinned = note::isPinned(_infos[i].name);
-      c.drawRect(r.x, r.y, r.w, r.h, pinned ? 4 : 2, true);
+      // Hairlines between rows, not boxes around them -- the hub's language,
+      // the same one the shelves and the settings pages speak now. The pinned
+      // note keeps its dot and gains the thin side-rule the readers use for
+      // "you are here", which is exactly what pinned means on this device.
+      if (pinned) c.fillRect(r.x - 8, r.y + 6, 3, r.h - 12, true);
+      if (i + 1 < _count) c.fillRect(r.x, r.y + r.h + 2, r.w, 1, true);
       int nameX = r.x + 10;
       if (pinned) {  // a filled dot marks the note left on the screen
         c.fillCircle(r.x + 16, r.y + r.h / 2, 6, true);
@@ -297,8 +301,9 @@ class NoteTool : public ToolApp {
       c.text(r.x + r.w - DEL_W - 16 - tw, r.y + (r.h - c.textHeight(TS_SMALL)) / 2, buf,
              TS_SMALL, true);
 
+      // The x stands alone. It is still the whole delRect to a finger; the
+      // frame around it was decoration, and eight frames a page was a wall.
       const TRect d = delRect(i);
-      c.drawRect(d.x, d.y, d.w, d.h, 1, true);
       c.textInBox(d.x, d.y, d.w, d.h, "x", TS_MED, true);
     }
 

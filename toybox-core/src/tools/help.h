@@ -190,6 +190,44 @@ inline constexpr Text FLASHCARDS{{
                                  false,
                                  5};
 
+// The readers' card earns its place differently from the games'. A game with
+// no rules card is unplayable; a reader with no card is merely silent about
+// everything it can do -- the page view has no chrome at all, so the corner
+// that leaves, the middle that answers "where am I", and above all the power
+// button that opens the options are all invisible until told.
+inline constexpr Text BOOKS{{
+    "A page fills the glass.",
+    "",
+    "Tap the left or right edge",
+    "to turn. Manga volumes",
+    "turn the other way round.",
+    "",
+    "Tap the middle to see the",
+    "page number, the top-left",
+    "corner to leave.",
+    "",
+    "The power button opens",
+    "options and bookmarks.",
+},
+                            false,
+                            9};
+
+inline constexpr Text EPUB{{
+    "Tap the left or right edge",
+    "to turn the page, the",
+    "top-left corner to leave.",
+    "",
+    "The power button opens",
+    "options: contents, book-",
+    "marks, and the text size.",
+    "",
+    "Your place is kept on the",
+    "card itself, so it follows",
+    "the card between devices.",
+},
+                           false,
+                           10};
+
 inline constexpr Text SUDOKU{{
     "Fill every empty square so",
     "that each row, column and",

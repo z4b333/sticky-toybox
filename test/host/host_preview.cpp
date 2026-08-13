@@ -892,6 +892,19 @@ int main() {
       abort();
     }
 
+    // First open shows the HOW TO READ card -- the page view has no chrome,
+    // so nothing else ever says what the power button does. GOT IT dismisses
+    // it for this run without suppressing it for the next.
+    setScreen("tool_books_help");
+    epd.clear();
+    toybox.render(stickyHost.sharedCanvas());
+    epd.displayFull();
+    toybox.onTap(help::OK_BTN.x + 10, help::OK_BTN.y + 10);
+    if (help::suppressed(stickyHost.prefs(), "bk")) {
+      printf("BOOK FAIL: GOT IT suppressed the card for ever\n");
+      abort();
+    }
+
     // The top shelf is a series folder and the two loose books; the folder
     // opens onto its own list, which needs two pages.
     if (bt->hostFolders() != 1 || bt->hostItems() != 3) {
@@ -1737,6 +1750,19 @@ int main() {
     }
     auto* et = static_cast<EpubTool*>(toybox.hostActive());
     g_dumpEnabled = true;
+
+    // The reader's first-open card, and DON'T SHOW AGAIN honoured: this one is
+    // suppressed for good, which is what the settings row exists to undo.
+    setScreen("tool_epub_help");
+    epd.clear();
+    toybox.render(stickyHost.sharedCanvas());
+    epd.displayFull();
+    toybox.onTap(help::NEVER_BTN.x + 10, help::NEVER_BTN.y + 10);
+    if (!help::suppressed(stickyHost.prefs(), "ep")) {
+      printf("EPUB APP FAIL: DON'T SHOW AGAIN did not stick\n");
+      abort();
+    }
+
     setScreen("tool_epub_list");
     stickyHost.refresh(true);
 
