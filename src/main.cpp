@@ -243,8 +243,10 @@ void handlePowerButton() {
 // The two holds are deliberately different lengths. Carrying on is the thing
 // you do twenty times a day and costs nothing if it fires by accident, so it
 // comes quickly. Settings is entered rarely and a pocket can press a button
-// for a long time, so it wants five deliberate seconds.
-constexpr uint32_t SETTINGS_HOLD_MS = 5000;
+// for a long time, so it wants a deliberate hold -- three seconds, which is
+// long past anything a hand does by accident and short enough that it does not
+// feel like the device has stopped answering.
+constexpr uint32_t SETTINGS_HOLD_MS = 3000;
 constexpr uint32_t RESUME_HOLD_MS = 900;
 
 void handleSideButtons() {
