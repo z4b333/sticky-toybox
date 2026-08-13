@@ -105,6 +105,9 @@ class StickyHost : public ToolsHost {
     touch.setRotation(r);
   }
   int canvasRotation() const override { return epd.rotation(); }
+  int deviceOrientation() override {
+    return sensors::imuPresent() ? sensors::orientation() : -1;
+  }
   void topBar(const char* t, bool withHelp, const char* backLabel) override {
     drawTopBar(_canvas, t, withHelp, backLabel);
   }

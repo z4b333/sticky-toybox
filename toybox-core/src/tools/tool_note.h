@@ -186,7 +186,11 @@ class NoteTool : public ToolApp {
     refreshList();
   }
 
-  bool wantsTick() const override { return _screen == Screen::Pair; }
+  // Two screens tick: pairing (the web server) and the which-way-up step,
+  // which follows the accelerometer while its question is open.
+  bool wantsTick() const override {
+    return _screen == Screen::Pair || (_screen == Screen::Orient && _gyro);
+  }
 
   // Settings sends people here for the lock screen picture: the phone's page
   // carries the uploader, and there is no reason for a second one.
@@ -196,6 +200,7 @@ class NoteTool : public ToolApp {
   }
 
   void tick() override {
+    if (_screen == Screen::Orient) return tickOrient();
     if (_screen != Screen::Pair) return;
     _net.loop();
     // The moment a phone is on the access point, step two is the useful screen
@@ -587,9 +592,31 @@ class NoteTool : public ToolApp {
   void openOrient() {
     _screen = Screen::Orient;
     _wasScreen = _returnTo;
-    _orient = lock::config().pinRotation & 3;
+    // With an accelerometer, the answer to "which way up" is the way the
+    // device is already being held: the hand doing the pinning turned it the
+    // right way round before the screen could ask. The step opens at that
+    // angle and follows the device live; the button only confirms. Without
+    // one, the TURN button carries on asking the old way.
+    const int held = host().deviceOrientation();
+    _gyro = held >= 0;
+    _orient = _gyro ? held : (lock::config().pinRotation & 3);
+    _tickDiv = 0;
     host().setCanvasRotation(_orient);
     host().beep(1);
+    host().refresh(true);
+  }
+
+  void tickOrient() {
+    if (!_gyro) return;
+    // ~6 Hz is plenty: the sensor itself updates at 26 Hz and a person
+    // turning a device is slower than either.
+    if (++_tickDiv < 8) return;
+    _tickDiv = 0;
+    const int held = host().deviceOrientation();
+    if (held < 0 || held == _orient) return;
+    _orient = held;
+    host().setCanvasRotation(_orient);
+    // A quarter turn changes every pixel, so this cannot be a partial update.
     host().refresh(true);
   }
 
@@ -615,13 +642,20 @@ class NoteTool : public ToolApp {
     // Painted over the note rather than beside it: there is no beside. White
     // boxes first, so a dense note does not swallow its own way out.
     c.fillRect(t.x - 6, t.y - 6, (k.x + k.w) - (t.x - 6) + 6, t.h + 12, false);
-    c.button(t.x, t.y, t.w, t.h, "TURN", false, TS_LARGE);
+    if (_gyro) {
+      // No TURN button: turning the device IS the control. Two short lines in
+      // its place say so, and the confirm stays where a thumb knows it.
+      c.text(t.x + 4, t.y + 2, "turn the device -", TS_SMALL, true);
+      c.text(t.x + 4, t.y + 26, "the note follows", TS_SMALL, true);
+    } else {
+      c.button(t.x, t.y, t.w, t.h, "TURN", false, TS_LARGE);
+    }
     c.button(k.x, k.y, k.w, k.h, "THIS WAY UP", true, TS_LARGE);
   }
 
   void tapOrient(int x, int y) {
     using namespace nui;
-    if (turnRect(canvas().width(), canvas().height()).hit(x, y)) {
+    if (!_gyro && turnRect(canvas().width(), canvas().height()).hit(x, y)) {
       _orient = (_orient + 1) & 3;
       host().setCanvasRotation(_orient);
       host().beep(0);
@@ -657,7 +691,9 @@ class NoteTool : public ToolApp {
   }
 
   // --- state -------------------------------------------------------------
-  int _orient = 0;  // the angle being tried on the which-way-up step
+  int _orient = 0;      // the angle being tried on the which-way-up step
+  bool _gyro = false;   // that angle follows the device rather than a button
+  uint8_t _tickDiv = 0;
   // Which screen the which-way-up step came from, and so where it goes back to:
   // the phone prompt, or the note you were reading when you pinned it.
   Screen _returnTo = Screen::Pair;

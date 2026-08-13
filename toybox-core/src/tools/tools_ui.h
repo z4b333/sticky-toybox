@@ -252,6 +252,11 @@ class ToolsHost {
   // fixed screen ignores it and reports 0.
   virtual void setCanvasRotation(int r) { (void)r; }
   virtual int canvasRotation() const { return 0; }
+  // Which way up the device is being HELD, from the accelerometer, in the same
+  // 0..3 space as canvasRotation. -1 means there is no way to know -- no IMU
+  // on the board, or a host with no board at all -- and callers fall back to
+  // asking with a button.
+  virtual int deviceOrientation() { return -1; }
   virtual void topBar(const char* title, bool withHelp = false, const char* backLabel = "HUB") = 0;
   // A tool with no rules card leaves this false and no "?" is drawn.
   virtual bool isHelpTap(int x, int y) const { return false; }

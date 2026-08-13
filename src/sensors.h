@@ -57,6 +57,10 @@ bool readClimate(int& tempDeciC, int& rhPercent);
 
 // --- accelerometer (LSM6DS3TR-C) ------------------------------------------
 bool imuPresent();
+#ifdef TOYBOX_HOST
+void hostSetImu(bool on);        // the harness plays both kinds of device
+void hostSetOrientation(int o);  // ...held whichever way the guard says
+#endif
 // Raw counts on the two axes orientation() uses, at +/-2 g full scale, so
 // 16384 counts is one g. The service screen shows these beside the rotation
 // they produce: which way the chip is glued down is the one thing about this

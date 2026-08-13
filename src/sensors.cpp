@@ -134,6 +134,7 @@ bool readClimate(int&, int&) { return false; }
 bool readAccel(int&, int&) { return false; }
 int orientation() { return g_orientation; }
 void hostSetOrientation(int o) { g_orientation = o; }
+void hostSetImu(bool on) { g_imu = on; }
 
 #else
 

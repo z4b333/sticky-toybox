@@ -3144,6 +3144,70 @@ int main() {
     printf("orient ok (turns, saves, and rests at what it saved)\n");
   }
 
+  // The same step on a device WITH an accelerometer: the angle follows the
+  // hand, not a button. The button-path walk above is the fallback for boards
+  // whose IMU never answered.
+  {
+    g_dumpEnabled = false;
+    sensors::hostSetImu(true);
+    sensors::hostSetOrientation(1);
+    char wasPinned[note::NAME_LEN + 1];
+    const bool hadPin = note::getPinned(wasPinned);
+    // The last guard left the tool on the pairing screen; walk to a note's
+    // view and pin from there, which is the other door into this step.
+    toybox.onTap(nui::DONE_BTN.x + 10, nui::DONE_BTN.y + 10);  // out of pairing
+    toybox.onTap(20 + 180, 56 + 46 + 20);                      // open the richer note
+    NoteTool* ntool = static_cast<NoteTool*>(toybox.hostActive());
+    toybox.onTap(nui::PIN_BTN.x + 10, nui::PIN_BTN.y + 10);  // PIN -- or UNPIN if it was pinned
+    if (stickyHost.canvasRotation() != 1)
+      toybox.onTap(nui::PIN_BTN.x + 10, nui::PIN_BTN.y + 10);  // then PIN
+    if (stickyHost.canvasRotation() != 1) {
+      printf("ORIENT IMU FAIL: opened at %d, the device is held at 1\n",
+             stickyHost.canvasRotation());
+      abort();
+    }
+    if (!ntool->wantsTick()) {
+      printf("ORIENT IMU FAIL: the step is not asking for ticks\n");
+      abort();
+    }
+    // Turning the device turns the note -- through the same tick the shell
+    // gives every app, throttled inside the tool.
+    sensors::hostSetOrientation(2);
+    for (int i = 0; i < 10; i++) toybox.tick();
+    if (stickyHost.canvasRotation() != 2) {
+      printf("ORIENT IMU FAIL: the note did not follow the device to 2\n");
+      abort();
+    }
+    // The TURN button is gone: a tap where it was does nothing.
+    {
+      const int w = stickyHost.canvas().width(), h = stickyHost.canvas().height();
+      tapRect(nui::turnRect(w, h));
+      if (stickyHost.canvasRotation() != 2) {
+        printf("ORIENT IMU FAIL: the retired TURN button still turns\n");
+        abort();
+      }
+      // The confirmation stays a button: KEEP saves the followed angle.
+      tapRect(nui::keepRect(w, h));
+    }
+    if (lock::config().pinRotation != 2 || stickyHost.canvasRotation() != 0) {
+      printf("ORIENT IMU FAIL: kept %d at rotation %d\n", lock::config().pinRotation,
+             stickyHost.canvasRotation());
+      abort();
+    }
+    lock::setPinRotation(prefs, 0);
+    sensors::hostSetImu(false);
+    sensors::hostSetOrientation(0);
+    // Put the world back: the walk pinned this note to open the step, and the
+    // guards below are about whatever was pinned before it.
+    if (hadPin)
+      note::setPinned(wasPinned);
+    else
+      note::setPinned("");
+    toybox.onTap(BACK_W / 2, TOPBAR_H / 2);  // out of the view, back to the list
+    g_dumpEnabled = true;
+    printf("orient imu ok (follows the hand, TURN retired, KEEP still decides)\n");
+  }
+
   setScreen("tool_note_pinned");
   epd.clear();
   toybox.render(stickyHost.sharedCanvas());
