@@ -93,7 +93,7 @@ class EpubTool : public ToolApp {
 
   void render(ToolsCanvas& c) override {
     if (_screen == Screen::Loading) {
-      bthumb::drawLoading(host(), c, _books[_cur].file, _books[_cur].title);
+      bthumb::drawLoading(host(), c, _books[_cur].file, _books[_cur].title, _freshCover);
       return;
     }
     if (_screen == Screen::Page) {
@@ -274,6 +274,7 @@ class EpubTool : public ToolApp {
 
 #ifdef TOYBOX_HOST
   int hostScreen() const { return _screen == Screen::Page ? 1 : 0; }
+  bool hostFreshCover() const { return _freshCover; }
   int hostSpine() const { return _spine; }
   int hostPage() const { return _page; }
   uint32_t hostPageOffset() const { return curOffset(); }
@@ -413,7 +414,9 @@ class EpubTool : public ToolApp {
     // open, the chapter replayed to the saved page); they pass behind the
     // book's own face. First-ever open has no cover yet and shows the plate.
     _screen = Screen::Loading;
+    _freshCover = false;
     host().refresh(true);
+    const bool hadCover = bthumb::have(_books[i].file);
     if (!host().epubOpen(_books[i].file)) {
       _cur = -1;
       _screen = Screen::List;
@@ -449,6 +452,14 @@ class EpubTool : public ToolApp {
       bool transient = false;
       if (!epubcov::makeThumb(host(), _book, _books[i].file, &transient) && !transient)
         bthumb::markFailed(_books[i].file);
+    }
+    // A cover that just came into existence goes into the plate's frame, so
+    // the first open -- the slowest one, behind a JPEG decode -- shows its
+    // progress where the empty frame promised it. One partial refresh; later
+    // opens lead with the full-bleed cover instead.
+    if (!hadCover && bthumb::have(_books[i].file)) {
+      _freshCover = true;
+      host().refresh(false);
     }
     // ...and, if the sleeping panel is set to wear a cover, this book's goes
     // into flash now. After the decode above, so the very first open of a
@@ -1547,7 +1558,8 @@ class EpubTool : public ToolApp {
   bool _open = false;
   bool _chrome = false;
   const char* _note = nullptr;
-  bool _help = false;  // the HOW TO READ card, once per device
+  bool _help = false;       // the HOW TO READ card, once per device
+  bool _freshCover = false; // this open just built the cover; show it framed
   char _noteBuf[96] = {};
   char _pageImage[192] = {};       // this page IS this picture, if set
   char _pendImage[192] = {};       // ...and this one opens the next page
