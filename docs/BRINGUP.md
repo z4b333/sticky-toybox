@@ -294,11 +294,14 @@ to sleep. Then start a countdown timer and leave it again: a running timer is
 supposed to hold the device awake, and that is the more interesting half of the
 test.
 
-**Now unplug the USB cable.** This is the power latch test and it is last on
-purpose. GPIO45 and GPIO46 are driven high at the very top of `setup()` to hold
-the board alive on battery, and those pin numbers are a guess. If the device
-dies the moment the cable comes out, that is what went wrong — plug it back in,
-it will come straight back, and tell me.
+**Now unplug the USB cable.** This is the power latch test. GPIO45 and GPIO46
+are driven high at the very top of `setup()` to hold the board alive on
+battery, and those pin numbers started as a guess taken from the vendor demo.
+
+**They were right.** The owner's board has run on battery from the first build
+and has never dropped when the cable came out, across every release since. This
+step is kept because a new board is a new board, but it is no longer one of the
+things anyone is waiting to find out.
 
 ## Step 8 — the phone side
 
