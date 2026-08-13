@@ -3030,6 +3030,29 @@ int main() {
     printf("note taps ok (ticks, crosses, uncrosses, all in the markdown)\n");
   }
 
+  // The text size cycles in place -- normal, large, largest, normal -- and is
+  // remembered. The overflow detector runs on the two big dumps, which is the
+  // guard that matters: largest is 40 px in a 440 px column, the layout most
+  // likely to push a long word off the glass.
+  {
+    setScreen("tool_note_large");
+    toybox.onTap(nui::SIZE_BTN.x + 10, nui::SIZE_BTN.y + 10);
+    if (nmd::g_body != TS_LARGE || stickyHost.prefs().getUInt("nt_size", 99) != 1) {
+      printf("NOTE FAIL: one tap on the size button did not land on large\n");
+      abort();
+    }
+    setScreen("tool_note_largest");
+    toybox.onTap(nui::SIZE_BTN.x + 10, nui::SIZE_BTN.y + 10);
+    g_dumpEnabled = false;
+    toybox.onTap(nui::SIZE_BTN.x + 10, nui::SIZE_BTN.y + 10);
+    if (nmd::g_body != TS_MED || stickyHost.prefs().getUInt("nt_size", 99) != 0) {
+      printf("NOTE FAIL: three taps did not come back to normal\n");
+      abort();
+    }
+    g_dumpEnabled = true;
+    printf("note size ok (three steps, remembered, back to start)\n");
+  }
+
   setScreen("tool_note_pair");
   toybox.onTap(190 + 75, 716 + 25);  // EDIT -> pairing screen
 

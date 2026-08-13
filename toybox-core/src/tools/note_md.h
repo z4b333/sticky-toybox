@@ -296,13 +296,21 @@ inline void noteHit(CheckHit* hits, int* hitCount, int maxHits, const TRect& are
   (*hitCount)++;
 }
 
+// The note body's size: one knob, read by every place a note draws -- the
+// notes app, the live pinned screen and the sleeping panel -- because a note
+// made readable from across the kitchen must be readable from across the
+// kitchen everywhere it appears. Set from the nt_size preference at boot and
+// by the size button on the note view.
+inline TSize g_body = TS_MED;
+inline void setBody(TSize s) { g_body = s; }
+
+// Headings keep their place ABOVE the body rather than their absolute size:
+// with the body grown to large, an H2 that stayed at large would vanish into
+// the text it is supposed to head.
 inline TSize sizeOf(Type t) {
-  switch (t) {
-    case H1: return TS_HUGE;
-    case H2: return TS_LARGE;
-    case H3: return TS_MED;
-    default: return TS_MED;
-  }
+  const int up = t == H1 ? 2 : t == H2 ? 1 : 0;
+  const int sz = (int)g_body + up;
+  return sz >= TS_HUGE ? TS_HUGE : (TSize)sz;
 }
 
 // Thai at the body size is Loma at 9 pt -- the two mark storeys eat the box and
@@ -310,7 +318,7 @@ inline TSize sizeOf(Type t) {
 // that carry Thai or CJK step up one size instead; pure-Latin lines keep the
 // tighter line the layout was drawn for.
 inline TSize bodySize(const char* src, const Block& b, TSize base) {
-  if (base != TS_MED) return base;
+  if (base != TS_MED) return base;  // already at or past the floor
   const char* p = src + 0;
   const char* end = p + b.len;
   while (p < end) {
@@ -361,11 +369,11 @@ inline int render(ToolsCanvas& c, const char* src, const Block* blocks, int coun
       }
 
       case Bullet: {
-        if (y + c.textHeight(TS_MED) > maxY) return i;
+        if (y + c.textHeight(g_body) > maxY) return i;
         const int rowTop = y;
-        c.fillCircle(area.x + 8, y + c.textHeight(TS_MED) / 2, 4, true);
+        c.fillCircle(area.x + 8, y + c.textHeight(g_body) / 2, 4, true);
         y = drawRich(c, area.x + 26, y, area.w - 26, src + b.start, b.len,
-                     bodySize(src + b.start, b, TS_MED), false,
+                     bodySize(src + b.start, b, g_body), false,
                      maxY, &over);
         if (over) return i;
         noteHit(hits, hitCount, maxHits, area, rowTop, y, i);
@@ -373,12 +381,12 @@ inline int render(ToolsCanvas& c, const char* src, const Block* blocks, int coun
       }
 
       case Numbered: {
-        if (y + c.textHeight(TS_MED) > maxY) return i;
+        if (y + c.textHeight(g_body) > maxY) return i;
         snprintf(buf, sizeof(buf), "%d.", b.num);
         const int numTop = y;
-        c.text(area.x, y, buf, TS_MED, true, true);
+        c.text(area.x, y, buf, g_body, true, true);
         y = drawRich(c, area.x + 44, y, area.w - 44, src + b.start, b.len,
-                     bodySize(src + b.start, b, TS_MED), false,
+                     bodySize(src + b.start, b, g_body), false,
                      maxY, &over);
         if (over) return i;
         noteHit(hits, hitCount, maxHits, area, numTop, y, i);
@@ -386,9 +394,11 @@ inline int render(ToolsCanvas& c, const char* src, const Block* blocks, int coun
       }
 
       case Check: {
-        const int boxSize = 22;
+        // The box grows with the text beside it, or a largest-size list reads
+        // as big words ticked by tiny boxes.
+        const int boxSize = g_body == TS_MED ? 22 : g_body == TS_LARGE ? 26 : 30;
         if (y + boxSize > maxY) return i;
-        const int by = y + (c.textHeight(TS_MED) - boxSize) / 2;
+        const int by = y + (c.textHeight(g_body) - boxSize) / 2;
         c.drawRect(area.x, by, boxSize, boxSize, 2, true);
         if (b.checked) {
           // a tick, drawn as two strokes so it reads at this size
@@ -403,7 +413,7 @@ inline int render(ToolsCanvas& c, const char* src, const Block* blocks, int coun
         }
         const int textY = y;
         y = drawRich(c, area.x + 36, textY, area.w - 36, src + b.start, b.len,
-                     bodySize(src + b.start, b, TS_MED), false,
+                     bodySize(src + b.start, b, g_body), false,
                      maxY, &over, b.checked);
         if (over) return i;
         y += 5;  // keep the boxes from stacking into a solid column
@@ -411,10 +421,10 @@ inline int render(ToolsCanvas& c, const char* src, const Block* blocks, int coun
       }
 
       case Quote: {
-        if (y + c.textHeight(TS_MED) > maxY) return i;
+        if (y + c.textHeight(g_body) > maxY) return i;
         const int qy = y;
         y = drawRich(c, area.x + 22, y, area.w - 22, src + b.start, b.len,
-                     bodySize(src + b.start, b, TS_MED), false, maxY,
+                     bodySize(src + b.start, b, g_body), false, maxY,
                      &over);
         c.fillRect(area.x, qy, 4, y - qy - 4, true);
         if (over) return i;
@@ -422,10 +432,10 @@ inline int render(ToolsCanvas& c, const char* src, const Block* blocks, int coun
       }
 
       default: {
-        if (y + c.textHeight(TS_MED) > maxY) return i;
+        if (y + c.textHeight(g_body) > maxY) return i;
         const int rowTop = y;
         y = drawRich(c, area.x, y, area.w, src + b.start, b.len,
-                     bodySize(src + b.start, b, TS_MED), false, maxY, &over);
+                     bodySize(src + b.start, b, g_body), false, maxY, &over);
         if (over) return i;
         if (b.type == Text) noteHit(hits, hitCount, maxHits, area, rowTop, y, i);
         break;

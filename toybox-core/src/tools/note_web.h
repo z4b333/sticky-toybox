@@ -210,6 +210,8 @@ button.send{width:100%;padding:16px;margin-top:14px;border:0;border-radius:9px;b
 color:#fff;font:600 17px system-ui;cursor:pointer}
 button.send:disabled{background:#999}
 .hint{font-size:13px;color:#666;margin:6px 0 0}
+.cnt{font-size:13px;color:#888;text-align:right;margin:4px 0 0}
+.cnt.over{color:#c00;font-weight:600}
 h2{font-size:13px;margin:22px 0 8px;text-transform:uppercase;letter-spacing:.06em;color:#555}
 /* The preview mimics the panel: 800x480 of pure black on white, scaled down. */
 #pv{background:#fff;border:2px solid #111;border-radius:4px;padding:16px;
@@ -253,6 +255,7 @@ picture instead — lock screen or home wallpaper &rsaquo;</a></p>
 </div>
 
 <textarea id="t" spellcheck="false" placeholder="Type here, or tap the microphone key on your keyboard and just talk."></textarea>
+<div class="cnt" id="cnt"></div>
 <p class="hint">Tap the microphone on your phone keyboard to dictate. Put the cursor on a
 line and tap a button above to format it.</p>
 
@@ -291,8 +294,23 @@ function render(src){
  }
  return out||'<div class="p" style="color:#999">empty</div>';
 }
-function upd(){pv.innerHTML=render(t.value)}
+// The device keeps at most 4,000 bytes of a note and used to trim the rest in
+// silence after the send. The editor now owns that line: a live counter, and a
+// cut at the limit so what the phone shows is exactly what the device keeps.
+var LIMIT=4000,cnt=document.getElementById('cnt');
+function nbytes(s){return new Blob([s]).size}
+function clamp(){
+ var v=t.value,n=nbytes(v);
+ if(n<=LIMIT){cnt.textContent=n+' / '+LIMIT;cnt.className='cnt';return}
+ while(nbytes(v)>LIMIT)v=v.slice(0,-1);
+ var p=Math.min(t.selectionStart,v.length);
+ t.value=v;try{t.setSelectionRange(p,p)}catch(e){}
+ cnt.textContent=LIMIT+' / '+LIMIT+' \u2014 full: the note was cut off here';
+ cnt.className='cnt over';
+}
+function upd(){clamp();pv.innerHTML=render(t.value)}
 t.addEventListener('input',upd);
+upd();
 
 // Toolbar: line prefixes toggle on every selected line; Bold wraps the selection.
 function eachLine(fn){

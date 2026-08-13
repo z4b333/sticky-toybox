@@ -55,7 +55,14 @@ inline void sanitizeName(const char* in, char* out) {
 
 inline bool save(const char* name, const char* body, size_t len) {
   tfs::ensureDir("/notes");
-  if (len > MAX_BYTES) len = MAX_BYTES;
+  if (len > MAX_BYTES) {
+    len = MAX_BYTES;
+    // Never cut inside a UTF-8 sequence: body[len] is the first byte dropped,
+    // and while it is a continuation byte the cut is mid-character -- step
+    // back until the drop starts at a whole one. The editor trims to the same
+    // limit before sending, so this is a backstop for other clients.
+    while (len > 0 && ((uint8_t)body[len] & 0xC0) == 0x80) len--;
+  }
   char p[64];
   path(p, sizeof(p), name);
   return tfs::write(p, body, len);

@@ -23,6 +23,10 @@ inline constexpr TRect PREV_BTN{20, 654, 130, 50};
 inline constexpr TRect NEXT_BTN{160, 654, 130, 50};
 inline constexpr TRect PIN_BTN{20, 716, 150, 50};
 inline constexpr TRect EDIT_BTN{190, 716, 150, 50};
+// The text size, cycled in place: normal, large, largest. It lives here and
+// not in settings because the note you are looking at is the only preview
+// that means anything, and the change lands on it immediately.
+inline constexpr TRect SIZE_BTN{360, 716, 100, 50};
 
 // "what should happen to this note" prompt, shown once per arrival. Two
 // choices and nothing else, so they are sized and spread like two cards; at 84
@@ -404,6 +408,9 @@ class NoteTool : public ToolApp {
     c.button(PIN_BTN.x, PIN_BTN.y, PIN_BTN.w, PIN_BTN.h, pinned ? "UNPIN" : "PIN",
              pinned, TS_MED);
     c.button(EDIT_BTN.x, EDIT_BTN.y, EDIT_BTN.w, EDIT_BTN.h, "EDIT", false, TS_MED);
+    // The label is the state: one A at each size the body can be.
+    c.button(SIZE_BTN.x, SIZE_BTN.y, SIZE_BTN.w, SIZE_BTN.h, "A",
+             false, nmd::g_body == TS_MED ? TS_SMALL : nmd::g_body == TS_LARGE ? TS_MED : TS_LARGE);
   }
 
   void tapView(int x, int y) {
@@ -427,6 +434,20 @@ class NoteTool : public ToolApp {
       free(_buf);
       _buf = nullptr;
       return openPair();
+    }
+    if (SIZE_BTN.hit(x, y)) {
+      const TSize next = nmd::g_body == TS_MED    ? TS_LARGE
+                         : nmd::g_body == TS_LARGE ? TS_HUGE
+                                                   : TS_MED;
+      nmd::setBody(next);
+      prefs().putUInt("nt_size", (uint32_t)(next - TS_MED));
+      // Bigger lines hold fewer blocks, so the page boundaries just moved;
+      // page one is the only page whose start is still true.
+      _pageDepth = 0;
+      _pageStack[0] = 0;
+      host().beep(0);
+      host().refresh(false);
+      return;
     }
     const bool hasNext = _next < _blockCount;
     if (NEXT_BTN.hit(x, y) && hasNext) {

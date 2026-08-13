@@ -64,6 +64,11 @@ void Toybox::release() {
 void Toybox::begin(ToolsHost& h) {
   _host = &h;
   appvis::load(h.prefs());
+  // The note body size, restored before anything can draw a note -- the lock
+  // screen paints one before the notes app has ever been opened.
+  uint32_t ns = h.prefs().getUInt("nt_size", 0);
+  if (ns > 2) ns = 0;
+  nmd::setBody((TSize)(TS_MED + ns));
   _where = Where::Hub;
   _hub.goHome();
   release();
