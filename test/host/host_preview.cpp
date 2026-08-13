@@ -1107,7 +1107,24 @@ int main() {
       printf("BOOK FAIL: CLOSE THE BOOK did not close it\n");
       abort();
     }
-    printf("tbk panel ok (keypad refuses a typo, marks on the card, out by a row)\n");
+
+    // Now REOPEN it. A mark that is only in RAM looks identical to a mark on
+    // the card until the book is closed, which is how a bookmark that was
+    // never written once got all the way to hardware: the panel said "1 kept",
+    // the beep sounded, and the card had nothing on it.
+    toybox.onTap(240, bookui::LIST_Y0 + 2 * bookui::LIST_ROW_H + 10);
+    if (bt->hostScreen() != 1) {
+      printf("BOOK FAIL: the book did not reopen\n");
+      abort();
+    }
+    toybox.onButton(SideBtn::Ok);
+    if (bt->hostMarkCount() != 1) {
+      printf("BOOK FAIL: the kept page did not survive closing the book (%d marks)\n",
+             bt->hostMarkCount());
+      abort();
+    }
+    toybox.onTap(240, rmenu::rootRect(2, 480).y + 40);  // close it again
+    printf("tbk panel ok (keypad refuses a typo, marks survive the book closing)\n");
     // ...and means nothing on the list, so main.cpp falls through to its own
     // uses of the button.
     if (toybox.onButton(SideBtn::Ok)) {
@@ -2058,12 +2075,10 @@ int main() {
       cp.hasOffset = true;
       uint8_t buf[10];
       const int n = epubc::encodeProgress(cp, buf);
-      // The fake sidecar store accepts writes without a session; a device
-      // writes through the same call while the bus is held.
-      if (!stickyHost.sdWriteFileAtomic("/.crosspoint/epub_836526750/progress.bin", buf, n)) {
-        printf("EPUB APP FAIL: could not plant the CrossPoint position\n");
-        abort();
-      }
+      // No session is open here, and the card calls now refuse that -- as the
+      // device does. This is the harness standing in for another firmware
+      // having left the file behind, so it plants it directly.
+      sdcard::hostPlantSide("/.crosspoint/epub_836526750/progress.bin", buf, n);
       toybox.open(false, 10);  // EPUB, fresh
       auto* et2 = static_cast<EpubTool*>(toybox.hostActive());
       toybox.onTap(240, epubui::LIST_Y0 + epubui::LIST_ROW_H + 10);
@@ -2103,10 +2118,7 @@ int main() {
       cp.hasOffset = true;
       uint8_t buf[10];
       const int n = epubc::encodeProgress(cp, buf);
-      if (!stickyHost.sdWriteFileAtomic("/.crosspoint/epub_836526750/progress.bin", buf, n)) {
-        printf("EPUB APP FAIL: could not plant the picture-chapter position\n");
-        abort();
-      }
+      sdcard::hostPlantSide("/.crosspoint/epub_836526750/progress.bin", buf, n);
       toybox.open(false, 10);
       auto* et3 = static_cast<EpubTool*>(toybox.hostActive());
       toybox.onTap(240, epubui::LIST_Y0 + epubui::LIST_ROW_H + 10);

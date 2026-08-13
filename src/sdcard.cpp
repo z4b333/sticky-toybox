@@ -467,6 +467,10 @@ uint32_t epubSize() { return g_fakeEpubOpen ? g_fakeEpubLen : 0; }
 void epubClose() { g_fakeEpubOpen = false; }
 
 int readFileAt(const char* path, void* dst, int max) {
+  // The device can only touch the card while something holds the bus, and the
+  // fake used to ignore that -- which is exactly how a write that fails on
+  // hardware passed here for two builds. Same rule, same shape.
+  if (!busHeld()) return -1;
   for (const FakeSide& s : g_side)
     if (s.n > 0 && strcmp(s.path, path) == 0) {
       const int n = s.n < max ? s.n : max;
@@ -477,6 +481,7 @@ int readFileAt(const char* path, void* dst, int max) {
 }
 
 bool writeFileAtomic(const char* path, const void* data, int n) {
+  if (!busHeld()) return false;  // see readFileAt
   if (n > (int)sizeof(g_side[0].data)) return false;
   FakeSide* slot = nullptr;
   for (FakeSide& s : g_side)
@@ -736,6 +741,19 @@ int readSlice(const char* path, uint32_t off, void* dst, int n) {
   if (it == fakeCard().end() || off + (uint32_t)n > it->second.size()) return -1;
   memcpy(dst, it->second.data() + off, (size_t)n);
   return n;
+}
+
+// Plants a file beside a book with no session open -- the harness standing in
+// for "another firmware left this here", which is the one thing a device never
+// does to itself.
+void hostPlantSide(const char* path, const void* data, int n) {
+  for (FakeSide& s : g_side)
+    if (s.n == 0 || strcmp(s.path, path) == 0) {
+      strncpy(s.path, path, sizeof(s.path) - 1);
+      memcpy(s.data, data, (size_t)n);
+      s.n = n;
+      return;
+    }
 }
 
 void hostPutCardFile(const char* path, const void* data, int n) {
@@ -1133,7 +1151,13 @@ void epubClose() {
 }
 
 int readFileAt(const char* path, void* dst, int max) {
-  if (!g_epubBusUp) return -1;
+  // busHeld(), NOT g_epubBusUp. These two calls are how anything small is kept
+  // beside a book -- a reading position, a KOReader sidecar, a bookmarks file
+  // -- and they were gated on the EPUB reader's own session flag. In the .tbk
+  // reader the bus is up under a different flag, so every one of those writes
+  // returned false and every read returned -1, silently: the owner kept a
+  // bookmark, the device beeped, and nothing was ever written.
+  if (!busHeld()) return -1;
   File f = SD.open(path, FILE_READ);
   if (!f || f.isDirectory()) return -1;
   const int n = f.read((uint8_t*)dst, max);
@@ -1362,7 +1386,7 @@ uint32_t mgrFreeMb() {
 }
 
 bool writeFileAtomic(const char* path, const void* data, int n) {
-  if (!g_epubBusUp) return false;
+  if (!busHeld()) return false;  // see readFileAt: any session, not the EPUB one
   makeParents(path);
   char tmp[128];
   snprintf(tmp, sizeof(tmp), "%s.tmp", path);

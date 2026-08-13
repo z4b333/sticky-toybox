@@ -144,6 +144,9 @@ void hostFailNextStreamClose();
 // The harness needs to put one there and then read back what the device made
 // of it, which is the whole of what a sidecar cover is.
 void hostPutCardFile(const char* path, const void* data, int n);
+// A file beside a book, planted with no session open: "another firmware left
+// this here". Bypasses the bus rule the real calls now obey.
+void hostPlantSide(const char* path, const void* data, int n);
 int hostCardFileSize(const char* path);
 #endif
 
