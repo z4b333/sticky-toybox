@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Toybox · Wallpaper Maker</title>
+<meta name="description" content="Make .tbi wallpapers, lock screen pictures and book covers for Toybox on the Seeed reTerminal Sticky, entirely in your browser.">
+<style>
+  :root {
+    --bg: #fafafa;
+    --fg: #18181b;
+    --muted: #71717a;
+    --line: #e4e4e7;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 720px; margin: 0 auto; padding: 8vh 24px 64px; }
+  h1 { font-size: 32px; font-weight: 650; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); margin: 8px 0 32px; }
+  .row { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
+  .panel { flex: 1 1 260px; min-width: 260px; }
+  .preview-wrap {
+    flex: 0 0 auto; border: 1px solid var(--line); border-radius: 10px;
+    background: #fff; padding: 12px;
+  }
+  canvas#pv {
+    width: 240px; height: 400px; display: block;
+    image-rendering: pixelated; border: 1px solid var(--line);
+    background: #fff;
+  }
+  .pvcap { font-size: 12px; color: var(--muted); text-align: center; margin-top: 8px; }
+  .drop {
+    border: 1.5px dashed var(--line); border-radius: 10px; background: #fff;
+    padding: 28px 16px; text-align: center; color: var(--muted);
+    cursor: pointer; margin-bottom: 20px;
+  }
+  .drop.hot { border-color: var(--fg); color: var(--fg); }
+  .group { margin-bottom: 18px; }
+  .ghead {
+    font-size: 13px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--muted); margin-bottom: 6px;
+  }
+  .opts { display: flex; gap: 8px; flex-wrap: wrap; }
+  .opts label {
+    border: 1px solid var(--line); border-radius: 8px; background: #fff;
+    padding: 6px 12px; cursor: pointer; font-size: 14px; user-select: none;
+  }
+  .opts label:has(input:checked) { border-color: var(--fg); font-weight: 600; }
+  .opts input { display: none; }
+  input[type=range] { width: 100%; accent-color: var(--fg); }
+  .slider-row { display: flex; gap: 10px; align-items: center; font-size: 14px; }
+  .slider-row output { min-width: 3ch; text-align: right; color: var(--muted); }
+  button.act {
+    width: 100%; padding: 13px; border: 0; border-radius: 10px;
+    background: var(--fg); color: #fff; font: 600 16px system-ui;
+    cursor: pointer; margin-top: 4px;
+  }
+  button.act:disabled { background: #a1a1aa; }
+  button.small {
+    padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px;
+    background: #fff; color: var(--fg); font: 500 14px system-ui; cursor: pointer;
+  }
+  input[type=text] {
+    width: 100%; padding: 10px 12px; border: 1px solid var(--line);
+    border-radius: 8px; font: inherit; background: #fff;
+  }
+  .hint { font-size: 14px; color: var(--muted); margin-top: 16px; }
+  .hint code { font-size: 13px; }
+  .foot { margin-top: 48px; font-size: 14px; color: var(--muted); }
+  .foot a { color: inherit; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Wallpaper maker</h1>
+  <p class="sub">Turns any picture into the device's own format, entirely in
+  this browser — nothing is uploaded anywhere. What you see below is exactly
+  what the panel will show: 480 × 800, one bit per pixel.</p>
+
+  <div class="drop" id="drop">
+    tap to choose a picture, or drop one here
+    <input type="file" id="file" accept="image/*" hidden>
+  </div>
+
+  <div class="row">
+    <div class="preview-wrap">
+      <canvas id="pv" width="480" height="800"></canvas>
+      <div class="pvcap">the panel's view · shown at half size</div>
+    </div>
+
+    <div class="panel">
+      <div class="group">
+        <div class="ghead">Fit</div>
+        <div class="opts">
+          <label><input type="radio" name="fit" value="fit" checked>whole picture</label>
+          <label><input type="radio" name="fit" value="fill">fill the panel</label>
+          <button class="small" id="rot">rotate 90°</button>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="ghead">Rendering</div>
+        <div class="opts">
+          <label><input type="radio" name="mode" value="dither" checked>dither (photos)</label>
+          <label><input type="radio" name="mode" value="thresh">threshold (line art)</label>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="ghead">Brightness</div>
+        <div class="slider-row">
+          <input type="range" id="bright" min="-100" max="100" value="0">
+          <output id="brightv">0</output>
+        </div>
+      </div>
+
+      <div class="group" id="threshG" style="display:none">
+        <div class="ghead">Threshold</div>
+        <div class="slider-row">
+          <input type="range" id="thresh" min="10" max="245" value="128">
+          <output id="threshv">128</output>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="ghead">Contrast stretch</div>
+        <div class="opts">
+          <label><input type="checkbox" id="stretch">stretch 2–98%</label>
+          <label><input type="checkbox" id="invert">invert</label>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="ghead">File name</div>
+        <input type="text" id="fname" value="wallpaper.tbi" spellcheck="false">
+      </div>
+
+      <button class="act" id="save" disabled>Download .tbi</button>
+    </div>
+  </div>
+
+  <p class="hint">Put the file in <code>/wallpapers</code> on the SD card (or the
+  card's root). On the device: <b>settings → Wallpaper</b>, or
+  <b>settings → Lock screen → THE&nbsp;PICTURE → FROM&nbsp;CARD</b> — choosing one
+  copies it into the device, so the card can come back out. You can also send it
+  through <b>Files over WiFi</b>.</p>
+
+  <p class="hint">The same file works as a <b>book cover</b>: name it
+  <code>&lt;book&nbsp;name&gt;.cover.tbi</code> and put it beside the book in
+  <code>/books</code> — it beats anything the device can decode.</p>
+
+  <p class="foot">
+    <a href="index.html">← Web installer</a>
+    · <a href="https://github.com/z4b333/sticky-toybox">Source on GitHub</a>
+  </p>
+</main>
+
+<script>
+'use strict';
+// Everything happens in this page. The output is the firmware's own
+// framebuffer layout: 480x800, 1 bit per pixel, MSB first, 1 = white,
+// behind an 8-byte TBI1 header. 48,008 bytes exactly.
+var W = 480, H = 800;
+var img = null, rotSteps = 0;
+var pv = document.getElementById('pv'), ctx = pv.getContext('2d');
+var drop = document.getElementById('drop'), file = document.getElementById('file');
+var save = document.getElementById('save'), fname = document.getElementById('fname');
+var bits = null;  // Uint8Array(48000) of packed pixels, rebuilt on every render
+
+function opt(name){ return document.querySelector('input[name='+name+']:checked').value; }
+function num(id){ return parseInt(document.getElementById(id).value, 10); }
+
+// Draw the source into a 480x800 grey buffer per the fit mode.
+function sourceGrey(){
+  var c = document.createElement('canvas'); c.width = W; c.height = H;
+  var g = c.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+  var iw = img.width, ih = img.height;
+  if (rotSteps % 2) { var t = iw; iw = ih; ih = t; }
+  var s = (opt('fit') === 'fill') ? Math.max(W/iw, H/ih) : Math.min(W/iw, H/ih);
+  var dw = iw*s, dh = ih*s;
+  g.save();
+  g.translate(W/2, H/2);
+  g.rotate(rotSteps * Math.PI/2);
+  // after rotation the draw size swaps back to the image's own axes
+  var rw = (rotSteps % 2) ? dh : dw, rh = (rotSteps % 2) ? dw : dh;
+  g.drawImage(img, -rw/2, -rh/2, rw, rh);
+  g.restore();
+  var d = g.getImageData(0, 0, W, H).data;
+  var grey = new Float32Array(W*H);
+  for (var i = 0; i < W*H; i++) {
+    // Rec. 601 luma; the alpha-on-white blend is already done by the canvas.
+    grey[i] = 0.299*d[i*4] + 0.587*d[i*4+1] + 0.114*d[i*4+2];
+  }
+  return grey;
+}
+
+function render(){
+  if (!img) return;
+  var grey = sourceGrey();
+  var i, v;
+
+  if (document.getElementById('stretch').checked) {
+    // 2-98 percentile stretch, the same treatment the firmware applies to
+    // thumbnails; here it is a choice because it hurts some photographs.
+    var hist = new Array(256).fill(0);
+    for (i = 0; i < grey.length; i++) hist[grey[i]|0]++;
+    var lo = 0, hi = 255, acc = 0, n = grey.length;
+    for (i = 0; i < 256; i++) { acc += hist[i]; if (acc >= n*0.02) { lo = i; break; } }
+    acc = 0;
+    for (i = 255; i >= 0; i--) { acc += hist[i]; if (acc >= n*0.02) { hi = i; break; } }
+    if (hi > lo)
+      for (i = 0; i < grey.length; i++)
+        grey[i] = Math.max(0, Math.min(255, (grey[i]-lo) * 255/(hi-lo)));
+  }
+  var b = num('bright');
+  if (b) for (i = 0; i < grey.length; i++) grey[i] = Math.max(0, Math.min(255, grey[i]+b));
+  if (document.getElementById('invert').checked)
+    for (i = 0; i < grey.length; i++) grey[i] = 255 - grey[i];
+
+  var out = new Uint8Array(W*H);  // 0 = black, 1 = white, per pixel
+  if (opt('mode') === 'thresh') {
+    var t = num('thresh');
+    for (i = 0; i < grey.length; i++) out[i] = grey[i] >= t ? 1 : 0;
+  } else {
+    // Floyd-Steinberg, serpentine, in place on the grey buffer.
+    for (var y = 0; y < H; y++) {
+      var ltr = !(y & 1);
+      for (var xx = 0; xx < W; xx++) {
+        var x = ltr ? xx : W-1-xx;
+        i = y*W + x;
+        v = grey[i];
+        var on = v >= 128 ? 1 : 0;
+        out[i] = on;
+        var err = v - (on ? 255 : 0);
+        var xr = ltr ? x+1 : x-1, xl = ltr ? x-1 : x+1;
+        if (xr >= 0 && xr < W) grey[y*W+xr] += err*7/16;
+        if (y+1 < H) {
+          if (xl >= 0 && xl < W) grey[(y+1)*W+xl] += err*3/16;
+          grey[(y+1)*W+x] += err*5/16;
+          if (xr >= 0 && xr < W) grey[(y+1)*W+xr] += err*1/16;
+        }
+      }
+    }
+  }
+
+  // The preview IS the output, pixel for pixel.
+  var id = ctx.createImageData(W, H);
+  for (i = 0; i < W*H; i++) {
+    v = out[i] ? 255 : 0;
+    id.data[i*4] = id.data[i*4+1] = id.data[i*4+2] = v;
+    id.data[i*4+3] = 255;
+  }
+  ctx.putImageData(id, 0, 0);
+
+  bits = new Uint8Array(W*H/8);
+  for (i = 0; i < W*H; i++)
+    if (out[i]) bits[i >> 3] |= 0x80 >> (i & 7);
+  save.disabled = false;
+}
+
+function load(f){
+  if (!f || !f.type.match(/^image\//)) return;
+  var url = URL.createObjectURL(f);
+  var im = new Image();
+  im.onload = function(){
+    img = im; rotSteps = 0;
+    URL.revokeObjectURL(url);
+    var base = f.name.replace(/\.[^.]*$/, '').replace(/[^\w\- ]+/g, '').trim() || 'wallpaper';
+    fname.value = base.slice(0, 30) + '.tbi';
+    render();
+  };
+  im.src = url;
+}
+
+drop.addEventListener('click', function(){ file.click(); });
+file.addEventListener('change', function(){ load(file.files[0]); });
+['dragover','dragenter'].forEach(function(ev){
+  drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.add('hot'); });
+});
+['dragleave','drop'].forEach(function(ev){
+  drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.remove('hot'); });
+});
+drop.addEventListener('drop', function(e){ load(e.dataTransfer.files[0]); });
+
+document.getElementById('rot').addEventListener('click', function(){
+  rotSteps = (rotSteps + 1) & 3; render();
+});
+['bright','thresh'].forEach(function(id){
+  var el = document.getElementById(id);
+  el.addEventListener('input', function(){
+    document.getElementById(id+'v').textContent = el.value; render();
+  });
+});
+['stretch','invert'].forEach(function(id){
+  document.getElementById(id).addEventListener('change', render);
+});
+document.querySelectorAll('input[type=radio]').forEach(function(r){
+  r.addEventListener('change', function(){
+    document.getElementById('threshG').style.display =
+      opt('mode') === 'thresh' ? '' : 'none';
+    render();
+  });
+});
+
+save.addEventListener('click', function(){
+  if (!bits) return;
+  var buf = new Uint8Array(8 + bits.length);
+  buf[0] = 0x54; buf[1] = 0x42; buf[2] = 0x49; buf[3] = 0x31;  // "TBI1"
+  buf[4] = W & 255; buf[5] = W >> 8;
+  buf[6] = H & 255; buf[7] = H >> 8;
+  buf.set(bits, 8);
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([buf], {type: 'application/octet-stream'}));
+  var n = fname.value.trim() || 'wallpaper.tbi';
+  if (!/\.tbi$/i.test(n)) n += '.tbi';
+  a.download = n;
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+</script>
+</body>
+</html>
