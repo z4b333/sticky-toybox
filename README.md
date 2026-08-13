@@ -2,8 +2,8 @@
 
 Custom firmware for the [Seeed reTerminal Sticky](https://www.seeedstudio.com)
 — an ESP32-S3 with a 3.97" e-paper screen and a magnet on the back. It turns
-the device into a small touch-operated toy box: six games, a handful of
-everyday tools, and notes you can pin to the fridge.
+the device into a small touch-operated toy box: six games, two book readers,
+a handful of everyday tools, and notes you can pin to the fridge.
 
 **Install it from your browser, no tools needed:
 [z4b333.github.io/sticky-toybox](https://z4b333.github.io/sticky-toybox/)**
@@ -36,6 +36,25 @@ and Vietnamese. The Thai readme is at [docs/README.th.md](docs/README.th.md).
   the game never ends in a full-board draw. Hard mode never loses, which is
   verified by a test that searches the entire game tree.
 
+## Reading
+
+- **Books** — pre-converted `.tbk` volumes off the microSD card, in 1-bit or
+  four-level grey. Made on a PC from your own CBZs with `tools/make_tbk.py`;
+  manga read right-to-left when marked. A page fills the glass: the edges
+  turn, the middle shows where you are, and the power button opens options —
+  go to a page by number, bookmarks, page-turn speed, close.
+- **EPUB** — real ebooks, laid out live with the device fonts, with
+  illustrations a PC app prepared shown as whole pages. Your place is kept on
+  the card in CrossPoint Reader's own format, so the same card moved between
+  firmwares opens the same book at the same page (a KOReader sidecar is
+  written too). Options cover the table of contents, bookmarks down to a
+  chosen phrase, text size and spacing.
+- Both readers list series folders under `/books`, remember your place, paint
+  the cover while a book opens, and can leave the current book's cover on the
+  lock screen. Page turns are a 0.3 s partial refresh with a cleaning full
+  every so often — fast, normal or best, chosen per reader, because text and
+  artwork ghost differently.
+
 ## Tools
 
 - **Notes.** Write or dictate them on your phone, then read them and tick
@@ -44,7 +63,11 @@ and Vietnamese. The Thai readme is at [docs/README.th.md](docs/README.th.md).
   is on it, the screen changes to the link. Pin one and it becomes the screen the device shows
   when it is off — pinning asks which way up you want it, with the note drawn
   full size so you are choosing the thing you are looking at rather than
-  guessing from a settings row.
+  guessing from a settings row — and it follows the accelerometer while the
+  question is open, so turning the device is the control. Note text comes in
+  three sizes, cycled on the note itself, and the phone editor shows the
+  device's 4,000-byte limit instead of letting a long note be trimmed in
+  silence.
 - **Flashcards** with spaced repetition, imported from your phone. The two side
   buttons grade a card without reaching up to the panel: DOWN reveals the
   answer and then takes it as known, UP sends it back to be asked again.
@@ -66,7 +89,8 @@ and Vietnamese. The Thai readme is at [docs/README.th.md](docs/README.th.md).
 - The sleeping note's footer shows the time, room temperature and battery, each
   of which can be turned off. The clock is set from your phone the first time
   you save a note, since the device has no network time.
-- With nothing pinned it shows a goodbye card, a picture, or nothing at all.
+- With nothing pinned it shows a goodbye card, a picture, the cover of the
+  book you are reading, or nothing at all.
   There is deliberately no clock: a panel that holds its last image with no
   power is exactly the wrong place for one. The time would be drawn on the way
   to sleep, wrong a minute later, and wrong for hours after that.
@@ -78,10 +102,12 @@ and Vietnamese. The Thai readme is at [docs/README.th.md](docs/README.th.md).
 - Below 3% battery it shuts down cleanly rather than risk a half-written
   screen.
 
-The gear icon opens settings: hide apps you don't use, set the beep volume,
-restore the how-to-play cards, reset stats. A second page covers the lock
-screen — sleep timing, what an empty panel shows, where the power button wakes
-to, and whether the note follows the accelerometer.
+Settings (hold UP on the home screen for three seconds) covers: which apps
+the hub shows, the wallpaper and the lock screen picture — both chosen from
+`.tbi` files on the card, copied in so the card can come out — files over
+WiFi, beep volume, restoring the first-time cards, and resetting stats. The
+lock screen page also holds sleep timing, what an empty panel shows, where
+the power button wakes to, and whether the note follows the accelerometer.
 
 ## Getting it onto a device
 
@@ -105,15 +131,11 @@ same thing as a tickable page for a phone.
 
 ## Known limitations
 
-- The board's 8 MB of PSRAM is not configured, so the service screen reports
-  none. Nothing currently needs it.
 - If the panel never answers, the firmware runs perfectly and you see nothing:
   e-paper holds its last image, so a device with an unresponsive display looks
   like a failed flash. It now says so with six low notes at boot and a line on
   the service screen, which is the best it can do — the one output that cannot
   report a dead display is the display.
-- The microSD slot is not used. It shares the display's SPI bus and has never
-  been exercised.
 - Thai line breaking works at character-cluster level, not word level, so a
   line can break in the middle of a word.
 - Characters above U+FFFF, including emoji, are not supported.
