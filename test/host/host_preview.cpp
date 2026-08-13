@@ -2249,8 +2249,105 @@ int main() {
       printf("typeface ok (three faces cycle, the place read from stands still)\n");
     }
 
+    // --- no word may vanish at a page boundary ------------------------------
+    // The same stretch of chapter is read twice, once at largest and once at
+    // normal, and the words joined across pages must be identical: the layout
+    // may break lines wherever it likes, but it may not eat. On hardware a
+    // page that filled mid-line dropped every gathered word but the last --
+    // "Good. Now that left the other two." arrived as "two."
+    toybox.onButton(SideBtn::Ok);  // panel down, back onto the page
+    {
+      const int spine0 = et->hostSpine();
+      const uint32_t off0 = et->hostPageOffset();
+      static char walkA[8192], walkB[8192], page[2048];
+      auto walk = [&](char* out, size_t cap) {
+        size_t n = 0;
+        uint32_t prevOff = 0xFFFFFFFFu;
+        int prevLen = -1;
+        for (int i = 0; i < 64; i++) {
+          if (et->hostSpine() != spine0) break;
+          const int pl = et->hostPageJoin(page, sizeof(page));
+          if (et->hostPageOffset() == prevOff && pl == prevLen) break;  // end of book
+          prevOff = et->hostPageOffset();
+          prevLen = pl;
+          if (n && pl && n + 1 < cap) out[n++] = ' ';
+          size_t take = (size_t)pl;
+          if (take > cap - 1 - n) take = cap - 1 - n;
+          memcpy(out + n, page, take);
+          n += take;
+          toybox.onButton(SideBtn::Down);
+        }
+        out[n] = 0;
+      };
+      et->hostSetStyle(2);  // largest: a page boundary every few sentences
+      walk(walkA, sizeof(walkA));
+      et->hostGoto(spine0, off0);
+      et->hostSetStyle(0);  // normal
+      walk(walkB, sizeof(walkB));
+      if (strcmp(walkA, walkB) != 0) {
+        int i = 0;
+        while (walkA[i] && walkA[i] == walkB[i]) i++;
+        const int from = i > 40 ? i - 40 : 0;
+        printf("EPUB APP FAIL: the chapter reads differently by size at byte %d\n"
+               "  largest: ...%.90s\n  normal:  ...%.90s\n",
+               i, walkA + from, walkB + from);
+        abort();
+      }
+      et->hostGoto(spine0, off0);
+      printf("page boundaries ok (chapter reads identically at largest and normal)\n");
+    }
+    toybox.onButton(SideBtn::Ok);  // the panel again, for the close row below
+
     // And the way out is a row, not the button.
-    toybox.onTap(240, rmenu::rootRect(4, 480).y + 40);
+    // The rotation row: one tap chooses landscape, and the turn lands when the
+    // panel closes -- laid out at the wide width, reading offset pinned still.
+    {
+      const uint32_t offR = et->hostPageOffset();
+      const int linesPortrait = et->hostLineCount();
+      toybox.onTap(240, rmenu::rootRect(4, 480).y + 40);  // portrait -> landscape
+      if (stickyHost.canvasRotation() != 0) {
+        printf("EPUB APP FAIL: the panel turned before it closed\n");
+        abort();
+      }
+      toybox.onButton(SideBtn::Ok);  // close the panel; the page turns now
+      if (stickyHost.canvasRotation() != 1) {
+        printf("EPUB APP FAIL: closing the panel did not turn the page\n");
+        abort();
+      }
+      if (et->hostPageOffset() != offR) {
+        printf("EPUB APP FAIL: rotation moved the reader (%u -> %u)\n", (unsigned)offR,
+               (unsigned)et->hostPageOffset());
+        abort();
+      }
+      if (et->hostLineCount() >= linesPortrait) {
+        printf("EPUB APP FAIL: landscape laid out %d lines, portrait %d -- no reflow?\n",
+               et->hostLineCount(), linesPortrait);
+        abort();
+      }
+      g_dumpEnabled = true;
+      setScreen("tool_epub_landscape");
+      epd.clear();
+      toybox.render(stickyHost.sharedCanvas());
+      epd.displayFull();
+      g_dumpEnabled = false;
+      toybox.onButton(SideBtn::Ok);  // the panel stands the canvas up again
+      if (stickyHost.canvasRotation() != 0) {
+        printf("EPUB APP FAIL: the panel opened sideways\n");
+        abort();
+      }
+      // Back to portrait: two more taps on the row, then close.
+      toybox.onTap(240, rmenu::rootRect(4, 480).y + 40);  // -> flipped
+      toybox.onTap(240, rmenu::rootRect(4, 480).y + 40);  // -> portrait
+      toybox.onButton(SideBtn::Ok);
+      if (stickyHost.canvasRotation() != 0 ||
+          stickyHost.prefs().getUInt("rd_rot", 99) != 0) {
+        printf("EPUB APP FAIL: three rotation taps did not come back to portrait\n");
+        abort();
+      }
+      printf("rotation ok (turns on close, offset pinned, panel stays portrait)\n");
+      toybox.onButton(SideBtn::Ok);  // panel up for the close row below
+    }
+    toybox.onTap(240, rmenu::rootRect(5, 480).y + 40);
     if (et->hostScreen() != 0) {
       printf("EPUB APP FAIL: CLOSE THE BOOK did not close it\n");
       abort();
@@ -2293,7 +2390,7 @@ int main() {
         abort();
       }
       toybox.onButton(SideBtn::Ok);                       // the panel
-      toybox.onTap(240, rmenu::rootRect(4, 480).y + 40);  // CLOSE THE BOOK
+      toybox.onTap(240, rmenu::rootRect(5, 480).y + 40);  // CLOSE THE BOOK
     }
 
     // --- a chapter that is one picture and no words -------------------------
@@ -2339,7 +2436,7 @@ int main() {
         abort();
       }
       toybox.onButton(SideBtn::Ok);                       // the panel
-      toybox.onTap(240, rmenu::rootRect(4, 480).y + 40);  // CLOSE THE BOOK
+      toybox.onTap(240, rmenu::rootRect(5, 480).y + 40);  // CLOSE THE BOOK
       printf("epub picture chapters ok (reachable both ways, never blank)\n");
     }
     toybox.goHub();

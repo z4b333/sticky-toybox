@@ -29,7 +29,10 @@
 namespace epubui {
 inline constexpr int MARGIN = 24;
 inline constexpr int TOP = 18;
-inline constexpr int BOTTOM = 770;   // the footer band starts below this
+// The footer band is measured from the bottom of whichever canvas is live:
+// the page reads at any of the four rotations now, and 480-tall landscape
+// needs the band as much as 800-tall portrait does.
+inline constexpr int BOTTOM_INSET = 30, FOOT_H = 56;
 // The reader's own type, chosen from the panel. Three sizes and three leadings,
 // and nothing SMALLER than the body size the whole firmware settled on: 24 px
 // is 2.6 mm on this 235 DPI panel, already about seven point, and the one time
@@ -88,6 +91,8 @@ class EpubTool : public ToolApp {
     _lead = (uint8_t)prefs().getUInt("rd_lead", 1);
     _face = (uint8_t)prefs().getUInt("rd_face", 0);
     if (_face >= h.typefaceCount()) _face = 0;
+    _rot = (uint8_t)prefs().getUInt("rd_rot", 0);
+    if (_rot != 1 && _rot != 3) _rot = 0;
     if (_size >= epubui::SIZES) _size = 0;
     if (_lead >= epubui::LEADS) _lead = 1;
     if (!_lut) _lut = (uint32_t*)malloc(sizeof(uint32_t) * epubui::MAX_PAGES);
@@ -277,6 +282,25 @@ class EpubTool : public ToolApp {
 #ifdef TOYBOX_HOST
   int hostScreen() const { return _screen == Screen::Page ? 1 : 0; }
   bool hostFreshCover() const { return _freshCover; }
+  // The page's words, joined -- so a guard can prove that no word vanishes at
+  // a page boundary by reading the same chapter under two layouts.
+  int hostPageJoin(char* out, int cap) const {
+    int n = 0;
+    for (int i = 0; i < _lineN && n < cap - 2; i++) {
+      if (n) out[n++] = ' ';
+      const int wl = (int)strlen(_lines[i].t);
+      const int take = wl < cap - 1 - n ? wl : cap - 1 - n;
+      memcpy(out + n, _lines[i].t, (size_t)take);
+      n += take;
+    }
+    out[n] = 0;
+    return n;
+  }
+  void hostSetStyle(uint8_t size) {
+    _size = size;
+    restyle();
+  }
+  void hostGoto(int spine, uint32_t off) { gotoPlace(spine, off); }
   int hostSpine() const { return _spine; }
   int hostPage() const { return _page; }
   uint32_t hostPageOffset() const { return curOffset(); }
@@ -481,6 +505,8 @@ class EpubTool : public ToolApp {
       off = p.hasOffset ? p.offset : 0;
     }
     _screen = Screen::Page;
+    host().setCanvasRotation(_rot);  // gotoPlace lays out at this width
+    _rotLaid = _rot;
     host().beep(1);
     if (!gotoPlace(spine, off)) {
       // A book whose first chapter will not parse is a book we cannot show.
@@ -495,6 +521,7 @@ class EpubTool : public ToolApp {
 
   void closeBook(bool beep) {
     _menu = rmenu::Page::None;
+    host().setCanvasRotation(0);  // the shelf, like everything else, is portrait
     if (_open) {
       saveProgress();
       _book.close();
@@ -531,6 +558,25 @@ class EpubTool : public ToolApp {
   // words placed (0 means the chapter had nothing left).
   static const char* faceName(int f) {
     return f == 1 ? "Literata" : f == 2 ? "Atkinson" : "DejaVu";
+  }
+
+  // 0 portrait, 1 and 3 the two landscapes. Which of the two you want depends
+  // on which hand holds the device, so both are offered.
+  static uint8_t nextRot(uint8_t r) { return r == 0 ? 1 : r == 1 ? 3 : 0; }
+  static const char* rotName(uint8_t r) {
+    return r == 1 ? "landscape" : r == 3 ? "landscape, flipped" : "portrait";
+  }
+
+  // The panel's screens are drawn portrait; the page is drawn at the chosen
+  // rotation. The reflow decision compares against the rotation the CURRENT
+  // LAYOUT was made at -- not the canvas, which is always portrait while the
+  // menu is up. Comparing the canvas let a landscape layout be drawn on a
+  // portrait page when the rotation was cycled all the way round with the
+  // panel open; the overflow detector caught it before hardware could.
+  void applyRot(uint8_t r) {
+    host().setCanvasRotation(r);
+    if (((_rotLaid ^ r) & 1) != 0 && _open) restyle();
+    _rotLaid = r;
   }
 
   // Sets the reading face for a stretch of measuring or drawing and puts the
@@ -581,7 +627,7 @@ class EpubTool : public ToolApp {
 
     auto flushLine = [&]() -> bool {  // false: the page is full
       if (curLen == 0) return true;
-      if (y + step > epubui::BOTTOM || _lineN >= epubui::MAX_LINES) return false;
+      if (y + step > c.height() - epubui::BOTTOM_INSET || _lineN >= epubui::MAX_LINES) return false;
       memcpy(_lines[_lineN].t, cur, (size_t)curLen);
       _lines[_lineN].t[curLen] = 0;
       _lines[_lineN].y = (short)y;
@@ -592,7 +638,7 @@ class EpubTool : public ToolApp {
       return true;
     };
     auto roomForLine = [&]() {
-      return y + step <= epubui::BOTTOM && _lineN < epubui::MAX_LINES;
+      return y + step <= c.height() - epubui::BOTTOM_INSET && _lineN < epubui::MAX_LINES;
     };
 
     char w[epubc::WORD_CAP];
@@ -652,6 +698,18 @@ class EpubTool : public ToolApp {
       // whole to the next page only happens on a page that already has text.
       placed++;
       const int need = curLen ? curW + spaceW + ww : ww;
+      // A line is only ever STARTED if there is room for it to land. Room
+      // used to be checked when the line was flushed, a word too late: a page
+      // that filled while a line was still being assembled pended the one
+      // word in hand and silently dropped every word already gathered into
+      // the line. On hardware, mid-novel: "Good. Now that left the other
+      // two." lost everything but "two." across a page turn.
+      if (!curLen && !roomForLine()) {
+        strcpy(_pend, w);
+        _pendOff = off;
+        _pendValid = true;
+        break;
+      }
       if (need <= lineW) {
         if (curLen) {
           cur[curLen++] = ' ';
@@ -665,7 +723,10 @@ class EpubTool : public ToolApp {
         }
         continue;
       }
-      // does not fit beside the current line
+      // Does not fit beside the current line. The flush cannot fail any more
+      // -- the line's room was reserved when its first word landed -- but the
+      // belt stays: if it somehow does, the whole unfinished line would be
+      // the loss, and the word in hand is the least of it.
       if (!flushLine()) {
         strcpy(_pend, w);
         _pendOff = off;
@@ -968,15 +1029,27 @@ class EpubTool : public ToolApp {
     _menu = rmenu::Page::Root;
     _mpage = 0;
     _nmarks = marks::load(host(), _books[_cur].file, _marks);
+    // The panel is a portrait design; the page under it may not be. Stand the
+    // canvas up for the menu and put the page's angle back on the way out.
+    const bool turned = host().canvasRotation() != 0;
+    host().setCanvasRotation(0);
     host().beep(0);
-    paint();
+    if (turned)
+      host().refresh(true);
+    else
+      paint();
   }
 
   void menuClose() {
     _menu = rmenu::Page::None;
     ensureStream();  // the contents list reads other entries out of the zip
+    applyRot(_rot);  // the page's rotation, back on (and a reflow if it changed)
     host().beep(0);
-    paint();
+    // A quarter turn changes every pixel; the partial path cannot describe it.
+    if (host().canvasRotation() != 0)
+      host().refresh(true);
+    else
+      paint();
   }
 
   void menuBack() {
@@ -1190,7 +1263,7 @@ class EpubTool : public ToolApp {
     // the top of the glass, and a corner that swallowed it would make the
     // first word of a page unkeepable. The band at the bottom -- the one
     // saying what to do -- is the way out, and so is the power button.
-    if (y >= 744) {
+    if (y >= host().canvas().height() - epubui::FOOT_H) {
       pickCancel();
       return;
     }
@@ -1240,8 +1313,9 @@ class EpubTool : public ToolApp {
       const int y = _lines[_pickL0].y + lineStepNow() - 4;
       c.fillRect(x0, y, x1 - x0, 3, true);
     }
-    c.fillRect(0, 744, c.width(), 56, false);
-    c.fillRect(0, 744, c.width(), 2, true);
+    const int fy = c.height() - epubui::FOOT_H;
+    c.fillRect(0, fy, c.width(), epubui::FOOT_H, false);
+    c.fillRect(0, fy, c.width(), 2, true);
     c.textCentered(c.width() / 2, 752,
                    _pickL0 < 0 ? "tap the first word to keep" : "now tap the last word", TS_MED,
                    true);
@@ -1251,7 +1325,7 @@ class EpubTool : public ToolApp {
   void renderMenu(ToolsCanvas& c) {
     char buf[64];
     if (_menu == rmenu::Page::Root) {
-      rmenu::Item items[5];
+      rmenu::Item items[6];
       items[0].label = "Contents";
       snprintf(_rootSub[0], sizeof(_rootSub[0]), "chapter %d of %d", _spine + 1,
                _book.spineCount());
@@ -1276,6 +1350,11 @@ class EpubTool : public ToolApp {
         items[n].sub = _rootSub[n];
         n++;
       }
+      items[n].label = "Rotation";
+      snprintf(_rootSub[n], sizeof(_rootSub[n]), "%s  -  lands when the panel closes",
+               rotName(_rot));
+      items[n].sub = _rootSub[n];
+      n++;
       items[n].label = "Close the book";
       items[n].sub = _books[_cur].title;
       rmenu::drawRoot(host(), c, "Options", items, n + 1);
@@ -1406,47 +1485,55 @@ class EpubTool : public ToolApp {
         return;
       }
       const bool hasFace = host().typefaceCount() > 1;
-      const int rows = hasFace ? 5 : 4;
-      const int hit = rmenu::hitRoot(x, y, rows, W);
-      switch (hit) {
-        case 0:
-          _menu = rmenu::Page::Contents;
-          _mpage = pageOfSpine();
-          host().beep(0);
-          paint();
-          return;
-        case 1:
-          _menu = rmenu::Page::Marks;
-          _mpage = 0;
-          host().beep(0);
-          paint();
-          return;
-        case 2:
-          _menu = rmenu::Page::Text;
-          host().beep(0);
-          paint();
-          return;
-        case 3:
-          if (hasFace) {
-            // Cycle and reflow from the offset being read: a different face
-            // has different widths, so the page boundaries just moved.
-            _face = (uint8_t)((_face + 1) % host().typefaceCount());
-            prefs().putUInt("rd_face", _face);
-            host().beep(0);
-            restyle();
-            paint();
-            return;
-          }
-          _menu = rmenu::Page::None;
-          closeBook(true);
-          return;
-        case 4:
-          _menu = rmenu::Page::None;
-          closeBook(true);
-          return;
-        default:
-          return;
+      const int rowFace = hasFace ? 3 : -1;
+      const int rowRot = hasFace ? 4 : 3;
+      const int rowClose = rowRot + 1;
+      const int hit = rmenu::hitRoot(x, y, rowClose + 1, W);
+      if (hit == 0) {
+        _menu = rmenu::Page::Contents;
+        _mpage = pageOfSpine();
+        host().beep(0);
+        paint();
+        return;
       }
+      if (hit == 1) {
+        _menu = rmenu::Page::Marks;
+        _mpage = 0;
+        host().beep(0);
+        paint();
+        return;
+      }
+      if (hit == 2) {
+        _menu = rmenu::Page::Text;
+        host().beep(0);
+        paint();
+        return;
+      }
+      if (hit == rowFace) {
+        // Cycle and reflow from the offset being read: a different face has
+        // different widths, so the page boundaries just moved.
+        _face = (uint8_t)((_face + 1) % host().typefaceCount());
+        prefs().putUInt("rd_face", _face);
+        host().beep(0);
+        restyle();
+        paint();
+        return;
+      }
+      if (hit == rowRot) {
+        // The row cycles; the turn itself waits for the panel to close, so
+        // the panel is never asked to draw itself sideways.
+        _rot = nextRot(_rot);
+        prefs().putUInt("rd_rot", _rot);
+        host().beep(0);
+        paint();
+        return;
+      }
+      if (hit == rowClose) {
+        _menu = rmenu::Page::None;
+        closeBook(true);
+        return;
+      }
+      return;
     }
 
     if (_menu == rmenu::Page::Keep) {
@@ -1576,8 +1663,9 @@ class EpubTool : public ToolApp {
 
   void renderFooter(ToolsCanvas& c) {
     // The footer: where you are, on a plate the page shows through around.
-    c.fillRect(0, 744, c.width(), 56, false);
-    c.fillRect(0, 744, c.width(), 2, true);
+    const int fy = c.height() - epubui::FOOT_H;
+    c.fillRect(0, fy, c.width(), epubui::FOOT_H, false);
+    c.fillRect(0, fy, c.width(), 2, true);
     // Where you are is measured FIRST, because it is the part that must not be
     // covered: a title runs to whatever length a publisher felt like, and the
     // one on this card ran straight through the page number.
@@ -1588,8 +1676,8 @@ class EpubTool : public ToolApp {
     else
       snprintf(pos, sizeof(pos), "ch %d/%d · p %d", _spine + 1, _book.spineCount(), _page + 1);
     const int pw = c.textWidth(pos, TS_MED);
-    c.textClipped(16, 758, c.width() - 32 - pw - 12, _books[_cur].title, TS_MED, true, true);
-    c.text(c.width() - 16 - pw, 758, pos, TS_MED, true);
+    c.textClipped(16, fy + 14, c.width() - 32 - pw - 12, _books[_cur].title, TS_MED, true, true);
+    c.text(c.width() - 16 - pw, fy + 14, pos, TS_MED, true);
   }
 
   Screen _screen = Screen::List;
@@ -1623,9 +1711,11 @@ class EpubTool : public ToolApp {
   int _ntoc = -1;                  // -1 until the book's contents are read
   marks::Mark _marks[marks::MAX];
   int _nmarks = 0;
-  char _rootSub[4][48] = {};
+  char _rootSub[5][48] = {};
   uint8_t _size = 0, _lead = 1;
   uint8_t _face = 0;  // 0 DejaVu, 1 Literata, 2 Atkinson
+  uint8_t _rot = 0;      // the page view's rotation; every menu screen is portrait
+  uint8_t _rotLaid = 0;  // the rotation the current layout was measured at
 
   HostIO _io;
   epubc::Book _book;
