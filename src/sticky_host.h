@@ -105,6 +105,9 @@ class StickyHost : public ToolsHost {
     touch.setRotation(r);
   }
   int canvasRotation() const override { return epd.rotation(); }
+  int typefaceCount() const override { return 3; }
+  int typeface() const override { return gfx::typeface(); }
+  void setTypeface(int n) override { gfx::setTypeface(n); }
   int deviceOrientation() override {
     return sensors::imuPresent() ? sensors::orientation() : -1;
   }

@@ -16,7 +16,11 @@ FIRST, LAST = 32, 126
 # an e-acute inside 44 px text dropped to the 32 px international face and
 # "resume" read as a ransom note. Latin-1's letters plus the handful of
 # Extended-A that western European text actually uses.
-EXTRAS = [c for c in range(0xC0, 0x100)] + [0x152, 0x153, 0x160, 0x161, 0x17D, 0x17E, 0x178]
+EXTRAS = ([c for c in range(0xC0, 0x100)] + [0x152, 0x153, 0x160, 0x161, 0x17D, 0x17E, 0x178]
+          # Typographic punctuation: commercial EPUBs use curly quotes, real
+          # dashes and the ellipsis on nearly every line, and at 44 px they
+          # had the same dropped-glyph problem the accents did.
+          + [0x2013, 0x2014, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2026])
 # Ink is any pixel darker than this on a white ground, so a higher number pulls
 # more of the antialiased edge into the glyph and thickens every stroke without
 # changing the typeface or moving a single layout.
@@ -150,4 +154,5 @@ def main():
     print('// %d bytes of glyph data.' % total, file=sys.stderr)
 
 
-main()
+if __name__ == '__main__':
+    main()

@@ -45,6 +45,13 @@ inline TRect turnRect(int w, int h) {
 inline TRect keepRect(int w, int h) {
   return TRect{w - 200 - ORIENT_M, h - ORIENT_H - ORIENT_M, 200, ORIENT_H};
 }
+// The text size, adjustable right here: this screen shows the note exactly as
+// the sleeping panel will wear it, which makes it the best place there is to
+// decide how big the words should be. Top-right, clear of both bands.
+inline TRect orientSizeRect(int w, int h) {
+  (void)h;
+  return TRect{w - 84, 16, 68, 56};
+}
 
 // pairing
 inline constexpr int QR_X = 110, QR_Y = 140, QR_SIZE = 260;
@@ -637,6 +644,10 @@ class NoteTool : public ToolApp {
     if (!drawPinnedFullScreen(c)) {
       c.textCentered(c.width() / 2, c.height() / 2, "nothing pinned", TS_LARGE, true);
     }
+    const TRect a = orientSizeRect(c.width(), c.height());
+    c.fillRect(a.x - 4, a.y - 4, a.w + 8, a.h + 8, false);
+    c.button(a.x, a.y, a.w, a.h, "A", false,
+             nmd::g_body == TS_MED ? TS_SMALL : nmd::g_body == TS_LARGE ? TS_MED : TS_LARGE);
     const TRect t = turnRect(c.width(), c.height());
     const TRect k = keepRect(c.width(), c.height());
     // Painted over the note rather than beside it: there is no beside. White
@@ -655,6 +666,16 @@ class NoteTool : public ToolApp {
 
   void tapOrient(int x, int y) {
     using namespace nui;
+    if (orientSizeRect(canvas().width(), canvas().height()).hit(x, y)) {
+      const TSize next = nmd::g_body == TS_MED    ? TS_LARGE
+                         : nmd::g_body == TS_LARGE ? TS_HUGE
+                                                   : TS_MED;
+      nmd::setBody(next);
+      prefs().putUInt("nt_size", (uint32_t)(next - TS_MED));
+      host().beep(0);
+      host().refresh(true);  // the note reflows; every pixel may change
+      return;
+    }
     if (!_gyro && turnRect(canvas().width(), canvas().height()).hit(x, y)) {
       _orient = (_orient + 1) & 3;
       host().setCanvasRotation(_orient);

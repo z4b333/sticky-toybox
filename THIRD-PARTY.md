@@ -147,3 +147,17 @@ by Toybox's own decoder over the vendored miniz inflate
 (tools/epub/epub_png.h).
 
 - http://elm-chan.org/fsw/tjpgd/ (via espressif/idf-extra-components)
+
+## Reading typefaces (tools/fonts/, baked into src/fonts_read.h)
+
+The EPUB reader's two optional typefaces, both under the SIL Open Font
+License 1.1, rasterised to 1-bit tables by tools/make_fonts_read.py from the
+files vendored in tools/fonts/:
+
+- **Literata** — copyright TypeTogether, commissioned by Google for Play
+  Books. https://github.com/googlefonts/literata
+- **Atkinson Hyperlegible** — copyright Braille Institute of America.
+  https://brailleinstitute.org/freefont
+
+The OFL permits embedding and redistribution; the font files themselves are
+carried unmodified in tools/fonts/ so the tables can be regenerated.

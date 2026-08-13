@@ -252,6 +252,13 @@ class ToolsHost {
   // fixed screen ignores it and reports 0.
   virtual void setCanvasRotation(int r) { (void)r; }
   virtual int canvasRotation() const { return 0; }
+  // Reading typefaces, for the EPUB reader: how many families the host's
+  // Latin tables carry (1 = just the UI face, no choice to offer) and which
+  // one text draws with right now. The reader sets it around its own pages
+  // and puts it back; a host with one face ignores both.
+  virtual int typefaceCount() const { return 1; }
+  virtual int typeface() const { return 0; }
+  virtual void setTypeface(int n) { (void)n; }
   // Which way up the device is being HELD, from the accelerometer, in the same
   // 0..3 space as canvasRotation. -1 means there is no way to know -- no IMU
   // on the board, or a host with no board at all -- and callers fall back to

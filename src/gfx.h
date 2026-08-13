@@ -13,6 +13,12 @@ void drawChar(int x, int y, char c, int scale, uint8_t color);
 int drawText(int x, int y, const char* s, int scale, uint8_t color, bool bold = false,
              int spacing = 0);
 int textWidth(const char* s, int scale, bool bold = false, int spacing = 0);
+
+// The typeface the Latin tables answer with: 0 = DejaVu (UI and default),
+// 1 = Literata, 2 = Atkinson Hyperlegible. The EPUB reader sets this around
+// its own text; everything else leaves it alone.
+void setTypeface(int n);
+int typeface();
 int textHeight(int scale);
 
 // Blank space left inside that width and height by the glyphs themselves, so

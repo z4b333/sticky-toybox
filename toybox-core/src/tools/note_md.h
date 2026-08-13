@@ -217,6 +217,46 @@ inline int drawRich(ToolsCanvas& c, int x, int y, int maxW, const char* src, int
       *overflowed = true;
       return y;
     }
+    // A word wider than the whole line -- a URL, a code, a key, a fist on the
+    // keyboard -- used to walk straight off the glass, because the breaker
+    // only ever broke BETWEEN words. Broken by codepoint instead: at least
+    // one per line, so a word of any width always makes progress.
+    if (ww > maxW) {
+      const char* p = seg.text;
+      while (*p) {
+        char piece[sizeof(seg.text)];
+        int n = 0;
+        while (*p) {
+          const char* q = p;
+          uni::next(q);
+          const int add = (int)(q - p);
+          if (n + add >= (int)sizeof(piece) - 1) break;
+          memcpy(piece + n, p, (size_t)add);
+          piece[n + add] = 0;
+          if (n > 0 && c.textWidth(piece, sz, bold) > maxW) {
+            piece[n] = 0;
+            break;
+          }
+          n += add;
+          p = q;
+        }
+        if (y + c.textHeight(sz) > maxY) {
+          *overflowed = true;
+          return y;
+        }
+        const int pw = c.textWidth(piece, sz, bold);
+        c.text(x, y, piece, sz, true, bold);
+        if (forceStrike || seg.strike)
+          c.fillRect(x - 1, y + c.textHeight(sz) / 2 - 1, pw + 2, 2, true);
+        if (*p) {
+          y += lh;
+        } else {
+          cx = x + pw;
+          lineStarted = true;
+        }
+      }
+      continue;
+    }
     if (lineStarted && !seg.glue) cx += spaceW;
     c.text(cx, y, seg.text, sz, true, bold);
     // The line goes through the middle of the glyphs, not under them: struck

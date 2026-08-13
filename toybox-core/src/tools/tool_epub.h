@@ -86,6 +86,8 @@ class EpubTool : public ToolApp {
     reload();
     _size = (uint8_t)prefs().getUInt("rd_size", 0);
     _lead = (uint8_t)prefs().getUInt("rd_lead", 1);
+    _face = (uint8_t)prefs().getUInt("rd_face", 0);
+    if (_face >= h.typefaceCount()) _face = 0;
     if (_size >= epubui::SIZES) _size = 0;
     if (_lead >= epubui::LEADS) _lead = 1;
     if (!_lut) _lut = (uint32_t*)malloc(sizeof(uint32_t) * epubui::MAX_PAGES);
@@ -527,7 +529,21 @@ class EpubTool : public ToolApp {
 
   // Lays out the next page from the stream into _lines. Returns the number of
   // words placed (0 means the chapter had nothing left).
+  static const char* faceName(int f) {
+    return f == 1 ? "Literata" : f == 2 ? "Atkinson" : "DejaVu";
+  }
+
+  // Sets the reading face for a stretch of measuring or drawing and puts the
+  // previous one back, so nesting works and nothing leaks into the UI.
+  struct FaceScope {
+    ToolsHost& h;
+    int prev;
+    FaceScope(ToolsHost& hh, int f) : h(hh), prev(hh.typeface()) { h.setTypeface(f); }
+    ~FaceScope() { h.setTypeface(prev); }
+  };
+
   int layoutPage() {
+    FaceScope fs(host(), _face);
     ToolsCanvas& c = host().canvas();
     const TSize ts = epubui::sizeAt(_size);
     const int step = c.textHeight(ts) + epubui::leadAir(_lead);
@@ -1071,6 +1087,7 @@ class EpubTool : public ToolApp {
 
   // The x span of word `w` in `line`, for the underline.
   void wordSpan(const char* line, int w, int& x0, int& x1) {
+    FaceScope fs(host(), _face);
     ToolsCanvas& c = host().canvas();
     const TSize ts = epubui::sizeAt(_size);
     char probe[200];
@@ -1213,6 +1230,7 @@ class EpubTool : public ToolApp {
   }
 
   void renderPick(ToolsCanvas& c) {
+    FaceScope fs(host(), _face);
     renderPage(c);
     // The chosen words, underlined. Nothing is inverted: on a page of text an
     // inverted word is a hole, and this has to be readable while it is chosen.
@@ -1233,7 +1251,7 @@ class EpubTool : public ToolApp {
   void renderMenu(ToolsCanvas& c) {
     char buf[64];
     if (_menu == rmenu::Page::Root) {
-      rmenu::Item items[4];
+      rmenu::Item items[5];
       items[0].label = "Contents";
       snprintf(_rootSub[0], sizeof(_rootSub[0]), "chapter %d of %d", _spine + 1,
                _book.spineCount());
@@ -1249,9 +1267,18 @@ class EpubTool : public ToolApp {
       snprintf(_rootSub[2], sizeof(_rootSub[2]), "%s, %s spacing", epubui::sizeName(_size),
                epubui::leadName(_lead));
       items[2].sub = _rootSub[2];
-      items[3].label = "Close the book";
-      items[3].sub = _books[_cur].title;
-      rmenu::drawRoot(host(), c, "Options", items, 4);
+      int n = 3;
+      if (host().typefaceCount() > 1) {
+        // A row that cycles in place, like the .tbk reader's page turns: the
+        // row states the answer, so there is nowhere to go.
+        items[n].label = "Typeface";
+        snprintf(_rootSub[n], sizeof(_rootSub[n]), "%s  -  the page reflows", faceName(_face));
+        items[n].sub = _rootSub[n];
+        n++;
+      }
+      items[n].label = "Close the book";
+      items[n].sub = _books[_cur].title;
+      rmenu::drawRoot(host(), c, "Options", items, n + 1);
       return;
     }
 
@@ -1378,7 +1405,10 @@ class EpubTool : public ToolApp {
         pickStart();
         return;
       }
-      switch (rmenu::hitRoot(x, y, 4, W)) {
+      const bool hasFace = host().typefaceCount() > 1;
+      const int rows = hasFace ? 5 : 4;
+      const int hit = rmenu::hitRoot(x, y, rows, W);
+      switch (hit) {
         case 0:
           _menu = rmenu::Page::Contents;
           _mpage = pageOfSpine();
@@ -1397,6 +1427,20 @@ class EpubTool : public ToolApp {
           paint();
           return;
         case 3:
+          if (hasFace) {
+            // Cycle and reflow from the offset being read: a different face
+            // has different widths, so the page boundaries just moved.
+            _face = (uint8_t)((_face + 1) % host().typefaceCount());
+            prefs().putUInt("rd_face", _face);
+            host().beep(0);
+            restyle();
+            paint();
+            return;
+          }
+          _menu = rmenu::Page::None;
+          closeBook(true);
+          return;
+        case 4:
           _menu = rmenu::Page::None;
           closeBook(true);
           return;
@@ -1518,6 +1562,7 @@ class EpubTool : public ToolApp {
   }
 
   void renderPage(ToolsCanvas& c) {
+    FaceScope fs(host(), _face);
     if (_pageImage[0]) {
       if (!drawImagePage(c)) drawImagePlate(c);
       if (_chrome) renderFooter(c);
@@ -1579,7 +1624,8 @@ class EpubTool : public ToolApp {
   marks::Mark _marks[marks::MAX];
   int _nmarks = 0;
   char _rootSub[4][48] = {};
-  uint8_t _size = 0, _lead = 1;    // the reader's type, remembered in prefs
+  uint8_t _size = 0, _lead = 1;
+  uint8_t _face = 0;  // 0 DejaVu, 1 Literata, 2 Atkinson
 
   HostIO _io;
   epubc::Book _book;

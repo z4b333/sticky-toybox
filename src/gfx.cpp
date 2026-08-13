@@ -18,6 +18,7 @@
 #include "fonts_cp.h"
 #else
 #include "fonts_ui.h"
+#include "fonts_read.h"
 #endif
 
 #ifdef TOYBOX_HOST
@@ -55,7 +56,32 @@ namespace {
 // bold cut (see tools/make_fonts.py). The 8x8 pixel font this replaced was
 // scaled 2x, 3x and 4x, which turned every large letter into a grid of squares
 // -- and its bold was the same glyph smeared one pixel sideways.
+// Which family answers: 0 is DejaVu (the UI's face, and the default), 1 and 2
+// are the two reading faces the EPUB reader can choose. The reader sets this
+// around its own text and puts it back; nothing else touches it, so the UI
+// never changes clothes by accident. The CrossPoint pass has one stand-in
+// family and ignores the knob, faithfully to that firmware.
+int g_typeface = 0;
+
 const UiFont* faceFor(int px, bool bold) {
+#ifdef UI_HAS_EXTRAS
+  if (g_typeface == 1) {
+    switch (px) {
+      case 24: return bold ? &FONT_LIT_24_BOLD : &FONT_LIT_24_REG;
+      case 32: return bold ? &FONT_LIT_32_BOLD : &FONT_LIT_32_REG;
+      case 44: return bold ? &FONT_LIT_44_BOLD : &FONT_LIT_44_REG;
+      default: return bold ? &FONT_LIT_16_BOLD : &FONT_LIT_16_REG;
+    }
+  }
+  if (g_typeface == 2) {
+    switch (px) {
+      case 24: return bold ? &FONT_ATK_24_BOLD : &FONT_ATK_24_REG;
+      case 32: return bold ? &FONT_ATK_32_BOLD : &FONT_ATK_32_REG;
+      case 44: return bold ? &FONT_ATK_44_BOLD : &FONT_ATK_44_REG;
+      default: return bold ? &FONT_ATK_16_BOLD : &FONT_ATK_16_REG;
+    }
+  }
+#endif
   switch (px) {
     case 24: return bold ? &FONT_24_BOLD : &FONT_24_REG;
     case 32: return bold ? &FONT_32_BOLD : &FONT_32_REG;
@@ -76,7 +102,9 @@ const uint16_t UI_EXTRA_CPS[1] PROGMEM = {0};
 // it and the caller falls through to the international tables.
 int glyphIndex(uint32_t cp) {
   if (cp >= 32 && cp <= 126) return (int)cp - 32;
-  if (cp < 0xC0 || cp > 0x17E) return -1;  // cheap bounds before the scan
+  const bool latin = cp >= 0xC0 && cp <= 0x17E;
+  const bool punct = cp >= 0x2013 && cp <= 0x2026;
+  if (!latin && !punct) return -1;  // cheap bounds before the scan
   for (int i = 0; i < UI_EXTRA_COUNT; i++)
     if (pgm_read_word(&UI_EXTRA_CPS[i]) == cp) return 95 + i;
   return -1;
@@ -180,6 +208,9 @@ int intlAdvance(int px, uint32_t cp) {
   return (h.f->box * 3) / 5 + 4;  // the missing-glyph box
 }
 }  // namespace
+
+void setTypeface(int n) { g_typeface = (n < 0 || n > 2) ? 0 : n; }
+int typeface() { return g_typeface; }
 
 void drawChar(int x, int y, char c, int px, uint8_t color) {
   const UiFont* f = faceFor(px, false);

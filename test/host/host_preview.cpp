@@ -2223,8 +2223,34 @@ int main() {
     g_dumpEnabled = false;
     toybox.onButton(SideBtn::Ok);  // back to the root
 
+    // The typeface row cycles in place: three taps come back to DejaVu, the
+    // preference sticks, and the page never leaves the panel. In between, a
+    // different face must actually measure differently -- that is the whole
+    // point -- so the second face's line count is allowed to differ but the
+    // reading offset must not move.
+    {
+      const uint32_t offBefore = et->hostPageOffset();
+      for (int i = 0; i < 3; i++) {
+        toybox.onTap(240, rmenu::rootRect(3, 480).y + 40);
+        if (et->hostMenu() == 0) {
+          printf("EPUB APP FAIL: the typeface row left the panel\n");
+          abort();
+        }
+        if (et->hostPageOffset() != offBefore) {
+          printf("EPUB APP FAIL: changing typeface moved the reader (%u -> %u)\n",
+                 (unsigned)offBefore, (unsigned)et->hostPageOffset());
+          abort();
+        }
+      }
+      if (stickyHost.prefs().getUInt("rd_face", 99) != 0) {
+        printf("EPUB APP FAIL: three typeface taps did not come back to DejaVu\n");
+        abort();
+      }
+      printf("typeface ok (three faces cycle, the place read from stands still)\n");
+    }
+
     // And the way out is a row, not the button.
-    toybox.onTap(240, rmenu::rootRect(3, 480).y + 40);
+    toybox.onTap(240, rmenu::rootRect(4, 480).y + 40);
     if (et->hostScreen() != 0) {
       printf("EPUB APP FAIL: CLOSE THE BOOK did not close it\n");
       abort();
@@ -2267,7 +2293,7 @@ int main() {
         abort();
       }
       toybox.onButton(SideBtn::Ok);                       // the panel
-      toybox.onTap(240, rmenu::rootRect(3, 480).y + 40);  // CLOSE THE BOOK
+      toybox.onTap(240, rmenu::rootRect(4, 480).y + 40);  // CLOSE THE BOOK
     }
 
     // --- a chapter that is one picture and no words -------------------------
@@ -2313,7 +2339,7 @@ int main() {
         abort();
       }
       toybox.onButton(SideBtn::Ok);                       // the panel
-      toybox.onTap(240, rmenu::rootRect(3, 480).y + 40);  // CLOSE THE BOOK
+      toybox.onTap(240, rmenu::rootRect(4, 480).y + 40);  // CLOSE THE BOOK
       printf("epub picture chapters ok (reachable both ways, never blank)\n");
     }
     toybox.goHub();
@@ -3193,6 +3219,17 @@ int main() {
       printf("ORIENT IMU FAIL: the note did not follow the device to 2\n");
       abort();
     }
+    // The size button rides this screen too: three taps cycle back to where
+    // they started, and none of them disturb the angle being chosen.
+    for (int i = 0; i < 3; i++) {
+      const int w = stickyHost.canvas().width(), h = stickyHost.canvas().height();
+      tapRect(nui::orientSizeRect(w, h));
+    }
+    if (stickyHost.prefs().getUInt("nt_size", 99) != 0 || stickyHost.canvasRotation() != 2) {
+      printf("ORIENT IMU FAIL: the size button cycled to %u and rotation %d\n",
+             stickyHost.prefs().getUInt("nt_size", 99), stickyHost.canvasRotation());
+      abort();
+    }
     // The TURN button is gone: a tap where it was does nothing.
     {
       const int w = stickyHost.canvas().width(), h = stickyHost.canvas().height();
@@ -3227,6 +3264,34 @@ int main() {
   epd.clear();
   toybox.render(stickyHost.sharedCanvas());
   epd.displayFull();
+
+  // A word with no spaces in it, longer than any line -- a URL, a key, a fist
+  // on the phone keyboard -- must break by codepoint rather than walk off the
+  // glass. Rendered at largest, which is where it walked furthest, and left
+  // to the overflow detector, which is exactly the failure it exists to see.
+  {
+    char wasPinned[note::NAME_LEN + 1];
+    const bool hadPin = note::getPinned(wasPinned);
+    static const char kWall[] =
+        "# Wall\nmdghyfghjughjuyghuyffui7trghu7yghiuuyy\n"
+        "longwordwithoutanyspacesatallthatkeepsgoingandgoingandgoing\n";
+    note::save("wall", kWall, strlen(kWall));
+    note::setPinned("wall");
+    nmd::setBody(TS_HUGE);
+    setScreen("lockscreen_wall");
+    epd.clear();
+    if (!drawPinnedFullScreen(stickyHost.sharedCanvas())) {
+      printf("NOTE FAIL: the wall note did not draw\n");
+      abort();
+    }
+    epd.displayFull();
+    nmd::setBody(TS_MED);
+    if (hadPin)
+      note::setPinned(wasPinned);
+    else
+      note::setPinned("");
+    printf("long-word wrap ok (a spaceless wall stays on the glass at largest)\n");
+  }
 
   // What the panel keeps once the device powers down.
   // Asleep: the note and nothing else. Awake: the same note, with the footer
