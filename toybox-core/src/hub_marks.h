@@ -20,8 +20,14 @@ template <typename F>
 inline void haloed(F draw) {
   static constexpr int8_t OFF[][2] = {{-2, 0}, {2, 0}, {0, -2}, {0, 2},  {-2, -1}, {-2, 1},
                                       {2, -1}, {2, 1}, {-1, -2}, {1, -2}, {-1, 2},  {1, 2}};
-  for (const auto& o : OFF) draw(o[0], o[1], true);
-  draw(0, 0, false);
+  // WHITE outline, BLACK mark. It used to be the other way round -- a white
+  // mark edged in black -- which is what a photograph wants and not what a
+  // person reading a shelf of small marks wants: the light version reads as a
+  // sticker sitting on top of the picture, and the dark one reads as part of
+  // the interface. The halo is still what makes it survive a dark wallpaper;
+  // only its polarity changed.
+  for (const auto& o : OFF) draw(o[0], o[1], false);
+  draw(0, 0, true);
 }
 
 // The dock marks follow the interface's "minimal pass": thin strokes, no

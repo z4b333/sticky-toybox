@@ -31,40 +31,45 @@ static_assert(NGROUPS == 3, "the dock draws exactly three folders");
 // frame, nub, bolt and number take the halo, and the bar itself is laid on
 // afterwards as solid black inside a white rim -- readable over a white home,
 // a black mountain, and everything between.
-constexpr int BATT_W = 28, BATT_H = 14;
+constexpr int CHARGE_W = 16;  // the bolt beside the percentage, when charging
+
+// The number, and nothing around it.
+//
+// There used to be a drawn cell with a bar in it beside the percentage, which
+// is two ways of saying one thing -- and the drawn one is the vaguer of the
+// two on a 28-pixel-wide glyph. The charging mark stays, because that is the
+// one thing the number cannot say: a device at 61 % going up and a device at
+// 61 % going down want different decisions from their owner.
+int batteryWidth(ToolsCanvas& c, const ToolsHost& host) {
+  const int pct = host.batteryPercent();
+  if (pct < 0) return 0;
+  char buf[8];
+  snprintf(buf, sizeof(buf), "%d%%", pct);
+  return c.textWidth(buf, TS_SMALL) + (host.charging() ? CHARGE_W : 0);
+}
 
 void batteryFrame(ToolsCanvas& c, const ToolsHost& host, int right, int top, bool black) {
   const int pct = host.batteryPercent();
-  if (pct < 0) return;  // no gauge answered: an empty outline would be a lie
-  const int x = right - 4 - BATT_W;  // 4 px of nub
-  c.drawRect(x, top, BATT_W, BATT_H, 2, black);
-  c.fillRect(x + BATT_W, top + 4, 4, 6, black);
-  if (host.charging()) {
-    decor::triangle(c, x + BATT_W / 2 + 3, top - 2, x + BATT_W / 2 - 4, top + BATT_H / 2 + 1,
-                    x + BATT_W / 2 + 2, top + BATT_H / 2 + 1, black);
-    decor::triangle(c, x + BATT_W / 2 - 3, top + BATT_H + 2, x + BATT_W / 2 + 4,
-                    top + BATT_H / 2 - 1, x + BATT_W / 2 - 2, top + BATT_H / 2 - 1, black);
-  }
+  if (pct < 0) return;  // no gauge answered: a number would be a lie
   char buf[8];
   snprintf(buf, sizeof(buf), "%d%%", pct);
-  c.text(x - 8 - c.textWidth(buf, TS_SMALL), top - 1, buf, TS_SMALL, black);
+  const int w = c.textWidth(buf, TS_SMALL);
+  c.text(right - w, top - 1, buf, TS_SMALL, black);
+  if (host.charging()) {
+    // A bolt, left of the number: two triangles meeting at the waist.
+    const int bx = right - w - CHARGE_W + 4, by = top + 1;
+    decor::triangle(c, bx + 6, by - 2, bx - 1, by + 8, bx + 5, by + 8, black);
+    decor::triangle(c, bx, by + 16, bx + 7, by + 6, bx + 1, by + 6, black);
+  }
 }
 
 void batteryFill(ToolsCanvas& c, const ToolsHost& host, int right, int top) {
-  const int pct = host.batteryPercent();
-  if (pct < 0) return;
-  const int x = right - 4 - BATT_W;
-  const int clamped = pct > 100 ? 100 : pct;
-  const int fill = ((BATT_W - 8) * clamped) / 100;
-  if (fill <= 0) return;
-  c.fillRect(x + 3, top + 3, fill + 2, BATT_H - 6, false);  // the white rim
-  c.fillRect(x + 4, top + 4, fill, BATT_H - 8, true);       // the bar
+  (void)c; (void)host; (void)right; (void)top;  // nothing to fill any more
 }
 
-// The two halves together, plain, for the harness to measure.
+// Kept as one call for the harness, which measures what home draws.
 void battery(ToolsCanvas& c, const ToolsHost& host, int right, int top, bool black) {
   batteryFrame(c, host, right, top, black);
-  if (black) batteryFill(c, host, right, top);
 }
 
 // --- the drawer pages --------------------------------------------------------
@@ -154,10 +159,9 @@ int visibleCount(int folder) {
 // where the halo simply vanishes. `active` underlines the drawer being looked
 // at; home passes -1 and no mark is set apart.
 void drawDock(ToolsCanvas& c, int active) {
-  hubmarks::haloed([&](int dx, int dy, bool black) {
-    c.fillRect(0, DOCK_Y + dy, SCREEN_W, 2, black);
-    (void)dx;
-  });
+  // No rule above the dock. The marks are the dock: a line across the picture
+  // was drawing a shelf for them to stand on, and the home screen is a
+  // photograph with three marks on it, not a bar bolted to the bottom.
   for (int f = 0; f < NGROUPS; f++) {
     const int cx = (SCREEN_W / 6) + f * (SCREEN_W / 3);
     hubmarks::haloed([&](int dx, int dy, bool black) {
@@ -328,25 +332,19 @@ void HubScreen::render(ToolsHost& host, ToolsCanvas& c) {
     }
   }
 
-  // Clock, percentage, cell, right-aligned in that order. The clock only
+  // Clock, then the percentage, right-aligned in that order. The clock only
   // exists when an RTC has been set; the loop ticks it with a partial refresh
   // once a minute while home is showing.
   hubmarks::haloed([&](int dx, int dy, bool black) {
     batteryFrame(c, host, SCREEN_W - 14 + dx, 18 + dy, black);
   });
-  batteryFill(c, host, SCREEN_W - 14, 18);
   {
     int hh = 0, mm = 0;
     if (host.clockHHMM(hh, mm)) {
       char clk[8];
       snprintf(clk, sizeof(clk), "%02d:%02d", hh, mm);
-      int pctW = 0;
-      if (host.batteryPercent() >= 0) {
-        char pct[8];
-        snprintf(pct, sizeof(pct), "%d%%", host.batteryPercent());
-        pctW = c.textWidth(pct, TS_SMALL) + 8;
-      }
-      const int x = SCREEN_W - 14 - 4 - 28 - pctW - 12 - c.textWidth(clk, TS_MED);
+      const int pctW = batteryWidth(c, host);
+      const int x = SCREEN_W - 14 - pctW - (pctW ? 14 : 0) - c.textWidth(clk, TS_MED);
       hubmarks::haloed(
           [&](int dx, int dy, bool black) { c.text(x + dx, 13 + dy, clk, TS_MED, black); });
     }

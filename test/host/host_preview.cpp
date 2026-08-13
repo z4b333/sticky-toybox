@@ -2263,30 +2263,41 @@ int main() {
       epdMapPixel(epd.rotation(), epd.panelFlipX(), epd.panelFlipY(), lx, ly, px, py);
       return (epd.fb()[(uint32_t)py * EPD_WB + (px >> 3)] & (0x80 >> (px & 7))) == 0;
     };
-    // On the home screen the cell is drawn haloed -- black offsets under a
-    // white pass -- so counting black ink there measures the halo, not the
-    // bar. The cell is drawn plain instead, at a spot the harness chooses,
-    // and the expected ink is computed here from the percentage alone.
-    const int W = 28, H = 14, RIGHT = 200, TOP = 100, X = RIGHT - 4 - W;
-    int worst = 0, worstPct = -1;
-    for (int pct : {0, 25, 50, 89, 100}) {
-      sensors::hostSetBattery(pct, false);
-      epd.clear();
-      hubHostBattery(stickyHost.sharedCanvas(), stickyHost, RIGHT, TOP, true);
-      // Ink across the middle of the cell, between the two side borders.
-      int ink = 0;
-      const int mid = TOP + H / 2;
-      for (int x = X + 4; x < X + W - 4; x++)
-        if (blackAt(x, mid)) ink++;
-      const int inner = W - 8;
-      const int want = (inner * pct) / 100;
-      const int off = ink > want ? ink - want : want - ink;
-      if (off > worst) { worst = off; worstPct = pct; }
+    // The battery is a NUMBER now, not a drawn cell with a bar in it. The old
+    // guard measured the bar against the percentage; there is no bar, so this
+    // measures the two things the number still has to get right: it is there
+    // at all when the gauge answered, it is not there when the gauge did not
+    // (an invented number is worse than no number), and charging adds a mark
+    // to the left of it rather than changing the number.
+    const int RIGHT = 200, TOP = 100;
+    auto inkNear = [&](int x0, int x1) {
+      int n = 0;
+      for (int y = TOP - 6; y < TOP + 22; y++)
+        for (int x = x0; x < x1; x++)
+          if (blackAt(x, y)) n++;
+      return n;
+    };
+    sensors::hostSetBattery(-1, false);
+    epd.clear();
+    hubHostBattery(stickyHost.sharedCanvas(), stickyHost, RIGHT, TOP, true);
+    if (inkNear(RIGHT - 90, RIGHT + 4) != 0) {
+      printf("BATTERY FAIL: something was drawn with no gauge answering\n");
+      abort();
     }
-    // Four pixels of slack for borders and rounding. More than that and the
-    // bar is not saying what the number beside it says.
-    if (worst > 4) {
-      printf("BATTERY FAIL: at %d%% the bar is %d px off what it should be\n", worstPct, worst);
+    sensors::hostSetBattery(89, false);
+    epd.clear();
+    hubHostBattery(stickyHost.sharedCanvas(), stickyHost, RIGHT, TOP, true);
+    const int plain = inkNear(RIGHT - 90, RIGHT + 4);
+    if (plain < 40) {
+      printf("BATTERY FAIL: the percentage drew %d px\n", plain);
+      abort();
+    }
+    sensors::hostSetBattery(89, true);
+    epd.clear();
+    hubHostBattery(stickyHost.sharedCanvas(), stickyHost, RIGHT, TOP, true);
+    const int charging = inkNear(RIGHT - 90, RIGHT + 4);
+    if (charging <= plain) {
+      printf("BATTERY FAIL: charging drew %d px, same as %d not charging\n", charging, plain);
       abort();
     }
     sensors::hostSetBattery(89, false);
@@ -2301,7 +2312,7 @@ int main() {
     sensors::hostSetBattery(-1, false);
     toybox.goHub();
     g_dumpEnabled = true;
-    printf("battery icon ok (the bar matches the number)\n");
+    printf("battery ok (a number, drawn only when the gauge answered)\n");
   }
 
   setScreen("hub_hidden");
