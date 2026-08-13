@@ -75,9 +75,10 @@ inline TRect chipRect(int i) {
   return TRect{r.x + i * (w + CHIP_GAP), r.y + r.h - CHIP_H, w, CHIP_H};
 }
 
-// The picture row's actions, right-aligned: send one, and throw the stored one
-// away. REMOVE only exists when there is something to remove.
-inline constexpr int SEND_W = 150, ACT_H2 = 46, REM_W = 46;
+// The picture row's actions, right-aligned: choose one from the card, and
+// throw the stored one away. REMOVE only exists when there is something to
+// remove.
+inline constexpr int SEND_W = 190, ACT_H2 = 46, REM_W = 46;
 inline TRect sendRect() {
   const TRect r = lockRect(LR_PICTURE);
   return TRect{r.x + r.w - SEND_W, r.y + (r.h - ACT_H2) / 2, SEND_W, ACT_H2};
@@ -86,6 +87,12 @@ inline TRect removeRect() {
   const TRect s = sendRect();
   return TRect{s.x - REM_W - 8, s.y, REM_W, ACT_H2};
 }
+
+// The lock picture page: the same list as the wallpaper page, writing to the
+// other file. The phone route lives on as one small line at the foot of it --
+// the only way in for a device with nothing in the card slot, and no louder
+// than that case deserves.
+inline TRect lockPhoneRect() { return TRect{16, 726, SCREEN_W - 32, 40}; }
 }  // namespace setui
 
 class SettingsScreen {
@@ -111,6 +118,10 @@ class SettingsScreen {
 
 #ifdef TOYBOX_HOST
   void hostOpenLock() { _page = 1; }
+  void hostOpenLockPic(ToolsHost& host) {
+    enterWall(host);
+    _page = 5;
+  }
   int hostPage() const { return _page; }
   fweb::FilesServer& hostFiles() { return _files; }
 #endif
@@ -121,6 +132,8 @@ class SettingsScreen {
   void renderWall(ToolsHost& host, ToolsCanvas& c);
   bool tapWall(ToolsHost& host, int x, int y);
   void enterWall(ToolsHost& host);
+  void renderLockPic(ToolsHost& host, ToolsCanvas& c);
+  bool tapLockPic(ToolsHost& host, int x, int y);
   void renderApps(ToolsHost& host, ToolsCanvas& c);
   bool tapApps(ToolsHost& host, int x, int y);
   void renderFiles(ToolsHost& host, ToolsCanvas& c);
@@ -132,10 +145,13 @@ class SettingsScreen {
   bool _armed = false;
   const char* _note = nullptr;
   char _coverNote[96] = {};
-  uint8_t _page = 0;  // 0 = settings, 1 = lock, 2 = wallpaper, 3 = apps, 4 = files
+  // 0 = settings, 1 = lock, 2 = wallpaper, 3 = apps, 4 = files,
+  // 5 = the lock screen's picture, off the card
+  uint8_t _page = 0;
   lock::Config _lock;
   // The card's offerings, read once on entering the page: the card is powered
-  // per call, and re-listing on every repaint would strobe it.
+  // per call, and re-listing on every repaint would strobe it. Pages 2 and 5
+  // are never open at the same time, so they share the one buffer.
   int8_t _wallN = -1;
   char _wallNames[setui::WALL_MAX][ToolsHost::SD_NAME_LEN] = {};
   // The files page's access point. Held by value, started on entering the

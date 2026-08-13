@@ -633,17 +633,61 @@ int main() {
       tapRect(setui::chipRect(was - lock::EMPTY_FIRST));
     }
 
-    // The picture row is the one that goes somewhere: it hands over to the
-    // notes tool's pairing screen, because that is where the phone page with
-    // the uploader lives. Settings has no web server and should not grow one.
+    // The picture row is the one that goes somewhere: to the card's list of
+    // pictures, which is where a picture comes from now. The phone route still
+    // exists at the foot of that page -- a device with an empty slot has no
+    // other way in -- and it still hands over to the notes tool's pairing
+    // screen, because that is where the uploader lives. Settings has no web
+    // server and should not grow one.
     tapRect(setui::sendRect());
+    if (!toybox.hostInSettings() || toybox.hostSettings().hostPage() != 5) {
+      printf("LOCK FAIL: the picture row did not open the card's list\n");
+      abort();
+    }
+    if (lockimg::have()) {
+      printf("LOCK FAIL: a lock picture existed before one was chosen\n");
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("settings_lock_from_card");
+    epd.clear();
+    toybox.render(stickyHost.sharedCanvas());
+    epd.displayFull();
+    g_dumpEnabled = false;
+    tapRect(setui::wallRect(0));  // "mountains.tbi"
+    if (!lockimg::have()) {
+      printf("LOCK FAIL: choosing a file did not store a lock picture\n");
+      abort();
+    }
+    // And the wallpaper is untouched by it: one list, two destinations, and
+    // the failure worth guarding against is the two of them being one file.
+    if (wallimg::have()) {
+      printf("LOCK FAIL: choosing a lock picture wrote the wallpaper too\n");
+      abort();
+    }
+    tapRect(setui::wallRemoveRect());
+    if (lockimg::have()) {
+      printf("LOCK FAIL: REMOVE left the lock picture behind\n");
+      abort();
+    }
+    tapRect(setui::lockPhoneRect());
     if (!toybox.hostInApp() || strcmp(toybox.activeTitle(), "NOTES") != 0) {
-      printf("LOCK FAIL: the picture row did not open the notes pairing\n");
+      printf("LOCK FAIL: the phone line did not open the notes pairing\n");
       abort();
     }
     toybox.goHub();
     toybox.openSettings();  // back into settings...
     tapRect(setui::actionRect(setui::ACT_LOCK));  // ...and back to the lock page
+
+    // Back from the picture list goes up to the lock page, not out of it: it
+    // was opened from a row there, and landing on the settings root would lose
+    // the place the person was standing in.
+    tapRect(setui::sendRect());
+    toybox.onTap(BACK_W / 2, TOPBAR_H / 2);
+    if (!toybox.hostInSettings() || toybox.hostSettings().hostPage() != 1) {
+      printf("LOCK FAIL: back from the picture list did not return to the lock page\n");
+      abort();
+    }
 
     // ...and back goes up one page rather than out of settings altogether.
     toybox.onTap(BACK_W / 2, TOPBAR_H / 2);

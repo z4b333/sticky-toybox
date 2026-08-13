@@ -130,6 +130,7 @@ class StickyHost : public ToolsHost {
   // this header meet awkwardly in the harness build.
   int sdWallpapers(char names[][SD_NAME_LEN], int max) override;
   bool sdWallpaperTake(const char* name) override;
+  bool sdLockTake(const char* name) override;
   int shelfFolders(ShelfFolder* out, int max, const char* ext) override;
   int bookList(BookInfo* out, int max, const char* dir) override;
   bool bookOpen(const char* file) override;

@@ -294,6 +294,12 @@ class ToolsHost {
     (void)name;
     return false;
   }
+  // The same copy, into the lock screen's picture instead. One list feeds both
+  // -- a .tbi is a .tbi -- so only the destination differs.
+  virtual bool sdLockTake(const char* name) {
+    (void)name;
+    return false;
+  }
 
   // Books: pre-converted .tbk volumes on the SD card (tools/make_tbk.py).
   // A page is 48,000 bytes in the framebuffer's own layout, so the reader

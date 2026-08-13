@@ -83,7 +83,9 @@ void SettingsScreen::enter() {
 bool SettingsScreen::back() {
   if (_page == 0) return false;
   leaveFiles();  // no-op unless the files page was the one being left
-  _page = 0;
+  // The picture list was opened from the lock screen page, so it goes back
+  // there rather than all the way out; every other page came from the top.
+  _page = _page == 5 ? 1 : 0;
   _note = nullptr;
   return true;
 }
@@ -186,6 +188,87 @@ bool SettingsScreen::tapWall(ToolsHost& host, int x, int y) {
   return false;
 }
 
+// --- the lock screen's picture ------------------------------------------------
+// The same list as the wallpaper page, because it is the same kind of file, and
+// a card that already holds pictures for one of them holds them for the other.
+// The card comes first here for the reason it comes first there: a picture that
+// is already on the card is one tap away, where the phone route is an access
+// point, a browser, a pairing step and a transfer -- worth it once, for a photo
+// that only exists on a phone, and worth nothing at all the other times.
+//
+// So the phone is still reachable, as one line at the foot of the page. It has
+// to be: a device with an empty card slot has no other way to get a picture in.
+void SettingsScreen::renderLockPic(ToolsHost& host, ToolsCanvas& c) {
+  (void)host;
+  using namespace setui;
+  drawTopBar(c, "LOCK PICTURE");
+
+  const TRect rm = wallRemoveRect();
+  if (lockimg::have()) {
+    c.button(rm.x, rm.y, rm.w, rm.h, "REMOVE THE CURRENT ONE", false, TS_MED);
+  } else {
+    c.text(rm.x + 4, rm.y + 12, "none set yet", TS_MED, true);
+  }
+
+  c.textTracked(16, WALL_Y0 - 40, "ON THE SD CARD", TS_MED, true, false, 1);
+  c.fillRect(16, WALL_Y0 - 14, SCREEN_W - 32, 1, true);
+
+  if (_wallN < 0) {
+    c.textCentered(SCREEN_W / 2, 320, "no card found", TS_LARGE, true);
+    c.textCentered(SCREEN_W / 2, 364, "is one in the slot?", TS_MED, true);
+  } else if (_wallN == 0) {
+    c.textCentered(SCREEN_W / 2, 320, "no pictures on the card", TS_LARGE, true);
+    c.textCentered(SCREEN_W / 2, 364, "make .tbi files with tools/make_tbi.py", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, 392, "and put them in /wallpapers", TS_SMALL, true);
+  } else {
+    for (int i = 0; i < _wallN; i++) {
+      const TRect r = wallRect(i);
+      c.listRow(r.x, r.y, r.w, r.h, _wallNames[i]);
+    }
+  }
+
+  const TRect ph = lockPhoneRect();
+  c.fillRect(ph.x, ph.y - 8, ph.w, 1, true);
+  c.text(ph.x + 4, ph.y + 8, "or send one from a phone", TS_SMALL, true);
+
+  c.textCentered(SCREEN_W / 2, 776,
+                 _note ? _note : "a chosen picture is copied in, so the card can come out",
+                 TS_SMALL, true);
+}
+
+bool SettingsScreen::tapLockPic(ToolsHost& host, int x, int y) {
+  using namespace setui;
+  _note = nullptr;
+  if (lockimg::have() && wallRemoveRect().hit(x, y)) {
+    lockimg::remove();
+    _note = "removed";
+    host.beep(2);
+    return true;
+  }
+  if (lockPhoneRect().hit(x, y)) {
+    // Settings has no web server of its own, so this hands over to the notes
+    // tool's pairing screen, whose phone page already carries the uploader.
+    host.beep(1);
+    host.goPairPicture();
+    return false;  // the shell repaints when the tool opens
+  }
+  for (int i = 0; i < _wallN; i++) {
+    if (!wallRect(i).hit(x, y)) continue;
+    if (host.sdLockTake(_wallNames[i])) {
+      _note = "lock picture set";
+      host.beep(1);
+    } else {
+      _note = "could not read it from the card";
+      host.beep(2);
+    }
+    // The card had the bus and the panel was re-initialised on the way out, so
+    // a differential repaint would difference against nothing.
+    host.refresh(true);
+    return false;
+  }
+  return false;
+}
+
 // --- the files page -----------------------------------------------------------
 // Pair, then get out of the way. The file list is on the phone because that is
 // where the person is looking -- and because while the card is being written
@@ -271,6 +354,10 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
   }
   if (_page == 2) {
     renderWall(host, c);
+    return;
+  }
+  if (_page == 5) {
+    renderLockPic(host, c);
     return;
   }
   if (_page == 4) {
@@ -374,7 +461,7 @@ const char* rowHint(int i) {
     case setui::LR_PICTURE:
       // Short, because the buttons start where a longer line would run on.
       // What the picture is for is said by the chip above it.
-      return lockimg::have() ? "one is stored" : "none sent yet";
+      return lockimg::have() ? "one is stored" : "none chosen yet";
     case setui::LR_WAKE: return "where the power button takes you";
     case setui::LR_ROTATE:
       // When it is off, say what happens instead -- otherwise the note simply
@@ -436,7 +523,7 @@ void SettingsScreen::renderLock(ToolsHost& host, ToolsCanvas& c) {
       }
     } else if (i == LR_PICTURE) {
       const TRect sr = sendRect();
-      c.button(sr.x, sr.y, sr.w, sr.h, lockimg::have() ? "REPLACE" : "SEND ONE", false,
+      c.button(sr.x, sr.y, sr.w, sr.h, lockimg::have() ? "REPLACE" : "FROM CARD", false,
                TS_MED);
       if (lockimg::have()) {
         const TRect rm = removeRect();
@@ -463,11 +550,15 @@ bool SettingsScreen::tapLock(ToolsHost& host, int x, int y) {
     return true;
   }
   if (sendRect().hit(x, y)) {
-    // Settings has no web server of its own, so this hands over to the notes
-    // tool's pairing screen, whose phone page already carries the uploader.
+    // Straight to the card's list. Reading it borrows the display's bus and
+    // re-initialises the panel on the way out, so the repaint is full and the
+    // shell is told not to do one of its own.
     host.beep(1);
-    host.goPairPicture();
-    return false;  // the shell repaints when the tool opens
+    _note = nullptr;
+    enterWall(host);
+    _page = 5;
+    host.refresh(true);
+    return false;
   }
   for (int k = 0; k < lock::EMPTY_COUNT; k++) {
     if (!chipRect(k).hit(x, y)) continue;
@@ -524,6 +615,7 @@ bool SettingsScreen::tapLock(ToolsHost& host, int x, int y) {
 bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
   if (_page == 1) return tapLock(host, x, y);
   if (_page == 2) return tapWall(host, x, y);
+  if (_page == 5) return tapLockPic(host, x, y);
   if (_page == 3) return tapApps(host, x, y);
   if (_page == 4) return tapFiles(host, x, y);
 

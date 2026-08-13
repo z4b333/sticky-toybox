@@ -41,6 +41,10 @@ bool StickyHost::sdWallpaperTake(const char* name) {
   return sdcard::takeTbi(name, wallimg::PATH);
 }
 
+bool StickyHost::sdLockTake(const char* name) {
+  return sdcard::takeTbi(name, lockimg::PATH);
+}
+
 int StickyHost::shelfFolders(ShelfFolder* out, int max, const char* ext) {
   // Same shape on both sides, so one small buffer and a copy; folders are
   // few enough that this stays on the stack.
