@@ -443,6 +443,16 @@ class BookTool : public ToolApp {
   // chrome has to be drawn over the page and only the canvas can do that. A
   // host with no grey (guests, the harness) falls through to the canvas path,
   // where render() dithers the page down to 1-bit.
+  // Same rule as the EPUB reader, with one hardware exception: a grey page
+  // goes through the four-level waveform, which IS a full sequence -- there is
+  // no partial version of it, and asking for one would show nothing.
+  void paint() {
+    if (rmenu::fastTurns(prefs()))
+      host().refreshFast();
+    else
+      host().refresh(true);
+  }
+
   void showPage() {
     if (_books[_cur].bpp == 2 && !_chrome) {
       // Streamed off the card first. bookShowGrey (the whole page in one
@@ -451,7 +461,7 @@ class BookTool : public ToolApp {
       if (host().bookShowGreyPaged(_pageNo)) return;
       if (_pageBuf && host().bookShowGrey(_pageBuf)) return;
     }
-    host().refresh(true);
+    paint();
   }
 
   void leaveBook() {
@@ -499,7 +509,7 @@ class BookTool : public ToolApp {
     _jump = _pageNo;
     _nmarks = marks::load(host(), _books[_cur].file, _marks);
     host().beep(0);
-    host().refresh(true);
+    paint();
   }
 
   void menuClose() {
@@ -512,7 +522,7 @@ class BookTool : public ToolApp {
     _menu = rmenu::Page::Root;
     _mpage = 0;
     host().beep(0);
-    host().refresh(true);
+    paint();
   }
 
   void menuScroll(int dir) {
@@ -524,7 +534,7 @@ class BookTool : public ToolApp {
     }
     _mpage = want;
     host().beep(0);
-    host().refresh(true);
+    paint();
   }
 
   // The jump. A .tbk has no chapters, so the only question is a number, and on
@@ -542,7 +552,7 @@ class BookTool : public ToolApp {
     _typed = (int32_t)(want < 0 ? 0 : (want > last ? last : want));
     _jump = (uint32_t)_typed;
     host().beep(0);
-    host().refresh(true);
+    paint();
   }
 
   // 1..9, then clear, 0, backspace.
@@ -580,7 +590,7 @@ class BookTool : public ToolApp {
       _jump = (uint32_t)(next > 0 ? next - 1 : 0);
     }
     host().beep(0);
-    host().refresh(true);
+    paint();
   }
 
   void markLabel(const marks::Mark& m, char* out, int cap) {

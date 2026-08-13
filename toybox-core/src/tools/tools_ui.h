@@ -217,6 +217,16 @@ class ToolsHost {
   // Re-render the active tool and push it to the panel. full=true forces an
   // absolute refresh (slower, clears ghosting) — use on screen changes.
   virtual void refresh(bool full = false) = 0;
+  // A page turn's refresh: partial, so it costs 0.3 s instead of 1.7 s, with
+  // the host promoting itself to a full clean every so often because ghosting
+  // accumulates. Use this for anything cosmetic and frequent -- turning a
+  // page, paging a list, moving through the panel. Use refresh(true) when the
+  // panel MUST be clean: after the SD bus was released (the controller was
+  // re-initialised), after a grey page, and on the way out of a book.
+  //
+  // The default is a plain partial, which is what a host with no ghosting
+  // policy of its own should do.
+  virtual void refreshFast() { refresh(false); }
   virtual void beep(uint8_t kind) = 0;  // 0 tap, 1 confirm, 2 reject, 3 alarm
   virtual void goHub() = 0;
   // Opens the notes tool straight into its pairing screen, where the phone's

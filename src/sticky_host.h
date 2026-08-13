@@ -77,6 +77,20 @@ class StickyHost : public ToolsHost {
     else
       epd.displayPartial();
   }
+  // Every eighth fast refresh is a full one. Eight is what commercial readers
+  // settle on: one 1.7-second pause per eight turns, and the page never gets
+  // visibly dirty. The driver has its own backstop at forty partials, which is
+  // ghost control for the whole firmware rather than a reading cadence.
+  static constexpr int CLEAN_EVERY = 8;
+  void refreshFast() override {
+    if (++_fastCount >= CLEAN_EVERY) {
+      _fastCount = 0;
+      refresh(true);
+      return;
+    }
+    refresh(false);
+  }
+  void resetFastCount() { _fastCount = 0; }
   void beep(uint8_t kind) override;
   void goHub() override { toybox.goHub(); }
   void goPairPicture() override { toybox.openPairPicture(); }
@@ -160,6 +174,7 @@ class StickyHost : public ToolsHost {
   }
 
   ToolsCanvas& sharedCanvas() { return _canvas; }
+  int _fastCount = 0;
 
 #ifdef TOYBOX_HOST
   // The standalone firmware is the whole device, so it never offers a way out.

@@ -179,12 +179,17 @@ static void dumpFrame(const uint8_t* fb) {
   printf("wrote %s\n", name);
 }
 static int g_paintCount = 0;  // counts refreshes even when dumping is off
+// Counted apart, because the whole point of a fast turn is WHICH of these two
+// the reader asked for: a full is 1.7 s on the glass and a partial is 0.3 s.
+static int g_fullCount = 0, g_partialCount = 0;
 void Epd::displayFull() {
   g_paintCount++;
+  g_fullCount++;
   dumpFrame(_fb);
 }
 void Epd::displayPartial() {
   g_paintCount++;
+  g_partialCount++;
   dumpFrame(_fb);
 }
 void Epd::deepSleep() {}
@@ -1875,6 +1880,36 @@ int main() {
     if (et->hostSpine() != 0) {
       printf("EPUB APP FAIL: UP did not cross back into chapter one\n");
       abort();
+    }
+
+    // --- fast turns ----------------------------------------------------------
+    // A page turn is a PARTIAL refresh -- 0.3 s against 1.7 s -- with the host
+    // promoting itself to a clean full one every eighth. That cadence is the
+    // whole feature: too rare and the ghosts pile up, too often and it is not
+    // fast any more. Eight turns must therefore cost exactly one full.
+    {
+      g_dumpEnabled = false;
+      stickyHost.resetFastCount();
+      const int fullBefore = g_fullCount, partialBefore = g_partialCount;
+      for (int i = 0; i < 8; i++) toybox.onButton(SideBtn::Down);
+      const int fulls = g_fullCount - fullBefore, partials = g_partialCount - partialBefore;
+      if (fulls != 1 || partials != 7) {
+        printf("EPUB APP FAIL: eight turns cost %d full and %d partial refreshes\n", fulls,
+               partials);
+        abort();
+      }
+      // ...and with fast turns switched off, every one of them is a full.
+      rmenu::setFastTurns(stickyHost.prefs(), false);
+      const int fullBefore2 = g_fullCount, partialBefore2 = g_partialCount;
+      for (int i = 0; i < 3; i++) toybox.onButton(SideBtn::Up);
+      if (g_fullCount - fullBefore2 != 3 || g_partialCount != partialBefore2) {
+        printf("EPUB APP FAIL: with fast turns off, 3 turns cost %d full %d partial\n",
+               g_fullCount - fullBefore2, g_partialCount - partialBefore2);
+        abort();
+      }
+      rmenu::setFastTurns(stickyHost.prefs(), true);
+      stickyHost.resetFastCount();
+      printf("fast turns ok (seven partials to a full, and off means off)\n");
     }
 
     // --- the panel behind the power button ----------------------------------

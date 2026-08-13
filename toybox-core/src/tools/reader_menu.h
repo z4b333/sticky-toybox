@@ -23,6 +23,13 @@
 
 namespace rmenu {
 
+// Fast turns: a partial refresh instead of a full one, 0.3 s against 1.7 s,
+// with the host cleaning up every eighth. A preference because ghosting is a
+// matter of taste and of eyes, and one preference for both readers because it
+// is one device and the answer cannot sensibly differ between two books.
+inline bool fastTurns(Preferences& p) { return p.getUInt("rd_fast", 1) != 0; }
+inline void setFastTurns(Preferences& p, bool on) { p.putUInt("rd_fast", on ? 1 : 0); }
+
 // Which page of the panel is showing. `None` means the book itself.
 enum class Page : uint8_t { None, Root, Contents, Marks, Text, Keep };
 
