@@ -150,6 +150,12 @@ bool takeBmp(const char* name, const char* destPath, int levels);
 // out or offers nothing.
 bool sleepArtGray(uint8_t* gray);
 
+// Recipes: .json files in /recipes (schema.org Recipe JSON-LD, saved from a
+// website or written by hand). Bare names, 63 bytes plus the NUL; -1 when no
+// card answered. Same claim-per-call bus rule as listTbi. Reading one back
+// is readWhole("/recipes/<name>").
+int listJson(char names[][64], int max);
+
 // A file on the card written a piece at a time, for anything too big to
 // assemble in RAM first. Only valid while something already holds the bus;
 // the cover builder streams into this while a book is being opened.

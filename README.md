@@ -52,6 +52,11 @@ and Vietnamese. The Thai readme is at [docs/README.th.md](docs/README.th.md).
   by CrossInk is used without a decode, and ours is left where CrossInk
   looks. Options cover the table of contents, bookmarks down to a chosen
   phrase, text size and spacing.
+- **Recipes** — schema.org Recipe JSON, the hidden data nearly every recipe
+  website embeds: save it as a `.json` in `/recipes` on the card, or paste
+  the page to the device over WiFi. Ingredients get tick boxes for the
+  gathering; COOK shows one step per page in large type, a tap or a side
+  button to advance — made for a glance from the chopping board.
 - Both readers list series folders under `/books`, remember your place, paint
   the cover while a book opens, and can leave the current book's cover on the
   lock screen. Page turns are a 0.3 s partial refresh with a cleaning full

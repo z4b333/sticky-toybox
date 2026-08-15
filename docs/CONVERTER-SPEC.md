@@ -437,6 +437,12 @@ Show the result before you write it. The device cannot.
 Books are also listed from `/Read` and `/epub` — CrossInk's shelf roots —
 beside `/books`, so a card set up for either firmware reads in both.
 
+**Recipes** (nothing to convert): the device reads schema.org/Recipe JSON-LD
+from `.json` files in `/recipes` — the `<script type="application/ld+json">`
+block of a recipe page, saved verbatim, works as-is (`@graph`, HowToStep and
+HowToSection forms, ISO-8601 durations, entities and `\u` escapes are all
+handled on device). Keep files under 256 KB and names under 63 bytes.
+
 **Do not write a cover into `/.toybox/covers/`.** The firmware decides whether
 a book has a cover by looking at a thumbnail in its *internal flash*, which a
 PC cannot write; it would see none, rebuild, and overwrite your file. Covers

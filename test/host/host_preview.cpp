@@ -38,6 +38,7 @@
 #include "tools/epub/epub_jpegdc.h"
 #include "fake_epub_cover.inc"
 #include "tools/tool_flash.h"
+#include "tools/tool_recipe.h"
 #include "tools/tool_note.h"
 #include "tools/tool_picker.h"
 #include "tools/tool_random.h"
@@ -243,7 +244,7 @@ static void checkHubRouting(const char* label) {
   struct Grp { Want items[6]; int n; };
   const Grp ALL[3] = {
       {{{true, 0}, {true, 1}, {true, 2}, {true, 3}, {false, 7}, {false, 8}}, 6},
-      {{{false, 0}, {false, 1}, {false, 3}, {false, 4}, {false, 2}}, 5},
+      {{{false, 0}, {false, 1}, {false, 3}, {false, 4}, {false, 2}, {false, 11}}, 6},
       {{{false, 9}, {false, 10}, {false, 5}, {false, 6}}, 4},
   };
   // The Study drawer wears the recently-read strip once any book has been
@@ -560,9 +561,9 @@ int main() {
 
   // Hide four apps through the screen itself, so the hub below reflows around
   // exactly what a finger would have hidden. STUDY's heading sits at
-  // 92 + 26 + 5*52 + 14 = 392 with DECIDE's five rows above it.
+  // 92 + 26 + 6*52 + 14 = 444 with DECIDE's six rows above it.
   g_dumpEnabled = false;
-  for (auto rc : {setRow(0, 92, 0), setRow(0, 92, 2), setRow(1, 92, 1), setRow(1, 392, 2)})
+  for (auto rc : {setRow(0, 92, 0), setRow(0, 92, 2), setRow(1, 92, 1), setRow(1, 444, 2)})
     toybox.onTap(rc.first, rc.second);
   toybox.onTap(BACK_W / 2, TOPBAR_H / 2);  // back up to the buttons page
   // Sound steps down a level on each tap and wraps at the bottom, so tapping it
@@ -571,7 +572,7 @@ int main() {
   const int levels = stickyHost.soundLevels();
   const int soundWas = stickyHost.soundLevel();
   tapRect(setui::actionRect(setui::ACT_SOUND));
-  if (appvis::shown() != 11 || stickyHost.soundLevel() != soundWas - 1) {
+  if (appvis::shown() != 12 || stickyHost.soundLevel() != soundWas - 1) {
     printf("SETTINGS FAIL: taps did not land (%d shown, sound %d)\n", appvis::shown(),
            stickyHost.soundLevel());
     abort();
@@ -3000,6 +3001,178 @@ int main() {
       }
     }
     printf("crossink covers ok (ours put back, theirs grabbed, both dirs)\n");
+    g_dumpEnabled = true;
+  }
+
+  // --- recipes ---------------------------------------------------------------
+  // The parser first, on JSON shaped like the internet actually serves it:
+  // @graph with an Article in the way, @type as an array, HowToStep objects,
+  // a HowToSection, entities, escapes, HTML tags, ISO durations.
+  {
+    g_dumpEnabled = false;
+    static rcp::Recipe r;
+    static const char kPage[] =
+        "{\"@context\":\"https://schema.org\",\"@graph\":[{\"@type\":\"Article\",\"name\":\"Blog"
+        "\"},"
+        "{\"@type\":[\"Recipe\"],\"name\":\"Tarte \\u00e0 l'oignon &amp; thyme\","
+        "\"recipeYield\":[\"6\",\"6 slices\"],\"totalTime\":\"PT1H30M\","
+        "\"recipeIngredient\":[\"2 <b>large</b> onions\",\"1 sheet puff pastry\","
+        "\"2 tbsp cr\\u00e8me fra\\u00eeche\"],"
+        "\"recipeInstructions\":[{\"@type\":\"HowToStep\",\"text\":\"Slice the onions &amp; cook "
+        "slowly.\"},"
+        "{\"@type\":\"HowToSection\",\"name\":\"Assembly\",\"itemListElement\":["
+        "{\"@type\":\"HowToStep\",\"text\":\"Roll out the pastry.\"},"
+        "{\"@type\":\"HowToStep\",\"text\":\"Top &#38; bake 25 minutes.\"}]}],"
+        "\"author\":{\"@type\":\"Person\",\"name\":\"Someone\"}}]}";
+    if (!rcp::parse(kPage, strlen(kPage), r)) {
+      printf("RECIPE FAIL: the @graph page did not parse\n");
+      abort();
+    }
+    if (strcmp(r.name, "Tarte \xc3\xa0 l'oignon & thyme") != 0 ||
+        strcmp(r.yield, "6 slices") != 0 || r.totalMin != 90 || r.nIng != 3 || r.nSteps != 3) {
+      printf("RECIPE FAIL: got '%s' yield '%s' %u min, %d ing %d steps\n", r.name, r.yield,
+             (unsigned)r.totalMin, r.nIng, r.nSteps);
+      abort();
+    }
+    if (strcmp(r.ing[0], "2 large onions") != 0 ||
+        strcmp(r.ing[2], "2 tbsp cr\xc3\xa8me fra\xc3\xae" "che") != 0 ||
+        strcmp(r.steps[0], "Slice the onions & cook slowly.") != 0 ||
+        strcmp(r.steps[2], "Top & bake 25 minutes.") != 0) {
+      printf("RECIPE FAIL: text mangled: '%s' / '%s' / '%s'\n", r.ing[0], r.steps[0], r.steps[2]);
+      abort();
+    }
+    // The plain shapes: bare object, string-array steps, numeric yield.
+    static const char kPlain[] =
+        "{\"@type\":\"Recipe\",\"name\":\"Toast\",\"recipeIngredient\":[\"bread\"],"
+        "\"recipeInstructions\":[\"Toast the bread.\",\"Butter it.\"],"
+        "\"recipeYield\":4,\"prepTime\":\"PT5M\"}";
+    if (!rcp::parse(kPlain, strlen(kPlain), r) || r.nSteps != 2 || r.prepMin != 5 ||
+        strcmp(r.yield, "4") != 0) {
+      printf("RECIPE FAIL: the plain recipe misread (%d steps, %u min, '%s')\n", r.nSteps,
+             (unsigned)r.prepMin, r.yield);
+      abort();
+    }
+    char head[48];
+    rcp::headline(r, head, sizeof(head));
+    if (strcmp(head, "serves 4  \xc2\xb7  5 min") != 0) {
+      printf("RECIPE FAIL: headline says '%s'\n", head);
+      abort();
+    }
+    static const char kNot[] = "{\"@type\":\"Article\",\"name\":\"not food\"}";
+    if (rcp::parse(kNot, strlen(kNot), r)) {
+      printf("RECIPE FAIL: an Article passed as a recipe\n");
+      abort();
+    }
+    printf("recipe parse ok (graph, sections, entities, durations)\n");
+
+    // The store: same name replaces, different name takes a new slot.
+    static const char kDal[] =
+        "{\"@type\":\"Recipe\",\"name\":\"Weeknight dal\",\"recipeIngredient\":[\"1 cup red "
+        "lentils\",\"2 cloves garlic\"],\"recipeInstructions\":[\"Rinse the lentils.\",\"Fry the "
+        "garlic.\",\"Simmer 20 minutes.\"],\"recipeYield\":\"4\"}";
+    {
+      char nm[rcp::NAME_LEN];
+      const int a = rstore::save(kDal, strlen(kDal), nm, sizeof(nm));
+      const int b = rstore::save(kDal, strlen(kDal), nm, sizeof(nm));
+      int slots[rstore::SLOTS];
+      static char names[rstore::SLOTS][rcp::NAME_LEN];
+      if (a < 0 || a != b || rstore::list(slots, names, rstore::SLOTS) != 1 ||
+          strcmp(names[0], "Weeknight dal") != 0) {
+        printf("RECIPE FAIL: the store did not replace by name (%d vs %d)\n", a, b);
+        abort();
+      }
+      rstore::remove(a);
+      if (rstore::list(slots, names, rstore::SLOTS) != 0) {
+        printf("RECIPE FAIL: a removed recipe still lists\n");
+        abort();
+      }
+    }
+
+    // The app itself, over a card recipe and a phone one.
+    sdcard::hostPutCardFile("/recipes/tarte.json", kPage, (int)strlen(kPage));
+    toybox.open(false, 11);
+    auto* rt = static_cast<RecipeTool*>(toybox.hostActive());
+    g_dumpEnabled = true;
+    setScreen("tool_recipe_help");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    toybox.onTap(240, 650);  // GOT IT
+    if (rt->hostCount() != 1) {
+      printf("RECIPE FAIL: the card recipe did not list (%d)\n", rt->hostCount());
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_recipe_list");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    toybox.onTap(240, rcpui::LIST_Y0 + 20);  // the one row
+    if (rt->hostScreen() != 1 || rt->hostRecipe().nIng != 3) {
+      printf("RECIPE FAIL: the card recipe did not open (screen %d)\n", rt->hostScreen());
+      abort();
+    }
+    toybox.onTap(100, rcpui::ING_Y0 + 20);  // tick the onions
+    if (!rt->hostTicked(0)) {
+      printf("RECIPE FAIL: the tick did not take\n");
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_recipe_view");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    toybox.onTap(240, rcpui::COOK_BTN.y + 30);
+    if (rt->hostScreen() != 2 || rt->hostStep() != 0) {
+      printf("RECIPE FAIL: COOK did not open step one\n");
+      abort();
+    }
+    toybox.onTap(400, 750);  // the NEXT zone
+    toybox.onButton(SideBtn::Down);
+    if (rt->hostStep() != 2) {
+      printf("RECIPE FAIL: stepping landed on %d, not 2\n", rt->hostStep());
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_recipe_cook");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    toybox.onTap(400, 750);  // past the last step: done, back to the recipe
+    if (rt->hostScreen() != 1) {
+      printf("RECIPE FAIL: finishing did not return to the recipe\n");
+      abort();
+    }
+    toybox.onTap(50, 26);  // back to the list
+
+    // The phone route, through the same store the real page posts to.
+    toybox.onTap(240, rcpui::PHONE_BTN.y + 20);
+    if (rt->hostScreen() != 3) {
+      printf("RECIPE FAIL: the phone button did not open pairing\n");
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_recipe_phone");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    if (!rt->hostNet().hostPost(kDal)) {
+      printf("RECIPE FAIL: the posted recipe was refused\n");
+      abort();
+    }
+    toybox.onTap(rcpui::DONE_BTN.x + 30, rcpui::DONE_BTN.y + 30);
+    if (rt->hostCount() != 2) {
+      printf("RECIPE FAIL: the phone recipe did not join the list (%d)\n", rt->hostCount());
+      abort();
+    }
+    toybox.onTap(240, rcpui::LIST_Y0 + 20);  // flash recipes list first
+    if (rt->hostScreen() != 1 || rt->hostRecipe().nSteps != 3) {
+      printf("RECIPE FAIL: the phone recipe did not open\n");
+      abort();
+    }
+    toybox.onTap(50, 26);  // back to the list
+    toybox.onTap(rcpui::delRect(0).x + 20, rcpui::delRect(0).y + 20);  // delete it
+    if (rt->hostCount() != 1) {
+      printf("RECIPE FAIL: delete left %d recipes\n", rt->hostCount());
+      abort();
+    }
+    toybox.goHub();
+    printf("recipes ok (card list, ticks, step pages, phone import)\n");
     g_dumpEnabled = true;
   }
 

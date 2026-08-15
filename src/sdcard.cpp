@@ -895,6 +895,21 @@ bool readBmpByName(const char* name, uint8_t* gray) {
 }
 }  // namespace
 
+int listJson(char names[][64], int max) {
+  int n = 0;
+  for (const auto& kv : fakeCard()) {
+    if (n >= max) break;
+    const std::string& p = kv.first;
+    if (p.size() < 15 || p.compare(0, 9, "/recipes/") != 0) continue;
+    if (p.compare(p.size() - 5, 5, ".json") != 0) continue;
+    if (p.find('/', 9) != std::string::npos) continue;  // no subfolders
+    strncpy(names[n], p.c_str() + 9, 63);
+    names[n][63] = 0;
+    n++;
+  }
+  return n;
+}
+
 bool sleepArtGray(uint8_t* gray) {
   if (findCardBlob("/sleep.bmp")) return readBmpGray("/sleep.bmp", gray);
   // "Random" on the host is the map's first match: guards plant one file.
@@ -1532,6 +1547,32 @@ bool readBmpByName(const char* name, uint8_t* gray) {
   return ok;
 }
 }  // namespace
+
+int listJson(char names[][64], int max) {
+  if (!busClaim()) {
+    busRelease();
+    return -1;
+  }
+  int n = 0;
+  File d = SD.open("/recipes");
+  if (d && d.isDirectory()) {
+    for (File f = d.openNextFile(); f && n < max; f = d.openNextFile()) {
+      if (f.isDirectory()) continue;
+      const char* nm = f.name();
+      const size_t len = strlen(nm);
+      if (len < 6 || strcasecmp(nm + len - 5, ".json") != 0) continue;
+      // A page's embedded JSON can be large, but a "recipe" past a quarter
+      // megabyte is a saved homepage, not a recipe.
+      if (f.size() < 20 || f.size() > (256u << 10)) continue;
+      const char* bare = strrchr(nm, '/');
+      strncpy(names[n], bare ? bare + 1 : nm, 63);
+      names[n][63] = 0;
+      n++;
+    }
+  }
+  busRelease();
+  return n;
+}
 
 bool sleepArtGray(uint8_t* gray) {
   const bool mine = !busHeld();

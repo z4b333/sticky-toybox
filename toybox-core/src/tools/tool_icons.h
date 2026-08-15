@@ -6,14 +6,14 @@
 
 namespace ticons {
 
-inline constexpr int COUNT = 11;
+inline constexpr int COUNT = 12;
 inline const char* const NAMES[COUNT] = {"COIN",  "DICE",   "TIMER", "RANDOM",
                                          "PICKER", "FLASHCARDS", "NOTES",  "SHIPS",
-                                         "SUDOKU", "BOOKS", "EPUB"};
+                                         "SUDOKU", "BOOKS", "EPUB", "RECIPES"};
 // Kept short: a hub tile is 140 px, which is about twelve characters.
 inline const char* const DESCS[COUNT] = {"heads/tails", "D4 - D20",   "countdown", "number/card",
                                          "from a list", "flashcards", "from phone", "battleship",
-                                         "9x9 numbers", "from the card", "ebooks"};
+                                         "9x9 numbers", "from the card", "ebooks", "what to cook"};
 
 inline void coin(ToolsCanvas& c, int cx, int cy, int s) {
   c.drawCircle(cx, cy, s / 2, 3, true);
@@ -143,6 +143,20 @@ inline void epub(ToolsCanvas& c, int cx, int cy, int s) {
   }
 }
 
+// A pot on the boil: body, lid with a knob, two rising wisps of steam.
+inline void recipes(ToolsCanvas& c, int cx, int cy, int s) {
+  const int w = s - 8, h = (s * 5) / 12;
+  const int x = cx - w / 2, y = cy + s / 2 - h - 4;
+  tdraw::roundRect(c, x, y, w, h, 6, 3, true);
+  c.fillRect(x - 6, y, w + 12, 4, true);              // the lid's brim
+  c.drawCircle(cx, y - 8, 5, 3, true);                // its knob
+  for (int k = 0; k < 2; k++) {                        // the steam
+    const int sx = cx - s / 6 + k * (s / 3);
+    c.fillRect(sx, y - 30, 3, 10, true);
+    c.fillRect(sx + 4, y - 44, 3, 10, true);
+  }
+}
+
 inline void draw(ToolsCanvas& c, int idx, int cx, int cy, int s) {
   switch (idx) {
     case 0: coin(c, cx, cy, s); break;
@@ -155,7 +169,8 @@ inline void draw(ToolsCanvas& c, int idx, int cx, int cy, int s) {
     case 7: battleship(c, cx, cy, s); break;
     case 8: sudoku(c, cx, cy, s); break;
     case 9: books(c, cx, cy, s); break;
-    default: epub(c, cx, cy, s); break;
+    case 10: epub(c, cx, cy, s); break;
+    default: recipes(c, cx, cy, s); break;
   }
 }
 

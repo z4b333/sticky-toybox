@@ -25,7 +25,10 @@ inline constexpr Group GROUPS[] = {
     {"PLAY", {{true, 0}, {true, 1}, {true, 2}, {true, 3}, {false, 7}, {false, 8}}, 6},
     // The timer lives with the deciders: it answers "how long", they answer
     // "which one" -- all of them verdict machines you consult and put down.
-    {"DECIDE", {{false, 0}, {false, 1}, {false, 3}, {false, 4}, {false, 2}}, 5},
+    // Recipes too: "what should we cook" is the oldest decide question there
+    // is -- and STUDY's drawer is full, where a fifth tile would push the
+    // recently-read covers off the panel.
+    {"DECIDE", {{false, 0}, {false, 1}, {false, 3}, {false, 4}, {false, 2}, {false, 11}}, 6},
     // The readers first: the drawer was drawn around "the thing you were
     // reading on top", and the readers are that thing. BOOKS is the .tbk
     // shelf, EPUB the ebook shelf. Four apps on top keeps the bottom of the

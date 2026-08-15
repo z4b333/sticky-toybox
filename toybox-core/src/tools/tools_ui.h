@@ -331,6 +331,16 @@ class ToolsHost {
     return false;
   }
 
+  // Recipe files on the SD card: bare names of the .json files in /recipes
+  // (schema.org Recipe JSON-LD, saved from a website). -1 when no card
+  // answered. Read one back with sdReadWhole("/recipes/<name>").
+  static constexpr int RECIPE_NAME_LEN = 64;
+  virtual int sdRecipes(char names[][RECIPE_NAME_LEN], int max) {
+    (void)names;
+    (void)max;
+    return -1;
+  }
+
   // Covers shared with the CrossPoint/CrossInk family, which caches a
   // finished cover.bmp beside its reading position. Grab: if one is waiting
   // in the book's cache directory, file it as this device's cover art and
