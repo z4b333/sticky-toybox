@@ -1439,10 +1439,23 @@ int main() {
       }
     }
 
+    // Both hash generations, pinned against independent references. The FNV
+    // vector is CrossInk's current directory name (fnvHash64, decimal); the
+    // Murmur one is the 32-bit libstdc++ std::hash older CrossPoint used, kept
+    // for reading old cards.
     char dir[96];
     epubc::cacheDir("/books/wind.epub", dir, sizeof(dir));
+    if (strcmp(dir, "/.crosspoint/epub_1175141337288249041") != 0) {
+      printf("EPUB FAIL: FNV cache dir is %s\n", dir);
+      abort();
+    }
+    if (epubc::fnvHash64("abc", 3) != 16654208175385433931ull) {
+      printf("EPUB FAIL: fnvHash64 drifted\n");
+      abort();
+    }
+    epubc::cacheDirLegacy("/books/wind.epub", dir, sizeof(dir));
     if (strcmp(dir, "/.crosspoint/epub_836526750") != 0) {
-      printf("EPUB FAIL: cache dir is %s\n", dir);
+      printf("EPUB FAIL: legacy cache dir is %s\n", dir);
       abort();
     }
 
@@ -1921,7 +1934,7 @@ int main() {
     // What did that write to the card? Exactly what CrossPoint reads.
     {
       uint8_t buf[16];
-      const int n = stickyHost.sdReadFile("/.crosspoint/epub_836526750/progress.bin", buf, 16);
+      const int n = stickyHost.sdReadFile("/.crosspoint/epub_1175141337288249041/progress.bin", buf, 16);
       epubc::Progress p;
       if (n != 10 || !epubc::decodeProgress(buf, n, p) || p.spine != 1 || !p.hasOffset ||
           p.offset != page1Off) {
@@ -2369,7 +2382,7 @@ int main() {
       // No session is open here, and the card calls now refuse that -- as the
       // device does. This is the harness standing in for another firmware
       // having left the file behind, so it plants it directly.
-      sdcard::hostPlantSide("/.crosspoint/epub_836526750/progress.bin", buf, n);
+      sdcard::hostPlantSide("/.crosspoint/epub_1175141337288249041/progress.bin", buf, n);
       toybox.open(false, 10);  // EPUB, fresh
       auto* et2 = static_cast<EpubTool*>(toybox.hostActive());
       toybox.onTap(240, epubui::LIST_Y0 + epubui::LIST_ROW_H + 10);
@@ -2393,6 +2406,7 @@ int main() {
       toybox.onTap(240, rmenu::rootRect(5, 480).y + 40);  // CLOSE THE BOOK
     }
 
+
     // --- a chapter that is one picture and no words -------------------------
     // A cover page, a colour gallery, a character-art plate: real books are
     // full of chapters with an <img> and nothing else. Such a chapter lays out
@@ -2409,7 +2423,7 @@ int main() {
       cp.hasOffset = true;
       uint8_t buf[10];
       const int n = epubc::encodeProgress(cp, buf);
-      sdcard::hostPlantSide("/.crosspoint/epub_836526750/progress.bin", buf, n);
+      sdcard::hostPlantSide("/.crosspoint/epub_1175141337288249041/progress.bin", buf, n);
       toybox.open(false, 10);
       auto* et3 = static_cast<EpubTool*>(toybox.hostActive());
       toybox.onTap(240, epubui::LIST_Y0 + epubui::LIST_ROW_H + 10);
@@ -2507,6 +2521,88 @@ int main() {
     }
     toybox.onButton(SideBtn::Ok);
     toybox.goHub();
+
+  // Relocated below the recents guard: both of these open books, and the
+  // strip above pins an exact order.
+  {
+    // --- a card from an older firmware migrates its position ----------------
+    // Older CrossPoint (and Toybox until now) kept the cache under the Murmur
+    // hash. When the FNV directory has nothing, the Murmur one is read -- and
+    // the next save writes FNV, so the position has moved house.
+    {
+      epubc::Progress cp;
+      cp.spine = 1;
+      cp.page = 1;
+      cp.pageCount = 9;
+      cp.offset = 2500;
+      cp.hasOffset = true;
+      uint8_t buf[10];
+      const int n = epubc::encodeProgress(cp, buf);
+      sdcard::hostPlantSide("/.crosspoint/epub_1175141337288249041/progress.bin", buf, 0);
+      sdcard::hostPlantSide("/.crosspoint/epub_836526750/progress.bin", buf, n);
+      toybox.open(false, 10);
+      auto* etm = static_cast<EpubTool*>(toybox.hostActive());
+      toybox.onTap(240, epubui::LIST_Y0 + epubui::LIST_ROW_H + 10);
+      if (etm->hostScreen() != 1 || etm->hostSpine() != 1) {
+        printf("EPUB APP FAIL: the legacy-hash position was not read\n");
+        abort();
+      }
+      toybox.onButton(SideBtn::Down);  // a turn: the save lands in the FNV dir
+      uint8_t back[16];
+      epubc::Progress q;
+      const int m =
+          sdcard::hostReadSide("/.crosspoint/epub_1175141337288249041/progress.bin", back, 16);
+      if (m != 10 || !epubc::decodeProgress(back, m, q) || q.spine != 1) {
+        printf("EPUB APP FAIL: the migrated position did not land in the FNV dir (n=%d)\n", m);
+        abort();
+      }
+      toybox.onButton(SideBtn::Ok);
+      toybox.onTap(240, rmenu::rootRect(5, 480).y + 40);  // CLOSE THE BOOK
+      printf("hash migration ok (reads Murmur, writes FNV)\n");
+    }
+
+    // --- the CrossInk shelf ---------------------------------------------------
+    // /Read (and /epub) appear as folders beside the series, named by their
+    // absolute path; opening one lists and opens its books, and the position
+    // lands under the FNV hash of the /Read path, where CrossInk will look.
+    {
+      sdcard::hostSetCrossRoots(true);
+      toybox.open(false, 10);  // fresh enter: the shelf re-lists
+      auto* etr = static_cast<EpubTool*>(toybox.hostActive());
+      if (etr->hostFolders() != 2) {
+        printf("EPUB APP FAIL: /Read did not shelve (%d folders)\n", etr->hostFolders());
+        abort();
+      }
+      toybox.onTap(240, shelf::Y0 + shelf::ROW_H + 10);  // the second folder: /Read
+      if (strcmp(etr->hostDir(), "/Read") != 0 || etr->hostItems() != 1) {
+        printf("EPUB APP FAIL: /Read opened as '%s' with %d rows\n", etr->hostDir(),
+               etr->hostItems());
+        abort();
+      }
+      toybox.onTap(240, shelf::Y0 + 10);  // the one book
+      if (etr->hostScreen() != 1) {
+        printf("EPUB APP FAIL: the /Read book did not open\n");
+        abort();
+      }
+      toybox.onButton(SideBtn::Down);              // a turn
+      toybox.onButton(SideBtn::Ok);                // the panel
+      toybox.onTap(240, rmenu::rootRect(5, 480).y + 40);  // CLOSE: the save lands
+      uint8_t pb[16];
+      if (sdcard::hostReadSide("/.crosspoint/epub_16433272010175318797/progress.bin", pb, 16) !=
+          10) {
+        sdcard::hostDumpSides();
+        printf("EPUB APP FAIL: /Read progress not under the FNV of its own path\n");
+        abort();
+      }
+      toybox.onTap(20, 20);                               // back out of /Read
+      if (strcmp(etr->hostDir(), "/books") != 0) {
+        printf("EPUB APP FAIL: back from /Read did not land on the top shelf\n");
+        abort();
+      }
+      sdcard::hostSetCrossRoots(false);
+      printf("crossink shelf ok (/Read lists, opens, and keeps its place)\n");
+    }
+  }
     toybox.hostHub().goHome();
     g_dumpEnabled = true;
     printf("recents ok (covers reopen, thumbnail stored, DOWN carries on reading)\n");

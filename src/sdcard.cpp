@@ -68,6 +68,9 @@ Report probe() {
 
 // The harness gets two invented wallpapers, so the settings page can be
 // rendered and its taps walked without a slot to put a card in.
+bool g_crossRoots = false;
+void hostSetCrossRoots(bool on) { g_crossRoots = on; }
+
 int listTbi(char names[][40], int max) {
   static const char* kFake[2] = {"mountains.tbi", "night-sky.tbi"};
   int n = 0;
@@ -188,6 +191,12 @@ int shelfFolders(ShelfFolder* out, int max, const char* ext) {
     strncpy(f.name, "Uketsu", sizeof(f.name) - 1);
     f.count = 1;
     out[n++] = f;
+    if (g_crossRoots && n < max) {
+      ShelfFolder r{};
+      strncpy(r.name, "/Read", sizeof(r.name) - 1);
+      r.count = 1;
+      out[n++] = r;
+    }
   }
   return n;
 }
@@ -410,7 +419,7 @@ struct FakeSide {
 };
 // Ten, not six: a book now carries a CrossPoint position, a KOReader sidecar
 // and a bookmarks file, and the harness opens more than one book.
-FakeSide g_side[10];
+FakeSide g_side[16];  // grew with the guards: each book leaves progress + sdr + marks
 }  // namespace
 
 // The second invented book exists to exercise long paths: real release
@@ -420,6 +429,14 @@ static const char kFakeLongPath[] =
     "/books/A Book With The Kind Of Very Long Release Filename Publishers Actually Use Vol 01.epub";
 
 int epubList(EpubMeta* out, int max, const char* dir) {
+  if (g_crossRoots && strcmp(dir, "/Read") == 0 && max > 0) {
+    // The CrossInk shelf: one book, served from the same fixture zip.
+    EpubMeta m{};
+    strncpy(m.file, "/Read/novel.epub", sizeof(m.file) - 1);
+    strncpy(m.title, "novel", sizeof(m.title) - 1);
+    out[0] = m;  // forgetting this line served the previous listing's book
+    return 1;
+  }
   int n = 0;
   const bool top = strcmp(dir, "/books") == 0;
   const char* files[3] = {"/books/wind.epub", kFakeLongPath, "/books/Uketsu/strange-houses.epub"};
@@ -447,7 +464,8 @@ int epubList(EpubMeta* out, int max, const char* dir) {
 
 bool epubOpen(const char* path) {
   if (strcmp(path, "/books/wind.epub") != 0 && strcmp(path, kFakeLongPath) != 0 &&
-      strcmp(path, "/books/Uketsu/strange-houses.epub") != 0)
+      strcmp(path, "/books/Uketsu/strange-houses.epub") != 0 &&
+      strcmp(path, "/Read/novel.epub") != 0)
     return false;
   buildFakeEpub();
   g_fakeEpubOpen = true;
@@ -746,6 +764,23 @@ int readSlice(const char* path, uint32_t off, void* dst, int n) {
 // Plants a file beside a book with no session open -- the harness standing in
 // for "another firmware left this here", which is the one thing a device never
 // does to itself.
+int hostReadSide(const char* path, void* dst, int max) {
+  // The guards' back door: reads a side file without the bus, for asserting
+  // what a CLOSED session left on the card. The device has no such door.
+  for (const FakeSide& s : g_side)
+    if (s.n > 0 && strcmp(s.path, path) == 0) {
+      const int n = s.n < max ? s.n : max;
+      memcpy(dst, s.data, (size_t)n);
+      return n;
+    }
+  return -1;
+}
+
+void hostDumpSides() {
+  for (const FakeSide& s : g_side)
+    if (s.path[0]) printf("  side: %s (%d)\n", s.path, s.n);
+}
+
 void hostPlantSide(const char* path, const void* data, int n) {
   for (FakeSide& s : g_side)
     if (s.n == 0 || strcmp(s.path, path) == 0) {
@@ -1049,6 +1084,23 @@ int shelfFolders(ShelfFolder* out, int max, const char* ext) {
       out[n++] = f;
     }
   }
+  // CrossPoint/CrossInk keep their books in /Read (and some cards use /epub).
+  // Those roots appear as folders on the top shelf, named by their absolute
+  // path -- the reader treats a leading slash as "this is not under /books".
+  if (strcasecmp(ext, ".epub") == 0) {
+    static const char* kRoots[2] = {"/Read", "/epub"};
+    for (const char* root : kRoots) {
+      if (n >= max) break;
+      File d = SD.open(root);
+      if (!d || !d.isDirectory()) continue;
+      ShelfFolder f{};
+      for (File b = d.openNextFile(); b; b = d.openNextFile())
+        if (!b.isDirectory() && hasExt(b.name(), ext)) f.count++;
+      if (f.count == 0) continue;
+      strncpy(f.name, root, sizeof(f.name) - 1);
+      out[n++] = f;
+    }
+  }
   busRelease();
   return n;
 }
@@ -1106,6 +1158,11 @@ int epubList(EpubMeta* out, int max, const char* dir) {
       epubc::cacheDir(m.file, cache, sizeof(cache));
       strncat(cache, "/progress.bin", sizeof(cache) - strlen(cache) - 1);
       m.cont = SD.exists(cache);
+      if (!m.cont) {
+        epubc::cacheDirLegacy(m.file, cache, sizeof(cache));
+        strncat(cache, "/progress.bin", sizeof(cache) - strlen(cache) - 1);
+        m.cont = SD.exists(cache);
+      }
       out[n++] = m;
     }
   }

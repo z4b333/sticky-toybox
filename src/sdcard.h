@@ -147,6 +147,9 @@ void hostPutCardFile(const char* path, const void* data, int n);
 // A file beside a book, planted with no session open: "another firmware left
 // this here". Bypasses the bus rule the real calls now obey.
 void hostPlantSide(const char* path, const void* data, int n);
+void hostSetCrossRoots(bool on);  // the fake card grows a /Read shelf
+void hostDumpSides();
+int hostReadSide(const char* path, void* dst, int max);
 int hostCardFileSize(const char* path);
 #endif
 

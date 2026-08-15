@@ -236,7 +236,23 @@ uint32_t cpHash(const char* s, size_t len) {
   return h;
 }
 
+uint64_t fnvHash64(const char* s, size_t len) {
+  // FNV-1a 64, matching CrossInk's ZipFile::fnvHash64 exactly: their cache
+  // directory name is std::to_string of this value.
+  uint64_t hash = 14695981039346656037ull;
+  for (size_t i = 0; i < len; i++) {
+    hash ^= (uint8_t)s[i];
+    hash *= 1099511628211ull;
+  }
+  return hash;
+}
+
 void cacheDir(const char* bookPath, char* out, int cap) {
+  snprintf(out, (size_t)cap, "/.crosspoint/epub_%llu",
+           (unsigned long long)fnvHash64(bookPath, strlen(bookPath)));
+}
+
+void cacheDirLegacy(const char* bookPath, char* out, int cap) {
   snprintf(out, (size_t)cap, "/.crosspoint/epub_%lu",
            (unsigned long)cpHash(bookPath, strlen(bookPath)));
 }

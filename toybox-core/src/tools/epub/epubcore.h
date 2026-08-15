@@ -209,7 +209,14 @@ class Book {
 // against a real 32-bit libstdc++. Both firmwares run 32-bit toolchains, so
 // both derive the same directory from the same path string.
 uint32_t cpHash(const char* s, size_t len);
-void cacheDir(const char* bookPath, char* out, int cap);   // "/.crosspoint/epub_<hash>"
+// CrossPoint/CrossInk moved their book-cache hash from 32-bit std::hash
+// (MurmurHashUnaligned2 -- cpHash above) to FNV-1a 64. Current builds write
+// the FNV directory and keep the Murmur one only to migrate old cards, so a
+// firmware that still writes Murmur is invisible to them. Toybox now does as
+// they do: write FNV, read FNV first and Murmur second.
+uint64_t fnvHash64(const char* s, size_t len);
+void cacheDir(const char* bookPath, char* out, int cap);        // FNV: "/.crosspoint/epub_<u64>"
+void cacheDirLegacy(const char* bookPath, char* out, int cap);  // Murmur32, read-only fallback
 
 struct Progress {
   uint16_t spine = 0;

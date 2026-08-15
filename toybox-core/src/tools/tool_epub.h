@@ -137,7 +137,8 @@ class EpubTool : public ToolApp {
       const int idx = _lpage * shelf::PER_PAGE + k;
       if (idx >= total) break;
       if (idx < _nf) {
-        shelf::drawFolderRow(c, k, _folders[idx].name, _folders[idx].count,
+        const char* nm = _folders[idx].name;
+        shelf::drawFolderRow(c, k, nm[0] == '/' ? nm + 1 : nm, _folders[idx].count,
                              shelf::rowSep(k, idx, total));
         continue;
       }
@@ -360,7 +361,13 @@ class EpubTool : public ToolApp {
   }
 
   void openFolder(int i) {
-    snprintf(_dir, sizeof(_dir), "%s/%s", shelf::TOP, _folders[i].name);
+    // A folder named with a leading slash IS its path: /Read and /epub, the
+    // roots CrossPoint and CrossInk keep their books in, shelved beside the
+    // series folders under /books.
+    if (_folders[i].name[0] == '/')
+      snprintf(_dir, sizeof(_dir), "%s", _folders[i].name);
+    else
+      snprintf(_dir, sizeof(_dir), "%s/%s", shelf::TOP, _folders[i].name);
     _note = nullptr;
     reload();
     host().beep(0);
@@ -378,9 +385,12 @@ class EpubTool : public ToolApp {
     short y;  // where layout put it: paragraph gaps make the steps uneven
   };
 
-  void progressPath(char* out, int cap) {
+  void progressPath(char* out, int cap, bool legacy = false) {
     char dir[96];
-    epubc::cacheDir(_books[_cur].file, dir, sizeof(dir));
+    if (legacy)
+      epubc::cacheDirLegacy(_books[_cur].file, dir, sizeof(dir));
+    else
+      epubc::cacheDir(_books[_cur].file, dir, sizeof(dir));
     snprintf(out, (size_t)cap, "%s/progress.bin", dir);
   }
 
@@ -497,7 +507,14 @@ class EpubTool : public ToolApp {
     uint8_t buf[10];
     char path[128];
     progressPath(path, sizeof(path));
-    const int n = host().sdReadFile(path, buf, sizeof(buf));
+    int n = host().sdReadFile(path, buf, sizeof(buf));
+    if (n <= 0) {
+      // A card written by an older CrossPoint (or an older Toybox) keeps its
+      // position under the Murmur directory. Read it once; the next save
+      // writes the FNV one and the position has migrated.
+      progressPath(path, sizeof(path), true);
+      n = host().sdReadFile(path, buf, sizeof(buf));
+    }
     int spine = 0;
     uint32_t off = 0;
     if (n > 0 && epubc::decodeProgress(buf, n, p)) {
