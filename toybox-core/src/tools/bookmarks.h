@@ -26,7 +26,11 @@ inline constexpr uint16_t TBK_SPINE = 0xFFFF;  // a .tbk has no chapters
 // spine + offset is an EPUB position in CrossPoint's own terms; `page` is what
 // the .tbk reader uses and what an EPUB shows in its list, remembering that a
 // page number is only true for the layout that made it.
-inline constexpr int LABEL = 40;
+//
+// 96 bytes of label, up from 40: the label is a picked phrase, and at 40 a
+// sentence lost its second half to "..." at the moment of keeping -- the
+// half that was usually the reason it was kept.
+inline constexpr int LABEL = 96;
 
 struct Mark {
   uint16_t spine;
@@ -45,37 +49,56 @@ inline void path(const char* file, char* out, int cap) {
   snprintf(out, (size_t)cap, "/.toybox/marks/%08lx.tbm", (unsigned long)key(file));
 }
 
-// "TBM2", u16 count, then MAX entries of 48 bytes. Fixed length, so a save is
+// "TBM3", u16 count, then MAX entries of 104 bytes. Fixed length, so a save is
 // one write and a load is one read, and a truncated file is refused rather
 // than guessed at -- there is nothing here worth recovering half of.
+//
+// TBM2 -- the same layout with 40-byte labels -- is still READ, so a card
+// full of marks kept before the labels grew loses none of them; the next
+// save writes TBM3 and the file has migrated. Never written, like the
+// Murmur progress directory: one format going out, two coming in.
 inline constexpr int ENTRY = 8 + LABEL;
 inline constexpr int FILE_BYTES = 6 + MAX * ENTRY;
+inline constexpr int LABEL_V2 = 40;
+inline constexpr int ENTRY_V2 = 8 + LABEL_V2;
+inline constexpr int FILE_BYTES_V2 = 6 + MAX * ENTRY_V2;
 
 inline int load(ToolsHost& h, const char* file, Mark* out) {
   char p[48];
   path(file, p, sizeof(p));
-  uint8_t buf[FILE_BYTES];
-  if (h.sdReadFile(p, buf, sizeof(buf)) != FILE_BYTES) return 0;
-  if (memcmp(buf, "TBM2", 4) != 0) return 0;
+  // Static: 1.7 KB is no stack frame's business, and neither reader loads
+  // two books at once.
+  static uint8_t buf[FILE_BYTES];
+  const int got = h.sdReadFile(p, buf, sizeof(buf));
+  int entry = ENTRY, labelBytes = LABEL;
+  if (got == FILE_BYTES && memcmp(buf, "TBM3", 4) == 0) {
+    // current
+  } else if (got == FILE_BYTES_V2 && memcmp(buf, "TBM2", 4) == 0) {
+    entry = ENTRY_V2;
+    labelBytes = LABEL_V2;
+  } else {
+    return 0;
+  }
   int n = buf[4] | (buf[5] << 8);
   if (n > MAX) n = MAX;
   for (int i = 0; i < n; i++) {
-    const uint8_t* e = buf + 6 + i * ENTRY;
+    const uint8_t* e = buf + 6 + i * entry;
     out[i].spine = (uint16_t)(e[0] | (e[1] << 8));
     out[i].page = (uint16_t)(e[2] | (e[3] << 8));
     out[i].off = (uint32_t)e[4] | ((uint32_t)e[5] << 8) | ((uint32_t)e[6] << 16) |
                  ((uint32_t)e[7] << 24);
-    memcpy(out[i].label, e + 8, LABEL);
-    out[i].label[LABEL - 1] = 0;
+    memset(out[i].label, 0, LABEL);
+    memcpy(out[i].label, e + 8, labelBytes);
+    out[i].label[labelBytes - 1] = 0;
   }
   return n;
 }
 
 inline bool save(ToolsHost& h, const char* file, const Mark* m, int n) {
   if (n > MAX) n = MAX;
-  uint8_t buf[FILE_BYTES];
+  static uint8_t buf[FILE_BYTES];  // static for the same reason as load's
   memset(buf, 0, sizeof(buf));
-  memcpy(buf, "TBM2", 4);
+  memcpy(buf, "TBM3", 4);
   buf[4] = (uint8_t)(n & 255);
   buf[5] = (uint8_t)(n >> 8);
   for (int i = 0; i < n; i++) {

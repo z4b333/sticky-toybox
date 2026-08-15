@@ -146,6 +146,39 @@ inline void drawRow(ToolsCanvas& c, int slot, const char* label, const char* sub
   if (rule) c.fillRect(16, y + shelf::ROW_H - 6, c.width() - 32, 1, true);
 }
 
+// A row whose label is allowed two lines: bookmarks carry whole sentences
+// now, and a sentence clipped to one line usually lost the half somebody
+// kept it for. Wrapped forward a word at a time (the same discipline as the
+// KEEP screen: measuring a string you have already cut decides line two from
+// a length that no longer exists); the second line clips if even two lines
+// are not enough, and the sub drops to the row's foot.
+inline void drawRowWrap(ToolsCanvas& c, int slot, const char* label, const char* sub, bool rule,
+                        bool marked = false) {
+  const int y = shelf::Y0 + slot * shelf::ROW_H;
+  if (marked) c.fillRect(16, y + 10, 3, shelf::ROW_H - 28, true);
+  const int x = marked ? 34 : 24;
+  const int w = c.width() - x - 24;
+  char line1[128] = "";
+  const char* rest = nullptr;
+  for (const char* p = label; *p;) {
+    const char* e = p;
+    while (*e && *e != ' ') e++;
+    char cand[128];
+    snprintf(cand, sizeof(cand), "%s%s%.*s", line1, line1[0] ? " " : "", (int)(e - p), p);
+    if (line1[0] && c.textWidth(cand, TS_MED) > w) {
+      rest = p;  // the word that did not fit starts line two
+      break;
+    }
+    snprintf(line1, sizeof(line1), "%s", cand);
+    p = e;
+    while (*p == ' ') p++;
+  }
+  c.textClipped(x, y + 6, w, line1, TS_MED, true);
+  if (rest) c.textClipped(x, y + 34, w, rest, TS_MED, true);
+  if (sub && sub[0]) c.text(x, y + 62, sub, TS_SMALL, true);
+  if (rule) c.fillRect(16, y + shelf::ROW_H - 6, c.width() - 32, 1, true);
+}
+
 inline void drawEmpty(ToolsCanvas& c, const char* what, const char* how) {
   c.textCentered(c.width() / 2, 320, what, TS_LARGE, true);
   c.textCentered(c.width() / 2, 368, how, TS_SMALL, true);

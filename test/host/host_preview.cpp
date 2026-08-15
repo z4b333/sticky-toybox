@@ -1128,7 +1128,7 @@ int main() {
       marks::path("/books/grey-test.tbk", mp, sizeof(mp));
       uint8_t raw[marks::FILE_BYTES];
       if (stickyHost.sdReadFile(mp, raw, sizeof(raw)) != marks::FILE_BYTES ||
-          memcmp(raw, "TBM2", 4) != 0 || raw[4] != 1) {
+          memcmp(raw, "TBM3", 4) != 0 || raw[4] != 1) {
         printf("BOOK FAIL: no bookmark file on the card at %s\n", mp);
         abort();
       }
@@ -2136,7 +2136,7 @@ int main() {
       char firstOfNext[16] = "";
       snprintf(firstOfNext, sizeof(firstOfNext), "%.5s", et->hostLine(1));
       // ...unless the label ran out first and said so, which is the honest
-      // answer for a phrase longer than a bookmark: 40 bytes and an ellipsis.
+      // answer for a phrase longer than a bookmark: the label bytes, then an ellipsis.
       const char* ph = et->hostPhrase();
       const size_t pl = strlen(ph);
       const bool cut = pl >= 3 && strcmp(ph + pl - 3, "...") == 0;
@@ -2160,7 +2160,7 @@ int main() {
       marks::path("/books/wind.epub", mp, sizeof(mp));
       uint8_t raw[marks::FILE_BYTES];
       if (stickyHost.sdReadFile(mp, raw, sizeof(raw)) != marks::FILE_BYTES ||
-          memcmp(raw, "TBM2", 4) != 0 || raw[4] != 1 || raw[14] == 0) {
+          memcmp(raw, "TBM3", 4) != 0 || raw[4] != 1 || raw[14] == 0) {
         printf("EPUB APP FAIL: no bookmark with a phrase on the card at %s\n", mp);
         abort();
       }
@@ -2190,6 +2190,53 @@ int main() {
     if (et->hostMarkCount() != 0) {
       printf("EPUB APP FAIL: the second tap did not remove the bookmark\n");
       abort();
+    }
+
+    // --- marks kept before the labels grew --------------------------------
+    // A TBM2 file (40-byte labels) planted where a book's marks live: load
+    // reads it whole, the next save writes TBM3, and a label longer than
+    // TBM2 could ever hold survives a round trip uncut. Run here because the
+    // open book holds the bus, which the side-file calls faithfully require.
+    {
+      uint8_t old[marks::FILE_BYTES_V2];
+      memset(old, 0, sizeof(old));
+      memcpy(old, "TBM2", 4);
+      old[4] = 1;
+      uint8_t* e = old + 6;
+      e[0] = 2;                   // spine 2
+      e[2] = 5;                   // page 5
+      e[4] = 0x39; e[5] = 0x30;   // off 12345
+      snprintf((char*)e + 8, marks::LABEL_V2, "kept before the labels grew");
+      char mp[48];
+      marks::path("/books/old-marks.epub", mp, sizeof(mp));
+      sdcard::hostPlantSide(mp, old, (int)sizeof(old));
+      static marks::Mark mm[marks::MAX];
+      const int nOld = marks::load(stickyHost, "/books/old-marks.epub", mm);
+      if (nOld != 1 || mm[0].spine != 2 || mm[0].page != 5 || mm[0].off != 12345 ||
+          strcmp(mm[0].label, "kept before the labels grew") != 0) {
+        printf("MARKS FAIL: the TBM2 file did not read back (n=%d label '%s')\n", nOld,
+               nOld ? mm[0].label : "");
+        abort();
+      }
+      if (!marks::save(stickyHost, "/books/old-marks.epub", mm, 1)) {
+        printf("MARKS FAIL: saving the migrated marks failed\n");
+        abort();
+      }
+      uint8_t raw[8];
+      if (sdcard::hostReadSide(mp, raw, 8) < 8 || memcmp(raw, "TBM3", 4) != 0) {
+        printf("MARKS FAIL: the save did not migrate the file to TBM3\n");
+        abort();
+      }
+      snprintf(mm[0].label, sizeof(mm[0].label),
+               "a phrase well past forty bytes, the length that used to cut sentences in half");
+      marks::save(stickyHost, "/books/old-marks.epub", mm, 1);
+      static marks::Mark two[marks::MAX];
+      if (marks::load(stickyHost, "/books/old-marks.epub", two) != 1 ||
+          strcmp(two[0].label, mm[0].label) != 0) {
+        printf("MARKS FAIL: a long label did not survive the round trip\n");
+        abort();
+      }
+      printf("marks migration ok (TBM2 read, TBM3 written, long labels whole)\n");
     }
 
     // Type: bigger text re-derives the page from the offset, so the reader

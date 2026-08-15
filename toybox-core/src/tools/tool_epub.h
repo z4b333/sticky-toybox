@@ -1482,12 +1482,15 @@ class EpubTool : public ToolApp {
         snprintf(buf, sizeof(buf), "chapter %d", spine + 1);
         rmenu::drawRow(c, k, label, buf, shelf::rowSep(k, idx, total), spine == _spine);
       } else {
-        char label[48], where[40];
+        char label[marks::LABEL + 8], where[40];
         markLabel(_marks[idx], label, sizeof(label));
         snprintf(where, sizeof(where), "chapter %u, page %u", (unsigned)(_marks[idx].spine + 1),
                  (unsigned)(_marks[idx].page + 1));
-        rmenu::drawRow(c, k, label, where, shelf::rowSep(k, idx, total),
-                       _marks[idx].spine == (uint16_t)_spine && _marks[idx].page == (uint16_t)_page);
+        // Two lines for the phrase: it is a sentence somebody chose, and the
+        // half past the clip was usually the half they chose it for.
+        rmenu::drawRowWrap(c, k, label, where, shelf::rowSep(k, idx, total),
+                           _marks[idx].spine == (uint16_t)_spine &&
+                               _marks[idx].page == (uint16_t)_page);
       }
     }
     shelf::drawPager(c, _mpage, total);
