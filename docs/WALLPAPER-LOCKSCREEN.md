@@ -2,13 +2,23 @@
 
 For anyone producing pictures for this device — the PC converter, the
 wallpapers site, or another firmware reading the same card. Current as of
-v1.0.0-beta.37.
+the CrossInk-compatibility work after v1.0.0-beta.40.
 
-## The file format: `.tbi`
+## Two source formats
 
-One format for both pictures. The device never decodes anything — a `.tbi`
-IS the framebuffer, prepared on a PC (`tools/make_tbi.py`) where scaling,
-cropping, greyscale and dithering are cheap and previewable.
+**`.bmp` — the shared format.** Plain Windows BMP is what the
+CrossPoint / CrossInk / Xteink family trades sleep art in, so a card set up
+for any of those firmwares now just works here. The device parses
+1/2/4/8/24/32 bpp uncompressed BMPs (BI_RGB, plus BI_BITFIELDS for 32-bit),
+bottom-up or top-down rows, up to 4096×4096. The palette is read, never
+assumed — an inverted-palette file shows correctly. Any size is accepted:
+the picture is box-average scaled, aspect-fit on white, into 480×800
+(enlarged at most 4×), then dithered **on the device** (Atkinson) to
+whichever depth its destination needs.
+
+**`.tbi` — the prepared format.** The finished framebuffer, made on a PC
+(`tools/make_tbi.py` or the wallpaper page on the flasher site) where the
+dither is previewable:
 
 | field  | bytes | value                                  |
 |--------|-------|----------------------------------------|
@@ -17,22 +27,29 @@ cropping, greyscale and dithering are cheap and previewable.
 | height | 2     | u16 LE, must be 800                    |
 | bits   | 48000 | 1 bpp, row-major, 60 bytes per row     |
 
-Total: exactly **48,008 bytes**. Bit order is **MSB first**; **1 = white,
-0 = black**. A file of any other size, magic, or geometry is rejected —
-wrong-sized files are not even listed on the picker.
+Total: exactly **48,008 bytes**. Bit order **MSB first**; **1 = white**.
+Any other size, magic or geometry is rejected — wrong-sized files are not
+even listed. Portrait only; the device rotates through its canvas.
 
-Portrait only (480×800). The device rotates through its canvas when needed;
-the file itself is never landscape.
+A prepared `.tbi` still gives the best 1-bit result (you saw the dither
+before saving). A `.bmp` gives the best *grey* result — see below.
 
 ## Where pictures come from
 
-**The SD card is the front door.** The picker lists `.tbi` files from `/`
-and `/wallpapers` (root first, so a card without the folder still works;
-extension case-insensitive; names shown truncated to 39 bytes). Choosing
-one **copies it into device flash**, so the card can come back out:
+**The SD card is the front door.** The picker lists `.tbi` and `.bmp`
+files from `/`, `/wallpapers`, `/sleep` and `/.sleep` (extension
+case-insensitive; names shown truncated to 39 bytes). Choosing one
+**copies/converts it into device flash**, so the card can come back out:
 
-- wallpaper → LittleFS `/wallimg.tbi`
-- lock screen picture → LittleFS `/lockimg.tbi`
+- wallpaper → 1-bit LittleFS `/wallimg.tbi` (a `.bmp` is dithered on the way)
+- lock picture from a `.tbi` → LittleFS `/lockimg.tbi` (1-bit)
+- lock picture from a `.bmp` → LittleFS `/lockimg.g2` (**2 bpp, four-level
+  grey** — header `TBG1` + u16 480 + u16 800, then 96,000 bytes in the
+  panel's 2bpp layout, high pair first, 0 = black, 3 = white; 96,008 total)
+
+At most one lock file exists at a time: whichever way a picture last
+arrived (card `.bmp`, card `.tbi`, or phone upload) removes the other, and
+REMOVE clears both.
 
 Reading the card borrows the display's SPI bus and re-initialises the panel
 on release, which is why every card action is followed by a full refresh.
@@ -41,51 +58,57 @@ on release, which is why every card action is followed by a full refresh.
 notes tool's pairing screen serves an upload page over SoftAP; the file is
 streamed straight to LittleFS (never buffered in RAM), landing at
 `/lockimg.tbi` by default or `/wallimg.tbi` when the request carries
-`?to=wall`. A half-arrived file is deleted rather than kept — a picture
-that turns to noise partway down the panel reads as a hardware fault.
-An upload is accepted only at exactly 48,008 bytes.
+`?to=wall`. Only exactly 48,008 bytes is accepted; a half-arrived file is
+deleted rather than kept.
 
-**Settings paths:** Settings → Wallpaper lists the card directly. Settings
-→ Lock screen → THE PICTURE → `FROM CARD` opens the same list writing to
-the lock file; "or send one from a phone" at the foot of that page is the
-upload route. Either picture can be removed on its page; the two files are
-fully independent.
+## Sleep art, matcha's way
+
+On power-off with the lock screen set to PICTURE and no note pinned, the
+device first looks at the card:
+
+1. `/sleep.bmp` — a fixed choice, always wins;
+2. else a **random** `.bmp` from `/.sleep/`;
+3. else a random `.bmp` from `/sleep/`.
+
+A hit is rendered in **four-level grey** through the panel's grey waveform
+(~3 s) with **nothing else on the panel — no time, temperature or battery
+footer**. A photograph the panel can do justice to gets the whole panel.
+This is the same convention matcha-reader uses, so one folder of art
+serves both firmwares.
 
 ## Where pictures are drawn
 
-**Wallpaper** (`/wallimg.tbi`): behind the hub's home screen, drawn through
-the canvas once per visit alongside the home screen's full refresh. The
-dock is haloed against it. No wallpaper → a plain home with a one-line
-hint. Runs of white bytes (0xFF) are skipped, so mostly-white pictures
-draw fast.
+**Wallpaper** (`/wallimg.tbi`): behind the hub's home screen, 1-bit,
+drawn through the canvas once per visit alongside the home screen's full
+refresh. Runs of white bytes are skipped, so mostly-white pictures draw
+fast.
 
-**Lock screen**: what the panel keeps after power-off (e-paper holds its
-last frame with no power). The draw order at shutdown:
+**Lock screen**: what the panel keeps after power-off. The order at
+shutdown:
 
-1. **Battery empty** overrides everything (the panel must say why the
-   device stopped answering).
-2. **A pinned note**, if one exists — drawn edge to edge at its pinned
-   rotation (or following the accelerometer when "turn with the device" is
-   on). Notes render at the owner's chosen text size (24/32/40 px).
+1. **Battery empty** overrides everything.
+2. **A pinned note** — edge to edge at its pinned rotation (or following
+   the accelerometer), at the owner's chosen text size.
 3. Otherwise, the "with no note pinned" setting, one of:
-   - **PICTURE** — `/lockimg.tbi`; falls back to COVER if none stored
-   - **COVER** — `/lockcover.tbi`, a copy of the current book's cover
-     stashed into flash at book-open time (so sleep never touches the card)
+   - **PICTURE** — card sleep art in grey (above), else `/lockimg.g2` in
+     grey, else `/lockimg.tbi` in 1-bit; falls back to COVER if none
+   - **COVER** — `/lockcover.tbi`, the current book's cover stashed into
+     flash at book-open time (so sleep never touches the card)
    - **GOODBYE** — a text card
    - **BLANK** — nothing, deliberately
-4. A footer line may carry the time, temperature and battery, per settings.
+4. The time/temperature/battery footer appears only on the *canvas*
+   paths (notes, 1-bit pictures, goodbye) — never over grey art.
 
 ## What a producer must do
 
-Emit exactly the table above: 480×800, 1-bit, MSB-first, 1 = white,
-48,008 bytes, `TBI1` header. Dither on the PC and show the user the
-dithered result before saving — one-bit e-paper turns a badly chosen
-photograph into mud, and the only way to know is to look. Name the file
-something short (≤ 39 bytes survives the picker) and put it in
-`/wallpapers` on the card, or offer it to the phone uploader unchanged.
+For a 1-bit `.tbi`: emit exactly the table above, dither on the PC, and
+show the user the dithered result before saving. Name it ≤ 39 bytes and
+put it in `/wallpapers`, or offer it to the phone uploader unchanged.
 
-There is no 2-bit (grey) wallpaper or lock format. Grey exists on this
-panel only as a full 3-second waveform used by the book reader; the lock
-and wallpaper paths are 1-bit by design. (CrossPoint's `.pxc` sleep images
-are a different format with **inverted** grey levels — do not reuse one
-for the other.)
+For grey art: save a plain uncompressed BMP (any common depth; 480×800 is
+ideal, anything else is scaled) as `/sleep.bmp` or into `/.sleep/`. The
+device does the grey dither itself, identically every time.
+
+(CrossPoint's `.pxc` sleep images are a different format with **inverted**
+grey levels — do not reuse one for the other. The `.bmp` route replaces
+any need for it.)

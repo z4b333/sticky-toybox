@@ -45,10 +45,13 @@ and Vietnamese. The Thai readme is at [docs/README.th.md](docs/README.th.md).
   go to a page by number, bookmarks, page-turn speed, close.
 - **EPUB** — real ebooks, laid out live with the device fonts, with
   illustrations a PC app prepared shown as whole pages. Your place is kept on
-  the card in CrossPoint Reader's own format, so the same card moved between
-  firmwares opens the same book at the same page (a KOReader sidecar is
-  written too). Options cover the table of contents, bookmarks down to a
-  chosen phrase, text size and spacing.
+  the card in the CrossPoint/CrossInk family's own format — same hash, same
+  bytes, and their `/Read` and `/epub` shelves are listed too — so the same
+  card moved between firmwares opens the same book at the same page (a
+  KOReader sidecar is written too). Covers are traded the same way: one left
+  by CrossInk is used without a decode, and ours is left where CrossInk
+  looks. Options cover the table of contents, bookmarks down to a chosen
+  phrase, text size and spacing.
 - Both readers list series folders under `/books`, remember your place, paint
   the cover while a book opens, and can leave the current book's cover on the
   lock screen. Page turns are a 0.3 s partial refresh with a cleaning full
@@ -103,9 +106,13 @@ and Vietnamese. The Thai readme is at [docs/README.th.md](docs/README.th.md).
   screen.
 
 Settings (hold UP on the home screen for three seconds) covers: which apps
-the hub shows, the wallpaper and the lock screen picture — both chosen from
-`.tbi` files on the card, copied in so the card can come out — files over
-WiFi, beep volume, restoring the first-time cards, and resetting stats. The
+the hub shows, the wallpaper and the lock screen picture — chosen from
+`.tbi` or plain `.bmp` files on the card, converted and copied in so the
+card can come out; a `.bmp` lock picture is kept in the panel's real
+four-level grey and drawn with nothing else over it. A `/sleep.bmp` (or a
+random face from `/.sleep`, matcha-reader's convention) on the card wins at
+power-off. Also: files over WiFi, beep volume, restoring the first-time
+cards, and resetting stats. The
 lock screen page also holds sleep timing, what an empty panel shows, where
 the power button wakes to, and whether the note follows the accelerometer.
 

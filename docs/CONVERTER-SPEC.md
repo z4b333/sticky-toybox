@@ -427,11 +427,15 @@ Show the result before you write it. The device cannot.
 
 | path | what it is |
 |---|---|
-| `/.crosspoint/epub_<hash>/progress.bin` | reading position, CrossPoint's format. `<hash>` is a 32-bit libstdc++ `std::hash` of the absolute path |
+| `/.crosspoint/epub_<hash64>/progress.bin` | reading position, CrossPoint's format. `<hash64>` is FNV-1a **64** of the absolute path, decimal — the hash current CrossInk uses. A legacy directory named by 32-bit libstdc++ `std::hash` is read once for migration, never written |
+| `/.crosspoint/epub_<hash64>/cover.bmp` | the finished cover, left where CrossInk looks for one: 480×800, **1-bit BMP**, 62-byte header, black-then-white palette, bottom-up, 48,062 bytes. Written only if absent; a cover.bmp found here (either hash dir) is **read** instead of decoding the EPUB's cover |
 | `<book>.sdr/metadata.epub.lua` | a KOReader sidecar, written for cards carried to KOReader. One-way; never read back |
 | `/.toybox/covers/<hash>.tbc` | the built 480×800 cover. `<hash>` is FNV-1a 32 of the absolute path |
 | `/.toybox/marks/<hash>.tbm` | bookmarks, 774 bytes, magic `TBM2` |
 | `/.toybox/` | the device's own folder — hidden from the shelf and the file manager |
+
+Books are also listed from `/Read` and `/epub` — CrossInk's shelf roots —
+beside `/books`, so a card set up for either firmware reads in both.
 
 **Do not write a cover into `/.toybox/covers/`.** The firmware decides whether
 a book has a cover by looking at a thumbnail in its *internal flash*, which a
