@@ -150,8 +150,8 @@ void SettingsScreen::renderWall(ToolsHost& host, ToolsCanvas& c) {
     c.textCentered(SCREEN_W / 2, 364, "is one in the slot?", TS_MED, true);
   } else if (_wallN == 0) {
     c.textCentered(SCREEN_W / 2, 320, "no wallpapers on the card", TS_LARGE, true);
-    c.textCentered(SCREEN_W / 2, 364, "make .tbi files with tools/make_tbi.py", TS_SMALL, true);
-    c.textCentered(SCREEN_W / 2, 392, "and put them in /wallpapers", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, 364, "put .bmp pictures or .tbi files", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, 392, "in the card's root or /wallpapers", TS_SMALL, true);
   } else {
     for (int i = 0; i < _wallN; i++) {
       const TRect r = wallRect(i);
@@ -221,8 +221,8 @@ void SettingsScreen::renderLockPic(ToolsHost& host, ToolsCanvas& c) {
     c.textCentered(SCREEN_W / 2, 364, "is one in the slot?", TS_MED, true);
   } else if (_wallN == 0) {
     c.textCentered(SCREEN_W / 2, 320, "no pictures on the card", TS_LARGE, true);
-    c.textCentered(SCREEN_W / 2, 364, "make .tbi files with tools/make_tbi.py", TS_SMALL, true);
-    c.textCentered(SCREEN_W / 2, 392, "and put them in /wallpapers", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, 364, "put .bmp pictures or .tbi files", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, 392, "in the card's root or /wallpapers", TS_SMALL, true);
   } else {
     for (int i = 0; i < _wallN; i++) {
       const TRect r = wallRect(i);

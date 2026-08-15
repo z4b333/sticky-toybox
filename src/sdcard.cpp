@@ -8,6 +8,7 @@
 #include <string>
 #endif
 
+#include "bmp_gray.h"
 #include "tools/epub/epubcore.h"
 #include "tools/lock_image.h"
 #include "tools/tiny_fs.h"
@@ -71,12 +72,39 @@ Report probe() {
 bool g_crossRoots = false;
 void hostSetCrossRoots(bool on) { g_crossRoots = on; }
 
+// The card's own little filesystem, for everything written by path rather
+// than by name: cover art, planted pictures, and whatever else learns to
+// live out here. Hoisted above listTbi, which lists the .bmp files in it.
+namespace {
+std::map<std::string, std::string>& fakeCard() {
+  static std::map<std::string, std::string> fs;
+  return fs;
+}
+}  // namespace
+
 int listTbi(char names[][40], int max) {
   static const char* kFake[2] = {"mountains.tbi", "night-sky.tbi"};
   int n = 0;
   for (; n < 2 && n < max; n++) {
     strncpy(names[n], kFake[n], 39);
     names[n][39] = 0;
+  }
+  // ...plus any .bmp a guard has planted where the device would look: the
+  // same four folders the device's list walks.
+  static const char* kDirs[4] = {"", "/wallpapers", "/sleep", "/.sleep"};
+  for (const auto& kv : fakeCard()) {
+    if (n >= max) break;
+    const std::string& p = kv.first;
+    if (p.size() < 5 || p.compare(p.size() - 4, 4, ".bmp") != 0) continue;
+    const size_t slash = p.rfind('/');
+    if (slash == std::string::npos) continue;
+    const std::string dir = p.substr(0, slash);
+    bool known = false;
+    for (const char* d : kDirs) known = known || dir == d;
+    if (!known) continue;
+    strncpy(names[n], p.c_str() + slash + 1, 39);
+    names[n][39] = 0;
+    n++;
   }
   return n;
 }
@@ -706,13 +734,7 @@ bool mgrWriteClose(bool keep) {
 
 uint32_t mgrFreeMb() { return g_mgrUp ? 121000 : 0; }
 
-// The card's own little filesystem, for everything written by path rather
-// than by name: cover art, and whatever else learns to live out here.
 namespace {
-std::map<std::string, std::string>& fakeCard() {
-  static std::map<std::string, std::string> fs;
-  return fs;
-}
 std::string g_streamPath;
 std::string g_streamBuf;
 bool g_streaming = false;
@@ -798,6 +820,95 @@ void hostPutCardFile(const char* path, const void* data, int n) {
 int hostCardFileSize(const char* path) {
   auto it = fakeCard().find(path);
   return it == fakeCard().end() ? -1 : (int)it->second.size();
+}
+
+// --- BMP pictures, against the fake card -------------------------------------
+// The point of these fakes is what they DON'T fake: a guard plants real BMP
+// bytes with hostPutCardFile, and everything from the 'BM' magic to the
+// palette to the box-average is the code the device ships. Only the card is
+// invented.
+namespace {
+struct MemReader {
+  const uint8_t* d;
+  uint32_t len, pos = 0;
+  int read(void* dst, uint32_t n) {
+    if (pos >= len) return 0;
+    if (pos + n > len) n = len - pos;
+    memcpy(dst, d + pos, n);
+    pos += n;
+    return (int)n;
+  }
+  bool seek(uint32_t off) {
+    if (off > len) return false;
+    pos = off;
+    return true;
+  }
+};
+
+const std::string* findCardBlob(const char* path) {
+  auto it = fakeCard().find(path);
+  return it == fakeCard().end() ? nullptr : &it->second;
+}
+
+// The folders a picture may be listed and taken from -- one set, shared by
+// list and take, so nothing can be shown that cannot then be fetched.
+const char* kBmpDirs[4] = {"", "/wallpapers", "/sleep", "/.sleep"};
+}  // namespace
+
+bool exists(const char* path) {
+  if (findCardBlob(path)) return true;
+  for (const FakeSide& s : g_side)
+    if (s.n > 0 && strcmp(s.path, path) == 0) return true;
+  return false;
+}
+
+bool readBmpGray(const char* path, uint8_t* gray) {
+  const uint8_t* d = nullptr;
+  uint32_t len = 0;
+  if (const std::string* blob = findCardBlob(path)) {
+    d = (const uint8_t*)blob->data();
+    len = (uint32_t)blob->size();
+  } else {
+    for (const FakeSide& s : g_side)
+      if (s.n > 0 && strcmp(s.path, path) == 0) {
+        d = s.data;
+        len = (uint32_t)s.n;
+      }
+  }
+  if (!d) return false;
+  MemReader r{d, len};
+  bmpg::Header h;
+  if (!bmpg::parseHeader(r, h)) return false;
+  static uint8_t rowBuf[4096 * 4 + 4], greyBuf[4096];
+  if (h.rowBytes > sizeof(rowBuf)) return false;
+  return bmpg::toGray(r, h, gray, rowBuf, greyBuf);
+}
+
+namespace {
+bool readBmpByName(const char* name, uint8_t* gray) {
+  for (const char* dir : kBmpDirs) {
+    char p[96];
+    snprintf(p, sizeof(p), "%s/%s", dir, name);
+    if (findCardBlob(p) && readBmpGray(p, gray)) return true;
+  }
+  return false;
+}
+}  // namespace
+
+bool sleepArtGray(uint8_t* gray) {
+  if (findCardBlob("/sleep.bmp")) return readBmpGray("/sleep.bmp", gray);
+  // "Random" on the host is the map's first match: guards plant one file.
+  static const char* kSleepDirs[2] = {"/.sleep", "/sleep"};
+  for (const char* dir : kSleepDirs) {
+    const std::string pre = std::string(dir) + "/";
+    for (const auto& kv : fakeCard()) {
+      const std::string& p = kv.first;
+      if (p.size() > pre.size() + 4 && p.compare(0, pre.size(), pre) == 0 &&
+          p.compare(p.size() - 4, 4, ".bmp") == 0 && p.find('/', pre.size()) == std::string::npos)
+        return readBmpGray(p.c_str(), gray);
+    }
+  }
+  return false;
 }
 
 #else
@@ -918,9 +1029,16 @@ bool isTbiName(const char* n) {
   return len > 4 && strcasecmp(n + len - 4, ".tbi") == 0;
 }
 
+bool isBmpName(const char* n) {
+  const size_t len = strlen(n);
+  return len > 4 && strcasecmp(n + len - 4, ".bmp") == 0;
+}
+
 // Root first, then /wallpapers, so a card with a folder keeps its root tidy
-// and a card without one still works.
-const char* kDirs[2] = {"/", "/wallpapers"};
+// and a card without one still works. The two sleep-art folders come last:
+// they exist for other firmware's power-off picture, but a picture is a
+// picture, and a card set up for CrossPoint should just work here.
+const char* kDirs[4] = {"/", "/wallpapers", "/sleep", "/.sleep"};
 }  // namespace
 
 int listTbi(char names[][40], int max) {
@@ -933,10 +1051,14 @@ int listTbi(char names[][40], int max) {
     File d = SD.open(dir);
     if (!d || !d.isDirectory()) continue;
     for (File f = d.openNextFile(); f && n < max; f = d.openNextFile()) {
-      if (f.isDirectory() || !isTbiName(f.name())) continue;
+      if (f.isDirectory()) continue;
+      const bool tbi = isTbiName(f.name()), bmp = isBmpName(f.name());
+      if (!tbi && !bmp) continue;
       // Wrong-sized files are left off the list entirely: a name that can only
-      // fail when tapped is worse than no name.
-      if (f.size() != tbimg::FILE_SIZE) continue;
+      // fail when tapped is worse than no name. A .tbi has exactly one right
+      // size; a .bmp merely has to be plausibly a picture.
+      if (tbi && f.size() != tbimg::FILE_SIZE) continue;
+      if (bmp && (f.size() < 62 || f.size() > (16u << 20))) continue;
       const char* bare = strrchr(f.name(), '/');
       strncpy(names[n], bare ? bare + 1 : f.name(), 39);
       names[n][39] = 0;
@@ -1335,6 +1457,122 @@ int readSlice(const char* path, uint32_t off, void* dst, int n) {
   return got;
 }
 
+bool exists(const char* path) {
+  const bool mine = !busHeld();
+  if (mine && !busClaim()) {
+    busRelease();
+    return false;
+  }
+  const bool got = SD.exists(path);
+  if (mine) busRelease();
+  return got;
+}
+
+// --- BMP pictures ------------------------------------------------------------
+
+namespace {
+// The parser's window onto an open File. bmp_gray.h is templated over this
+// so the harness can drive the identical code from a memory blob.
+struct FileReader {
+  File& f;
+  int read(void* dst, uint32_t n) { return f.read((uint8_t*)dst, n); }
+  bool seek(uint32_t off) { return f.seek(off); }
+};
+
+// One BMP into 480x800 grey. The bus is already up. The row buffers come and
+// go from PSRAM: a 4096-wide 32-bit row is 16 KB, which is nobody's stack
+// and not worth anyone's permanent BSS.
+bool readBmpGrayHeld(const char* path, uint8_t* gray) {
+  File f = SD.open(path, FILE_READ);
+  if (!f || f.isDirectory()) return false;
+  FileReader r{f};
+  bmpg::Header h;
+  bool ok = bmpg::parseHeader(r, h);
+  uint8_t* rowBuf = ok ? (uint8_t*)ps_malloc(h.rowBytes) : nullptr;
+  uint8_t* greyBuf = ok ? (uint8_t*)ps_malloc((size_t)h.width) : nullptr;
+  ok = ok && rowBuf && greyBuf && bmpg::toGray(r, h, gray, rowBuf, greyBuf);
+  free(rowBuf);
+  free(greyBuf);
+  f.close();
+  return ok;
+}
+
+// A bare name resolved across the same folders the list walks; parses the
+// first file that answers to it. Bus already up.
+bool readBmpByNameHeld(const char* name, uint8_t* gray) {
+  for (const char* dir : kDirs) {
+    char p[96];
+    snprintf(p, sizeof(p), "%s%s%s", dir, dir[1] ? "/" : "", name);
+    if (SD.exists(p)) return readBmpGrayHeld(p, gray);
+  }
+  return false;
+}
+}  // namespace
+
+bool readBmpGray(const char* path, uint8_t* gray) {
+  const bool mine = !busHeld();
+  if (mine && !busClaim()) {
+    busRelease();
+    return false;
+  }
+  const bool ok = readBmpGrayHeld(path, gray);
+  if (mine) busRelease();
+  return ok;
+}
+
+namespace {
+bool readBmpByName(const char* name, uint8_t* gray) {
+  const bool mine = !busHeld();
+  if (mine && !busClaim()) {
+    busRelease();
+    return false;
+  }
+  const bool ok = readBmpByNameHeld(name, gray);
+  if (mine) busRelease();
+  return ok;
+}
+}  // namespace
+
+bool sleepArtGray(uint8_t* gray) {
+  const bool mine = !busHeld();
+  if (mine && !busClaim()) {
+    busRelease();
+    return false;
+  }
+  // matcha's convention, kept exactly: a fixed /sleep.bmp wins, otherwise a
+  // random pick from the hidden folder, otherwise from the visible one.
+  char pick[96] = "";
+  static const char* kSleepDirs[2] = {"/.sleep", "/sleep"};
+  if (SD.exists("/sleep.bmp")) {
+    strcpy(pick, "/sleep.bmp");
+  } else {
+    for (const char* dir : kSleepDirs) {
+      File d = SD.open(dir);
+      if (!d || !d.isDirectory()) continue;
+      int count = 0;
+      for (File f = d.openNextFile(); f; f = d.openNextFile())
+        if (!f.isDirectory() && isBmpName(f.name())) count++;
+      if (count == 0) continue;
+      // The hardware RNG: every power-off gets a fresh face, which is most
+      // of the fun of a folder of pictures.
+      int want = (int)(esp_random() % (uint32_t)count);
+      d.rewindDirectory();
+      for (File f = d.openNextFile(); f; f = d.openNextFile()) {
+        if (f.isDirectory() || !isBmpName(f.name())) continue;
+        if (want-- == 0) {
+          const char* bare = strrchr(f.name(), '/');
+          snprintf(pick, sizeof(pick), "%s/%s", dir, bare ? bare + 1 : f.name());
+          break;
+        }
+      }
+      break;
+    }
+  }
+  const bool ok = pick[0] && readBmpGrayHeld(pick, gray);
+  if (mine) busRelease();
+  return ok;
+}
+
 bool mgrOpen() {
   if (g_mgrUp) return true;
   if (!busClaim()) {
@@ -1544,5 +1782,51 @@ void bookClose() {
 }
 
 #endif
+
+// --- a card .bmp becomes a flash picture --------------------------------------
+// Shared by both builds: everything below the card read -- the dither, the
+// packing, the header, the atomic-enough write -- is one piece of code, and
+// the harness proves it on the same bytes the device would meet.
+bool takeBmp(const char* name, const char* destPath, int levels) {
+  if (levels != 2 && levels != 4) return false;
+#ifdef TOYBOX_HOST
+  static uint8_t grayBuf[(size_t)bmpg::OUT_W * bmpg::OUT_H];
+  static uint8_t packedBuf[tbg2::BITS];
+  uint8_t* gray = grayBuf;
+  uint8_t* packed = packedBuf;
+#else
+  uint8_t* gray = (uint8_t*)ps_malloc((size_t)bmpg::OUT_W * bmpg::OUT_H);
+  uint8_t* packed = (uint8_t*)ps_malloc(tbg2::BITS);
+#endif
+  bool ok = gray && packed && readBmpByName(name, gray);
+  if (ok) {
+    bmpg::atkinson(gray, levels);
+    uint8_t hdr[8];
+    uint32_t bits;
+    if (levels == 2) {
+      bmpg::pack1(gray, packed);
+      hdr[0] = 'T'; hdr[1] = 'B'; hdr[2] = 'I'; hdr[3] = '1';
+      bits = tbimg::BITS;
+    } else {
+      bmpg::pack2(gray, packed);
+      hdr[0] = 'T'; hdr[1] = 'B'; hdr[2] = 'G'; hdr[3] = '1';
+      bits = tbg2::BITS;
+    }
+    hdr[4] = (uint8_t)(bmpg::OUT_W & 255); hdr[5] = (uint8_t)(bmpg::OUT_W >> 8);
+    hdr[6] = (uint8_t)(bmpg::OUT_H & 255); hdr[7] = (uint8_t)(bmpg::OUT_H >> 8);
+    tfs::begin();
+    ok = tfs::appendOpen(destPath) && tfs::appendChunk(hdr, sizeof(hdr)) &&
+         tfs::appendChunk(packed, bits);
+    tfs::appendClose();
+    // Half a picture is worse than none: it would draw as a photo that turns
+    // to noise partway down the panel.
+    if (!ok) tfs::remove(destPath);
+  }
+#ifndef TOYBOX_HOST
+  free(gray);
+  free(packed);
+#endif
+  return ok;
+}
 
 }  // namespace sdcard

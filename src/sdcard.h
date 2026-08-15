@@ -129,6 +129,27 @@ bool writeFileAtomic(const char* path, const void* data, int n);
 // Is any session -- a book, an epub, the phone -- currently holding the bus?
 bool busHeld();
 
+// Does this exact path exist on the card? Borrows the bus if nothing holds it
+// (same 150 ms cost and full-refresh-afterwards rule as readWhole).
+bool exists(const char* path);
+
+// BMP pictures -- the source format the CrossPoint/CrossInk/Xteink family
+// trades sleep art and covers in, so one card can serve every firmware.
+//
+// readBmpGray parses any plain BMP (1/2/4/8/24/32 bpp, palette read rather
+// than assumed) and box-averages it, aspect-fit on white, into `gray`:
+// 480x800 bytes of luminance, portrait. Borrows the bus if nothing holds it.
+bool readBmpGray(const char* path, uint8_t* gray);
+// A .bmp from the wallpaper folders, dithered and stored in flash: levels 2
+// writes a 1-bit .tbi file at destPath, levels 4 the 2bpp grey file the lock
+// screen paints. Same claim-per-call bus rule as takeTbi.
+bool takeBmp(const char* name, const char* destPath, int levels);
+// The sleeping panel's picture, the way matcha does it: /sleep.bmp if it
+// exists, else a RANDOM .bmp out of /.sleep (or /sleep), into `gray` as
+// above. One bus claim for the whole pick-and-parse. False when the card is
+// out or offers nothing.
+bool sleepArtGray(uint8_t* gray);
+
 // A file on the card written a piece at a time, for anything too big to
 // assemble in RAM first. Only valid while something already holds the bus;
 // the cover builder streams into this while a book is being opened.

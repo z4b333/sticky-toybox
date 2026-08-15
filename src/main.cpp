@@ -10,10 +10,12 @@
 #include <esp_sleep.h>
 #include <esp_system.h>
 
+#include "bmp_gray.h"
 #include "board_pins.h"
 #include "buzzer.h"
 #include "epd.h"
 #include "gfx.h"
+#include "sdcard.h"
 #include "sensors.h"
 #include "service.h"
 #include "sticky_host.h"
@@ -149,6 +151,41 @@ void showPinned() {
   epd.displayFull();
 }
 
+// The grey way down. A picture painted at the four levels the panel really
+// has, straight through the grey path -- no canvas, no footer, nothing on it
+// but the picture, because a photograph the panel does justice to deserves
+// the whole panel. Card art first, matcha's convention (/sleep.bmp, else a
+// random face from /.sleep or /sleep), then the grey lock picture a card
+// .bmp was turned into. False means nothing grey to show; the 1-bit canvas
+// path takes over as it always did.
+bool paintGreySleep() {
+  uint8_t* gray = (uint8_t*)ps_malloc((size_t)bmpg::OUT_W * bmpg::OUT_H);
+  uint8_t* packed = (uint8_t*)ps_malloc(tbg2::BITS);
+  bool done = false;
+  if (gray && packed) {
+    // sleepArtGray borrows the card bus and re-initialises the panel on the
+    // way out -- which suits the grey render, whose first pass is a full
+    // scrub anyway.
+    if (sdcard::sleepArtGray(gray)) {
+      bmpg::atkinson(gray, 4);
+      bmpg::pack2(gray, packed);
+      done = epd.displayGrey2bpp(packed);
+    }
+    if (!done && lockimg::haveG2()) {
+      size_t len = 0;
+      char* buf = tfs::readAlloc(lockimg::G2_PATH, len);
+      if (buf) {
+        if (len == tbg2::FILE_SIZE)
+          done = epd.displayGrey2bpp((const uint8_t*)buf + tbg2::HEADER);
+        free(buf);
+      }
+    }
+  }
+  free(gray);
+  free(packed);
+  return done;
+}
+
 void powerOff(bool lowBattery = false) {
   epd.clear();
   // E-paper keeps its last image with no power. If a note is pinned, leave that
@@ -158,15 +195,23 @@ void powerOff(bool lowBattery = false) {
   // A pinned note goes down at its resting angle whatever the device was doing
   // a moment ago -- powering off from the middle of a game must not leave the
   // note sideways for the next eight hours. Everything else is portrait.
+  bool pinned = false;
   {
     char pin[note::NAME_LEN + 1];
-    const bool pinned = !lowBattery && note::getPinned(pin);
+    pinned = !lowBattery && note::getPinned(pin);
     const int rot = pinned ? restRotation() : 0;
     epd.setRotation(rot);
     touch.setRotation(rot);
     epd.clear();
   }
-  if (lowBattery) {
+  // The one screen that gets the panel's real greys: an unpinned power-off
+  // set to show a picture. paintGreySleep paints the panel itself, so the
+  // whole canvas path -- footer included -- is skipped.
+  const bool paintedGrey = !lowBattery && !pinned &&
+                           lock::config().empty == lock::EMPTY_PICTURE && paintGreySleep();
+  if (paintedGrey) {
+    // fall through to deepSleep below; the panel already holds the picture
+  } else if (lowBattery) {
     // The one case that overrides everything else: if the panel just says
     // "shopping list" the owner has no idea why it stopped responding.
     c.textTrackedCentered(EPD_W / 2, 300, "BATTERY EMPTY", TS_LARGE, true, true, 3);
@@ -191,7 +236,7 @@ void powerOff(bool lowBattery = false) {
         break;
     }
   }
-  epd.displayFull();
+  if (!paintedGrey) epd.displayFull();
   epd.deepSleep();
   delay(50);
 

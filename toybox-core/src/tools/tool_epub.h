@@ -485,9 +485,13 @@ class EpubTool : public ToolApp {
     // chose it, on a machine that could do the picture justice.
     if (!bthumb::coverFromSidecar(host(), _books[i].file) &&
         !bthumb::have(_books[i].file) && !bthumb::failed(_books[i].file)) {
-      bool transient = false;
-      if (!epubcov::makeThumb(host(), _book, _books[i].file, &transient) && !transient)
-        bthumb::markFailed(_books[i].file);
+      // A cover CrossInk already decoded may be waiting in its cache
+      // directory; taking it skips the whole JPEG decode.
+      if (!host().crossCoverGrab(_books[i].file)) {
+        bool transient = false;
+        if (!epubcov::makeThumb(host(), _book, _books[i].file, &transient) && !transient)
+          bthumb::markFailed(_books[i].file);
+      }
     }
     // A cover that just came into existence goes into the plate's frame, so
     // the first open -- the slowest one, behind a JPEG decode -- shows its
@@ -501,6 +505,10 @@ class EpubTool : public ToolApp {
     // into flash now. After the decode above, so the very first open of a
     // book still gets one.
     bthumb::noteForLock(host(), _books[i].file);
+    // The favour returned: leave the finished cover where CrossInk looks for
+    // one, so ITS first open of this book skips the decode too. One exists()
+    // check when the file is already there.
+    if (bthumb::have(_books[i].file)) host().crossCoverPut(_books[i].file);
 
     // Where were we? The card remembers, in CrossPoint's format.
     epubc::Progress p;

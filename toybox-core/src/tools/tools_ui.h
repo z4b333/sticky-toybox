@@ -323,6 +323,22 @@ class ToolsHost {
     return false;
   }
 
+  // Covers shared with the CrossPoint/CrossInk family, which caches a
+  // finished cover.bmp beside its reading position. Grab: if one is waiting
+  // in the book's cache directory, file it as this device's cover art and
+  // skip the decode -- true means the cover exists now. Put: leave OUR
+  // finished cover there for them, never clobbering one that exists. Both
+  // are called mid-open, with the card already awake; a host with no card
+  // declines and the decoder does what it always did.
+  virtual bool crossCoverGrab(const char* file) {
+    (void)file;
+    return false;
+  }
+  virtual bool crossCoverPut(const char* file) {
+    (void)file;
+    return false;
+  }
+
   // Books: pre-converted .tbk volumes on the SD card (tools/make_tbk.py).
   // A page is 48,000 bytes in the framebuffer's own layout, so the reader
   // copies rather than decodes. While a book is open the card stays powered

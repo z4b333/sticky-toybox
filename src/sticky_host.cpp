@@ -1,6 +1,8 @@
 #include "sticky_host.h"
 
 #include "sdcard.h"
+#include "tools/book_thumbs.h"
+#include "tools/epub/epubcore.h"
 #include "tools/lock_image.h"
 
 StickyHost stickyHost;
@@ -37,12 +39,126 @@ int StickyHost::sdWallpapers(char names[][SD_NAME_LEN], int max) {
   return sdcard::listTbi(names, max);
 }
 
+namespace {
+bool isBmpExt(const char* n) {
+  const size_t len = strlen(n);
+  return len > 4 && strcasecmp(n + len - 4, ".bmp") == 0;
+}
+}  // namespace
+
 bool StickyHost::sdWallpaperTake(const char* name) {
+  // A .bmp -- the format the CrossPoint/CrossInk/Xteink family trades art in
+  // -- is dithered on the way through; the home screen stays 1-bit.
+  if (isBmpExt(name)) return sdcard::takeBmp(name, wallimg::PATH, 2);
   return sdcard::takeTbi(name, wallimg::PATH);
 }
 
 bool StickyHost::sdLockTake(const char* name) {
-  return sdcard::takeTbi(name, lockimg::PATH);
+  // The lock screen is where the panel's four greys are worth having: the
+  // picture stands alone for hours. A .bmp becomes the 2bpp grey file; a
+  // .tbi stays the finished 1-bit picture it already is. Either way the
+  // OTHER file goes: one picture, whichever way it last arrived.
+  if (isBmpExt(name)) {
+    if (!sdcard::takeBmp(name, lockimg::G2_PATH, 4)) return false;
+    tfs::remove(lockimg::PATH);
+    return true;
+  }
+  if (!sdcard::takeTbi(name, lockimg::PATH)) return false;
+  tfs::remove(lockimg::G2_PATH);
+  return true;
+}
+
+// --- covers shared with CrossInk ----------------------------------------------
+// CrossInk keeps a finished cover as cover.bmp inside the book's cache
+// directory (/.crosspoint/epub_<hash>/) and decodes one only when it is
+// missing. Reading theirs and leaving ours means a card moved between the
+// two firmwares decodes each cover exactly once, in whichever device the
+// book is opened first.
+
+bool StickyHost::crossCoverGrab(const char* file) {
+  char p[112];
+  {
+    char dir[64];
+    epubc::cacheDir(file, dir, sizeof(dir));
+    snprintf(p, sizeof(p), "%s/cover.bmp", dir);
+    if (!sdcard::exists(p)) {
+      epubc::cacheDirLegacy(file, dir, sizeof(dir));
+      snprintf(p, sizeof(p), "%s/cover.bmp", dir);
+      if (!sdcard::exists(p)) return false;
+    }
+  }
+  uint8_t* gray = (uint8_t*)ps_malloc((size_t)480 * 800);
+  if (!gray) return false;
+  bool ok = sdcard::readBmpGray(p, gray);
+  if (ok) {
+    // Through the cover builder, exactly as if the JPEG decoder had produced
+    // these rows: it dithers, files both sizes, and sweeps the stale flash
+    // copy -- one pipeline, whoever did the decoding.
+    bthumb::Builder b;
+    ok = b.begin(*this, file, 480, 800);
+    for (int y = 0; ok && y < 800; y++) b.row(y, gray + (size_t)y * 480, 480);
+    if (ok) ok = b.finish();
+  }
+  free(gray);
+  return ok;
+}
+
+bool StickyHost::crossCoverPut(const char* file) {
+  // Mid-open only: the card is awake because a reader holds it. Never over a
+  // cover that already exists -- theirs is as good as ours.
+  if (!sdcard::busHeld()) return false;
+  char p[112];
+  {
+    char dir[64];
+    epubc::cacheDir(file, dir, sizeof(dir));
+    snprintf(p, sizeof(p), "%s/cover.bmp", dir);
+  }
+  if (sdcard::exists(p)) return true;
+  char big[48];
+  bthumb::bigPath(file, big, sizeof(big));
+  // A 1-bit BMP, the shape their converter writes: 62-byte header (file
+  // header, BITMAPINFOHEADER, a black-then-white palette), then bottom-up
+  // rows. At 480 wide a row is exactly 60 bytes -- already 4-aligned -- and
+  // our bit sense IS the palette's: index 1 is white. So the pixel bytes are
+  // the big cover's own, written back to front.
+  constexpr uint32_t ROWB = 60, ROWS = 800, HDR = 62;
+  constexpr uint32_t BAND_ROWS = 80, BAND = ROWB * BAND_ROWS;
+  uint8_t* band = (uint8_t*)malloc(BAND);
+  if (!band) return false;
+  // Probe the big cover before opening the stream: a book whose full-size
+  // cover was never written (or was dropped) should not leave a header-only
+  // cover.bmp behind.
+  if (sdcard::readSlice(big, 0, band, (int)ROWB) != (int)ROWB) {
+    free(band);
+    return false;
+  }
+  bool ok = sdcard::streamOpen(p);
+  if (ok) {
+    uint8_t h[HDR] = {0};
+    h[0] = 'B'; h[1] = 'M';
+    const uint32_t fileSize = HDR + ROWB * ROWS;
+    h[2] = (uint8_t)fileSize; h[3] = (uint8_t)(fileSize >> 8);
+    h[4] = (uint8_t)(fileSize >> 16); h[5] = (uint8_t)(fileSize >> 24);
+    h[10] = HDR;              // offBits
+    h[14] = 40;               // BITMAPINFOHEADER
+    h[18] = (uint8_t)(480 & 255); h[19] = 480 >> 8;   // width
+    h[22] = (uint8_t)(ROWS & 255); h[23] = ROWS >> 8;  // height, bottom-up
+    h[26] = 1;                // planes
+    h[28] = 1;                // bits per pixel
+    const uint32_t img = ROWB * ROWS;
+    h[34] = (uint8_t)img; h[35] = (uint8_t)(img >> 8); h[36] = (uint8_t)(img >> 16);
+    h[46] = 2;                // colours used
+    // palette: 0 = black (already zeroed), 1 = white
+    h[58] = h[59] = h[60] = 255;
+    ok = sdcard::streamWrite(h, HDR);
+  }
+  for (int b = (int)(ROWS / BAND_ROWS) - 1; ok && b >= 0; b--) {
+    ok = sdcard::readSlice(big, (uint32_t)b * BAND, band, (int)BAND) == (int)BAND;
+    for (int r = (int)BAND_ROWS - 1; ok && r >= 0; r--)
+      ok = sdcard::streamWrite(band + (uint32_t)r * ROWB, ROWB);
+  }
+  free(band);
+  return sdcard::streamClose(ok) && ok;
 }
 
 int StickyHost::shelfFolders(ShelfFolder* out, int max, const char* ext) {

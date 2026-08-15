@@ -18,6 +18,10 @@ template <typename T>
 T constrain(T v, T lo, T hi) {
   return v < lo ? lo : (v > hi ? hi : v);
 }
+// PSRAM on a PC is just RAM; the device's ps_malloc falls back to internal
+// malloc anyway, so the semantics match.
+inline void* ps_malloc(size_t n) { return malloc(n); }
+
 #define HIGH 1
 #define LOW 0
 #define INPUT 0

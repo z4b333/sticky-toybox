@@ -20,6 +20,7 @@
 #include "sticky_host.h"
 #include "toybox.h"
 #include "settings.h"
+#include "bmp_gray.h"
 #include "tools/lock_image.h"
 #include "tools/lockscreen.h"
 #include "nonogram.h"
@@ -2606,6 +2607,353 @@ int main() {
     toybox.hostHub().goHome();
     g_dumpEnabled = true;
     printf("recents ok (covers reopen, thumbnail stored, DOWN carries on reading)\n");
+  }
+
+  // --- BMP pictures ----------------------------------------------------------
+  // The format the CrossPoint/CrossInk/Xteink family trades sleep art and
+  // covers in. Every byte parsed here goes through src/bmp_gray.h -- the
+  // parser the device ships -- against BMPs built the way real writers build
+  // them: bottom-up and top-down, palettes that mean what they say (including
+  // one that lies backwards), 8 and 24 and 4 bits per pixel.
+  {
+    g_dumpEnabled = false;
+    static uint8_t gray[480 * 800];
+
+    // A 240x400 8bpp quadrant card: black / white over grey 85 / grey 170.
+    // 240x400 doubles to exactly 480x800 -- the whole panel covered, every
+    // quadrant where arithmetic says, and the upscale replication exercised
+    // on the way (the 4x enlargement cap stays clear at 2x).
+    auto quad8 = [](bool invertPalette) {
+      static uint8_t bmp[14 + 40 + 1024 + 240 * 400];
+      const int W = 240, H = 400;
+      const uint32_t off = 14 + 40 + 1024, img = (uint32_t)W * H, total = off + img;
+      memset(bmp, 0, sizeof(bmp));
+      bmp[0] = 'B'; bmp[1] = 'M';
+      bmp[2] = (uint8_t)total; bmp[3] = (uint8_t)(total >> 8); bmp[4] = (uint8_t)(total >> 16);
+      bmp[10] = (uint8_t)off; bmp[11] = (uint8_t)(off >> 8);
+      bmp[14] = 40;
+      bmp[18] = (uint8_t)(W & 255); bmp[19] = (uint8_t)(W >> 8);
+      bmp[22] = (uint8_t)(H & 255); bmp[23] = (uint8_t)(H >> 8);  // positive: bottom-up
+      bmp[26] = 1; bmp[28] = 8;
+      for (int i = 0; i < 256; i++) {  // palette: BGRA, honest or inverted
+        const uint8_t v = invertPalette ? (uint8_t)(255 - i) : (uint8_t)i;
+        bmp[54 + i * 4 + 0] = bmp[54 + i * 4 + 1] = bmp[54 + i * 4 + 2] = v;
+      }
+      for (int y = 0; y < H; y++) {      // stored bottom row first
+        const int srcY = H - 1 - y;      // the picture's own row
+        for (int x = 0; x < W; x++) {
+          uint8_t v;
+          if (srcY < H / 2) v = x < W / 2 ? 0 : 255;
+          else v = x < W / 2 ? 85 : 170;
+          bmp[off + (uint32_t)y * W + x] = v;
+        }
+      }
+      return std::make_pair((const uint8_t*)bmp, total);
+    };
+
+    {
+      auto [b, n] = quad8(false);
+      sdcard::hostPutCardFile("/wallpapers/photo.bmp", b, (int)n);
+      if (!sdcard::readBmpGray("/wallpapers/photo.bmp", gray)) {
+        printf("BMP FAIL: the 8bpp quadrant card did not parse\n");
+        abort();
+      }
+      const int tl = gray[100 * 480 + 100], tr = gray[100 * 480 + 400];
+      const int bl = gray[700 * 480 + 100], br = gray[700 * 480 + 400];
+      if (tl != 0 || tr != 255 || bl != 85 || br != 170) {
+        printf("BMP FAIL: quadrants read %d %d %d %d, want 0 255 85 170\n", tl, tr, bl, br);
+        abort();
+      }
+    }
+    {
+      // The same picture with a backwards palette: the VALUES are identical,
+      // the palette says they mean the opposite, and the palette must win.
+      auto [b, n] = quad8(true);
+      sdcard::hostPutCardFile("/inverted.bmp", b, (int)n);
+      if (!sdcard::readBmpGray("/inverted.bmp", gray) || gray[100 * 480 + 100] != 255 ||
+          gray[100 * 480 + 400] != 0) {
+        printf("BMP FAIL: an inverted palette was not honoured\n");
+        abort();
+      }
+    }
+    {
+      // 24bpp, top-down (negative height), pure-colour quadrants: the
+      // BGR-order luminance weights, and the row direction flag.
+      const int W = 96, H = 160;
+      const uint32_t off = 14 + 40, img = (uint32_t)W * 3 * H, total = off + img;
+      static uint8_t bmp[14 + 40 + 96 * 3 * 160];
+      memset(bmp, 0, sizeof(bmp));
+      bmp[0] = 'B'; bmp[1] = 'M';
+      bmp[10] = (uint8_t)off;
+      bmp[14] = 40;
+      bmp[18] = W;
+      const int32_t nh = -H;  // top-down
+      memcpy(bmp + 22, &nh, 4);
+      bmp[26] = 1; bmp[28] = 24;
+      for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++) {
+          uint8_t* p = bmp + off + ((uint32_t)y * W + x) * 3;  // stored top first
+          if (y < H / 2) {
+            if (x < W / 2) p[2] = 255;       // red
+            else p[1] = 255;                 // green
+          } else {
+            if (x < W / 2) p[0] = 255;       // blue
+            else p[0] = p[1] = p[2] = 255;   // white
+          }
+        }
+      sdcard::hostPutCardFile("/rgb.bmp", bmp, (int)total);
+      if (!sdcard::readBmpGray("/rgb.bmp", gray)) {
+        printf("BMP FAIL: the 24bpp top-down card did not parse\n");
+        abort();
+      }
+      const int r = gray[100 * 480 + 100], g = gray[100 * 480 + 400];
+      const int bu = gray[700 * 480 + 100], w = gray[700 * 480 + 400];
+      if (r != (77 * 255) >> 8 || g != (150 * 255) >> 8 || bu != (29 * 255) >> 8 || w != 255) {
+        printf("BMP FAIL: 24bpp luminance read %d %d %d %d\n", r, g, bu, w);
+        abort();
+      }
+    }
+    {
+      // 4bpp with a two-colour palette, and the small-image cap: an 8x8 may
+      // grow at most 4x, so it lands as a 32x32 patch on white.
+      const int W = 8, H = 8;
+      const uint32_t off = 14 + 40 + 64, total = off + 4 * H;  // rowBytes(8px,4bpp)=4->pad 4
+      static uint8_t bmp[14 + 40 + 64 + 4 * 8];
+      memset(bmp, 0, sizeof(bmp));
+      bmp[0] = 'B'; bmp[1] = 'M';
+      bmp[10] = (uint8_t)off;
+      bmp[14] = 40;
+      bmp[18] = W; bmp[22] = H;
+      bmp[26] = 1; bmp[28] = 4;
+      bmp[46] = 2;                                   // two palette entries
+      bmp[54 + 4] = bmp[54 + 5] = bmp[54 + 6] = 255; // index 1 = white
+      for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++)
+          if (x < W / 2)  // left half index 1 (white), right half 0 (black)
+            bmp[off + (uint32_t)y * 4 + (x >> 1)] |= (uint8_t)(1 << (x & 1 ? 0 : 4));
+      sdcard::hostPutCardFile("/tiny.bmp", bmp, (int)total);
+      if (!sdcard::readBmpGray("/tiny.bmp", gray)) {
+        printf("BMP FAIL: the 4bpp card did not parse\n");
+        abort();
+      }
+      const int x0 = (480 - 32) / 2, y0 = (800 - 32) / 2;
+      if (gray[0] != 255 || gray[(y0 + 8) * 480 + x0 + 8] != 255 ||
+          gray[(y0 + 8) * 480 + x0 + 24] != 0) {
+        printf("BMP FAIL: 4bpp halves read %d %d (margin %d)\n",
+               gray[(y0 + 8) * 480 + x0 + 8], gray[(y0 + 8) * 480 + x0 + 24], gray[0]);
+        abort();
+      }
+    }
+    {
+      // Atkinson on a flat middle grey: to 2 levels, roughly half the dots
+      // set; to 4, everything within a level of the middle pair. Property
+      // checks, because dithering's whole job is to have no exact answer.
+      memset(gray, 128, sizeof(gray));
+      bmpg::atkinson(gray, 2);
+      uint32_t ones = 0;
+      for (uint32_t i = 0; i < sizeof(gray); i++) {
+        if (gray[i] > 1) {
+          printf("BMP FAIL: 2-level dither produced value %d\n", gray[i]);
+          abort();
+        }
+        ones += gray[i];
+      }
+      const double frac = (double)ones / sizeof(gray);
+      if (frac < 0.45 || frac < 128.0 / 255 - 0.05 || frac > 128.0 / 255 + 0.05) {
+        printf("BMP FAIL: 2-level dither of grey 128 set %.3f of dots\n", frac);
+        abort();
+      }
+      memset(gray, 128, sizeof(gray));
+      bmpg::atkinson(gray, 4);
+      for (uint32_t i = 0; i < sizeof(gray); i++)
+        if (gray[i] < 1 || gray[i] > 2) {
+          printf("BMP FAIL: 4-level dither of grey 128 left level %d\n", gray[i]);
+          abort();
+        }
+    }
+    printf("bmp parse ok (palettes, row orders, depths, dither)\n");
+
+    // --- and the ways a .bmp gets used ---------------------------------------
+    // The wallpaper list offers it; taking it as wallpaper makes the 1-bit
+    // .tbi; taking it as the lock picture makes the 2bpp grey file -- and
+    // each choice removes the other lock file, so exactly one picture rules.
+    {
+      char names[8][40];
+      const int n = sdcard::listTbi(names, 8);
+      bool listed = false;
+      for (int i = 0; i < n; i++) listed = listed || strcmp(names[i], "photo.bmp") == 0;
+      if (!listed) {
+        printf("BMP FAIL: photo.bmp not on the wallpaper list (%d names)\n", n);
+        abort();
+      }
+      if (!stickyHost.sdWallpaperTake("photo.bmp") ||
+          tfs::size(wallimg::PATH) != tbimg::FILE_SIZE) {
+        printf("BMP FAIL: photo.bmp did not become the wallpaper\n");
+        abort();
+      }
+      // The top-left quadrant was black; dithered black stays black.
+      {
+        size_t len = 0;
+        char* buf = tfs::readAlloc(wallimg::PATH, len);
+        const uint8_t* bits = (const uint8_t*)buf + tbimg::HEADER;
+        int blacks = 0;
+        for (int y = 100; y < 110; y++)
+          for (int xb = 0; xb < 20; xb++)
+            for (int k = 0; k < 8; k++)
+              if (!(bits[y * 60 + xb] & (0x80 >> k))) blacks++;
+        free(buf);
+        if (blacks < 1500) {  // of 1600
+          printf("BMP FAIL: the wallpaper's black quadrant has %d black dots\n", blacks);
+          abort();
+        }
+      }
+      if (!stickyHost.sdLockTake("photo.bmp") || tfs::size(lockimg::G2_PATH) != tbg2::FILE_SIZE ||
+          !lockimg::haveG2() || !lockimg::have()) {
+        printf("BMP FAIL: photo.bmp did not become the grey lock picture\n");
+        abort();
+      }
+      // The grey file really has four levels: quadrant means of the packed
+      // 2bpp, in the panel's own order.
+      {
+        size_t len = 0;
+        char* buf = tfs::readAlloc(lockimg::G2_PATH, len);
+        const uint8_t* bits = (const uint8_t*)buf + tbg2::HEADER;
+        auto meanAt = [&](int yb, int xb) {
+          double s = 0;
+          int c = 0;
+          for (int y = yb; y < yb + 40; y++)
+            for (int x = xb; x < xb + 40; x++) {
+              const uint32_t i = (uint32_t)y * 480 + x;
+              s += (bits[i >> 2] >> (6 - 2 * (i & 3))) & 3;
+              c++;
+            }
+          return s / c;
+        };
+        const double tl = meanAt(80, 80), tr = meanAt(80, 360);
+        const double bl = meanAt(680, 80), br = meanAt(680, 360);
+        free(buf);
+        if (tl > 0.05 || tr < 2.95 || bl < 0.8 || bl > 1.2 || br < 1.8 || br > 2.2) {
+          printf("BMP FAIL: grey lock quadrants mean %.2f %.2f %.2f %.2f\n", tl, tr, bl, br);
+          abort();
+        }
+      }
+      // A .tbi taken afterwards removes the grey file; the .bmp taken again
+      // removes the .tbi. One picture, whichever way it last arrived.
+      if (!stickyHost.sdLockTake("mountains.tbi") || tfs::exists(lockimg::G2_PATH) ||
+          !tfs::exists(lockimg::PATH) || !lockimg::have()) {
+        printf("BMP FAIL: taking a .tbi did not retire the grey lock file\n");
+        abort();
+      }
+      if (!stickyHost.sdLockTake("photo.bmp") || tfs::exists(lockimg::PATH) ||
+          !lockimg::haveG2()) {
+        printf("BMP FAIL: taking the .bmp back did not retire the .tbi\n");
+        abort();
+      }
+      lockimg::remove();
+      if (lockimg::have()) {
+        printf("BMP FAIL: remove did not clear both lock files\n");
+        abort();
+      }
+      wallimg::remove();
+    }
+
+    // Sleep art: /sleep.bmp wins; otherwise the hidden folder offers a face.
+    {
+      auto [b, n] = quad8(false);
+      sdcard::hostPutCardFile("/.sleep/night.bmp", b, (int)n);
+      if (!sdcard::sleepArtGray(gray) || gray[100 * 480 + 100] != 0 ||
+          gray[100 * 480 + 400] != 255) {
+        printf("BMP FAIL: /.sleep art was not picked up\n");
+        abort();
+      }
+      auto [b2, n2] = quad8(true);
+      sdcard::hostPutCardFile("/sleep.bmp", b2, (int)n2);
+      if (!sdcard::sleepArtGray(gray) || gray[100 * 480 + 100] != 255) {
+        printf("BMP FAIL: /sleep.bmp did not win over the folder\n");
+        abort();
+      }
+    }
+    printf("bmp art ok (list, wallpaper, grey lock, sleep pick)\n");
+
+    // --- covers traded with CrossInk -----------------------------------------
+    // Put: opening wind.epub earlier left OUR cover as their cover.bmp, in
+    // their cache dir, in their format -- prove it parses back to the very
+    // pixels of the big cover it came from.
+    {
+      char dir[64], p[112];
+      epubc::cacheDir("/books/wind.epub", dir, sizeof(dir));
+      snprintf(p, sizeof(p), "%s/cover.bmp", dir);
+      const int sz = sdcard::hostCardFileSize(p);
+      if (sz != 62 + 60 * 800) {
+        printf("BMP FAIL: cover.bmp for wind.epub is %d bytes (want 48062)\n", sz);
+        abort();
+      }
+      if (!sdcard::readBmpGray(p, gray)) {
+        printf("BMP FAIL: our own cover.bmp did not parse\n");
+        abort();
+      }
+      char big[48];
+      bthumb::bigPath("/books/wind.epub", big, sizeof(big));
+      static uint8_t tbc[48000];
+      if (sdcard::readWhole(big, tbc, sizeof(tbc)) != (int)sizeof(tbc)) {
+        printf("BMP FAIL: wind's big cover went missing\n");
+        abort();
+      }
+      for (int i = 0; i < 480 * 800; i += 997) {
+        const int want = (tbc[i >> 3] & (0x80 >> (i & 7))) ? 255 : 0;
+        if (gray[i] != want) {
+          printf("BMP FAIL: cover.bmp pixel %d is %d, the cover says %d\n", i, gray[i], want);
+          abort();
+        }
+      }
+    }
+    // Grab: a cover.bmp another firmware left becomes our cover art without
+    // any decode -- for a book that does not even exist, which is the proof
+    // no decoder was involved.
+    {
+      auto [b, n] = quad8(false);
+      char dir[64], p[112];
+      epubc::cacheDir("/books/fake-cross.epub", dir, sizeof(dir));
+      snprintf(p, sizeof(p), "%s/cover.bmp", dir);
+      sdcard::hostPutCardFile(p, b, (int)n);
+      if (!stickyHost.crossCoverGrab("/books/fake-cross.epub") ||
+          !bthumb::have("/books/fake-cross.epub")) {
+        printf("BMP FAIL: a waiting cover.bmp was not grabbed\n");
+        abort();
+      }
+      static uint8_t small[bthumb::BYTES];
+      if (!bthumb::load("/books/fake-cross.epub", small)) {
+        printf("BMP FAIL: the grabbed cover made no thumbnail\n");
+        abort();
+      }
+      // Top-left of the quadrant card is black, top-right white; the strip
+      // thumbnail (96x160) must agree. Sampled clear of the halfway seam:
+      // bytes 0-3 are columns 0-31 (deep in the black half), bytes 8-11
+      // columns 64-95 (deep in the white).
+      int tlBlack = 0, trBlack = 0;
+      for (int y = 20; y < 40; y++)
+        for (int x = 0; x < 12; x++) {
+          if (x >= 4 && x < 8) continue;
+          for (int k = 0; k < 8; k++) {
+            const bool black = !(small[y * 12 + x] & (0x80 >> k));
+            if (x < 4) tlBlack += black; else trBlack += black;
+          }
+        }
+      if (tlBlack < 500 || trBlack > 140) {
+        printf("BMP FAIL: grabbed thumbnail halves %d/%d black\n", tlBlack, trBlack);
+        abort();
+      }
+      // ...and the legacy Murmur directory is honoured when FNV has nothing.
+      epubc::cacheDirLegacy("/books/old-cross.epub", dir, sizeof(dir));
+      snprintf(p, sizeof(p), "%s/cover.bmp", dir);
+      sdcard::hostPutCardFile(p, b, (int)n);
+      if (!stickyHost.crossCoverGrab("/books/old-cross.epub")) {
+        printf("BMP FAIL: a legacy-dir cover.bmp was not grabbed\n");
+        abort();
+      }
+    }
+    printf("crossink covers ok (ours put back, theirs grabbed, both dirs)\n");
+    g_dumpEnabled = true;
   }
 
   // --- long book paths -------------------------------------------------------

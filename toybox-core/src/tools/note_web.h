@@ -74,7 +74,12 @@ class NoteServer {
         "/pic", HTTP_POST, [this] { _portal.server().send(200, "text/plain", _picOk ? "ok" : "bad"); },
         [this] { receivePicture(); });
     _portal.on("/pic", HTTP_DELETE, [this] {
-      tfs::remove(picPath());
+      // The lock screen may be holding its picture as either file -- the
+      // phone's 1-bit or a card .bmp's grey -- so removing means both.
+      if (_portal.server().arg("to") == "wall")
+        tfs::remove(wallimg::PATH);
+      else
+        lockimg::remove();
       _portal.server().send(200, "text/plain", "ok");
     });
     _portal.on("/picture", HTTP_GET, [this] { sendPicturePage(); });
@@ -130,6 +135,9 @@ class NoteServer {
       // that turns to noise partway down the panel.
       _picOk = (_picLen == tbimg::FILE_SIZE);
       if (!_picOk) tfs::remove(_picPath);
+      // A fresh phone picture for the lock screen replaces a grey one taken
+      // from a card .bmp: one picture, whichever way it last arrived.
+      if (_picOk && strcmp(_picPath, lockimg::PATH) == 0) tfs::remove(lockimg::G2_PATH);
     } else {
       if (_picFile) _picFile.close();
       tfs::remove(_picPath);

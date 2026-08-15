@@ -71,12 +71,35 @@ inline bool draw(ToolsCanvas& c, const char* path) {
 
 }  // namespace tbimg
 
+// The lock screen's grey picture: the same 480x800, but 2 bits per pixel in
+// the panel's own 2bpp layout (high pair first, 0 = black, 3 = white). It
+// exists because the panel CAN show four greys and a photograph is the one
+// thing on this device that deserves them. Made from a .bmp on the card --
+// the format the CrossPoint/CrossInk/Xteink family trades sleep art in -- and
+// painted straight to the panel's grey path, never through the 1-bit canvas.
+namespace tbg2 {
+inline constexpr uint32_t MAGIC = 0x31474254;  // 'TBG1', little endian
+inline constexpr int W = 480, H = 800;
+inline constexpr uint32_t BITS = (uint32_t)W * H / 4;  // 96,000
+inline constexpr uint32_t HEADER = 8;                  // magic, u16 w, u16 h
+inline constexpr uint32_t FILE_SIZE = HEADER + BITS;
+inline bool have(const char* path) { return tfs::size(path) == FILE_SIZE; }
+}  // namespace tbg2
+
 namespace lockimg {
 inline constexpr const char* PATH = "/lockimg.tbi";
+inline constexpr const char* G2_PATH = "/lockimg.g2";
 inline constexpr uint32_t FILE_SIZE = tbimg::FILE_SIZE;
 inline constexpr int W = tbimg::W, H = tbimg::H;
-inline bool have() { return tbimg::have(PATH); }
-inline void remove() { tfs::remove(PATH); }
+// Two files, one picture: at most one exists at a time -- whichever way a
+// picture last arrived (phone sends 1-bit, a card .bmp becomes grey) removes
+// the other, so "have" and "remove" speak for both.
+inline bool haveG2() { return tbg2::have(G2_PATH); }
+inline bool have() { return tbimg::have(PATH) || haveG2(); }
+inline void remove() {
+  tfs::remove(PATH);
+  tfs::remove(G2_PATH);
+}
 inline bool draw(ToolsCanvas& c) { return tbimg::draw(c, PATH); }
 }  // namespace lockimg
 
