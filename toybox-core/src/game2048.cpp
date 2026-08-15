@@ -310,7 +310,7 @@ void G2048App::onTap(int x, int y) {
   if (host().isHelpTap(x, y)) {
     _help = !_help;
     host().beep(1);
-    host().refresh(true);
+    host().refreshUi();
     return;
   }
   if (_help) {
@@ -319,7 +319,7 @@ void G2048App::onTap(int x, int y) {
     if (t == help::Tap::Never) help::suppress(prefs(), "g20");
     _help = false;
     host().beep(1);
-    host().refresh(true);
+    host().refreshUi();
     return;
   }
 

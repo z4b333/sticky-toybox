@@ -51,6 +51,7 @@ class BookTool : public ToolApp {
     free(_pageBuf);
   }
 
+  bool enterTouchesCard() const override { return true; }  // the shelf lists the card
   void enter(ToolsHost& h) override {
     ToolApp::enter(h);
     _screen = Screen::List;

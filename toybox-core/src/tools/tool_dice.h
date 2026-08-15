@@ -142,7 +142,7 @@ class DiceTool : public ToolApp {
         prefs().putInt("d_type", i);
         _rolled = 0;
         host().beep(0);
-        host().refresh(true);
+        host().refreshUi();
         return;
       }
     }
@@ -159,7 +159,7 @@ class DiceTool : public ToolApp {
     prefs().putInt("d_count", v);
     _rolled = 0;
     host().beep(0);
-    host().refresh(true);
+    host().refreshUi();
   }
   void setMod(int v) {
     _mod = v;

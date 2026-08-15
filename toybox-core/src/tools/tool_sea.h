@@ -149,7 +149,7 @@ class SeaTool : public ToolApp {
   void toggleHelp() {
     _help = !_help;
     host().beep(1);
-    host().refresh(true);
+    host().refreshUi();
   }
   void tapHelp(int x, int y) {
     const help::Tap t = help::hit(x, y);
@@ -157,7 +157,7 @@ class SeaTool : public ToolApp {
     if (t == help::Tap::Never) help::suppress(prefs(), "sea");
     _help = false;
     host().beep(1);
-    host().refresh(true);
+    host().refreshUi();
   }
 
   enum class Screen : uint8_t { Menu, Pair, Setup, Play, Over };
@@ -237,7 +237,7 @@ class SeaTool : public ToolApp {
       _gunner.reset();
       _screen = Screen::Setup;
       host().beep(1);
-      host().refresh(true);
+      host().refreshUi();
       return;
     }
     if (DUEL_BTN.hit(x, y)) {
@@ -252,7 +252,7 @@ class SeaTool : public ToolApp {
       }
       _screen = Screen::Pair;
       host().beep(1);
-      host().refresh(true);
+      host().refreshUi();
     }
   }
 
@@ -315,7 +315,7 @@ class SeaTool : public ToolApp {
       _duelMode = false;
       _screen = Screen::Menu;
       host().beep(1);
-      host().refresh(true);
+      host().refreshUi();
       return;
     }
     const Phase p = _duel.phase();
@@ -323,12 +323,12 @@ class SeaTool : public ToolApp {
       if (HOST_BTN.hit(x, y)) {
         _duel.startHosting(millis());
         host().beep(1);
-        host().refresh(true);
+        host().refreshUi();
       } else if (BROWSE_BTN.hit(x, y)) {
         _duel.startBrowsing();
         _foundShown = 0;
         host().beep(1);
-        host().refresh(true);
+        host().refreshUi();
       }
       return;
     }
@@ -337,7 +337,7 @@ class SeaTool : public ToolApp {
         if (!foundRect(i).hit(x, y)) continue;
         _duel.joinFound(i, millis());
         host().beep(1);
-        host().refresh(true);
+        host().refreshUi();
         return;
       }
     }
@@ -416,7 +416,7 @@ class SeaTool : public ToolApp {
       _myTurnSolo = true;
     }
     _sel = -1;
-    host().refresh(true);
+    host().refreshUi();
   }
 
   // --- play --------------------------------------------------------------
@@ -545,7 +545,7 @@ class SeaTool : public ToolApp {
     recordResult(won);
     _screen = Screen::Over;
     host().beep(won ? 3 : 2);
-    host().refresh(true);
+    host().refreshUi();
   }
 
   void recordResult(bool won) {
@@ -588,7 +588,7 @@ class SeaTool : public ToolApp {
       _screen = Screen::Menu;
       _msg[0] = 0;
       host().beep(1);
-      host().refresh(true);
+      host().refreshUi();
       return;
     }
     if (!AGAIN_BTN.hit(x, y)) return;
@@ -605,7 +605,7 @@ class SeaTool : public ToolApp {
       _gunner.reset();
       _screen = Screen::Setup;
     }
-    host().refresh(true);
+    host().refreshUi();
   }
 
   // --- drawing -----------------------------------------------------------

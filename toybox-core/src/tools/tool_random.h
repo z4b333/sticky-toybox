@@ -141,7 +141,7 @@ class RandomTool : public ToolApp {
         saveRange();
         resetDraws();
         host().beep(1);
-        host().refresh(true);
+        host().refreshUi();
         return;
       }
     }
@@ -208,7 +208,7 @@ class RandomTool : public ToolApp {
     _hist[0] = _value;
     if (_histN < kHist) _histN++;
     host().beep(1);
-    host().refresh(true);
+    host().refreshUi();
   }
 
   // --- card mode ---------------------------------------------------------
@@ -259,13 +259,13 @@ class RandomTool : public ToolApp {
     if (DRAW_CARD.hit(x, y) && _dealt < 52) {
       _dealt++;
       host().beep(1);
-      host().refresh(true);
+      host().refreshUi();
       return;
     }
     if (SHUFFLE.hit(x, y)) {
       shuffleDeck();
       host().beep(1);
-      host().refresh(true);
+      host().refreshUi();
     }
   }
 
@@ -283,7 +283,7 @@ class RandomTool : public ToolApp {
   void switchMode(bool cards) {
     _cardMode = cards;
     host().beep(1);
-    host().refresh(true);
+    host().refreshUi();
   }
 
   static constexpr int kHist = 10;

@@ -352,7 +352,7 @@ class NoteTool : public ToolApp {
         note::remove(_infos[i].name);
         refreshList();
         host().beep(2);
-        host().refresh(true);
+        host().refreshUi();
         return;
       }
       if (rowRect(i).hit(x, y)) return openNote(i);
@@ -372,7 +372,7 @@ class NoteTool : public ToolApp {
     _pageStack[0] = 0;
     _screen = Screen::View;
     host().beep(1);
-    host().refresh(true);
+    host().refreshUi();
   }
 
   bool loadBody() {
@@ -398,7 +398,7 @@ class NoteTool : public ToolApp {
     _buf = nullptr;
     _screen = Screen::List;
     refreshList();
-    host().refresh(true);
+    host().refreshUi();
   }
 
   void renderView(ToolsCanvas& c) {
@@ -466,14 +466,14 @@ class NoteTool : public ToolApp {
       if (_pageDepth + 1 < kMaxPages) {
         _pageStack[++_pageDepth] = _next;
         host().beep(0);
-        host().refresh(true);
+        host().refreshUi();
       }
       return;
     }
     if (PREV_BTN.hit(x, y) && _pageDepth > 0) {
       _pageDepth--;
       host().beep(0);
-      host().refresh(true);
+      host().refreshUi();
       return;
     }
     // Tapping any line acts on it: a checkbox flips, anything else is crossed
@@ -490,7 +490,7 @@ class NoteTool : public ToolApp {
       note::save(_name, _buf, _len);
       _blockCount = nmd::parse(_buf, _blocks, nmd::MAX_BLOCKS);
       host().beep(1);
-      host().refresh(true);
+      host().refreshUi();
       return;
     }
   }
@@ -511,7 +511,7 @@ class NoteTool : public ToolApp {
     _screen = Screen::List;
     refreshList();
     host().beep(1);
-    host().refresh(true);
+    host().refreshUi();
   }
 
   void renderPair(ToolsCanvas& c) {
@@ -673,7 +673,7 @@ class NoteTool : public ToolApp {
       nmd::setBody(next);
       prefs().putUInt("nt_size", (uint32_t)(next - TS_MED));
       host().beep(0);
-      host().refresh(true);  // the note reflows; every pixel may change
+      host().refreshUi();  // the note reflows; every pixel may change
       return;
     }
     if (!_gyro && turnRect(canvas().width(), canvas().height()).hit(x, y)) {
@@ -699,7 +699,7 @@ class NoteTool : public ToolApp {
         _pinnedIt = false;
         _answered = true;
         host().beep(1);
-        host().refresh(true);
+        host().refreshUi();
       }
       return;
     }

@@ -140,7 +140,7 @@ class FlashTool : public ToolApp {
     if (_net.received() && !_importShown) {
       _importShown = true;
       host().beep(3);
-      host().refresh(true);
+      host().refreshUi();
     }
   }
 
@@ -169,7 +169,7 @@ class FlashTool : public ToolApp {
         releaseCards();
         _screen = Screen::Decks;
         refreshDeckList();
-        host().refresh(true);
+        host().refreshUi();
       } else if (_screen == Screen::Import) {
         closeImport();
       } else {
@@ -180,7 +180,7 @@ class FlashTool : public ToolApp {
     if (host().isHelpTap(x, y)) {
       _help = !_help;
       host().beep(1);
-      host().refresh(true);
+      host().refreshUi();
       return;
     }
     if (_help) {
@@ -189,7 +189,7 @@ class FlashTool : public ToolApp {
       if (t == help::Tap::Never) help::suppress(prefs(), "fc");
       _help = false;
       host().beep(1);
-      host().refresh(true);
+      host().refreshUi();
       return;
     }
     switch (_screen) {
@@ -283,7 +283,7 @@ class FlashTool : public ToolApp {
         fcard::deleteDeck(_decks[i].name);
         refreshDeckList();
         host().beep(2);
-        host().refresh(true);
+        host().refreshUi();
         return;
       }
       if (rowRect(i, _deckCount).hit(x, y)) return startStudy(i);
@@ -320,7 +320,7 @@ class FlashTool : public ToolApp {
     _graded = 0;
     _screen = Screen::Study;
     host().beep(1);
-    host().refresh(true);
+    host().refreshUi();
   }
 
   // Shuffle, then bring low Leitner boxes to the front. Cards you keep getting
@@ -410,7 +410,7 @@ class FlashTool : public ToolApp {
     _pos = 0;
     _flipped = false;
     host().beep(1);
-    host().refresh(true);
+    host().refreshUi();
   }
 
   void backToDecks() {
@@ -419,19 +419,19 @@ class FlashTool : public ToolApp {
     _screen = Screen::Decks;
     refreshDeckList();
     host().beep(1);
-    host().refresh(true);
+    host().refreshUi();
   }
 
   void reveal() {
     _flipped = true;
     host().beep(0);
-    host().refresh(true);
+    host().refreshUi();
   }
 
   void unreveal() {
     _flipped = false;
     host().beep(0);
-    host().refresh(true);
+    host().refreshUi();
   }
 
   void gradeAgain() {
@@ -485,7 +485,7 @@ class FlashTool : public ToolApp {
       _graded = 0;
     }
     host().beep(beepKind);
-    host().refresh(true);
+    host().refreshUi();
   }
 
   int masteredCount() const {
@@ -595,7 +595,7 @@ class FlashTool : public ToolApp {
     _screen = Screen::Decks;
     refreshDeckList();
     host().beep(1);
-    host().refresh(true);
+    host().refreshUi();
   }
 
   void renderImport(ToolsCanvas& c) {

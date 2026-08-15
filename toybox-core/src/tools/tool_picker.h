@@ -155,7 +155,7 @@ class PickerTool : public ToolApp {
       _draft[0] = 0;
       _draftLen = 0;
       host().beep(1);
-      host().refresh(true);
+      host().refreshUi();
       return;
     }
     if (PHONE_BTN.hit(x, y)) return openPair();
@@ -165,7 +165,7 @@ class PickerTool : public ToolApp {
       memset(_used, 0, sizeof(_used));
       save();
       host().beep(1);
-      host().refresh(true);
+      host().refreshUi();
       return;
     }
     if (MODE.hit(x, y)) {
@@ -173,7 +173,7 @@ class PickerTool : public ToolApp {
       prefs().putBool("pk_rm", _removeMode);
       memset(_used, 0, sizeof(_used));
       host().beep(1);
-      host().refresh(true);
+      host().refreshUi();
       return;
     }
     if (SPIN.hit(x, y) && _count > 0) return pick();
@@ -200,7 +200,7 @@ class PickerTool : public ToolApp {
       _picked = (int)(esp_random() % (uint32_t)_count);
     }
     host().beep(3);
-    host().refresh(true);
+    host().refreshUi();
   }
 
   void removeItem(int i) {
@@ -212,7 +212,7 @@ class PickerTool : public ToolApp {
     _picked = -1;
     save();
     host().beep(1);
-    host().refresh(true);
+    host().refreshUi();
   }
 
   // --- keyboard ----------------------------------------------------------
@@ -246,7 +246,7 @@ class PickerTool : public ToolApp {
     if (K_CANCEL.hit(x, y)) {
       _screen = Screen::List;
       host().beep(1);
-      host().refresh(true);
+      host().refreshUi();
       return;
     }
     if (K_OK.hit(x, y)) {
@@ -258,7 +258,7 @@ class PickerTool : public ToolApp {
       }
       _screen = Screen::List;
       host().beep(1);
-      host().refresh(true);
+      host().refreshUi();
       return;
     }
     if (K_DEL.hit(x, y)) {
@@ -324,7 +324,7 @@ class PickerTool : public ToolApp {
     _screen = Screen::List;
     load();
     host().beep(1);
-    host().refresh(true);
+    host().refreshUi();
   }
 
   void renderPair(ToolsCanvas& c) {

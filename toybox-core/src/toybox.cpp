@@ -102,7 +102,12 @@ void Toybox::open(bool game, int idx) {
   if (!sameG) p.putBool("last_g", game);
   if (!sameI) p.putInt("last_i", idx);
   _active->enter(*_host);
-  _host->refresh(true);
+  // Entering an app is text and hairlines replacing the home screen: partial,
+  // unless a photo wallpaper is under the ink (a photograph ghosts through a
+  // partial in a way hairlines never do), or entry itself borrowed the SD bus
+  // -- the readers' shelves list the card, which re-initialises the panel and
+  // leaves nothing valid to diff against.
+  _host->refresh(_active->enterTouchesCard() || wallimg::have());
 }
 
 void Toybox::openSettings() {
@@ -157,7 +162,9 @@ void Toybox::goHub() {
   release();
   _settings.leave();
   _where = Where::Hub;
-  _host->refresh(true);
+  // Same rule as the drawer: partial onto a plain home, full when the photo
+  // wallpaper is about to be under the ink.
+  _host->refresh(wallimg::have());
 }
 
 void Toybox::render(ToolsCanvas& c) {
@@ -183,7 +190,9 @@ void Toybox::onTap(int x, int y) {
       const bool wasFiles = _settings.onBusPage();
       if (_settings.back()) {
         _host->beep(1);
-        _host->refresh(true);
+        // Backing up a settings page is text over text -- partial -- except
+        // out of the files page, whose card session re-initialised the panel.
+        _host->refresh(wasFiles);
         return;
       }
       appvis::save(_host->prefs());

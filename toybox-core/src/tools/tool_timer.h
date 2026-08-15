@@ -94,7 +94,7 @@ class TimerTool : public ToolApp {
       _finished = false;
       _remainMs = (uint32_t)_setSec * 1000u;
       host().beep(1);
-      host().refresh(true);
+      host().refreshUi();
       return;
     }
     if (MODE_CD.hit(x, y) && _stopwatch) return switchMode(false);
@@ -112,7 +112,7 @@ class TimerTool : public ToolApp {
       _finished = true;
       _remainMs = 0;
       host().beep(3);
-      host().refresh(true);
+      host().refreshUi();
       return;
     }
     const int sec = (int)(displayMs() / 1000u);
@@ -163,7 +163,7 @@ class TimerTool : public ToolApp {
         _remainMs = (uint32_t)_setSec * 1000u;
         _running = false;
         host().beep(1);
-        host().refresh(true);
+        host().refreshUi();
         return;
       }
     }
@@ -178,14 +178,14 @@ class TimerTool : public ToolApp {
         _lastShown = -1;
       }
       host().beep(1);
-      host().refresh(true);
+      host().refreshUi();
       return;
     }
     if (CD_RESET.hit(x, y)) {
       _running = false;
       _remainMs = (uint32_t)_setSec * 1000u;
       host().beep(1);
-      host().refresh(true);
+      host().refreshUi();
       return;
     }
     for (int i = 0; i < 3; i++) {
@@ -252,7 +252,7 @@ class TimerTool : public ToolApp {
         _lastShown = -1;
       }
       host().beep(1);
-      host().refresh(true);
+      host().refreshUi();
       return;
     }
     if (SW_RESET.hit(x, y)) {
@@ -260,7 +260,7 @@ class TimerTool : public ToolApp {
       _swAccum = 0;
       _lapN = 0;
       host().beep(1);
-      host().refresh(true);
+      host().refreshUi();
       return;
     }
     if (SW_LAP.hit(x, y) && _lapN < kLaps) {
@@ -282,7 +282,7 @@ class TimerTool : public ToolApp {
       _remainMs = (uint32_t)_setSec * 1000u;
     }
     host().beep(1);
-    host().refresh(true);
+    host().refreshUi();
   }
 
   // --- helpers -----------------------------------------------------------

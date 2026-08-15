@@ -152,7 +152,7 @@ class SudokuTool : public ToolApp {
     if (host().isHelpTap(x, y)) {
       _help = !_help;
       host().beep(1);
-      host().refresh(true);
+      host().refreshUi();
       return;
     }
     if (_help) {
@@ -161,7 +161,7 @@ class SudokuTool : public ToolApp {
       if (t == help::Tap::Never) help::suppress(prefs(), "sud");
       _help = false;
       host().beep(1);
-      host().refresh(true);
+      host().refreshUi();
       return;
     }
 

@@ -237,6 +237,14 @@ class ToolsHost {
     }
     refresh(false);
   }
+  // A screen change that is only cosmetically different: text on white
+  // replacing text on white. Partial (0.3 s), promoted to a full clean every
+  // eighth time by the host's shared counter, so ghosting stays bounded
+  // without every list tap costing 1.7 s. NOT for: anything after the SD bus
+  // was released, rotation changes, QR codes (a ghost line can break a
+  // scan), grey pages, or ink over a photo wallpaper -- those use
+  // refresh(true).
+  void refreshUi() { refreshFast(8); }
   virtual void beep(uint8_t kind) = 0;  // 0 tap, 1 confirm, 2 reject, 3 alarm
   virtual void goHub() = 0;
   // Opens the notes tool straight into its pairing screen, where the phone's
@@ -563,6 +571,12 @@ class ToolApp {
   virtual const char* title() const = 0;
   // Called every time the tool is opened from the hub.
   virtual void enter(ToolsHost& h) { _host = &h; }
+  // Does enter() borrow the SD bus? Borrowing re-initialises the panel, so
+  // the shell's paint after entry must be a full refresh rather than a
+  // partial diff against controller RAM that was just reset. The readers say
+  // yes (their shelves list the card); everything else enters from flash and
+  // RAM and gets the cheap paint.
+  virtual bool enterTouchesCard() const { return false; }
   virtual void render(ToolsCanvas& c) = 0;
   virtual void onTap(int x, int y) = 0;
   virtual void onSwipe(int dx, int dy) { (void)dx; (void)dy; }

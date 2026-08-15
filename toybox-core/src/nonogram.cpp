@@ -255,7 +255,7 @@ void NonogramApp::onTap(int x, int y) {
   if (host().isHelpTap(x, y)) {
     _help = !_help;
     host().beep(1);
-    host().refresh(true);
+    host().refreshUi();
     return;
   }
   if (_help) {
@@ -264,7 +264,7 @@ void NonogramApp::onTap(int x, int y) {
     if (t == help::Tap::Never) help::suppress(prefs(), "non");
     _help = false;
     host().beep(1);
-    host().refresh(true);
+    host().refreshUi();
     return;
   }
 

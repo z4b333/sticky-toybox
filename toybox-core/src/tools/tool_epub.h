@@ -80,6 +80,7 @@ class EpubTool : public ToolApp {
     free(_lut);
   }
 
+  bool enterTouchesCard() const override { return true; }  // the shelf lists the card
   void enter(ToolsHost& h) override {
     ToolApp::enter(h);
     _screen = Screen::List;

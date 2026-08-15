@@ -85,7 +85,7 @@ class CoinTool : public ToolApp {
       prefs().putUInt("c_heads", 0);
       prefs().putUInt("c_tails", 0);
       host().beep(1);
-      host().refresh(true);
+      host().refreshUi();
     }
   }
 
