@@ -68,7 +68,7 @@ class HubScreen {
   Tap hit(const ToolsHost& host, int x, int y) const;
 
   // Which page is up. Home is folder -1; the folders are applist group order:
-  // 0 = PLAY, 1 = DECIDE, 2 = STUDY.
+  // 0 = PLAY, 1 = UTILITY, 2 = STUDY.
   bool atHome() const { return _folder < 0; }
   void goHome() { _folder = -1; }
   void openFolder(int f);

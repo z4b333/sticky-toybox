@@ -45,7 +45,7 @@ inline void card1(ToolsCanvas& c) {
   header(c, 0, "THE DOCK");
   struct Row { const char* name; const char* sub; };
   static constexpr Row R[3] = {{"PLAY", "six games, one at a time"},
-                               {"DECIDE", "coin, dice, picker, timer"},
+                               {"UTILITY", "coin, dice, picker, timer"},
                                {"STUDY", "books, ebooks, cards, notes"}};
   int y = 180;
   for (int i = 0; i < 3; i++) {

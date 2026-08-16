@@ -510,7 +510,7 @@ int main() {
   {
     g_dumpEnabled = false;
     // The dock on a guest drawer switches drawers in place.
-    toybox.onTap(EPD_W / 2, hubui::DOCK_Y + 30);  // middle third: DECIDE
+    toybox.onTap(EPD_W / 2, hubui::DOCK_Y + 30);  // middle third: UTILITY
     if (toybox.hostHub().folder() != 1 || toybox.hostHub().atHome()) {
       printf("EXIT FAIL: the guest dock did not switch to the second drawer\n");
       abort();
@@ -561,7 +561,7 @@ int main() {
 
   // Hide four apps through the screen itself, so the hub below reflows around
   // exactly what a finger would have hidden. STUDY's heading sits at
-  // 92 + 26 + 6*52 + 14 = 444 with DECIDE's six rows above it.
+  // 92 + 26 + 6*52 + 14 = 444 with UTILITY's six rows above it.
   g_dumpEnabled = false;
   for (auto rc : {setRow(0, 92, 0), setRow(0, 92, 2), setRow(1, 92, 1), setRow(1, 444, 2)})
     toybox.onTap(rc.first, rc.second);

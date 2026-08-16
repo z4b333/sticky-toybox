@@ -42,13 +42,21 @@ inline void play(ToolsCanvas& c, int cx, int cy, int s, bool black) {
              cy + (s * 28) / 100, 3, black);
 }
 
-// A die showing five, thin-walled.
-inline void decide(ToolsCanvas& c, int cx, int cy, int s, bool black) {
-  const int r = (s * 42) / 100;
-  tdraw::roundRect(c, cx - r, cy - r, 2 * r, 2 * r, (s * 14) / 100, 2, black);
-  static constexpr int8_t P[][2] = {{-20, -20}, {20, -20}, {0, 0}, {-20, 20}, {20, 20}};
-  for (const auto& p : P)
-    c.fillCircle(cx + (p[0] * s) / 100, cy + (p[1] * s) / 100, (s * 7) / 100, black);
+// A toolbox: the case, its lid seam, and a squared handle over the top --
+// the least ink that says "the things you reach for". It replaced the die
+// when the folder stopped being DECIDE and became UTILITY: a die names four
+// of the six apps at best, a toolbox names the idea.
+inline void utility(ToolsCanvas& c, int cx, int cy, int s, bool black) {
+  const int w = (s * 42) / 100;        // half-width of the case
+  const int top = cy - (s * 8) / 100;  // the case sits low; the handle needs air
+  const int bot = cy + (s * 32) / 100;
+  tdraw::roundRect(c, cx - w, top, 2 * w, bot - top, (s * 8) / 100, 2, black);
+  c.drawLine(cx - w + 2, top + (s * 13) / 100, cx + w - 2, top + (s * 13) / 100, 2,
+             black);  // the lid seam
+  const int hw = (s * 14) / 100, ht = top - (s * 15) / 100;
+  c.drawLine(cx - hw, top, cx - hw, ht, 3, black);
+  c.drawLine(cx + hw, top, cx + hw, ht, 3, black);
+  c.drawLine(cx - hw, ht, cx + hw, ht, 3, black);
 }
 
 // An open book: two thin pages either side of a spine gap, a line of text on
@@ -77,7 +85,7 @@ inline void study(ToolsCanvas& c, int cx, int cy, int s, bool black) {
 inline void folder(ToolsCanvas& c, int f, int cx, int cy, int s, bool black) {
   switch (f) {
     case 0: play(c, cx, cy, s, black); break;
-    case 1: decide(c, cx, cy, s, black); break;
+    case 1: utility(c, cx, cy, s, black); break;
     default: study(c, cx, cy, s, black); break;
   }
 }
