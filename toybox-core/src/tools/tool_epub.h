@@ -484,9 +484,10 @@ class EpubTool : public ToolApp {
     // chose it, on a machine that could do the picture justice.
     if (!bthumb::coverFromSidecar(host(), _books[i].file) &&
         !bthumb::have(_books[i].file) && !bthumb::failed(_books[i].file)) {
-      // A cover CrossInk already decoded may be waiting in its cache
-      // directory; taking it skips the whole JPEG decode.
-      if (!host().crossCoverGrab(_books[i].file)) {
+      // Cheapest source first: a .cover.bmp the owner put beside the book,
+      // then a cover CrossInk already decoded in its cache directory --
+      // either skips the whole JPEG decode.
+      if (!host().coverFromBmp(_books[i].file) && !host().crossCoverGrab(_books[i].file)) {
         bool transient = false;
         if (!epubcov::makeThumb(host(), _book, _books[i].file, &transient) && !transient)
           bthumb::markFailed(_books[i].file);

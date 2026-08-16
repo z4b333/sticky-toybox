@@ -75,11 +75,11 @@ and Vietnamese.
   clock is set from your phone when you save a note.
 - With nothing pinned, the off-screen shows a goodbye card, a picture, the
   cover of the book you are reading, or nothing.
-- Pictures come from the card (`.bmp` or prepared `.tbi` files) or from
-  your phone, which shows you the dithered result before sending. A `.bmp`
-  lock picture is shown in real four-level grey. A `/sleep.bmp` on the card
-  (or a random `.bmp` from `/.sleep`, the matcha-reader convention) is used
-  at power-off.
+- Pictures are plain `.bmp` files — one format for wallpaper, lock screen,
+  sleep art and book covers. They come from the card or from your phone,
+  which shows you the dithered result before sending. A `.bmp` lock picture
+  is shown in real four-level grey. A `/sleep.bmp` on the card (or a random
+  `.bmp` from `/.sleep`, the matcha-reader convention) is used at power-off.
 - Below 3% battery it shuts down cleanly.
 
 **Settings** (hold UP on the home screen for 3 seconds): which apps the hub

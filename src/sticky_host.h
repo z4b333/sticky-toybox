@@ -147,6 +147,7 @@ class StickyHost : public ToolsHost {
   bool sdWallpaperTake(const char* name) override;
   bool sdLockTake(const char* name) override;
   int sdRecipes(char names[][RECIPE_NAME_LEN], int max) override;
+  bool coverFromBmp(const char* file) override;
   bool crossCoverGrab(const char* file) override;
   bool crossCoverPut(const char* file) override;
   int shelfFolders(ShelfFolder* out, int max, const char* ext) override;

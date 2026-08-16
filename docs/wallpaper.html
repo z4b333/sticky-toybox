@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Toybox · Wallpaper Maker</title>
-<meta name="description" content="Convert any picture for Toybox on the Seeed reTerminal Sticky: crop, zoom, brightness, contrast, four dithering algorithms, and .tbi or BMP output — entirely in your browser.">
+<meta name="description" content="Convert any picture for Toybox on the Seeed reTerminal Sticky: crop, zoom, brightness, contrast, four dithering algorithms, one grey BMP download — entirely in your browser.">
 <style>
   :root {
     --bg: #fafafa;
@@ -81,8 +81,9 @@
 <body>
 <main>
   <h1>Wallpaper maker</h1>
-  <p class="sub">Turns any picture into the device's formats, entirely in this
-  browser — nothing is uploaded anywhere. The preview is exactly what the
+  <p class="sub">Turns any picture into one grey BMP the device uses everywhere
+  — wallpaper, lock screen, sleeping screen, book covers. Entirely in this
+  browser, nothing is uploaded anywhere. The preview is exactly what the
   panel will show, 480 × 800.</p>
 
   <div class="drop" id="drop">
@@ -157,33 +158,23 @@
       </div>
 
       <div class="group">
-        <div class="ghead">Output</div>
-        <div class="opts">
-          <label><input type="radio" name="out" value="tbi" checked>.tbi · Toybox 1-bit</label>
-          <label><input type="radio" name="out" value="bmp1">BMP · 1-bit</label>
-          <label><input type="radio" name="out" value="bmp4">BMP · 4-level grey</label>
-        </div>
-      </div>
-
-      <div class="group">
         <div class="ghead">File name</div>
-        <input type="text" id="fname" value="wallpaper.tbi" spellcheck="false">
+        <input type="text" id="fname" value="wallpaper.bmp" spellcheck="false">
       </div>
 
-      <button class="act" id="save" disabled>Download</button>
+      <button class="act" id="save" disabled>Download .bmp</button>
     </div>
   </div>
 
-  <p class="hint"><b>.tbi</b> goes in <code>/wallpapers</code> (or the card's
-  root): on the device, <b>settings → Wallpaper</b> or <b>Lock screen →
-  FROM&nbsp;CARD</b>. Named <code>&lt;book&nbsp;name&gt;.cover.tbi</code> beside a
-  book it becomes that book's cover.</p>
+  <p class="hint">One file, every job. Put the BMP in <code>/wallpapers</code>
+  (or the card's root) and pick it on the device under <b>settings →
+  Wallpaper</b> or <b>Lock screen → FROM&nbsp;CARD</b> — the lock picture keeps
+  its four greys, the wallpaper is redrawn in crisp black and white.</p>
 
-  <p class="hint"><b>BMP grey</b> is the pretty one for the sleeping screen:
-  save it as <code>/sleep.bmp</code> (or drop several in <code>/.sleep/</code>
-  for a random one each time) and the panel shows it in real four-level grey
-  at power-off. Chosen from the wallpaper list, a BMP lock picture also keeps
-  its greys. The same files work on the Xteink X3/X4 and
+  <p class="hint">For the sleeping screen, save it as <code>/sleep.bmp</code>
+  (or drop several in <code>/.sleep/</code> for a random one each time).
+  Named <code>&lt;book&nbsp;name&gt;.cover.bmp</code> beside a book it becomes
+  that book's cover. The same files work on the Xteink X3/X4 and
   CrossPoint/CrossInk/matcha family.</p>
 
   <p class="foot">
@@ -194,9 +185,7 @@
 
 <script>
 'use strict';
-// Everything happens in this page. Outputs:
-//   .tbi      480x800, 1 bpp MSB-first, 1 = white, 8-byte TBI1 header (48,008 B)
-//   BMP 1-bit 62-byte header, black/white palette, bottom-up rows
+// Everything happens in this page. One output for every job on the device:
 //   BMP grey  8 bpp, 4-entry-effective palette 0/85/170/255, bottom-up
 var W = 480, H = 800;
 var img = null, rotSteps = 0;
@@ -345,7 +334,7 @@ function render(){
   if (document.getElementById('invert').checked)
     for (i = 0; i < grey.length; i++) grey[i] = 255 - grey[i];
 
-  var levels = opt('out') === 'bmp4' ? 4 : 2;
+  var levels = 4;
   outPix = quantize(grey, levels);
 
   // The preview IS the output, pixel for pixel, at the output's own depth.
@@ -360,17 +349,7 @@ function render(){
   save.disabled = false;
 }
 
-// --- writers -----------------------------------------------------------------
-function tbiBytes(){
-  var bits = new Uint8Array(W*H/8);
-  for (var i = 0; i < W*H; i++)
-    if (outPix[i]) bits[i >> 3] |= 0x80 >> (i & 7);
-  var buf = new Uint8Array(8 + bits.length);
-  buf[0]=0x54; buf[1]=0x42; buf[2]=0x49; buf[3]=0x31;  // "TBI1"
-  buf[4]=W&255; buf[5]=W>>8; buf[6]=H&255; buf[7]=H>>8;
-  buf.set(bits, 8);
-  return buf;
-}
+// --- writer ------------------------------------------------------------------
 function bmpHeader(buf, offBits, bpp, colors, imgBytes){
   var total = offBits + imgBytes;
   buf[0]=0x42; buf[1]=0x4D;
@@ -382,19 +361,6 @@ function bmpHeader(buf, offBits, bpp, colors, imgBytes){
   buf[26]=1; buf[28]=bpp;
   buf[34]=imgBytes&255; buf[35]=(imgBytes>>8)&255; buf[36]=(imgBytes>>16)&255;
   buf[46]=colors&255;
-}
-function bmp1Bytes(){
-  var rowB = W/8;                    // 60, already 4-aligned
-  var off = 14+40+8;                 // two palette entries
-  var buf = new Uint8Array(off + rowB*H);
-  bmpHeader(buf, off, 1, 2, rowB*H);
-  buf[58]=buf[59]=buf[60]=255;       // index 1 = white (index 0 stays black)
-  for (var y = 0; y < H; y++) {
-    var src = (H-1-y)*W, dst = off + y*rowB;
-    for (var x = 0; x < W; x++)
-      if (outPix[src+x]) buf[dst + (x>>3)] |= 0x80 >> (x&7);
-  }
-  return buf;
 }
 function bmp4Bytes(){
   var off = 14+40+1024;              // a full 8bpp palette; four entries used
@@ -411,12 +377,6 @@ function bmp4Bytes(){
   return buf;
 }
 
-function extFor(){ return opt('out') === 'tbi' ? '.tbi' : '.bmp'; }
-function retag(){
-  var n = fname.value.trim().replace(/\.(tbi|bmp)$/i, '');
-  fname.value = (n || 'wallpaper') + extFor();
-}
-
 function load(f){
   if (!f || !f.type.match(/^image\//)) return;
   var url = URL.createObjectURL(f);
@@ -425,7 +385,7 @@ function load(f){
     img = im; rotSteps = 0; panX = panY = 0;
     URL.revokeObjectURL(url);
     var base = f.name.replace(/\.[^.]*$/, '').replace(/[^\w\- ]+/g, '').trim() || 'wallpaper';
-    fname.value = base.slice(0, 30) + extFor();
+    fname.value = base.slice(0, 30) + '.bmp';
     render();
   };
   im.src = url;
@@ -479,19 +439,17 @@ document.querySelectorAll('input[type=radio]').forEach(function(r){
   r.addEventListener('change', function(){
     document.getElementById('threshG').style.display =
       opt('algo') === 'thresh' ? '' : 'none';
-    if (r.name === 'out') retag();
     render();
   });
 });
 
 save.addEventListener('click', function(){
   if (!outPix) return;
-  var kind = opt('out');
-  var buf = kind === 'tbi' ? tbiBytes() : kind === 'bmp1' ? bmp1Bytes() : bmp4Bytes();
+  var buf = bmp4Bytes();
   var a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([buf], {type: 'application/octet-stream'}));
-  var n = fname.value.trim() || ('wallpaper' + extFor());
-  if (!/\.(tbi|bmp)$/i.test(n)) n += extFor();
+  var n = fname.value.trim() || 'wallpaper.bmp';
+  if (!/\.bmp$/i.test(n)) n = n.replace(/\.tbi$/i, '') + '.bmp';
   a.download = n;
   a.click();
   URL.revokeObjectURL(a.href);

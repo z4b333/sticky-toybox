@@ -268,9 +268,8 @@ void SettingsScreen::renderWall(ToolsHost& host, ToolsCanvas& c) {
     c.textCentered(SCREEN_W / 2, WALL_Y0 + 104, "is one in the slot?", TS_MED, true);
   } else if (_wallN == 0) {
     c.textCentered(SCREEN_W / 2, WALL_Y0 + 60, "no pictures on the card", TS_LARGE, true);
-    c.textCentered(SCREEN_W / 2, WALL_Y0 + 104, "put .bmp pictures or .tbi files", TS_SMALL, true);
-    c.textCentered(SCREEN_W / 2, WALL_Y0 + 132, "in the card's root or /wallpapers", TS_SMALL,
-                   true);
+    c.textCentered(SCREEN_W / 2, WALL_Y0 + 104, "put .bmp pictures in the card's", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, WALL_Y0 + 132, "root or /wallpapers", TS_SMALL, true);
   } else {
     for (int i = 0; i < _wallN; i++) {
       const TRect r = wallRect(i);
@@ -340,9 +339,8 @@ void SettingsScreen::renderLockPic(ToolsHost& host, ToolsCanvas& c) {
     c.textCentered(SCREEN_W / 2, WALL_Y0 + 104, "is one in the slot?", TS_MED, true);
   } else if (_wallN == 0) {
     c.textCentered(SCREEN_W / 2, WALL_Y0 + 60, "no pictures on the card", TS_LARGE, true);
-    c.textCentered(SCREEN_W / 2, WALL_Y0 + 104, "put .bmp pictures or .tbi files", TS_SMALL, true);
-    c.textCentered(SCREEN_W / 2, WALL_Y0 + 132, "in the card's root or /wallpapers", TS_SMALL,
-                   true);
+    c.textCentered(SCREEN_W / 2, WALL_Y0 + 104, "put .bmp pictures in the card's", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, WALL_Y0 + 132, "root or /wallpapers", TS_SMALL, true);
   } else {
     for (int i = 0; i < shown; i++) {
       const TRect r = wallRect(i);

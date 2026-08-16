@@ -341,6 +341,16 @@ class ToolsHost {
     return -1;
   }
 
+  // A cover the owner put beside the book as a plain .bmp --
+  // "<stem>.cover.bmp" -- parsed and filed as this book's cover art. The
+  // one-format story: everything a person makes for this device is a BMP.
+  // Used when no cover exists yet; a .cover.tbi (the legacy prepared form)
+  // still wins because it carries its own freshness check.
+  virtual bool coverFromBmp(const char* file) {
+    (void)file;
+    return false;
+  }
+
   // Covers shared with the CrossPoint/CrossInk family, which caches a
   // finished cover.bmp beside its reading position. Grab: if one is waiting
   // in the book's cache directory, file it as this device's cover art and

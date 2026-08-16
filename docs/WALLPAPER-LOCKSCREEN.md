@@ -4,11 +4,13 @@ For anyone producing pictures for this device — the PC converter, the
 wallpapers site, or another firmware reading the same card. Current as of
 v1.0.0-beta.41.
 
-## Two source formats
+## One format: `.bmp`
 
-**`.bmp` — the shared format.** Plain Windows BMP is what the
-CrossPoint / CrossInk / Xteink family trades sleep art in, so a card set up
-for any of those firmwares now just works here. The device parses
+**Everything the user puts on the card is a plain Windows BMP** — the
+same file serves wallpaper, lock picture, sleep art, and (named
+`<book name>.cover.bmp` beside a book) that book's cover. It is also what
+the CrossPoint / CrossInk / Xteink family trades sleep art in, so a card
+set up for any of those firmwares just works here. The device parses
 1/2/4/8/24/32 bpp uncompressed BMPs (BI_RGB, plus BI_BITFIELDS for 32-bit),
 bottom-up or top-down rows, up to 4096×4096. The palette is read, never
 assumed — an inverted-palette file shows correctly. Any size is accepted:
@@ -16,9 +18,9 @@ the picture is box-average scaled, aspect-fit on white, into 480×800
 (enlarged at most 4×), then dithered **on the device** (Atkinson) to
 whichever depth its destination needs.
 
-**`.tbi` — the prepared format.** The finished framebuffer, made on a PC
-(`tools/make_tbi.py` or the wallpaper page on the flasher site) where the
-dither is previewable:
+**`.tbi` — legacy, still read.** Old cards prepared for earlier releases
+carry finished 1-bit framebuffers; the picker still lists and takes them,
+but nothing new should produce one:
 
 | field  | bytes | value                                  |
 |--------|-------|----------------------------------------|
@@ -31,8 +33,10 @@ Total: exactly **48,008 bytes**. Bit order **MSB first**; **1 = white**.
 Any other size, magic or geometry is rejected — wrong-sized files are not
 even listed. Portrait only; the device rotates through its canvas.
 
-A prepared `.tbi` still gives the best 1-bit result (you saw the dither
-before saving). A `.bmp` gives the best *grey* result — see below.
+A four-level-grey `.bmp` (what the wallpaper page on the flasher site
+saves) is the one file that does every job well: the greys survive where
+grey is shown, and the device's own 1-bit re-dither of four flat tones at
+1:1 is clean where 1-bit is needed.
 
 ## Where pictures come from
 
@@ -101,13 +105,12 @@ shutdown:
 
 ## What a producer must do
 
-For a 1-bit `.tbi`: emit exactly the table above, dither on the PC, and
-show the user the dithered result before saving. Name it ≤ 39 bytes and
-put it in `/wallpapers`, or offer it to the phone uploader unchanged.
-
-For grey art: save a plain uncompressed BMP (any common depth; 480×800 is
-ideal, anything else is scaled) as `/sleep.bmp` or into `/.sleep/`. The
-device does the grey dither itself, identically every time.
+Save a plain uncompressed BMP — a four-level-grey 8 bpp one at 480×800 is
+ideal, but any common depth and size works (anything else is scaled).
+Name it ≤ 39 bytes and put it in `/wallpapers` or the root for the picker,
+as `/sleep.bmp` or into `/.sleep/` for sleep art, or as
+`<book name>.cover.bmp` beside a book for its cover. The device does its
+own dither, identically every time. Do not emit new `.tbi` files.
 
 (CrossPoint's `.pxc` sleep images are a different format with **inverted**
 grey levels — do not reuse one for the other. The `.bmp` route replaces

@@ -435,8 +435,10 @@ class BookTool : public ToolApp {
     // Most explicit first: a .cover.tbi beside the book, then a cover the
     // converter put inside the file, then page 0 as the last resort.
     if (!bthumb::coverFromSidecar(host(), _books[i].file) && !bthumb::have(_books[i].file)) {
-      bool made = false;
-      if (_books[i].cover) {
+      // A .cover.bmp beside the book first: the owner's choice, in the one
+      // format everything else on the card already uses.
+      bool made = host().coverFromBmp(_books[i].file);
+      if (!made && _books[i].cover) {
         // The embedded cover is 48,000 bytes of one bit and wants a buffer
         // for exactly one call. A grey book has none, so borrow one and hand
         // it straight back rather than carrying it all session.

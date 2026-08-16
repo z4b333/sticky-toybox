@@ -278,8 +278,9 @@ What a converter should do:
 - **Detect it and act on it.** Walk the JPEG markers: `FFC0`/`FFC1` is
   baseline, **`FFC2` is progressive**. Skip `FFD8`, and skip `FFD0`–`FFD7`;
   every other marker carries a big-endian u16 length you can jump over.
-- If the cover is progressive — or simply always — **write the `.cover.tbi`
-  sidecar** (§6). It costs 48 KB beside a book that is already megabytes.
+- If the cover is progressive — or simply always — **write a sidecar cover**
+  (§6): a `.cover.bmp`, or a prepared `.cover.tbi`. It costs tens of KB
+  beside a book that is already megabytes.
 - The same applies to any **artwork** inside the book: a progressive insert
   with no `toybox/` counterpart would be decoded the same way. Pre-render it.
 
@@ -358,16 +359,19 @@ In priority order, highest first:
 
 ```
 /books/Uketsu/strange-houses.epub
-/books/Uketsu/strange-houses.cover.tbi     <- same stem, ".cover.tbi"
+/books/Uketsu/strange-houses.cover.bmp     <- same stem, ".cover.bmp"
 
 /books/One Piece/vol01.tbk
-/books/One Piece/vol01.cover.tbi
+/books/One Piece/vol01.cover.bmp
 ```
 
-The stem is the path with its **last** extension removed. The file is an
-ordinary `.tbi` (§2). Replace it and the device picks the change up on the
-book's next open — it compares four 64-byte samples taken from the middle of
-the picture, so there is no cache to clear.
+The stem is the path with its **last** extension removed. The file is a plain
+BMP (any common depth; the device scales and dithers it), which keeps the
+user's card on one picture format. A prepared `.cover.tbi` sidecar (an
+ordinary `.tbi`, §2) is also still honoured, and wins if both exist. Replace
+either and the device picks the change up on the book's next open — it
+compares four 64-byte samples taken from the middle of the picture, so there
+is no cache to clear.
 
 **2. Inside the `.tbk`** — the embedded cover of §3. Travels with the file,
 survives a rename, needs no second file. Ignored if a sidecar exists.
@@ -475,8 +479,9 @@ replacing; both are rebuilt or simply lost, and neither breaks anything.
 **Either**
 
 - [ ] full path on the card ≤ 127 bytes
-- [ ] sidecar `.cover.tbi` (if any) shares the book's stem exactly and is 48,008 bytes
-- [ ] any EPUB whose cover is a **progressive** JPEG ships a `.cover.tbi` (§4)
+- [ ] sidecar cover (if any) shares the book's stem exactly — `.cover.bmp`
+      any plain BMP, or `.cover.tbi` exactly 48,008 bytes
+- [ ] any EPUB whose cover is a **progressive** JPEG ships a sidecar cover (§4)
 
 ### Testing without a device
 

@@ -80,6 +80,40 @@ bool StickyHost::sdLockTake(const char* name) {
 // two firmwares decodes each cover exactly once, in whichever device the
 // book is opened first.
 
+namespace {
+// Any BMP on the card becomes this book's cover art: parsed to grey, then
+// through the cover builder, which dithers, files both sizes and sweeps the
+// stale flash copy -- exactly as if the JPEG decoder had produced these
+// rows. One pipeline, whoever decoded; shared by the .cover.bmp sidecar and
+// the CrossInk cache.
+bool bmpToCover(StickyHost& h, const char* bmpPath, const char* file) {
+  uint8_t* gray = (uint8_t*)ps_malloc((size_t)480 * 800);
+  if (!gray) return false;
+  bool ok = sdcard::readBmpGray(bmpPath, gray);
+  if (ok) {
+    bthumb::Builder b;
+    ok = b.begin(h, file, 480, 800);
+    for (int y = 0; ok && y < 800; y++) b.row(y, gray + (size_t)y * 480, 480);
+    if (ok) ok = b.finish();
+  }
+  free(gray);
+  return ok;
+}
+}  // namespace
+
+bool StickyHost::coverFromBmp(const char* file) {
+  // "<stem>.cover.bmp" beside the book -- the same address the legacy
+  // .cover.tbi answers to, in the one format everything else already uses.
+  char p[160];
+  const char* dot = strrchr(file, '.');
+  const char* slash = strrchr(file, '/');
+  if (!dot || (slash && dot < slash)) return false;
+  if (snprintf(p, sizeof(p), "%.*s.cover.bmp", (int)(dot - file), file) >= (int)sizeof(p))
+    return false;
+  if (!sdcard::exists(p)) return false;
+  return bmpToCover(*this, p, file);
+}
+
 bool StickyHost::crossCoverGrab(const char* file) {
   char p[112];
   {
@@ -92,20 +126,7 @@ bool StickyHost::crossCoverGrab(const char* file) {
       if (!sdcard::exists(p)) return false;
     }
   }
-  uint8_t* gray = (uint8_t*)ps_malloc((size_t)480 * 800);
-  if (!gray) return false;
-  bool ok = sdcard::readBmpGray(p, gray);
-  if (ok) {
-    // Through the cover builder, exactly as if the JPEG decoder had produced
-    // these rows: it dithers, files both sizes, and sweeps the stale flash
-    // copy -- one pipeline, whoever did the decoding.
-    bthumb::Builder b;
-    ok = b.begin(*this, file, 480, 800);
-    for (int y = 0; ok && y < 800; y++) b.row(y, gray + (size_t)y * 480, 480);
-    if (ok) ok = b.finish();
-  }
-  free(gray);
-  return ok;
+  return bmpToCover(*this, p, file);
 }
 
 bool StickyHost::crossCoverPut(const char* file) {

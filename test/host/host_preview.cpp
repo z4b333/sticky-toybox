@@ -3054,7 +3054,41 @@ int main() {
         abort();
       }
     }
-    printf("crossink covers ok (ours put back, theirs grabbed, both dirs)\n");
+    // Sidecar: a user drops <book>.cover.bmp beside the book -- the one-format
+    // route -- and it becomes that book's cover with no decoder involved.
+    {
+      auto [b, n] = quad8(false);
+      sdcard::hostPutCardFile("/books/side.cover.bmp", b, (int)n);
+      if (!stickyHost.coverFromBmp("/books/side.epub") ||
+          !bthumb::have("/books/side.epub")) {
+        printf("BMP FAIL: a .cover.bmp sidecar was not taken\n");
+        abort();
+      }
+      static uint8_t small[bthumb::BYTES];
+      if (!bthumb::load("/books/side.epub", small)) {
+        printf("BMP FAIL: the sidecar cover made no thumbnail\n");
+        abort();
+      }
+      int tlBlack = 0, trBlack = 0;
+      for (int y = 20; y < 40; y++)
+        for (int x = 0; x < 12; x++) {
+          if (x >= 4 && x < 8) continue;
+          for (int k = 0; k < 8; k++) {
+            const bool black = !(small[y * 12 + x] & (0x80 >> k));
+            if (x < 4) tlBlack += black; else trBlack += black;
+          }
+        }
+      if (tlBlack < 500 || trBlack > 140) {
+        printf("BMP FAIL: sidecar thumbnail halves %d/%d black\n", tlBlack, trBlack);
+        abort();
+      }
+      // No sidecar, no claim: a book without one must say so.
+      if (stickyHost.coverFromBmp("/books/bare.epub")) {
+        printf("BMP FAIL: coverFromBmp invented a sidecar\n");
+        abort();
+      }
+    }
+    printf("crossink covers ok (ours put back, theirs grabbed, both dirs, sidecar bmp)\n");
     g_dumpEnabled = true;
   }
 
