@@ -446,10 +446,19 @@ class EpubTool : public ToolApp {
 
   void openBook(int i) {
     _cur = i;
-    // The cover as the loading screen, painted before the card is touched. An
-    // EPUB spends real seconds opening (zip walk, cover decode on the first
-    // open, the chapter replayed to the saved page); they pass behind the
-    // book's own face. First-ever open has no cover yet and shows the plate.
+    // The cheap cover sources first, BEFORE the loading paint: a sidecar the
+    // owner put beside the book, or a cover CrossInk already decoded. Neither
+    // costs a decode, so even a book's very first open can lead with its own
+    // face instead of the titled plate. (The sidecar check runs every open
+    // anyway -- that is how a replaced sidecar is noticed.)
+    if (!bthumb::coverFromSidecar(host(), _books[i].file) &&
+        !bthumb::have(_books[i].file) && !bthumb::failed(_books[i].file)) {
+      if (!host().coverFromBmp(_books[i].file)) host().crossCoverGrab(_books[i].file);
+    }
+    // The cover as the loading screen. An EPUB spends real seconds opening
+    // (zip walk, cover decode on the first open, the chapter replayed to the
+    // saved page); they pass behind the book's own face. Only a first open
+    // with no sidecar and no CrossInk cache still shows the plate.
     _screen = Screen::Loading;
     host().refresh(true);
     if (!host().epubOpen(_books[i].file)) {
@@ -477,21 +486,13 @@ class EpubTool : public ToolApp {
     _nmarks = 0;
     recents::note(prefs(), recents::KIND_EPUB, _books[i].file, _books[i].title);
 
-    // The cover thumbnail for the hub's recently-read strip: decoded once on
-    // a book's first open (a second or two for a big JPEG), never again --
-    // and a cover that will not decode is marked so it is never retried.
-    // A cover the owner put beside the book wins over the one inside it: they
-    // chose it, on a machine that could do the picture justice.
-    if (!bthumb::coverFromSidecar(host(), _books[i].file) &&
-        !bthumb::have(_books[i].file) && !bthumb::failed(_books[i].file)) {
-      // Cheapest source first: a .cover.bmp the owner put beside the book,
-      // then a cover CrossInk already decoded in its cache directory --
-      // either skips the whole JPEG decode.
-      if (!host().coverFromBmp(_books[i].file) && !host().crossCoverGrab(_books[i].file)) {
-        bool transient = false;
-        if (!epubcov::makeThumb(host(), _book, _books[i].file, &transient) && !transient)
-          bthumb::markFailed(_books[i].file);
-      }
+    // The decode fallback: only a book with no cover from any cheap source
+    // (tried above, before the loading paint) pays for the JPEG decode --
+    // once, and a cover that will not decode is marked so it is not retried.
+    if (!bthumb::have(_books[i].file) && !bthumb::failed(_books[i].file)) {
+      bool transient = false;
+      if (!epubcov::makeThumb(host(), _book, _books[i].file, &transient) && !transient)
+        bthumb::markFailed(_books[i].file);
     }
     // No repaint when a cover was just built: the loading face stays as it
     // was painted -- the full cover, or the plain plate on a true first open
@@ -586,7 +587,9 @@ class EpubTool : public ToolApp {
   // on which hand holds the device, so both are offered -- as buttons, in
   // the order the arrows suggest: turn it left, keep it upright, turn it
   // right.
-  static constexpr uint8_t kRotBtn[3] = {3, 0, 1};
+  // Confirmed on glass: rotation 1 turns the text toward the panel's left
+  // side, 3 toward its right.
+  static constexpr uint8_t kRotBtn[3] = {1, 0, 3};
   static TRect rotBtnRect(const TRect& row, int k) {
     const int bw = (row.w - 32) / 3;
     return {row.x + 8 + k * (bw + 8), row.y + 56, bw, 46};

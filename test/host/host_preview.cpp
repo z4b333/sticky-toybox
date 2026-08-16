@@ -2398,8 +2398,9 @@ int main() {
     toybox.onButton(SideBtn::Ok);  // the panel again, for the close row below
 
     // And the way out is a row, not the button.
-    // Rotation is three buttons in the row: LEFT (3), PORTRAIT (0), RIGHT
-    // (1), one tap each -- and the turn still lands when the panel closes.
+    // Rotation is three buttons in the row: LEFT (1), PORTRAIT (0), RIGHT
+    // (3), one tap each -- and the turn still lands when the panel closes.
+    // The senses were confirmed on glass and swapped once.
     {
       const int rotY = rmenu::rootRect(4, 480).y + 79;  // through the buttons
       const uint32_t offR = et->hostPageOffset();
@@ -2410,7 +2411,7 @@ int main() {
         abort();
       }
       toybox.onButton(SideBtn::Ok);  // close the panel; the page turns now
-      if (stickyHost.canvasRotation() != 1) {
+      if (stickyHost.canvasRotation() != 3) {
         printf("EPUB APP FAIL: closing the panel did not turn the page\n");
         abort();
       }
@@ -2437,9 +2438,9 @@ int main() {
       }
       // The other landscape, one tap, no cycling through portrait to get
       // there; then straight home the same way.
-      toybox.onTap(98, rotY);  // LEFT: the flipped landscape
+      toybox.onTap(98, rotY);  // LEFT: the other landscape
       toybox.onButton(SideBtn::Ok);
-      if (stickyHost.canvasRotation() != 3) {
+      if (stickyHost.canvasRotation() != 1) {
         printf("EPUB APP FAIL: LEFT did not land the flipped landscape\n");
         abort();
       }

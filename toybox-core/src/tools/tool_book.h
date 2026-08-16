@@ -405,9 +405,15 @@ class BookTool : public ToolApp {
       host().refresh(true);
       return;
     }
-    // The cover as the loading screen: painted before the card is touched,
-    // so the open happens behind the book's own face rather than a stale list.
+    // A sidecar cover first, BEFORE the loading paint: the owner's choice,
+    // cheap to take (no decode), and checking it every open is how a
+    // replaced sidecar is noticed. With it in place even a first open leads
+    // with the book's own face.
     _cur = i;
+    if (!bthumb::coverFromSidecar(host(), _books[i].file) && !bthumb::have(_books[i].file))
+      host().coverFromBmp(_books[i].file);
+    // The cover as the loading screen, so the open happens behind the book's
+    // own face rather than a stale list.
     _screen = Screen::Loading;
     host().refresh(true);
     if (!host().bookOpen(_books[i].file)) {
@@ -432,13 +438,11 @@ class BookTool : public ToolApp {
     // A build that fails leaves have() false and is tried again next time,
     // which is right for this reader: nothing here decodes, so every failure
     // is a passing one. See makeAndSave.
-    // Most explicit first: a .cover.tbi beside the book, then a cover the
-    // converter put inside the file, then page 0 as the last resort.
-    if (!bthumb::coverFromSidecar(host(), _books[i].file) && !bthumb::have(_books[i].file)) {
-      // A .cover.bmp beside the book first: the owner's choice, in the one
-      // format everything else on the card already uses.
-      bool made = host().coverFromBmp(_books[i].file);
-      if (!made && _books[i].cover) {
+    // The sidecars were tried before the loading paint; what is left is the
+    // book's own content -- the embedded cover, then page 0 as last resort.
+    if (!bthumb::have(_books[i].file)) {
+      bool made = false;
+      if (_books[i].cover) {
         // The embedded cover is 48,000 bytes of one bit and wants a buffer
         // for exactly one call. A grey book has none, so borrow one and hand
         // it straight back rather than carrying it all session.
