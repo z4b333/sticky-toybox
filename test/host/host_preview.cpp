@@ -3129,11 +3129,19 @@ int main() {
     // The app itself, over a card recipe and a phone one.
     sdcard::hostPutCardFile("/recipes/tarte.json", kPage, (int)strlen(kPage));
     toybox.open(false, 11);
-    auto* rt = static_cast<RecipeTool*>(toybox.hostActive());
     g_dumpEnabled = true;
     setScreen("tool_recipe_help");
     stickyHost.refresh(true);
     g_dumpEnabled = false;
+    // The way out works even with the help card up -- on glass this tap
+    // rebooted the device once; at minimum it must leave cleanly.
+    toybox.onTap(BACK_W / 2, TOPBAR_H / 2);
+    if (toybox.hostInApp()) {
+      printf("RECIPE FAIL: HUB did not leave from under the help card\n");
+      abort();
+    }
+    toybox.open(false, 11);  // fresh entry: the card is up again
+    auto* rt = static_cast<RecipeTool*>(toybox.hostActive());
     toybox.onTap(240, 650);  // GOT IT
     if (rt->hostCount() != 1) {
       printf("RECIPE FAIL: the card recipe did not list (%d)\n", rt->hostCount());

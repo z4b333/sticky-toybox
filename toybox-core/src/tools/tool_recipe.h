@@ -53,17 +53,35 @@ class RecipeTool : public ToolApp {
     reload();
   }
 
+  // The access point must not outlive the screen that started it, however
+  // the tool is left -- the hub button included.
+  ~RecipeTool() override { _net.stop(); }
+
   void render(ToolsCanvas& c) override {
+    // The card REPLACES the page, as it does in every game: drawn over the
+    // list it double-exposes with whatever is underneath, which on glass
+    // reads as two screens fighting.
+    if (_help && _screen == Screen::List) {
+      host().topBar("RECIPES", true);
+      renderHelp(c);
+      return;
+    }
     switch (_screen) {
       case Screen::List: renderList(c); break;
       case Screen::View: renderView(c); break;
       case Screen::Cook: renderCook(c); break;
       case Screen::Import: renderImport(c); break;
     }
-    if (_help && _screen == Screen::List) renderHelp(c);
   }
 
   void onTap(int x, int y) override {
+    // Back first, like everywhere else: the way out works even with the
+    // help card up.
+    if (_screen == Screen::List && host().isBackTap(x, y)) {
+      host().beep(1);
+      host().goHub();
+      return;
+    }
     if (_help && _screen == Screen::List) {
       const help::Tap t = help::hit(x, y);
       if (t == help::Tap::None) return;
@@ -197,11 +215,6 @@ class RecipeTool : public ToolApp {
   void tapList(int x, int y) {
     using namespace rcpui;
     _note = nullptr;
-    if (host().isBackTap(x, y)) {
-      host().beep(1);
-      host().goHub();
-      return;
-    }
     if (host().isHelpTap(x, y)) {
       _help = true;
       host().beep(1);
