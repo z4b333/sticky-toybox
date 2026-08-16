@@ -144,12 +144,9 @@ class EpubTool : public ToolApp {
         continue;
       }
       const int b = idx - _nf;
-      const int y = shelf::Y0 + k * shelf::ROW_H;
-      c.textClipped(24, y + 10, c.width() - 48, _books[b].title, TS_MED, true, true);
-      c.text(24, y + 44, _books[b].cont ? "carries on where it stopped" : "from the start",
-             TS_SMALL, true);
-      if (shelf::rowSep(k, idx, total))
-        c.fillRect(16, y + shelf::ROW_H - 6, c.width() - 32, 1, true);
+      shelf::drawBookRow(c, k, _books[b].title,
+                         _books[b].cont ? "carries on where it stopped" : "from the start",
+                         shelf::rowSep(k, idx, total));
     }
     shelf::drawPager(c, _lpage, total);
     c.textCentered(c.width() / 2, 770,
@@ -459,6 +456,12 @@ class EpubTool : public ToolApp {
     // (zip walk, cover decode on the first open, the chapter replayed to the
     // saved page); they pass behind the book's own face. Only a first open
     // with no sidecar and no CrossInk cache still shows the plate.
+    //
+    // Portrait, whatever the page's own angle is: a cover is a portrait
+    // object -- turned on its side it is cropped, not rotated -- and the
+    // plate is a portrait design like every other screen that is not the
+    // page itself. The reading rotation goes on at the Page transition.
+    host().setCanvasRotation(0);
     _screen = Screen::Loading;
     host().refresh(true);
     if (!host().epubOpen(_books[i].file)) {

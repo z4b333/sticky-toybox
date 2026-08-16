@@ -83,6 +83,43 @@ inline void drawPager(ToolsCanvas& c, int page, int items) {
   c.textCentered(SCREEN_W / 2, PAGER_Y + (PAGER_H - c.textHeight(TS_MED)) / 2, buf, TS_MED, true);
 }
 
+// A book: its whole name, and a word about where it will open. Release
+// filenames run long -- "The Apothecary Diaries - Volume 6" is short for the
+// genre -- and a clipped name is the wrong half of the information on a
+// shelf, where the name is the ONLY thing telling two volumes apart. So a
+// long title takes a second line and the row tightens to fit it; a short one
+// keeps the roomier single-line layout. Three lines will not fit a row, so
+// the second is clipped in the rare case a title outruns both.
+inline void drawBookRow(ToolsCanvas& c, int rowOnPage, const char* title, const char* sub,
+                        bool sep = true) {
+  const int y = Y0 + rowOnPage * ROW_H;
+  const int maxW = SCREEN_W - 48;
+  if (c.textWidth(title, TS_MED, true) <= maxW) {
+    c.text(24, y + 10, title, TS_MED, true, true);
+    c.text(24, y + 44, sub, TS_SMALL, true);
+  } else {
+    // The longest run of whole words that fits, measured forward.
+    char buf[48];
+    int fit = 0, brk = 0;
+    for (int i = 0; title[i] && i < (int)sizeof(buf) - 1; i++) {
+      buf[i] = title[i];
+      buf[i + 1] = 0;
+      if (c.textWidth(buf, TS_MED, true) > maxW) break;
+      fit = i + 1;
+      if (title[i] == ' ') brk = i;
+    }
+    const int take = brk > 0 ? brk : (fit > 0 ? fit : 1);
+    memcpy(buf, title, (size_t)take);
+    buf[take] = 0;
+    const char* rest = title + take;
+    while (*rest == ' ') rest++;
+    c.text(24, y + 4, buf, TS_MED, true, true);
+    c.textClipped(24, y + 32, maxW, rest, TS_MED, true, true);
+    c.text(24, y + 62, sub, TS_SMALL, true);
+  }
+  if (sep) c.fillRect(16, y + ROW_H - 6, SCREEN_W - 32, 1, true);
+}
+
 // A series: its name, and how many of this reader's books are inside. Drawn
 // with the same rule as the hub's drawers -- a mark, a name, a count.
 inline void drawFolderRow(ToolsCanvas& c, int rowOnPage, const char* name, int count,

@@ -110,8 +110,6 @@ class BookTool : public ToolApp {
         continue;
       }
       const int b = idx - _nf;
-      const int y = shelf::Y0 + k * shelf::ROW_H;
-      c.textClipped(24, y + 10, c.width() - 48, _books[b].title, TS_MED, true, true);
       char sub[64];
       const uint32_t at = savedPage(b);
       if (at > 0)
@@ -119,9 +117,7 @@ class BookTool : public ToolApp {
                  (unsigned long)(at + 1));
       else
         snprintf(sub, sizeof(sub), "%lu pages  ·  new", (unsigned long)_books[b].pages);
-      c.text(24, y + 44, sub, TS_SMALL, true);
-      if (shelf::rowSep(k, idx, total))
-        c.fillRect(16, y + shelf::ROW_H - 6, c.width() - 32, 1, true);
+      shelf::drawBookRow(c, k, _books[b].title, sub, shelf::rowSep(k, idx, total));
     }
     shelf::drawPager(c, _lpage, total);
     c.textCentered(c.width() / 2, 770, _note ? _note : "the card stays in while you read",
@@ -413,7 +409,10 @@ class BookTool : public ToolApp {
     if (!bthumb::coverFromSidecar(host(), _books[i].file) && !bthumb::have(_books[i].file))
       host().coverFromBmp(_books[i].file);
     // The cover as the loading screen, so the open happens behind the book's
-    // own face rather than a stale list.
+    // own face rather than a stale list. Portrait, like the cover itself and
+    // like every screen here: a canvas left on its side by another reader
+    // would crop the face rather than turn it.
+    host().setCanvasRotation(0);
     _screen = Screen::Loading;
     host().refresh(true);
     if (!host().bookOpen(_books[i].file)) {

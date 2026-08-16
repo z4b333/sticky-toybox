@@ -658,23 +658,46 @@ inline constexpr int FRAME_X = 144, FRAME_Y = 190, FRAME_W = W * 2, FRAME_H = H 
 inline void drawPlate(ToolsCanvas& c, const char* file, const char* title) {
   c.drawRect(FRAME_X - 8, FRAME_Y - 8, FRAME_W + 16, FRAME_H + 16, 2, true);
   c.drawRect(FRAME_X - 2, FRAME_Y - 2, FRAME_W + 4, FRAME_H + 4, 1, true);
-  // Clipped: this is the one place a book's own title is set large, and a
-  // release filename is longer than the panel at that size.
-  {
-    const int maxW = c.width() - 48;
-    char cap[192];
-    snprintf(cap, sizeof(cap), "%s", title ? title : "");
-    if (c.textWidth(cap, TS_LARGE, true) > maxW) {
-      c.textClipped(24, 560, maxW, cap, TS_LARGE, true, true);
-    } else {
-      c.textCentered(c.width() / 2, 560, cap, TS_LARGE, true, true);
+  // The whole title, wrapped over as many lines as it needs. This is the one
+  // place a book's own name is set large, and half a name -- "The Apothecary
+  // Diaries - V..." -- is not a name. Whole words while they fit; the last
+  // line is clipped only if a title outruns even three of them.
+  const int maxW = c.width() - 48;
+  char cap[64];
+  snprintf(cap, sizeof(cap), "%s", title ? title : "");
+  const char* s = cap;
+  int y = 536;
+  constexpr int MAXL = 3, STEP = 40;
+  for (int line = 0; *s && line < MAXL; line++, y += STEP) {
+    if (line == MAXL - 1 || c.textWidth(s, TS_LARGE, true) <= maxW) {
+      // The rest, whole if it fits and clipped if this is the last line.
+      if (c.textWidth(s, TS_LARGE, true) > maxW)
+        c.textClipped(24, y, maxW, s, TS_LARGE, true, true);
+      else
+        c.textCentered(c.width() / 2, y, s, TS_LARGE, true, true);
+      y += STEP;
+      break;
     }
+    // The longest run of whole words that fits, measured forward.
+    char buf[64];
+    int fit = 0, brk = 0;
+    for (int i = 0; s[i] && i < (int)sizeof(buf) - 1; i++) {
+      buf[i] = s[i];
+      buf[i + 1] = 0;
+      if (c.textWidth(buf, TS_LARGE, true) > maxW) break;
+      fit = i + 1;
+      if (s[i] == ' ') brk = i;
+    }
+    int take = brk > 0 ? brk : (fit > 0 ? fit : 1);  // a single huge word breaks mid-word
+    memcpy(buf, s, (size_t)take);
+    buf[take] = 0;
+    c.textCentered(c.width() / 2, y, buf, TS_LARGE, true, true);
+    s += take;
+    while (*s == ' ') s++;
   }
-  const bool coverComing = !failed(file);
-  c.textCentered(c.width() / 2, 620,
-                 coverComing ? "unwrapping the new book" : "opening the book", TS_SMALL, true);
-  if (coverComing)
-    c.textCentered(c.width() / 2, 652, "its cover is on the way", TS_SMALL, true);
+  // One line under it, saying what the wait is for.
+  c.textCentered(c.width() / 2, y + 14, failed(file) ? "opening the book" : "unwrapping the new book",
+                 TS_SMALL, true);
 }
 
 // The loading screen a book opens behind. Best available: the full-size

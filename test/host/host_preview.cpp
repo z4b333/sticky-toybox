@@ -164,6 +164,11 @@ void Epd::drawCircle(int cx, int cy, int r, uint8_t color, int thickness) {
     }
   }
 }
+// Set by a guard that wants to know the canvas rotation at the FIRST paint of
+// a flow -- the loading screen's, in particular, which must stand up even when
+// the page it leads to lies down.
+static int* g_rotWatch = nullptr;
+
 static void dumpFrame(const uint8_t* fb) {
   if (!g_dumpEnabled) return;
   g_screenPainted = true;
@@ -187,6 +192,10 @@ static int g_fullCount = 0, g_partialCount = 0;
 void Epd::displayFull() {
   g_paintCount++;
   g_fullCount++;
+  if (g_rotWatch) {  // the first paint after a guard armed it, then done
+    *g_rotWatch = rotation();
+    g_rotWatch = nullptr;
+  }
   dumpFrame(_fb);
 }
 void Epd::displayPartial() {
@@ -3300,6 +3309,42 @@ int main() {
     toybox.goHub();
     printf("unwrapping ok (empty plate %ld, cover %ld of %ld, %d paints, beeped)\n", plateInk,
            coverInk, area, frames);
+    g_dumpEnabled = true;
+  }
+
+  // --- the loading screen is portrait, whatever the page's angle -------------
+  // A cover is a portrait object: laid into a landscape canvas it is cropped,
+  // not turned, which on glass was a cover lying on its side with its bottom
+  // half missing. So the plate and the cover paint standing up even when the
+  // reader is set to a landscape page -- the reading rotation goes on at the
+  // page, and only there.
+  {
+    g_dumpEnabled = false;
+    stickyHost.prefs().putUInt("rd_rot", 1);  // read sideways
+    toybox.goHub();
+    toybox.open(false, 10, false);
+    auto* er = static_cast<EpubTool*>(toybox.hostActive());
+    stickyHost.setCanvasRotation(1);  // and leave the canvas lying down beforehand
+    int rotAtLoading = -1;
+    g_rotWatch = &rotAtLoading;       // sampled on the first paint of the open
+    if (!er->openDirect("/books/wind.epub")) {
+      printf("PORTRAIT FAIL: the book did not open\n");
+      abort();
+    }
+    g_rotWatch = nullptr;
+    if (rotAtLoading != 0) {
+      printf("PORTRAIT FAIL: the loading screen painted at rotation %d\n", rotAtLoading);
+      abort();
+    }
+    if (stickyHost.canvasRotation() != 1) {
+      printf("PORTRAIT FAIL: the page did not take the reading rotation (%d)\n",
+             stickyHost.canvasRotation());
+      abort();
+    }
+    toybox.goHub();
+    stickyHost.setCanvasRotation(0);
+    stickyHost.prefs().putUInt("rd_rot", 0);
+    printf("loading portrait ok (plate and cover stand up, the page lies down)\n");
     g_dumpEnabled = true;
   }
 
