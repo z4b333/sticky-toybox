@@ -41,9 +41,11 @@ and Vietnamese.
   bookmarks that keep a chosen phrase. Illustrations prepared by a PC tool
   show as full pages.
 - **Recipes** — reads the standard recipe data (schema.org JSON) that most
-  recipe websites embed. Save it as a `.json` file in `/recipes` on the
-  card, or paste the page to the device over WiFi. Ingredients have tick
-  boxes; COOK mode shows one step per page in large type.
+  recipe websites embed. Paste a link on the
+  [recipe grabber](https://z4b333.github.io/sticky-toybox/recipe.html) to
+  get a `.json` file for `/recipes` on the card, or paste the page to the
+  device over WiFi. Ingredients have tick boxes; COOK mode shows one step
+  per page in large type.
 - Your reading position is saved on the card in the same format CrossPoint
   and CrossInk use (a KOReader sidecar is written too), and their `/Read`
   and `/epub` folders are read. Move the card between firmwares and the

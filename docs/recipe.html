@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Toybox · Recipe grabber</title>
+<meta name="description" content="Paste a link to any online recipe and get a .json file for the Toybox RECIPES app on the Seeed reTerminal Sticky. Extraction happens in your browser.">
+<style>
+  :root {
+    --bg: #fafafa;
+    --fg: #18181b;
+    --muted: #71717a;
+    --line: #e4e4e7;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--fg);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 680px; margin: 0 auto; padding: 6vh 24px 64px; }
+  h1 { font-size: 32px; font-weight: 650; letter-spacing: -0.02em; }
+  .sub { color: var(--muted); margin: 8px 0 28px; }
+  .ghead {
+    font-size: 13px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--muted); margin: 20px 0 6px;
+  }
+  input[type=url], input[type=text], textarea {
+    width: 100%; padding: 10px 12px; border: 1px solid var(--line);
+    border-radius: 8px; font: inherit; background: #fff;
+  }
+  textarea { min-height: 110px; resize: vertical; font-size: 14px; }
+  .row { display: flex; gap: 10px; }
+  .row input { flex: 1; }
+  button.act {
+    padding: 11px 20px; border: 0; border-radius: 10px;
+    background: var(--fg); color: #fff; font: 600 16px system-ui;
+    cursor: pointer; white-space: nowrap;
+  }
+  button.act:disabled { background: #a1a1aa; }
+  button.wide { width: 100%; margin-top: 8px; padding: 13px; }
+  .err { color: #b91c1c; font-size: 14px; margin-top: 10px; min-height: 1.4em; }
+  .card {
+    border: 1px solid var(--line); border-radius: 10px; background: #fff;
+    padding: 16px 18px; margin-top: 20px; display: none;
+  }
+  .card h2 { font-size: 20px; font-weight: 650; }
+  .meta { color: var(--muted); font-size: 14px; margin: 2px 0 12px; }
+  .card h3 {
+    font-size: 13px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--muted); margin: 12px 0 4px;
+  }
+  .card ul, .card ol { padding-left: 22px; font-size: 15px; }
+  .card li { margin: 2px 0; }
+  .hint { font-size: 14px; color: var(--muted); margin-top: 16px; }
+  .hint code { font-size: 13px; }
+  .foot { margin-top: 48px; font-size: 14px; color: var(--muted); }
+  .foot a { color: inherit; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Recipe grabber</h1>
+  <p class="sub">Paste a link to a recipe page and get a <code>.json</code>
+  file for the RECIPES app. It reads the hidden recipe data (schema.org
+  JSON-LD) that nearly every recipe site embeds for search engines —
+  extraction happens in this browser.</p>
+
+  <div class="ghead">Recipe link</div>
+  <div class="row">
+    <input type="url" id="url" placeholder="https://www.example.com/best-weeknight-dal/" spellcheck="false">
+    <button class="act" id="go">Fetch</button>
+  </div>
+  <div class="err" id="err"></div>
+
+  <div class="ghead">Or paste the page itself</div>
+  <textarea id="paste" placeholder="If fetching fails: open the recipe page, select all (Ctrl/Cmd-A), copy, and paste here. Page source works too."></textarea>
+  <button class="act wide" id="scan">Find the recipe in the paste</button>
+
+  <div class="card" id="card">
+    <h2 id="rname"></h2>
+    <div class="meta" id="rmeta"></div>
+    <h3>Ingredients</h3>
+    <ul id="ring"></ul>
+    <h3>Steps</h3>
+    <ol id="rst"></ol>
+    <div class="ghead">File name</div>
+    <input type="text" id="fname" spellcheck="false">
+    <button class="act wide" id="save">Download .json</button>
+  </div>
+
+  <p class="hint">Put the file in <code>/recipes</code> on the SD card — the
+  RECIPES app lists everything there (up to 256&nbsp;KB per file). A device
+  without a card can instead take recipes straight from the phone through the
+  app's own PHONE page.</p>
+
+  <p class="foot">
+    <a href="index.html">← Web installer</a>
+    · <a href="wallpaper.html">Wallpaper maker</a>
+    · <a href="https://github.com/z4b333/sticky-toybox">Source on GitHub</a>
+  </p>
+</main>
+
+<script>
+'use strict';
+// The device reads raw schema.org Recipe JSON from /recipes/*.json, so the
+// file saved here is the recipe object exactly as the site published it --
+// the firmware's parser copes with @graph wrappers, HowToSections, entities
+// and the rest. Fetching goes direct first, then through public CORS relays,
+// because almost no recipe site allows a cross-site read.
+var found = null;
+var err = document.getElementById('err');
+var card = document.getElementById('card');
+var fname = document.getElementById('fname');
+
+function firstRecipe(o){
+  if (!o || typeof o !== 'object') return null;
+  var t = o['@type'];
+  if (t === 'Recipe' || (Array.isArray(t) && t.indexOf('Recipe') >= 0)) return o;
+  if (Array.isArray(o)) {
+    for (var i = 0; i < o.length; i++) { var r = firstRecipe(o[i]); if (r) return r; }
+    return null;
+  }
+  for (var k in o) {
+    if (o[k] && typeof o[k] === 'object') { var r2 = firstRecipe(o[k]); if (r2) return r2; }
+  }
+  return null;
+}
+function extract(text){
+  var cands = [];
+  try { cands.push(JSON.parse(text)); } catch (e) {}
+  var re = /<script[^>]*ld\+json[^>]*>([\s\S]*?)<\/script>/gi, m;
+  while ((m = re.exec(text))) { try { cands.push(JSON.parse(m[1])); } catch (e) {} }
+  for (var i = 0; i < cands.length; i++) { var r = firstRecipe(cands[i]); if (r) return r; }
+  return null;
+}
+function txt(v){ return v == null ? '' : (typeof v === 'string' ? v : String(v)); }
+function flatSteps(v, out){
+  if (v == null) return;
+  if (typeof v === 'string') { if (v.trim()) out.push(v.trim()); return; }
+  if (Array.isArray(v)) { for (var i = 0; i < v.length; i++) flatSteps(v[i], out); return; }
+  if (typeof v === 'object') {
+    if (v.itemListElement) return flatSteps(v.itemListElement, out);
+    var t = txt(v.text) || txt(v.name);
+    if (t.trim()) out.push(t.trim());
+  }
+}
+function unhtml(s){
+  var d = document.createElement('div');
+  d.innerHTML = s.replace(/<[^>]*>/g, ' ');
+  return d.textContent.replace(/\s+/g, ' ').trim();
+}
+function isoDur(s){
+  var m = /^P(?:([\d.]+)D)?(?:T(?:([\d.]+)H)?(?:([\d.]+)M)?(?:[\d.]+S)?)?$/.exec(txt(s).trim());
+  if (!m) return txt(s);
+  var mins = (parseFloat(m[1]) || 0) * 1440 + (parseFloat(m[2]) || 0) * 60 + (parseFloat(m[3]) || 0);
+  if (!mins) return '';
+  var h = Math.floor(mins / 60), mm = Math.round(mins % 60);
+  return (h ? h + ' h ' : '') + (mm ? mm + ' min' : '');
+}
+
+function show(r){
+  found = r;
+  var name = unhtml(txt(r.name)) || 'recipe';
+  document.getElementById('rname').textContent = name;
+  var bits = [];
+  var y = r.recipeYield; if (Array.isArray(y)) y = y[y.length - 1];
+  if (y) bits.push(unhtml(txt(y)));
+  var t = isoDur(r.totalTime); if (t) bits.push(t);
+  document.getElementById('rmeta').textContent = bits.join(' · ');
+  var ing = (r.recipeIngredient || r.ingredients || []).map(txt).filter(function(s){ return s.trim(); });
+  var ul = document.getElementById('ring'); ul.innerHTML = '';
+  ing.forEach(function(s){
+    var li = document.createElement('li'); li.textContent = unhtml(s); ul.appendChild(li);
+  });
+  var steps = []; flatSteps(r.recipeInstructions || r.instructions, steps);
+  var ol = document.getElementById('rst'); ol.innerHTML = '';
+  steps.forEach(function(s){
+    var li = document.createElement('li'); li.textContent = unhtml(s); ol.appendChild(li);
+  });
+  var base = name.replace(/[^\w\- ]+/g, '').replace(/\s+/g, ' ').trim().slice(0, 40) || 'recipe';
+  fname.value = base + '.json';
+  card.style.display = 'block';
+  card.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+}
+
+function tryText(text, from, advice){
+  var r = extract(text);
+  if (!r) { err.textContent = 'No recipe data found in ' + from + ' — ' + advice; return false; }
+  err.textContent = '';
+  show(r);
+  return true;
+}
+
+// Direct first; a same-origin-friendly site needs no relay and nothing
+// leaves this browser but the page request itself.
+var RELAYS = [
+  function(u){ return 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u); },
+  function(u){ return 'https://corsproxy.io/?url=' + encodeURIComponent(u); }
+];
+function fetchUrl(){
+  var u = document.getElementById('url').value.trim();
+  if (!u) { err.textContent = 'Paste a link first.'; return; }
+  if (!/^https?:\/\//i.test(u)) u = 'https://' + u;
+  var go = document.getElementById('go');
+  go.disabled = true; err.textContent = 'Fetching…';
+  var tries = [u].concat(RELAYS.map(function(r){ return r(u); }));
+  (function next(i){
+    if (i >= tries.length) {
+      go.disabled = false;
+      err.textContent = 'Could not fetch that page from the browser. Open the ' +
+        'link, select all, copy, and paste it in the box below instead.';
+      return;
+    }
+    fetch(tries[i]).then(function(res){
+      if (!res.ok) throw 0;
+      return res.text();
+    }).then(function(text){
+      go.disabled = false;
+      tryText(text, 'that page', 'try pasting the page itself below.');
+    }).catch(function(){ next(i + 1); });
+  })(0);
+}
+
+document.getElementById('go').addEventListener('click', fetchUrl);
+document.getElementById('url').addEventListener('keydown', function(e){
+  if (e.key === 'Enter') fetchUrl();
+});
+document.getElementById('scan').addEventListener('click', function(){
+  var p = document.getElementById('paste').value;
+  if (!p.trim()) { err.textContent = 'The paste box is empty.'; return; }
+  tryText(p, 'the paste', 'paste the page source (view-source:) if plain copy did not carry it.');
+});
+
+document.getElementById('save').addEventListener('click', function(){
+  if (!found) return;
+  var json = JSON.stringify(found, null, 1);
+  if (json.length > (256 << 10)) json = JSON.stringify(found);
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([json], {type: 'application/json'}));
+  var n = fname.value.trim() || 'recipe.json';
+  if (!/\.json$/i.test(n)) n += '.json';
+  a.download = n;
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+</script>
+</body>
+</html>
