@@ -690,6 +690,22 @@ int main() {
       printf("LOCK FAIL: choosing a file did not store a lock picture\n");
       abort();
     }
+    // The page now says WHICH picture: the miniature is up and the chosen
+    // row wears the tick (the pref carries the name the tick matches).
+    {
+      char src[40] = "";
+      stickyHost.prefs().getString("lk_src", src, sizeof(src));
+      if (strcmp(src, "mountains.tbi") != 0) {
+        printf("LOCK FAIL: the chosen name was not remembered ('%s')\n", src);
+        abort();
+      }
+    }
+    g_dumpEnabled = true;
+    setScreen("settings_lock_chosen");
+    epd.clear();
+    toybox.render(stickyHost.sharedCanvas());
+    epd.displayFull();
+    g_dumpEnabled = false;
     // And the wallpaper is untouched by it: one list, two destinations, and
     // the failure worth guarding against is the two of them being one file.
     if (wallimg::have()) {

@@ -180,40 +180,102 @@ bool SettingsScreen::tick(ToolsHost& host) {
   return false;
 }
 
-// --- the wallpaper page -------------------------------------------------------
-// What is behind the home screen, and what the SD card offers to put there.
-// The list is .tbi files -- pre-converted on a PC with tools/make_tbi.py --
-// and tapping one copies it into the device, so the card can come back out.
+// --- the wallpaper and lock-picture pages -------------------------------------
+// What is on the device now, shown as the picture itself: a 1:5 miniature of
+// the stored file, its source's name beside it, REMOVE underneath. Then what
+// the card offers, the chosen row wearing a tick. One layout for both pages,
+// because they are the same page pointed at different files.
 void SettingsScreen::enterWall(ToolsHost& host) {
   _wallN = (int8_t)host.sdWallpapers(_wallNames, setui::WALL_MAX);
 }
 
-void SettingsScreen::renderWall(ToolsHost& host, ToolsCanvas& c) {
-  (void)host;
-  using namespace setui;
-  drawTopBar(c, "WALLPAPER");
-
-  const TRect rm = wallRemoveRect();
-  if (wallimg::have()) {
-    c.button(rm.x, rm.y, rm.w, rm.h, "REMOVE THE CURRENT ONE", false, TS_MED);
-  } else {
-    c.text(rm.x + 4, rm.y + 12, "none set - the home screen is plain", TS_MED, true);
+namespace {
+// The stored picture at a fifth: 480x800 sampled to 96x160, greys thresholded
+// at the middle. Small, but unmistakably the picture -- which is the whole
+// question this block answers.
+void drawMiniPreview(ToolsCanvas& c, const char* path, int x, int y) {
+  size_t len = 0;
+  char* buf = tfs::readAlloc(path, len);
+  if (buf) {
+    if (len == tbimg::FILE_SIZE) {
+      const uint8_t* bits = (const uint8_t*)buf + tbimg::HEADER;
+      for (int py = 0; py < setui::CUR_PV_H; py++)
+        for (int px = 0; px < setui::CUR_PV_W; px++) {
+          const int sx = px * 5 + 2, sy = py * 5 + 2;
+          if (!(bits[sy * 60 + (sx >> 3)] & (0x80 >> (sx & 7))))
+            c.fillRect(x + px, y + py, 1, 1, true);
+        }
+    } else if (len == tbg2::FILE_SIZE) {
+      const uint8_t* b2 = (const uint8_t*)buf + tbg2::HEADER;
+      for (int py = 0; py < setui::CUR_PV_H; py++)
+        for (int px = 0; px < setui::CUR_PV_W; px++) {
+          const uint32_t i = (uint32_t)(py * 5 + 2) * 480 + (uint32_t)(px * 5 + 2);
+          if (((b2[i >> 2] >> (6 - 2 * (i & 3))) & 3) < 2) c.fillRect(x + px, y + py, 1, 1, true);
+        }
+    }
+    free(buf);
   }
+  c.drawRect(x - 2, y - 2, setui::CUR_PV_W + 4, setui::CUR_PV_H + 4, 1, true);
+}
 
-  c.textTracked(16, WALL_Y0 - 40, "ON THE SD CARD", TS_MED, true, false, 1);
-  c.fillRect(16, WALL_Y0 - 14, SCREEN_W - 32, 1, true);
+// A tick beside the list row whose file is the one on the device.
+void drawRowTick(ToolsCanvas& c, const TRect& r) {
+  const int cx = r.x + r.w - 28, cy = r.y + r.h / 2;
+  c.drawCircle(cx, cy, 14, 2, true);
+  c.drawLine(cx - 6, cy, cx - 2, cy + 5, 3, true);
+  c.drawLine(cx - 2, cy + 5, cx + 7, cy - 5, 3, true);
+}
 
+// One page drawn for both destinations: the stored file(s), the pref that
+// remembers where the picture came from, and the page's own words.
+void renderPicturePage(ToolsHost& host, ToolsCanvas& c, const char* title, bool have,
+                       const char* pvPath, const char* pvAlt, const char* srcKey,
+                       const char* noneLine, const char* rows[][40], int, int) {
+  (void)rows;
+  using namespace setui;
+  drawTopBar(c, title);
+  c.textTracked(16, CUR_HEAD_Y, "CURRENT", TS_SMALL, true, false, 1);
+  c.fillRect(16, CUR_HEAD_Y + 22, SCREEN_W - 32, 1, true);
+  if (have) {
+    // Whichever file exists is the one previewed: the 1-bit picture, or the
+    // grey one a card .bmp became.
+    drawMiniPreview(c, tfs::exists(pvPath) ? pvPath : pvAlt, 18, CUR_Y);
+    char src[40] = "";
+    host.prefs().getString(srcKey, src, sizeof(src));
+    const int tx = 16 + CUR_PV_W + 20;
+    c.textClipped(tx, CUR_Y + 6, SCREEN_W - tx - 16, src[0] ? src : "sent from the phone",
+                  TS_MED, true);
+    const TRect rm = wallRemoveRect();
+    c.button(rm.x, rm.y, rm.w, rm.h, "REMOVE", false, TS_MED);
+  } else {
+    c.text(20, CUR_Y + 6, noneLine, TS_MED, true);
+  }
+}
+}  // namespace
+
+void SettingsScreen::renderWall(ToolsHost& host, ToolsCanvas& c) {
+  using namespace setui;
+  renderPicturePage(host, c, "WALLPAPER", wallimg::have(), wallimg::PATH, wallimg::PATH,
+                    "wp_src", "none set - the home screen is plain", nullptr, 0, 0);
+
+  c.textTracked(16, WALL_Y0 - 44, "ON THE SD CARD", TS_SMALL, true, false, 1);
+  c.fillRect(16, WALL_Y0 - 22, SCREEN_W - 32, 1, true);
+
+  char src[40] = "";
+  host.prefs().getString("wp_src", src, sizeof(src));
   if (_wallN < 0) {
-    c.textCentered(SCREEN_W / 2, 320, "no card found", TS_LARGE, true);
-    c.textCentered(SCREEN_W / 2, 364, "is one in the slot?", TS_MED, true);
+    c.textCentered(SCREEN_W / 2, WALL_Y0 + 60, "no card found", TS_LARGE, true);
+    c.textCentered(SCREEN_W / 2, WALL_Y0 + 104, "is one in the slot?", TS_MED, true);
   } else if (_wallN == 0) {
-    c.textCentered(SCREEN_W / 2, 320, "no wallpapers on the card", TS_LARGE, true);
-    c.textCentered(SCREEN_W / 2, 364, "put .bmp pictures or .tbi files", TS_SMALL, true);
-    c.textCentered(SCREEN_W / 2, 392, "in the card's root or /wallpapers", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, WALL_Y0 + 60, "no pictures on the card", TS_LARGE, true);
+    c.textCentered(SCREEN_W / 2, WALL_Y0 + 104, "put .bmp pictures or .tbi files", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, WALL_Y0 + 132, "in the card's root or /wallpapers", TS_SMALL,
+                   true);
   } else {
     for (int i = 0; i < _wallN; i++) {
       const TRect r = wallRect(i);
       c.listRow(r.x, r.y, r.w, r.h, _wallNames[i]);
+      if (wallimg::have() && strcmp(_wallNames[i], src) == 0) drawRowTick(c, r);
     }
   }
 
@@ -227,6 +289,7 @@ bool SettingsScreen::tapWall(ToolsHost& host, int x, int y) {
   _note = nullptr;
   if (wallimg::have() && wallRemoveRect().hit(x, y)) {
     wallimg::remove();
+    host.prefs().remove("wp_src");
     _note = "removed - the home screen is plain again";
     host.beep(2);
     return true;
@@ -234,6 +297,7 @@ bool SettingsScreen::tapWall(ToolsHost& host, int x, int y) {
   for (int i = 0; i < _wallN; i++) {
     if (!wallRect(i).hit(x, y)) continue;
     if (host.sdWallpaperTake(_wallNames[i])) {
+      host.prefs().putString("wp_src", _wallNames[i]);
       _note = "wallpaper set";
       host.beep(1);
     } else {
@@ -260,31 +324,30 @@ bool SettingsScreen::tapWall(ToolsHost& host, int x, int y) {
 // So the phone is still reachable, as one line at the foot of the page. It has
 // to be: a device with an empty card slot has no other way to get a picture in.
 void SettingsScreen::renderLockPic(ToolsHost& host, ToolsCanvas& c) {
-  (void)host;
   using namespace setui;
-  drawTopBar(c, "LOCK PICTURE");
+  renderPicturePage(host, c, "LOCK PICTURE", lockimg::have(), lockimg::PATH, lockimg::G2_PATH,
+                    "lk_src", "none set yet", nullptr, 0, 0);
 
-  const TRect rm = wallRemoveRect();
-  if (lockimg::have()) {
-    c.button(rm.x, rm.y, rm.w, rm.h, "REMOVE THE CURRENT ONE", false, TS_MED);
-  } else {
-    c.text(rm.x + 4, rm.y + 12, "none set yet", TS_MED, true);
-  }
+  c.textTracked(16, WALL_Y0 - 44, "ON THE SD CARD", TS_SMALL, true, false, 1);
+  c.fillRect(16, WALL_Y0 - 22, SCREEN_W - 32, 1, true);
 
-  c.textTracked(16, WALL_Y0 - 40, "ON THE SD CARD", TS_MED, true, false, 1);
-  c.fillRect(16, WALL_Y0 - 14, SCREEN_W - 32, 1, true);
-
+  char src[40] = "";
+  host.prefs().getString("lk_src", src, sizeof(src));
+  // One row fewer than the wallpaper page: the phone line needs its seat.
+  const int shown = _wallN > 6 ? 6 : _wallN;
   if (_wallN < 0) {
-    c.textCentered(SCREEN_W / 2, 320, "no card found", TS_LARGE, true);
-    c.textCentered(SCREEN_W / 2, 364, "is one in the slot?", TS_MED, true);
+    c.textCentered(SCREEN_W / 2, WALL_Y0 + 60, "no card found", TS_LARGE, true);
+    c.textCentered(SCREEN_W / 2, WALL_Y0 + 104, "is one in the slot?", TS_MED, true);
   } else if (_wallN == 0) {
-    c.textCentered(SCREEN_W / 2, 320, "no pictures on the card", TS_LARGE, true);
-    c.textCentered(SCREEN_W / 2, 364, "put .bmp pictures or .tbi files", TS_SMALL, true);
-    c.textCentered(SCREEN_W / 2, 392, "in the card's root or /wallpapers", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, WALL_Y0 + 60, "no pictures on the card", TS_LARGE, true);
+    c.textCentered(SCREEN_W / 2, WALL_Y0 + 104, "put .bmp pictures or .tbi files", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, WALL_Y0 + 132, "in the card's root or /wallpapers", TS_SMALL,
+                   true);
   } else {
-    for (int i = 0; i < _wallN; i++) {
+    for (int i = 0; i < shown; i++) {
       const TRect r = wallRect(i);
       c.listRow(r.x, r.y, r.w, r.h, _wallNames[i]);
+      if (lockimg::have() && strcmp(_wallNames[i], src) == 0) drawRowTick(c, r);
     }
   }
 
@@ -302,6 +365,7 @@ bool SettingsScreen::tapLockPic(ToolsHost& host, int x, int y) {
   _note = nullptr;
   if (lockimg::have() && wallRemoveRect().hit(x, y)) {
     lockimg::remove();
+    host.prefs().remove("lk_src");
     _note = "removed";
     host.beep(2);
     return true;
@@ -313,9 +377,11 @@ bool SettingsScreen::tapLockPic(ToolsHost& host, int x, int y) {
     host.goPairPicture();
     return false;  // the shell repaints when the tool opens
   }
-  for (int i = 0; i < _wallN; i++) {
+  const int shown = _wallN > 6 ? 6 : _wallN;
+  for (int i = 0; i < shown; i++) {
     if (!wallRect(i).hit(x, y)) continue;
     if (host.sdLockTake(_wallNames[i])) {
+      host.prefs().putString("lk_src", _wallNames[i]);
       _note = "lock picture set";
       host.beep(1);
     } else {

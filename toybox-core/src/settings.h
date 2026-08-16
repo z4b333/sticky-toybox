@@ -43,11 +43,19 @@ inline TRect actionRect(int i) {
 inline constexpr int FILES_QR = 240, FILES_QR_X = (SCREEN_W - FILES_QR) / 2, FILES_QR_Y = 150;
 inline TRect filesDoneRect() { return TRect{16, 700, SCREEN_W - 32, 60}; }
 
-// The wallpaper page: what is on the device now, then what the card offers.
-inline constexpr int WALL_MAX = 8;
-inline constexpr int WALL_Y0 = 172, WALL_ROW_H = 56, WALL_ROW_STEP = 62;
+// The wallpaper and lock-picture pages: what is on the device now -- shown
+// as the picture itself, a 1:5 miniature, beside its name and its REMOVE --
+// then what the card offers, with the chosen row wearing a tick. The old
+// layout answered "which one is it?" with nothing at all, and sat its
+// remove button on top of the card list's heading.
+inline constexpr int WALL_MAX = 7;
+inline constexpr int CUR_HEAD_Y = 56;                      // "CURRENT" + rule
+inline constexpr int CUR_Y = 92;                           // the preview block
+inline constexpr int CUR_PV_W = 96, CUR_PV_H = 160;        // 480x800 at 1:5
+inline TRect wallPreviewRect() { return TRect{16, CUR_Y, CUR_PV_W, CUR_PV_H}; }
+inline TRect wallRemoveRect() { return TRect{SCREEN_W - 16 - 140, CUR_Y + CUR_PV_H - 48, 140, 48}; }
+inline constexpr int WALL_Y0 = 316, WALL_ROW_H = 56, WALL_ROW_STEP = 62;
 inline TRect wallRect(int i) { return TRect{16, WALL_Y0 + i * WALL_ROW_STEP, SCREEN_W - 32, WALL_ROW_H}; }
-inline TRect wallRemoveRect() { return TRect{16, 84, SCREEN_W - 32, 50}; }
 
 // The lock screen page, in four sections a person can name -- WHEN IT
 // SLEEPS, WHAT IT SHOWS, THE FOOTER LINE, WAKING -- instead of one column of
