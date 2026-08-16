@@ -57,7 +57,9 @@ void hubHostBattery(ToolsCanvas& c, const ToolsHost& host, int right, int top, b
 class HubScreen {
  public:
   struct Tap {
-    enum Kind : uint8_t { None, App, Folder, Home, Settings, Exit, Recent } kind = None;
+    enum Kind : uint8_t {
+      None, App, Folder, Home, Settings, Exit, Recent, PagePrev, PageNext
+    } kind = None;
     // Settings is also the answer for the drawers' "+ add" cell, which exists
     // to bring hidden apps back.
     bool game = false;
@@ -70,12 +72,20 @@ class HubScreen {
   // Which page is up. Home is folder -1; the folders are applist group order:
   // 0 = PLAY, 1 = UTILITY, 2 = STUDY.
   bool atHome() const { return _folder < 0; }
-  void goHome() { _folder = -1; }
+  void goHome() {
+    _folder = -1;
+    _fpage = 0;
+  }
   void openFolder(int f);
   int folder() const { return _folder; }
+  // A drawer with more than six visible tiles pages them; the arrows live in
+  // the header corner. Render clamps, so stepping past the end is harmless.
+  void folderPageStep(int d) { _fpage = (int8_t)(_fpage + d < 0 ? 0 : _fpage + d); }
+  int folderPage() const { return _fpage; }
 
  private:
   int8_t _folder = -1;
+  int8_t _fpage = 0;
   // The recently-read entries, cached at render time so the const hit() can
   // agree with what was drawn without touching NVS.
   int8_t _recN = 0;

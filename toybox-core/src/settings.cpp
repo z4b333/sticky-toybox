@@ -187,7 +187,23 @@ bool SettingsScreen::tick(ToolsHost& host) {
 // because they are the same page pointed at different files.
 void SettingsScreen::enterWall(ToolsHost& host) {
   _wallN = (int8_t)host.sdWallpapers(_wallNames, setui::WALL_MAX);
+  _wallPage = 0;
 }
+
+namespace {
+// < PREV   2 / 4   NEXT > under the rows, drawn only once the card offers
+// more than one page. An arrow that cannot go anywhere is not drawn at all.
+void drawWallPager(ToolsCanvas& c, bool lockPage, int page, int pages) {
+  using namespace setui;
+  if (pages <= 1) return;
+  const TRect pv = wallPagerPrev(lockPage), nx = wallPagerNext(lockPage);
+  if (page > 0) c.button(pv.x, pv.y, pv.w, pv.h, "< PREV", false, TS_SMALL);
+  if (page < pages - 1) c.button(nx.x, nx.y, nx.w, nx.h, "NEXT >", false, TS_SMALL);
+  char b[16];
+  snprintf(b, sizeof(b), "%d / %d", page + 1, pages);
+  c.textCentered(SCREEN_W / 2, pv.y + 12, b, TS_MED, true);
+}
+}  // namespace
 
 namespace {
 // The stored picture at a fifth: 480x800 sampled to 96x160, greys thresholded
@@ -271,11 +287,14 @@ void SettingsScreen::renderWall(ToolsHost& host, ToolsCanvas& c) {
     c.textCentered(SCREEN_W / 2, WALL_Y0 + 104, "put .bmp pictures in the card's", TS_SMALL, true);
     c.textCentered(SCREEN_W / 2, WALL_Y0 + 132, "root or /wallpapers", TS_SMALL, true);
   } else {
-    for (int i = 0; i < _wallN; i++) {
+    const int pages = (_wallN + WALL_PER - 1) / WALL_PER;
+    const int first = _wallPage * WALL_PER;
+    for (int i = 0; first + i < _wallN && i < WALL_PER; i++) {
       const TRect r = wallRect(i);
-      c.listRow(r.x, r.y, r.w, r.h, _wallNames[i]);
-      if (wallimg::have() && strcmp(_wallNames[i], src) == 0) drawRowTick(c, r);
+      c.listRow(r.x, r.y, r.w, r.h, _wallNames[first + i]);
+      if (wallimg::have() && strcmp(_wallNames[first + i], src) == 0) drawRowTick(c, r);
     }
+    drawWallPager(c, false, _wallPage, pages);
   }
 
   c.textCentered(SCREEN_W / 2, 776,
@@ -293,8 +312,23 @@ bool SettingsScreen::tapWall(ToolsHost& host, int x, int y) {
     host.beep(2);
     return true;
   }
-  for (int i = 0; i < _wallN; i++) {
-    if (!wallRect(i).hit(x, y)) continue;
+  const int pages = _wallN > 0 ? (_wallN + WALL_PER - 1) / WALL_PER : 1;
+  if (pages > 1) {
+    if (_wallPage > 0 && wallPagerPrev(false).hit(x, y)) {
+      _wallPage--;
+      host.beep(1);
+      return true;
+    }
+    if (_wallPage < pages - 1 && wallPagerNext(false).hit(x, y)) {
+      _wallPage++;
+      host.beep(1);
+      return true;
+    }
+  }
+  const int first = _wallPage * WALL_PER;
+  for (int row = 0; row < WALL_PER && first + row < _wallN; row++) {
+    const int i = first + row;
+    if (!wallRect(row).hit(x, y)) continue;
     if (host.sdWallpaperTake(_wallNames[i])) {
       host.prefs().putString("wp_src", _wallNames[i]);
       _note = "wallpaper set";
@@ -332,8 +366,6 @@ void SettingsScreen::renderLockPic(ToolsHost& host, ToolsCanvas& c) {
 
   char src[40] = "";
   host.prefs().getString("lk_src", src, sizeof(src));
-  // One row fewer than the wallpaper page: the phone line needs its seat.
-  const int shown = _wallN > 6 ? 6 : _wallN;
   if (_wallN < 0) {
     c.textCentered(SCREEN_W / 2, WALL_Y0 + 60, "no card found", TS_LARGE, true);
     c.textCentered(SCREEN_W / 2, WALL_Y0 + 104, "is one in the slot?", TS_MED, true);
@@ -342,11 +374,15 @@ void SettingsScreen::renderLockPic(ToolsHost& host, ToolsCanvas& c) {
     c.textCentered(SCREEN_W / 2, WALL_Y0 + 104, "put .bmp pictures in the card's", TS_SMALL, true);
     c.textCentered(SCREEN_W / 2, WALL_Y0 + 132, "root or /wallpapers", TS_SMALL, true);
   } else {
-    for (int i = 0; i < shown; i++) {
+    // One row fewer than the wallpaper page: the phone line needs its seat.
+    const int pages = (_wallN + LOCK_PER - 1) / LOCK_PER;
+    const int first = _wallPage * LOCK_PER;
+    for (int i = 0; first + i < _wallN && i < LOCK_PER; i++) {
       const TRect r = wallRect(i);
-      c.listRow(r.x, r.y, r.w, r.h, _wallNames[i]);
-      if (lockimg::have() && strcmp(_wallNames[i], src) == 0) drawRowTick(c, r);
+      c.listRow(r.x, r.y, r.w, r.h, _wallNames[first + i]);
+      if (lockimg::have() && strcmp(_wallNames[first + i], src) == 0) drawRowTick(c, r);
     }
+    drawWallPager(c, true, _wallPage, pages);
   }
 
   const TRect ph = lockPhoneRect();
@@ -375,9 +411,23 @@ bool SettingsScreen::tapLockPic(ToolsHost& host, int x, int y) {
     host.goPairPicture();
     return false;  // the shell repaints when the tool opens
   }
-  const int shown = _wallN > 6 ? 6 : _wallN;
-  for (int i = 0; i < shown; i++) {
-    if (!wallRect(i).hit(x, y)) continue;
+  const int pages = _wallN > 0 ? (_wallN + LOCK_PER - 1) / LOCK_PER : 1;
+  if (pages > 1) {
+    if (_wallPage > 0 && wallPagerPrev(true).hit(x, y)) {
+      _wallPage--;
+      host.beep(1);
+      return true;
+    }
+    if (_wallPage < pages - 1 && wallPagerNext(true).hit(x, y)) {
+      _wallPage++;
+      host.beep(1);
+      return true;
+    }
+  }
+  const int first = _wallPage * LOCK_PER;
+  for (int row = 0; row < LOCK_PER && first + row < _wallN; row++) {
+    const int i = first + row;
+    if (!wallRect(row).hit(x, y)) continue;
     if (host.sdLockTake(_wallNames[i])) {
       host.prefs().putString("lk_src", _wallNames[i]);
       _note = "lock picture set";

@@ -48,7 +48,11 @@ inline TRect filesDoneRect() { return TRect{16, 700, SCREEN_W - 32, 60}; }
 // then what the card offers, with the chosen row wearing a tick. The old
 // layout answered "which one is it?" with nothing at all, and sat its
 // remove button on top of the card list's heading.
-inline constexpr int WALL_MAX = 7;
+// Up to 24 names remembered; six rows to a page on the wallpaper page, five
+// on the lock page (the phone line needs its seat), with < PREV / NEXT >
+// under the rows once there is more than one page.
+inline constexpr int WALL_MAX = 24;
+inline constexpr int WALL_PER = 6, LOCK_PER = 5;
 inline constexpr int CUR_HEAD_Y = 56;                      // "CURRENT" + rule
 inline constexpr int CUR_Y = 92;                           // the preview block
 inline constexpr int CUR_PV_W = 96, CUR_PV_H = 160;        // 480x800 at 1:5
@@ -56,6 +60,11 @@ inline TRect wallPreviewRect() { return TRect{16, CUR_Y, CUR_PV_W, CUR_PV_H}; }
 inline TRect wallRemoveRect() { return TRect{SCREEN_W - 16 - 140, CUR_Y + CUR_PV_H - 48, 140, 48}; }
 inline constexpr int WALL_Y0 = 316, WALL_ROW_H = 56, WALL_ROW_STEP = 62;
 inline TRect wallRect(int i) { return TRect{16, WALL_Y0 + i * WALL_ROW_STEP, SCREEN_W - 32, WALL_ROW_H}; }
+// The pager sits where the rows stop: after six on the wallpaper page, after
+// five on the lock page.
+inline int wallPagerY(bool lockPage) { return WALL_Y0 + (lockPage ? LOCK_PER : WALL_PER) * WALL_ROW_STEP + 6; }
+inline TRect wallPagerPrev(bool lockPage) { return TRect{16, wallPagerY(lockPage), 130, 44}; }
+inline TRect wallPagerNext(bool lockPage) { return TRect{SCREEN_W - 16 - 130, wallPagerY(lockPage), 130, 44}; }
 
 // The lock screen page, in four sections a person can name -- WHEN IT
 // SLEEPS, WHAT IT SHOWS, THE FOOTER LINE, WAKING -- instead of one column of
@@ -181,6 +190,7 @@ class SettingsScreen {
   // per call, and re-listing on every repaint would strobe it. Pages 2 and 5
   // are never open at the same time, so they share the one buffer.
   int8_t _wallN = -1;
+  int8_t _wallPage = 0;  // which page of card pictures is up
   char _wallNames[setui::WALL_MAX][ToolsHost::SD_NAME_LEN] = {};
   // The files page's access point. Held by value, started on entering the
   // page and stopped on every way out of it.

@@ -3093,6 +3093,48 @@ int main() {
     g_dumpEnabled = true;
   }
 
+  // --- picture list paging ----------------------------------------------------
+  // The card now holds more pictures than one page shows (the two .tbi fakes
+  // plus every .bmp planted above), so the wallpaper page grows < PREV /
+  // NEXT >, and a choice made on page two lands on the right file.
+  {
+    g_dumpEnabled = false;
+    static char names[setui::WALL_MAX][ToolsHost::SD_NAME_LEN];
+    const int n = sdcard::listTbi(names, setui::WALL_MAX);
+    if (n <= setui::WALL_PER) {
+      printf("PAGING FAIL: expected more than one page of pictures, got %d\n", n);
+      abort();
+    }
+    const int pages = (n + setui::WALL_PER - 1) / setui::WALL_PER;
+    toybox.goHub();
+    toybox.openSettings();
+    tapRect(setui::actionRect(setui::ACT_WALL));
+    tapRect(setui::wallPagerNext(false));  // page two
+    tapRect(setui::wallRect(0));           // its first row
+    char src[40] = "";
+    stickyHost.prefs().getString("wp_src", src, sizeof(src));
+    if (strcmp(src, names[setui::WALL_PER]) != 0) {
+      printf("PAGING FAIL: page 2 row 0 chose '%s', the list says '%s'\n", src,
+             names[setui::WALL_PER]);
+      abort();
+    }
+    // PREV returns; a second PREV is off the end and must go nowhere.
+    tapRect(setui::wallPagerPrev(false));
+    tapRect(setui::wallPagerPrev(false));
+    tapRect(setui::wallRect(0));
+    stickyHost.prefs().getString("wp_src", src, sizeof(src));
+    if (strcmp(src, names[0]) != 0) {
+      printf("PAGING FAIL: back on page 1, row 0 chose '%s' not '%s'\n", src, names[0]);
+      abort();
+    }
+    // Clean up: later guards expect no wallpaper set.
+    wallimg::remove();
+    stickyHost.prefs().remove("wp_src");
+    toybox.goHub();
+    printf("picture paging ok (%d names, %d pages, both directions land)\n", n, pages);
+    g_dumpEnabled = true;
+  }
+
   // --- recipes ---------------------------------------------------------------
   // The parser first, on JSON shaped like the internet actually serves it:
   // @graph with an Article in the way, @type as an array, HowToStep objects,

@@ -17,7 +17,9 @@ struct Item {
 };
 struct Group {
   const char* name;
-  Item items[6];
+  // Room for twelve: a drawer shows six tiles to a page and grows page
+  // arrows in its header corner past that (hub.cpp walkFolder).
+  Item items[12];
   uint8_t n;
 };
 

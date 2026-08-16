@@ -237,6 +237,12 @@ void Toybox::onTap(int x, int y) {
       _hub.goHome();
       _host->refresh(wallimg::have());
       return;
+    case HubScreen::Tap::PagePrev:
+    case HubScreen::Tap::PageNext:
+      // Turning a drawer's page is tiles over tiles: partial is plenty.
+      _hub.folderPageStep(t.kind == HubScreen::Tap::PageNext ? 1 : -1);
+      _host->refresh(false);
+      return;
     case HubScreen::Tap::Recent: {
       // A recently-read cover: open its reader, then the book itself, which
       // resumes at the saved position the way it always does -- with no stop

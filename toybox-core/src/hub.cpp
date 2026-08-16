@@ -81,29 +81,44 @@ constexpr uint8_t ADD_IDX = 255;
 // hidden apps, and dropping the cell is what caps a drawer at three rows.
 // topAnchor pins the block under the title instead of centring it, which is
 // how the Study drawer makes room for the recently-read strip below.
+// Six tiles to a page; a drawer with more pages them behind < > arrows in
+// its header corner. The page is clamped here rather than trusted, so a
+// stale page (an app hidden while deep in the list) cannot show nothing.
+inline constexpr int FOLDER_PER = 6;
+
+int folderPagesOf(int cells) { return cells <= 0 ? 1 : (cells + FOLDER_PER - 1) / FOLDER_PER; }
+
+int clampFolderPage(int page, int cells) {
+  const int last = folderPagesOf(cells) - 1;
+  return page < 0 ? 0 : page > last ? last : page;
+}
+
 template <typename F>
-void walkFolder(int folder, bool guest, bool topAnchor, F f) {
+void walkFolder(int folder, bool guest, bool topAnchor, int page, F f) {
   const Group& grp = GROUPS[folder];
-  Item vis[7];
+  Item vis[13];
   int n = 0;
   for (int i = 0; i < grp.n; i++)
     if (appvis::visible(grp.items[i].game, grp.items[i].idx)) vis[n++] = grp.items[i];
   if (!guest && n < grp.n) vis[n++] = Item{false, ADD_IDX};
   if (n == 0) return;
 
+  const int first = clampFolderPage(page, n) * FOLDER_PER;
+  const int count = n - first > FOLDER_PER ? FOLDER_PER : n - first;
+
   const int step = ROW_STEP;
   const int bottom = FOLDER_BOTTOM;
-  const int rows = (n + 1) / 2;
+  const int rows = (count + 1) / 2;
   const int block = rows * step;
   const int avail = bottom - FOLDER_TOP;
   int y0 = topAnchor ? FOLDER_TOP : FOLDER_TOP + (avail - block) / 2;
   if (y0 < FOLDER_TOP) y0 = FOLDER_TOP;
 
-  for (int i = 0; i < n; i++) {
+  for (int i = 0; i < count; i++) {
     const int col = i % 2, row = i / 2;
     const int cx = SCREEN_W / 4 + col * (SCREEN_W / 2);
     const int rowTop = y0 + row * step;
-    f(vis[i], cx, rowTop + TILE / 2, col, rowTop, rowTop + step);
+    f(vis[first + i], cx, rowTop + TILE / 2, col, rowTop, rowTop + step);
   }
 }
 
@@ -182,8 +197,23 @@ void drawRecentStrip(ToolsCanvas& c, int stripTop, const recents::Entry* rec, in
   }
 }
 
-void renderFolder(ToolsHost& host, ToolsCanvas& c, int folder, const recents::Entry* rec,
-                  int recN) {
+// The page arrows in a drawer's header corner, drawn (and hit) only when the
+// drawer has more than one page of tiles. A guest's corner already carries
+// the gear, so its pager sits just left of it.
+TRect fpagePrevRect(bool guest) { return TRect{SCREEN_W - (guest ? 300 : 190), 4, 56, 56}; }
+TRect fpageNextRect(bool guest) { return TRect{SCREEN_W - (guest ? 176 : 66), 4, 56, 56}; }
+
+void drawFolderPager(ToolsCanvas& c, bool guest, int page, int pages) {
+  const TRect pv = fpagePrevRect(guest), nx = fpageNextRect(guest);
+  if (page > 0) c.text(pv.x + 18, pv.y + 12, "<", TS_LARGE, true, true);
+  if (page < pages - 1) c.text(nx.x + 18, nx.y + 12, ">", TS_LARGE, true, true);
+  char b[8];
+  snprintf(b, sizeof(b), "%d/%d", page + 1, pages);
+  c.textCentered((pv.x + nx.x + 56) / 2, 24, b, TS_SMALL, true);
+}
+
+void renderFolder(ToolsHost& host, ToolsCanvas& c, int folder, int page,
+                  const recents::Entry* rec, int recN) {
   const bool guest = host.canExit();
   const Group& grp = GROUPS[folder];
 
@@ -195,14 +225,18 @@ void renderFolder(ToolsHost& host, ToolsCanvas& c, int folder, const recents::En
   c.drawLine(24, 34, 52, 34, 3, true);
   c.drawLine(24, 34, 36, 24, 3, true);
   c.drawLine(24, 34, 36, 44, 3, true);
+  const int cellCount = folderCells(folder, guest);
+  const int pages = folderPagesOf(cellCount);
+  page = clampFolderPage(page, cellCount);
   if (guest) {
     decor::gear(c, SCREEN_W - 34, 34, 14, 8, true);
-  } else {
+  } else if (pages <= 1) {
     const int n = visibleCount(folder);
     char buf[16];
     snprintf(buf, sizeof(buf), "%d apps", n);
     c.text(SCREEN_W - 16 - c.textWidth(buf, TS_SMALL), 24, buf, TS_SMALL, true);
   }
+  if (pages > 1) drawFolderPager(c, guest, page, pages);
   char title[16];
   sentence(title, sizeof(title), grp.name);
   c.text(24, 68, title, TS_HUGE, true, true);
@@ -210,10 +244,9 @@ void renderFolder(ToolsHost& host, ToolsCanvas& c, int folder, const recents::En
 
   // Where the block of cells starts and ends, for the hairline dividers. The
   // walk is the authority; this only records what it did.
-  const int cellCount = folderCells(folder, guest);
-  const bool strip = folder == 2 && !guest && recN > 0 && stripFits(cellCount);
+  const bool strip = folder == 2 && !guest && recN > 0 && pages == 1 && stripFits(cellCount);
   int top = SCREEN_H, bottom = 0, cells = 0;
-  walkFolder(folder, guest, strip,
+  walkFolder(folder, guest, strip, page,
              [&](const Item& it, int cx, int cy2, int, int rowTop, int rowBottom) {
     cells++;
     if (rowTop < top) top = rowTop;
@@ -255,6 +288,7 @@ void hubHostBattery(ToolsCanvas& c, const ToolsHost& host, int right, int top, b
 
 void HubScreen::openFolder(int f) {
   _folder = (int8_t)(f < 0 ? -1 : f >= NGROUPS ? NGROUPS - 1 : f);
+  _fpage = 0;  // a drawer opens on its first page
 }
 
 void HubScreen::render(ToolsHost& host, ToolsCanvas& c) {
@@ -268,7 +302,7 @@ void HubScreen::render(ToolsHost& host, ToolsCanvas& c) {
     int recN = 0;
     if (_folder == 2 && !host.canExit()) recN = recents::list(host.prefs(), rec);
     _recN = (int8_t)recN;
-    renderFolder(host, c, _folder, rec, recN);
+    renderFolder(host, c, _folder, _fpage, rec, recN);
     return;
   }
 
@@ -348,9 +382,23 @@ HubScreen::Tap HubScreen::hit(const ToolsHost& host, int x, int y) const {
       if (t.idx > 2) t.idx = 2;
       return t;
     }
-    // The recently-read covers, when the Study drawer is wearing them.
+    // The page arrows, when the drawer has pages to turn.
     const int cellCount = folderCells(folder, guest);
-    const bool strip = folder == 2 && !guest && _recN > 0 && stripFits(cellCount);
+    const int pages = folderPagesOf(cellCount);
+    const int page = clampFolderPage(_fpage, cellCount);
+    if (pages > 1) {
+      if (page > 0 && fpagePrevRect(guest).hit(x, y)) {
+        t.kind = Tap::PagePrev;
+        return t;
+      }
+      if (page < pages - 1 && fpageNextRect(guest).hit(x, y)) {
+        t.kind = Tap::PageNext;
+        return t;
+      }
+    }
+    // The recently-read covers, when the Study drawer is wearing them.
+    const bool strip =
+        folder == 2 && !guest && _recN > 0 && pages == 1 && stripFits(cellCount);
     if (strip) {
       const int rowTop = stripTopFor(cellCount) + REC_HEAD_H;
       if (y >= rowTop && y < rowTop + _recN * REC_ROW_H) {
@@ -361,7 +409,7 @@ HubScreen::Tap HubScreen::hit(const ToolsHost& host, int x, int y) const {
     }
     bool found = false;
     Item got{};
-    walkFolder(folder, guest, strip,
+    walkFolder(folder, guest, strip, page,
                [&](const Item& it, int cx, int, int col, int rowTop, int rowBottom) {
                  if (found) return;
                  const int left = col == 0 ? 0 : SCREEN_W / 2;
