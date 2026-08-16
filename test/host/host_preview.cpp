@@ -965,21 +965,13 @@ int main() {
       printf("BOOK FAIL: opening a book did not land on its first page\n");
       abort();
     }
-    // A FIRST open builds the cover mid-open and shows it in the plate's
-    // frame -- the flag says that paint happened. The dump below is that
-    // screen, drawn again for the record (the mock only files full
-    // refreshes, and the fresh paint is deliberately a partial).
-    if (!bt->hostFreshCover()) {
-      printf("BOOK FAIL: the first open did not show its new cover in the frame\n");
+    // A first open builds the cover mid-open but no longer repaints for it:
+    // the loading face stays as painted and the page is the next thing the
+    // panel shows. The cover must still exist afterwards.
+    if (!bthumb::have("/books/One Piece/one-piece-v1.tbk")) {
+      printf("BOOK FAIL: the first open did not build the cover\n");
       abort();
     }
-    g_dumpEnabled = true;
-    setScreen("tool_books_loading_fresh");
-    epd.clear();
-    bthumb::drawLoading(stickyHost, stickyHost.sharedCanvas(),
-                        "/books/One Piece/one-piece-v1.tbk", "One Piece vol 1", true);
-    epd.displayFull();
-    g_dumpEnabled = false;
     // A 1-bit page still arrives whole -- 48 KB is a block this device can
     // find, and the blit wants it contiguous.
     if (bt->hostPageBufBytes() != 48000) {

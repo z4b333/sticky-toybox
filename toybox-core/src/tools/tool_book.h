@@ -75,7 +75,7 @@ class BookTool : public ToolApp {
       return;
     }
     if (_screen == Screen::Loading) {
-      bthumb::drawLoading(host(), c, _books[_cur].file, _books[_cur].title, _freshCover);
+      bthumb::drawLoading(host(), c, _books[_cur].file, _books[_cur].title);
       return;
     }
     if (_screen == Screen::Page) {
@@ -265,7 +265,6 @@ class BookTool : public ToolApp {
 
 #ifdef TOYBOX_HOST
   int hostScreen() const { return _screen == Screen::Page ? 1 : 0; }
-  bool hostFreshCover() const { return _freshCover; }
   uint32_t hostPage() const { return _pageNo; }
   int hostMenu() const { return (int)_menu; }
   int hostMarkCount() const { return _nmarks; }
@@ -409,9 +408,7 @@ class BookTool : public ToolApp {
     // so the open happens behind the book's own face rather than a stale list.
     _cur = i;
     _screen = Screen::Loading;
-    _freshCover = false;
     host().refresh(true);
-    const bool hadCover = bthumb::have(_books[i].file);
     if (!host().bookOpen(_books[i].file)) {
       _note = "could not open it - is the card still in?";
       _screen = Screen::List;
@@ -454,14 +451,9 @@ class BookTool : public ToolApp {
       }
       if (!made) _note = "the cover could not be made - it will try again";
     }
-    // A cover that just came into existence goes into the plate's frame, so
-    // the slowest open a book ever has shows its progress where the empty
-    // frame promised it. One partial refresh; later opens lead with the
-    // full-bleed cover instead.
-    if (!hadCover && bthumb::have(_books[i].file)) {
-      _freshCover = true;
-      host().refresh(false);
-    }
+    // No repaint when a cover was just built: the loading face stays put and
+    // the page is the next paint. The mid-open framed-cover step is gone --
+    // on glass it read as the book going backwards.
     // ...and, if the sleeping panel is set to wear a cover, this book's goes
     // into flash now. After the builder above, so the very first open of a
     // book still gets one.
@@ -900,6 +892,5 @@ class BookTool : public ToolApp {
   uint32_t _pageBufBytes = 0;
   const char* _note = nullptr;
   bool _help = false;       // the HOW TO READ card, once per device
-  bool _freshCover = false; // this open just built the cover; show it framed
   char _noteBuf[80] = {};
 };
