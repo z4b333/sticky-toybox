@@ -626,7 +626,7 @@ class EpubTool : public ToolApp {
   static constexpr uint8_t kRotBtn[3] = {1, 0, 3};
   static TRect rotBtnRect(const TRect& row, int k) {
     const int bw = (row.w - 32) / 3;
-    return {row.x + 8 + k * (bw + 8), row.y + 56, bw, 46};
+    return {row.x + 8 + k * (bw + 8), row.y + 48, bw, 42};
   }
 
   // The panel's screens are drawn portrait; the page is drawn at the chosen
@@ -1255,6 +1255,7 @@ class EpubTool : public ToolApp {
   void menuOpen() {
     _menu = rmenu::Page::Root;
     _mpage = 0;
+    _resetArmed = false;  // a question does not survive the screen that asked it
     _nmarks = marks::load(host(), _books[_cur].file, _marks);
     // The panel is a portrait design; the page under it may not be. Stand the
     // canvas up for the menu and put the page's angle back on the way out.
@@ -1265,6 +1266,31 @@ class EpubTool : public ToolApp {
       host().refresh(true);
     else
       paint();
+  }
+
+  // Forget where this book was being read, and go back to its first page.
+  //
+  // Nothing is deleted: the position is SET to the beginning and saved the
+  // ordinary way, which leaves a valid record on the card (and a 0% KOReader
+  // sidecar beside it) instead of a hole that the legacy-directory fallback
+  // would happily fill with an older position. Bookmarks are left alone --
+  // they are phrases the reader chose to keep, not a place it happened to
+  // stop, and losing them here would be a surprise nobody asked for.
+  void startAgain() {
+    _menu = rmenu::Page::None;
+    ensureStream();
+    applyRot(_rot);
+    _books[_cur].cont = false;  // the shelf says "from the start" again
+    if (!gotoPlace(0, 0)) {
+      _note = "could not go back to the start";
+      host().beep(2);
+      host().refresh(true);
+      return;
+    }
+    saveProgress();  // the card now says: the beginning
+    syncPageRot();
+    host().beep(1);
+    host().refresh(true);
   }
 
   void menuClose() {
@@ -1556,7 +1582,7 @@ class EpubTool : public ToolApp {
   void renderMenu(ToolsCanvas& c) {
     char buf[64];
     if (_menu == rmenu::Page::Root) {
-      rmenu::Item items[6];
+      rmenu::Item items[7];
       items[0].label = "Contents";
       snprintf(_rootSub[0], sizeof(_rootSub[0]), "chapter %d of %d", _spine + 1,
                _book.spineCount());
@@ -1586,9 +1612,23 @@ class EpubTool : public ToolApp {
       items[n].label = "Rotation";
       items[n].sub = "";  // three buttons, drawn below
       n++;
+      // Forgetting where you were is a per-book thing, so it lives with the
+      // book rather than in settings: the panel is already the screen about
+      // THIS book. Two taps, like every other irreversible row on the device.
+      const int rowReset = n;
+      items[n].label = "Start again";
+      items[n].sub = _resetArmed ? "tap again to forget this book's place"
+                                 : (_books[_cur].cont ? "back to the first page" : "already at the start");
+      n++;
       items[n].label = "Close the book";
       items[n].sub = _books[_cur].title;
       rmenu::drawRoot(host(), c, "Options", items, n + 1);
+      if (_resetArmed) {  // the armed row inverts, as the reset in settings does
+        const TRect r = rmenu::rootRect(rowReset, c.width());
+        c.fillRect(r.x, r.y + 1, r.w, r.h - 2, true);
+        c.text(r.x + 8, r.y + 20, "Start again", TS_LARGE, false);
+        c.text(r.x + 8, r.y + 62, "tap again to forget this book's place", TS_SMALL, false);
+      }
       if (rowFace >= 0) {
         const TRect r = rmenu::rootRect(rowFace, c.width());
         char sample[120];
@@ -1597,7 +1637,7 @@ class EpubTool : public ToolApp {
         snprintf(sample, sizeof(sample), "%s - %s", faceName(_face),
                  _lineN > 0 && _lines[0].t[0] ? _lines[0].t : "The quick brown fox");
         FaceScope fs(host(), _face);
-        c.textClipped(r.x + 8, r.y + 66, r.w - 16, sample, TS_MED, true);
+        c.textClipped(r.x + 8, r.y + 58, r.w - 16, sample, TS_MED, true);
       }
       {
         // Rotation as three buttons -- one tap to any of the three, no
@@ -1743,8 +1783,13 @@ class EpubTool : public ToolApp {
       const bool hasFace = host().typefaceCount() > 1;
       const int rowFace = hasFace ? 3 : -1;
       const int rowRot = hasFace ? 4 : 3;
-      const int rowClose = rowRot + 1;
+      const int rowReset = rowRot + 1;
+      const int rowClose = rowReset + 1;
       const int hit = rmenu::hitRoot(x, y, rowClose + 1, W);
+      // Any tap that is not the armed row itself disarms it -- the same rule
+      // the settings reset follows, so a question never outlives the screen.
+      const bool wasArmed = _resetArmed;
+      if (wasArmed && hit != rowReset) _resetArmed = false;
       if (hit == 0) {
         _menu = rmenu::Page::Contents;
         _mpage = pageOfSpine();
@@ -1763,6 +1808,17 @@ class EpubTool : public ToolApp {
         _menu = rmenu::Page::Text;
         host().beep(0);
         paint();
+        return;
+      }
+      if (hit == rowReset) {
+        if (!wasArmed) {
+          _resetArmed = true;
+          host().beep(2);
+          paint();
+          return;
+        }
+        _resetArmed = false;
+        startAgain();
         return;
       }
       if (hit == rowFace) {
@@ -1995,6 +2051,7 @@ class EpubTool : public ToolApp {
   char _rootSub[5][48] = {};
   uint8_t _size = 0, _lead = 1;
   uint8_t _face = 0;  // 0 DejaVu, 1 Literata, 2 Atkinson
+  bool _resetArmed = false;  // "Start again" asked once and waiting on a second tap
   uint8_t _rot = 0;      // the page view's rotation; every menu screen is portrait
   uint8_t _rotLaid = 0;  // the rotation the current layout was measured at
 

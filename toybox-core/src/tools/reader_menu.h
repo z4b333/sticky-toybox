@@ -81,7 +81,10 @@ enum class Page : uint8_t { None, Root, Contents, Marks, Text, Keep };
 
 // Rows, generously spaced, divided by hairlines. A thumb needs the height
 // whether or not there is a box drawn around it.
-inline constexpr int ROOT_Y0 = 116, ROOT_H = 116, ROOT_GAP = 0;
+// Seven rows fit at 98: 110 + 7*98 = 796, which is the panel. They were 116
+// when six was the most the panel offered, and a thumb does not notice the
+// difference -- 98 px is still two thirds of an inch.
+inline constexpr int ROOT_Y0 = 110, ROOT_H = 98, ROOT_GAP = 0;
 inline constexpr int ROOT_MARGIN = 24;
 
 inline TRect rootRect(int i, int w) {
@@ -109,10 +112,10 @@ inline void drawRoot(ToolsHost& h, ToolsCanvas& c, const char* title, const Item
   for (int i = 0; i < n; i++) {
     const TRect r = rootRect(i, c.width());
     if (i > 0) c.fillRect(r.x, r.y, r.w, 1, true);  // hairlines between, none around
-    c.text(r.x + 8, r.y + 28, items[i].label, TS_LARGE, true);
+    c.text(r.x + 8, r.y + 20, items[i].label, TS_LARGE, true);
     const int subW = r.w - 16 - (items[i].plus ? 92 : 0);
     if (items[i].sub && items[i].sub[0])
-      c.textClipped(r.x + 8, r.y + 70, subW, items[i].sub, TS_SMALL, true);
+      c.textClipped(r.x + 8, r.y + 62, subW, items[i].sub, TS_SMALL, true);
     if (items[i].plus) {
       const TRect p = plusRect(i, c.width());
       const int cx = p.x + p.w / 2, cy = p.y + p.h / 2;

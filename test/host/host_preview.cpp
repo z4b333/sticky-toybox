@@ -1247,8 +1247,9 @@ int main() {
       }
     }
 
-    // And the way out is the row under it.
-    toybox.onTap(240, rmenu::rootRect(3, 480).y + 40);
+    // And the way out is the row under it -- row 4 now, with "Start again"
+    // between the settings and the exit.
+    toybox.onTap(240, rmenu::rootRect(4, 480).y + 40);
     if (bt->hostScreen() != 0) {
       printf("BOOK FAIL: CLOSE THE BOOK did not close it\n");
       abort();
@@ -1269,7 +1270,7 @@ int main() {
              bt->hostMarkCount());
       abort();
     }
-    toybox.onTap(240, rmenu::rootRect(3, 480).y + 40);  // close it again
+    toybox.onTap(240, rmenu::rootRect(4, 480).y + 40);  // close it again
     printf("tbk panel ok (keypad refuses a typo, marks survive the book closing)\n");
     // ...and means nothing on the list, so main.cpp falls through to its own
     // uses of the button.
@@ -2467,7 +2468,9 @@ int main() {
       printf("rotation ok (three buttons, turns on close, offset pinned)\n");
       toybox.onButton(SideBtn::Ok);  // panel up for the close row below
     }
-    toybox.onTap(240, rmenu::rootRect(5, 480).y + 40);
+    // Row 6 now: "Start again" sits between the rotation buttons and the way
+    // out, so a thumb reaching for one cannot land on the other.
+    toybox.onTap(240, rmenu::rootRect(6, 480).y + 40);
     if (et->hostScreen() != 0) {
       printf("EPUB APP FAIL: CLOSE THE BOOK did not close it\n");
       abort();
@@ -2510,7 +2513,7 @@ int main() {
         abort();
       }
       toybox.onButton(SideBtn::Ok);                       // the panel
-      toybox.onTap(240, rmenu::rootRect(5, 480).y + 40);  // CLOSE THE BOOK
+      toybox.onTap(240, rmenu::rootRect(6, 480).y + 40);  // CLOSE THE BOOK
     }
 
 
@@ -2557,7 +2560,7 @@ int main() {
         abort();
       }
       toybox.onButton(SideBtn::Ok);                       // the panel
-      toybox.onTap(240, rmenu::rootRect(5, 480).y + 40);  // CLOSE THE BOOK
+      toybox.onTap(240, rmenu::rootRect(6, 480).y + 40);  // CLOSE THE BOOK
       printf("epub picture chapters ok (reachable both ways, never blank)\n");
     }
     toybox.goHub();
@@ -2673,7 +2676,7 @@ int main() {
         abort();
       }
       toybox.onButton(SideBtn::Ok);
-      toybox.onTap(240, rmenu::rootRect(5, 480).y + 40);  // CLOSE THE BOOK
+      toybox.onTap(240, rmenu::rootRect(6, 480).y + 40);  // CLOSE THE BOOK
       printf("hash migration ok (reads Murmur, writes FNV)\n");
     }
 
@@ -2702,7 +2705,7 @@ int main() {
       }
       toybox.onButton(SideBtn::Down);              // a turn
       toybox.onButton(SideBtn::Ok);                // the panel
-      toybox.onTap(240, rmenu::rootRect(5, 480).y + 40);  // CLOSE: the save lands
+      toybox.onTap(240, rmenu::rootRect(6, 480).y + 40);  // CLOSE: the save lands
       uint8_t pb[16];
       if (sdcard::hostReadSide("/.crosspoint/epub_16433272010175318797/progress.bin", pb, 16) !=
           10) {
@@ -3486,6 +3489,123 @@ int main() {
       }
     toybox.goHub();
     printf("headings and bold ok (h2 whole and large, <b> exact to the byte)\n");
+    g_dumpEnabled = true;
+  }
+
+  // --- start again, per book -------------------------------------------------
+  // Two taps on one row, and this book forgets where it was. The first tap
+  // only asks: a row that erased a reading position on one tap would be the
+  // most expensive misfire on the device. Checked on the EPUB reader, whose
+  // position lives on the card, and on the .tbk reader, whose position is a
+  // setting -- and bookmarks must survive both, being a different promise.
+  {
+    g_dumpEnabled = false;
+    toybox.goHub();
+    toybox.open(false, 10, false);
+    auto* er = static_cast<EpubTool*>(toybox.hostActive());
+    if (!er->openDirect("/books/wind.epub")) {
+      printf("RESET FAIL: the book did not open\n");
+      abort();
+    }
+    // Get somewhere worth losing.
+    for (int k = 0; k < 6; k++) toybox.onButton(SideBtn::Down);
+    const int spineWas = er->hostSpine();
+    const uint32_t offWas = er->hostPageOffset();
+    if (spineWas == 0 && er->hostPage() == 0) {
+      printf("RESET FAIL: could not get away from the start\n");
+      abort();
+    }
+    static marks::Mark mbuf[marks::MAX];
+    const int marksWere = marks::load(stickyHost, "/books/wind.epub", mbuf);
+    toybox.onButton(SideBtn::Ok);  // the panel
+    const int W = 480, rowReset = stickyHost.typefaceCount() > 1 ? 5 : 4;
+    g_dumpEnabled = true;
+    setScreen("epub_start_again_armed");
+    toybox.onTap(240, rmenu::rootRect(rowReset, W).y + 40);  // asks
+    g_dumpEnabled = false;
+    if (er->hostMenu() == 0 || er->hostSpine() != spineWas) {
+      printf("RESET FAIL: the first tap did something (menu %d, s%d)\n", er->hostMenu(),
+             er->hostSpine());
+      abort();
+    }
+    // A tap somewhere else takes the question away rather than leaving it
+    // armed under a thumb: into Text, back out, and the next tap on the row
+    // must only ASK again.
+    toybox.onTap(240, rmenu::rootRect(2, W).y + 40);  // Text
+    toybox.onTap(20, 20);                             // back to the root
+    toybox.onTap(240, rmenu::rootRect(rowReset, W).y + 40);  // asks (not confirms)
+    if (er->hostSpine() != spineWas) {
+      printf("RESET FAIL: the question survived a trip to another screen\n");
+      abort();
+    }
+    toybox.onTap(240, rmenu::rootRect(rowReset, W).y + 40);  // and confirms
+    if (er->hostMenu() != 0) {
+      printf("RESET FAIL: the panel stayed up after starting again\n");
+      abort();
+    }
+    // The first page of the first chapter -- by page number, not offset: a
+    // chapter's first page starts at its first visible codepoint, which is
+    // not necessarily zero.
+    if (er->hostSpine() != 0 || er->hostPage() != 0) {
+      printf("RESET FAIL: still at s%d p%d\n", er->hostSpine(), er->hostPage());
+      abort();
+    }
+    if (marks::load(stickyHost, "/books/wind.epub", mbuf) != marksWere) {
+      printf("RESET FAIL: starting again took the bookmarks with it\n");
+      abort();
+    }
+    // ...and the card was told, so closing and reopening still starts at the
+    // beginning rather than resurrecting the old place.
+    toybox.goHub();
+    toybox.open(false, 10, false);
+    auto* er2 = static_cast<EpubTool*>(toybox.hostActive());
+    er2->openDirect("/books/wind.epub");
+    if (er2->hostSpine() != 0 || er2->hostPage() != 0) {
+      printf("RESET FAIL: reopening went back to s%d p%d\n", er2->hostSpine(),
+             er2->hostPage());
+      abort();
+    }
+    toybox.goHub();
+    printf("epub start again ok (asks first, forgets the place, keeps the marks)\n");
+
+    // The same row in the .tbk reader, where a position is a setting rather
+    // than a file on the card. Row 3 there: Go to page, Bookmarks, Page
+    // turns, Start again, Close.
+    toybox.open(false, 9, false);
+    auto* br = static_cast<BookTool*>(toybox.hostActive());
+    // Straight to a book: the top of this shelf is a series folder, so a tap
+    // at the first row would open the folder rather than anything to read.
+    if (!br->openDirect("/books/One Piece/one-piece-v1.tbk")) {
+      printf("RESET FAIL: the .tbk book did not open\n");
+      abort();
+    }
+    for (int k = 0; k < 3; k++) toybox.onButton(SideBtn::Down);
+    if (br->hostPage() == 0) {
+      printf("RESET FAIL: the .tbk reader would not leave page one\n");
+      abort();
+    }
+    toybox.onButton(SideBtn::Ok);                     // the panel
+    toybox.onTap(240, rmenu::rootRect(3, W).y + 40);  // asks
+    if (br->hostPage() == 0) {
+      printf("RESET FAIL: the .tbk first tap reset it\n");
+      abort();
+    }
+    toybox.onTap(240, rmenu::rootRect(3, W).y + 40);  // confirms
+    if (br->hostMenu() != 0 || br->hostPage() != 0) {
+      printf("RESET FAIL: the .tbk book is at page %lu (menu %d)\n",
+             (unsigned long)br->hostPage(), br->hostMenu());
+      abort();
+    }
+    // Closing and reopening still starts at page one.
+    toybox.onButton(SideBtn::Ok);
+    toybox.onTap(240, rmenu::rootRect(4, W).y + 40);  // close
+    br->openDirect("/books/One Piece/one-piece-v1.tbk");  // and open it again
+    if (br->hostPage() != 0) {
+      printf("RESET FAIL: the .tbk book reopened at page %lu\n", (unsigned long)br->hostPage());
+      abort();
+    }
+    toybox.goHub();
+    printf("tbk start again ok (asks first, page one, and it sticks)\n");
     g_dumpEnabled = true;
   }
 

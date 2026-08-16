@@ -338,6 +338,24 @@ class BookTool : public ToolApp {
     snprintf(out, 12, "b%08lx", (unsigned long)h);
   }
 
+  // Forget where this book was and go back to page one. The saved page is
+  // this reader's whole notion of a position, so clearing it IS starting
+  // again; bookmarks are left alone, being pages the reader chose to keep
+  // rather than the one it happened to stop on.
+  void startAgain() {
+    _menu = rmenu::Page::None;
+    char k[12];
+    posKey(_cur, k);
+    prefs().remove(k);
+    _pageNo = 0;
+    if (!readCurrentPage()) {
+      leaveBook();
+      return;
+    }
+    host().beep(1);
+    showPage();
+  }
+
   uint32_t savedPage(int i) {
     char k[12];
     posKey(i, k);
@@ -545,6 +563,7 @@ class BookTool : public ToolApp {
   void menuOpen() {
     _menu = rmenu::Page::Root;
     _mpage = 0;
+    _resetArmed = false;  // a question does not survive the screen that asked it
     _jump = _pageNo;
     _nmarks = marks::load(host(), _books[_cur].file, _marks);
     host().beep(0);
@@ -597,7 +616,7 @@ class BookTool : public ToolApp {
   // Go to page, bookmarks, page turns, close. Four rows at 116 px starting at
   // 116 ends at 580, which leaves the bottom fifth of the panel empty -- the
   // panel is a list of four decisions, not a form to be filled.
-  static constexpr int ROOT_N = 4;
+  static constexpr int ROOT_N = 5;  // ...the fifth is "Start again"
 
   // 1..9, then clear, 0, backspace.
   static constexpr int KEYS = 12;
@@ -662,9 +681,21 @@ class BookTool : public ToolApp {
       snprintf(_rootSub[2], sizeof(_rootSub[2]), "%s  -  %s", rmenu::refreshLabel(mode()),
                rmenu::refreshSub(mode()));
       items[2].sub = _rootSub[2];
-      items[3].label = "Close the book";
-      items[3].sub = _books[_cur].title;
+      // Forgetting where you were belongs to the book, so it lives here
+      // rather than in settings. Two taps, like every other row that cannot
+      // be undone.
+      items[3].label = "Start again";
+      items[3].sub = _resetArmed ? "tap again to forget this book's place"
+                                 : (_pageNo > 0 ? "back to the first page" : "already at the start");
+      items[4].label = "Close the book";
+      items[4].sub = _books[_cur].title;
       rmenu::drawRoot(host(), c, "Options", items, ROOT_N);
+      if (_resetArmed) {
+        const TRect r = rmenu::rootRect(3, c.width());
+        c.fillRect(r.x, r.y + 1, r.w, r.h - 2, true);
+        c.text(r.x + 8, r.y + 20, "Start again", TS_LARGE, false);
+        c.text(r.x + 8, r.y + 62, "tap again to forget this book's place", TS_SMALL, false);
+      }
       return;
     }
 
@@ -721,7 +752,12 @@ class BookTool : public ToolApp {
         keepPage();
         return;
       }
-      switch (rmenu::hitRoot(x, y, ROOT_N, W)) {
+      const int rootHit = rmenu::hitRoot(x, y, ROOT_N, W);
+      // Any tap that is not the armed row disarms it: a question does not
+      // outlive the screen that asked it.
+      const bool wasArmed = _resetArmed;
+      if (wasArmed && rootHit != 3) _resetArmed = false;
+      switch (rootHit) {
         case 0:
           _menu = rmenu::Page::Contents;
           _jump = _pageNo;
@@ -743,6 +779,16 @@ class BookTool : public ToolApp {
           paint();
           return;
         case 3:
+          if (!wasArmed) {
+            _resetArmed = true;
+            host().beep(2);
+            paint();
+            return;
+          }
+          _resetArmed = false;
+          startAgain();
+          return;
+        case 4:
           _menu = rmenu::Page::None;
           leaveBook();
           return;
@@ -904,6 +950,7 @@ class BookTool : public ToolApp {
   uint8_t* _pageBuf = nullptr;
   uint32_t _pageBufBytes = 0;
   const char* _note = nullptr;
+  bool _resetArmed = false;  // "Start again" asked once, waiting on a second tap
   bool _help = false;       // the HOW TO READ card, once per device
   char _noteBuf[80] = {};
 };
