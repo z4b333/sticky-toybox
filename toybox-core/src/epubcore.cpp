@@ -46,6 +46,20 @@ bool isNonVisible(const char* name) {
          nameIs(name, "title") || nameIs(name, "rp");
 }
 
+// The two inline tags this reader honours. <em> and <i> are deliberately not
+// here: the device carries no italic face, and a slanted-by-shear glyph on a
+// 1-bit panel reads as a printing fault rather than emphasis.
+bool isBoldTag(const char* name) { return nameIs(name, "b") || nameIs(name, "strong"); }
+
+// h1..h6, as a level. Headings are block tags too (below), so a heading has
+// its own paragraph and can be laid out at its own size without splitting a
+// line between two faces.
+int headingLevel(const char* name) {
+  if (!name || (name[0] != 'h' && name[0] != 'H')) return 0;
+  if (name[1] < '1' || name[1] > '6' || name[2] != 0) return 0;
+  return name[1] - '0';
+}
+
 // Tags that break a paragraph for display. This list is Toybox's own -- it
 // affects how text wraps, never how offsets count, so it is free to differ
 // from CrossPoint's block model.
@@ -953,6 +967,10 @@ bool Book::chapterOpen(int spineIdx) {
   _cpLen = 0;
   _wordLen = 0;
   _wordStart = 0;
+  _wordStyle = 0;
+  _outStyle = 0;
+  _boldDepth = 0;  // a chapter opens in body type, whatever the last one left
+  _headLevel = 0;
   _outReady = false;
   _wordSinceBreak = false;
   _queued = 0;
@@ -986,6 +1004,7 @@ void Book::tokFlushWord() {
   memcpy(_outWord, _word, (size_t)_wordLen);
   _outWord[_wordLen] = 0;
   _outStart = _wordStart;
+  _outStyle = _wordStyle;
   _outReady = true;
   _wordLen = 0;
   _wordSinceBreak = true;
@@ -1019,7 +1038,10 @@ void Book::tokEmitCp(uint32_t cp, const char* utf8, int len) {
     // across lines anyway, so the seam is invisible.
     tokFlushWord();
   }
-  if (_wordLen == 0) _wordStart = at;
+  if (_wordLen == 0) {
+    _wordStart = at;
+    _wordStyle = (uint8_t)((_boldDepth ? STYLE_BOLD : 0) | (_headLevel << 4));
+  }
   if (sub) {
     _word[_wordLen++] = sub;
   } else {
@@ -1135,12 +1157,20 @@ int Book::tokPump() {
         } else if (nameIs(name, "body")) {
           _insideBody = false;
         }
+        if (_insideBody && _nonVisibleDepth == 0) {
+          if (isBoldTag(name) && _boldDepth) _boldDepth--;
+          if (headingLevel(name)) _headLevel = 0;
+        }
         if (_insideBody && _nonVisibleDepth == 0 && isBlockTag(name)) tokBlockBreak();
       } else {
         if (nameIs(name, "body")) _insideBody = true;
         const bool skip = _insideBody && (_nonVisibleDepth > 0 || isNonVisible(name));
         if (skip) _nonVisibleDepth++;
         if (_insideBody && _nonVisibleDepth == 0 && isBlockTag(name)) tokBlockBreak();
+        if (_insideBody && _nonVisibleDepth == 0 && !selfClose) {
+          if (isBoldTag(name) && _boldDepth < 250) _boldDepth++;
+          if (const int hl = headingLevel(name)) _headLevel = (uint8_t)hl;
+        }
         if (selfClose && skip) _nonVisibleDepth--;
         if (wantAttrs) {
           attrs[al] = 0;

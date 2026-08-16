@@ -3431,6 +3431,64 @@ int main() {
     g_dumpEnabled = true;
   }
 
+  // --- headings and bold ----------------------------------------------------
+  // Chapter one opens with an <h2> and carries a <b> inside its second
+  // paragraph. The heading must be ONE line, marked as a heading and set
+  // larger than the body; the bold phrase must be marked bold where it
+  // starts and not before it. Both are read off the laid-out lines rather
+  // than the pixels, because "which bytes are bold" is the thing that was
+  // wrong on glass -- the styling is per byte, and an off-by-one there shows
+  // up as a bold space or a plain first letter.
+  {
+    g_dumpEnabled = false;
+    toybox.goHub();
+    toybox.open(false, 10, false);
+    auto* es = static_cast<EpubTool*>(toybox.hostActive());
+    if (!es->openDirect("/books/wind.epub")) {
+      printf("STYLE FAIL: the book did not open\n");
+      abort();
+    }
+    es->hostGoto(0, 0);  // the top of chapter one
+    if (strcmp(es->hostLine(0), "One two three") != 0) {
+      printf("STYLE FAIL: line 0 is '%s', wanted the whole heading\n", es->hostLine(0));
+      abort();
+    }
+    if (es->hostLineHead(0) == 0) {
+      printf("STYLE FAIL: the heading line is not marked as one\n");
+      abort();
+    }
+    if (es->hostLineY(1) - es->hostLineY(0) <= 0) {
+      printf("STYLE FAIL: the heading left no room for the line under it\n");
+      abort();
+    }
+    // "cafe & more": the bold opens at the ampersand, four bytes in (the e
+    // is two bytes), and everything before it is body weight.
+    const char* l1 = es->hostLine(1);
+    const char* amp = strchr(l1, '&');
+    if (!amp) {
+      printf("STYLE FAIL: line 1 is '%s', wanted the bold phrase\n", l1);
+      abort();
+    }
+    const int at = (int)(amp - l1);
+    // The separating space is left to the run it precedes -- it carries no
+    // ink either way, and letting it join the bold phrase keeps that phrase
+    // one run, which is what the layout measured. So the check starts one
+    // byte before the ampersand.
+    for (int i = 0; i < at - 1; i++)
+      if (es->hostLineBoldAt(1, i)) {
+        printf("STYLE FAIL: byte %d of '%s' is bold before the <b> opens\n", i, l1);
+        abort();
+      }
+    for (int i = at; l1[i]; i++)
+      if (!es->hostLineBoldAt(1, i)) {
+        printf("STYLE FAIL: byte %d of '%s' lost its bold\n", i, l1);
+        abort();
+      }
+    toybox.goHub();
+    printf("headings and bold ok (h2 whole and large, <b> exact to the byte)\n");
+    g_dumpEnabled = true;
+  }
+
   // --- artwork prepared as .bmp ---------------------------------------------
   // The one format, inside the book too: chapter three's illustration is a
   // 1-bit 480x800 BMP (chapter one's is still a .tbi, so both routes stay

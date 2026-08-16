@@ -42,6 +42,18 @@ inline TSize sizeAt(int i) { return i <= 0 ? TS_MED : (i == 1 ? TS_LARGE : TS_HU
 inline const char* sizeName(int i) { return i <= 0 ? "normal" : (i == 1 ? "large" : "largest"); }
 inline const char* leadName(int i) { return i <= 0 ? "tight" : (i == 1 ? "normal" : "airy"); }
 inline int leadAir(int i) { return i <= 0 ? 6 : (i == 1 ? 10 : 18); }
+// A heading is set one size up from the body and bold. One step, not six:
+// h1 through h6 all mean "this is a heading" to a reader holding a phone-sized
+// panel, and a six-level hierarchy would spend the panel's whole size range on
+// distinctions nothing on the page makes use of. The largest body size has
+// nowhere to go, so its headings say so with weight alone.
+inline TSize headSize(int bodyIdx) {
+  return bodyIdx <= 0 ? TS_LARGE : TS_HUGE;
+}
+inline TSize sizeFor(int bodyIdx, int head) { return head ? headSize(bodyIdx) : sizeAt(bodyIdx); }
+// The air above a heading, so it belongs to the text it introduces rather
+// than floating between two paragraphs.
+inline constexpr int HEAD_GAP = 10;
 inline constexpr int PARA_GAP = 14;
 // Enough for the smallest type at the tightest leading: 752 px of page over a
 // 30 px step is 25 lines, and a page that runs out of Line slots stops early
@@ -317,6 +329,8 @@ class EpubTool : public ToolApp {
   // the harness throws it away to walk the other path.
   void hostDropToc() { _ntoc = 0; }
   const char* hostLine(int i) const { return i < _lineN ? _lines[i].t : ""; }
+  int hostLineHead(int i) const { return i < _lineN ? _lines[i].head : 0; }
+  bool hostLineBoldAt(int i, int at) const { return i < _lineN && _lines[i].boldAt(at); }
   int hostLineCount() const { return _lineN; }
   const char* hostDir() const { return _dir; }
   int hostFolders() const { return _nf; }
@@ -380,7 +394,15 @@ class EpubTool : public ToolApp {
 
   struct Line {
     char t[200];
-    short y;  // where layout put it: paragraph gaps make the steps uneven
+    short y;     // where layout put it: paragraph gaps make the steps uneven
+    uint8_t head;  // 0 body, else the heading level it belongs to
+    // Which bytes are bold, one bit each, so a line can change weight
+    // mid-sentence without carrying a second copy of itself. 200 bytes of
+    // text is 25 bytes of flags; runs would be smaller only for lines that
+    // do not exist in real books.
+    uint8_t bold[25];
+    bool boldAt(int i) const { return (bold[i >> 3] >> (i & 7)) & 1; }
+    void setBold(int i) { bold[i >> 3] |= (uint8_t)(1 << (i & 7)); }
   };
 
   void progressPath(char* out, int cap, bool legacy = false) {
@@ -648,8 +670,13 @@ class EpubTool : public ToolApp {
     FaceScope fs(host(), _face);
     ToolsCanvas& c = host().canvas();
     const TSize ts = epubui::sizeAt(_size);
-    const int step = c.textHeight(ts) + epubui::leadAir(_lead);
     const int lineW = c.width() - 2 * epubui::MARGIN;
+    // A line's height follows its own type: a heading line is taller than the
+    // body around it, so the step cannot be one number for the page any more.
+    auto stepFor = [&](int head) {
+      return c.textHeight(epubui::sizeFor(_size, head)) + epubui::leadAir(_lead);
+    };
+    const int step = stepFor(0);
     // What is on the glass right now, kept in case this call finds nothing.
     // A chapter announces its end by a layout that places nothing, and until
     // the caller decides where to go next, the page it was called on is still
@@ -665,6 +692,11 @@ class EpubTool : public ToolApp {
     char cur[256];
     int curLen = 0;
     int curW = 0;
+    // The style of the line being assembled: its heading level (the whole
+    // line shares one, because a heading is its own block) and which of its
+    // bytes are bold.
+    int curHead = 0;
+    uint8_t curBold[25] = {};
     int placed = 0;
     uint32_t pageStart = 0;
     bool started = false;
@@ -683,32 +715,43 @@ class EpubTool : public ToolApp {
 
     auto flushLine = [&]() -> bool {  // false: the page is full
       if (curLen == 0) return true;
-      if (y + step > c.height() - epubui::BOTTOM_INSET || _lineN >= epubui::MAX_LINES) return false;
+      const int h = stepFor(curHead);
+      if (y + h > c.height() - epubui::BOTTOM_INSET || _lineN >= epubui::MAX_LINES) return false;
       memcpy(_lines[_lineN].t, cur, (size_t)curLen);
       _lines[_lineN].t[curLen] = 0;
       _lines[_lineN].y = (short)y;
+      _lines[_lineN].head = (uint8_t)curHead;
+      memcpy(_lines[_lineN].bold, curBold, sizeof(curBold));
       _lineN++;
-      y += step;
+      y += h;
       curLen = 0;
       curW = 0;
+      curHead = 0;
+      memset(curBold, 0, sizeof(curBold));
       return true;
     };
-    auto roomForLine = [&]() {
-      return y + step <= c.height() - epubui::BOTTOM_INSET && _lineN < epubui::MAX_LINES;
+    auto roomForLine = [&](int head) {
+      return y + stepFor(head) <= c.height() - epubui::BOTTOM_INSET &&
+             _lineN < epubui::MAX_LINES;
     };
 
     char w[epubc::WORD_CAP];
     uint32_t off = 0;
     while (true) {
       int tok;
+      uint8_t st = 0;
       if (_pendValid) {
         strcpy(w, _pend);
         off = _pendOff;
+        st = _pendStyle;  // a word carried to the next page keeps its markup
         _pendValid = false;
         tok = epubc::TOK_WORD;
       } else {
         tok = _book.next(w, off);
+        st = _book.wordStyle();
       }
+      const int wHead = st >> 4;
+      const bool wBold = (st & epubc::Book::STYLE_BOLD) != 0;
 
       if (tok == epubc::TOK_END || tok == epubc::TOK_ERR) {
         _atEnd = true;
@@ -743,8 +786,27 @@ class EpubTool : public ToolApp {
         continue;
       }
 
-      // a word
-      const int ww = c.textWidth(w, ts);
+      // a word, measured in the face it will be drawn in
+      const TSize wts = epubui::sizeFor(_size, wHead);
+      const int ww = c.textWidth(w, wts, wBold);
+      // A heading never shares a line with body text: they are different
+      // blocks, so a change of level flushes what is in hand.
+      if (curLen && wHead != curHead) {
+        if (!flushLine()) {
+          strcpy(_pend, w);
+          _pendOff = off;
+          _pendStyle = st;
+          _pendValid = true;
+          break;
+        }
+        if (wHead) y += epubui::HEAD_GAP;
+      }
+      // The space in front of a word belongs to that word's run: measured in
+      // its face and weight, and marked with it, so a bold phrase is one run
+      // rather than three and the width the layout counted is the width the
+      // drawing spends.
+      const int wSpaceW =
+          c.textWidth(" ", wts, wBold) > 0 ? c.textWidth(" ", wts, wBold) : spaceW;
       if (!started) {
         pageStart = off;
         started = true;
@@ -753,26 +815,37 @@ class EpubTool : public ToolApp {
       // word of a fresh page always lands (split if huge), so a word carried
       // whole to the next page only happens on a page that already has text.
       placed++;
-      const int need = curLen ? curW + spaceW + ww : ww;
+      const int need = curLen ? curW + wSpaceW + ww : ww;
+      // Records which bytes of `cur` this word occupies, so the line can be
+      // drawn in runs later.
+      auto markBold = [&](int from, int len) {
+        if (!wBold) return;
+        for (int i = from; i < from + len && i < (int)sizeof(curBold) * 8; i++)
+          curBold[i >> 3] |= (uint8_t)(1 << (i & 7));
+      };
       // A line is only ever STARTED if there is room for it to land. Room
       // used to be checked when the line was flushed, a word too late: a page
       // that filled while a line was still being assembled pended the one
       // word in hand and silently dropped every word already gathered into
       // the line. On hardware, mid-novel: "Good. Now that left the other
       // two." lost everything but "two." across a page turn.
-      if (!curLen && !roomForLine()) {
+      if (!curLen && !roomForLine(wHead)) {
         strcpy(_pend, w);
         _pendOff = off;
+        _pendStyle = st;
         _pendValid = true;
         break;
       }
+      if (!curLen) curHead = wHead;
       if (need <= lineW) {
         if (curLen) {
+          markBold(curLen, 1);
           cur[curLen++] = ' ';
-          curW += spaceW;
+          curW += wSpaceW;
         }
         const int wl = (int)strlen(w);
         if (curLen + wl < (int)sizeof(cur)) {
+          markBold(curLen, wl);
           memcpy(cur + curLen, w, (size_t)wl);
           curLen += wl;
           curW += ww;
@@ -786,17 +859,21 @@ class EpubTool : public ToolApp {
       if (!flushLine()) {
         strcpy(_pend, w);
         _pendOff = off;
+        _pendStyle = st;
         _pendValid = true;
         break;
       }
       if (ww <= lineW) {
-        if (!roomForLine()) {
+        if (!roomForLine(wHead)) {
           strcpy(_pend, w);
           _pendOff = off;
+          _pendStyle = st;
           _pendValid = true;
           break;
         }
         const int wl = (int)strlen(w);
+        curHead = wHead;
+        markBold(0, wl);
         memcpy(cur, w, (size_t)wl);
         curLen = wl;
         curW = ww;
@@ -805,10 +882,12 @@ class EpubTool : public ToolApp {
       // Longer than a whole line (Thai and CJK runs, URLs): hard-split at the
       // widest prefix that fits, and keep going with the remainder.
       const char* rest = w;
+      curHead = wHead;
       while (*rest) {
-        if (!roomForLine()) {
+        if (!roomForLine(wHead)) {
           strcpy(_pend, rest);
           _pendOff = off;  // close enough: a back-turn lands at the word's start
+          _pendStyle = st;
           _pendValid = true;
           break;
         }
@@ -822,19 +901,21 @@ class EpubTool : public ToolApp {
           else if (lead >= 0xC0) step = 2;
           memcpy(probe, rest, (size_t)(fitBytes + step));
           probe[fitBytes + step] = 0;
-          if (c.textWidth(probe, ts) > lineW) break;
+          if (c.textWidth(probe, wts, wBold) > lineW) break;
           fitBytes += step;
         }
         if (fitBytes == 0) fitBytes = 1;  // a glyph wider than the line still moves on
         memcpy(cur, rest, (size_t)fitBytes);
         curLen = fitBytes;
+        markBold(0, fitBytes);
         memcpy(probe, rest, (size_t)fitBytes);
         probe[fitBytes] = 0;
-        curW = c.textWidth(probe, ts);
+        curW = c.textWidth(probe, wts, wBold);
         rest += fitBytes;
         if (*rest && !flushLine()) {
           strcpy(_pend, rest);
           _pendOff = off;
+          _pendStyle = st;
           _pendValid = true;
           break;
         }
@@ -892,6 +973,10 @@ class EpubTool : public ToolApp {
       if (off >= target) {
         strcpy(_pend, w);
         _pendOff = off;
+        // ...with its markup. Forgetting it here is what made the first word
+        // of a resumed page forget it was inside a heading, which split the
+        // heading's own first word off as a line of body text.
+        _pendStyle = _book.wordStyle();
         _pendValid = true;
         break;
       }
@@ -1832,8 +1917,28 @@ class EpubTool : public ToolApp {
       if (_chrome) renderFooter(c);
       return;
     }
-    for (int i = 0; i < _lineN; i++)
-      c.text(epubui::MARGIN, _lines[i].y, _lines[i].t, epubui::sizeAt(_size), true);
+    // Each line in its own type, and in runs where the weight changes inside
+    // it: the parser said which bytes were inside a <b> or <strong>, and a
+    // heading line carries its level. Drawn left to right, each run measured
+    // as it is placed, which is the same arithmetic the layout did.
+    for (int i = 0; i < _lineN; i++) {
+      const Line& ln = _lines[i];
+      const TSize lts = epubui::sizeFor(_size, ln.head);
+      const int n = (int)strlen(ln.t);
+      int x = epubui::MARGIN;
+      for (int a = 0; a < n;) {
+        const bool bold = ln.boldAt(a) || ln.head != 0;  // a heading is bold throughout
+        int b = a + 1;
+        while (b < n && (ln.boldAt(b) || ln.head != 0) == bold) b++;
+        char seg[201];
+        const int len = b - a;
+        memcpy(seg, ln.t + a, (size_t)len);
+        seg[len] = 0;
+        c.text(x, ln.y, seg, lts, true, bold);
+        x += c.textWidth(seg, lts, bold);
+        a = b;
+      }
+    }
     if (!_chrome) return;
     renderFooter(c);
   }
@@ -1903,6 +2008,7 @@ class EpubTool : public ToolApp {
   bool _atEnd = false;
   char _pend[epubc::WORD_CAP];
   uint32_t _pendOff = 0;
+  uint8_t _pendStyle = 0;  // the markup the carried word was wearing
   bool _pendValid = false;
   Line _lines[epubui::MAX_LINES];
   int _lineN = 0;

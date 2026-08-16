@@ -250,8 +250,11 @@ static const char kFakeCh1[] =
     "<style>p { margin: 0; }</style>\n"
     "</head>\n"
     "<body>\n"
-    "<p>One two&nbsp;three</p>\n"
-    "<p>caf&#233; &amp; more</p>\n"
+    // A heading and a bold phrase, made out of the text that was already
+    // here: tags carry no visible codepoints, so every offset the other
+    // guards pin down stays exactly where it was.
+    "<h2>One two&nbsp;three</h2>\n"
+    "<p>caf&#233; <b>&amp; more</b></p>\n"
     // The illustration, deliberately on the same line as the paragraph after
     // it: an <img> carries no codepoints, so "ende" must still start at 27,
     // and a newline here would have moved it and hidden that.

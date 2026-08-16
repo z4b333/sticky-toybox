@@ -82,6 +82,17 @@ class Book {
   // Reads an arbitrary zip entry by name -- the pre-rendered artwork beside an
   // image, or the image itself. Same one-at-a-time rule as the cover: no
   // chapter may be open across it.
+  // How the last TOK_WORD was marked up: bold (b, strong) and the heading
+  // level it sits in (h1..h6, 0 for ordinary text). Captured where the word
+  // STARTS, which is the only place a run can be said to begin -- a word
+  // straddling a tag boundary belongs to the style it was opened in.
+  //
+  // Only these two. Italic would need a face this device does not carry, and
+  // everything else CSS can say about a span is a rabbit hole with no floor.
+  static constexpr uint8_t STYLE_BOLD = 1;
+  uint8_t wordStyle() const { return _outStyle; }
+  int wordHeading() const { return _outStyle >> 4; }
+
   // The full entry name behind the last TOK_IMAGE. `next()` also copies it
   // into `word`, but WORD_CAP is 96 bytes and a real image path can be longer,
   // so anything that means to open it should ask here.
@@ -195,6 +206,10 @@ class Book {
   char _word[WORD_CAP];
   int _wordLen = 0;
   uint32_t _wordStart = 0;
+  uint8_t _wordStyle = 0;   // the style the word in hand started in
+  uint8_t _outStyle = 0;    // ...and the one the caller is holding
+  uint8_t _boldDepth = 0;   // nested <b>/<strong>
+  uint8_t _headLevel = 0;   // 1..6 while inside an <h1>..<h6>
   char _outWord[WORD_CAP];
   uint32_t _outStart = 0;
   bool _outReady = false;
