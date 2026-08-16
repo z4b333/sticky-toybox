@@ -204,8 +204,11 @@ void setLevel(Level lv) { g_soundLevel = (uint8_t)lv; }
 Level level() { return (Level)g_soundLevel; }
 void setEnabled(bool on) { g_soundLevel = on ? 3 : 0; }
 bool enabled() { return g_soundLevel != 0; }
+// Counted, so a guard can assert not just that the panel showed the right
+// thing but that the device SAID so -- the unwrapping beep, in particular.
+int g_confirms = 0;
 void tap() {}
-void confirm() {}
+void confirm() { g_confirms++; }
 void error() {}
 void win() {}
 }  // namespace buzzer
@@ -3197,6 +3200,106 @@ int main() {
     toybox.goHub();
     printf("sidecar first open ok (first paint %ld%% dark = the cover)\n",
            dark * 100 / totalPx);
+    g_dumpEnabled = true;
+  }
+
+  // --- unwrapping a book with no sidecar --------------------------------------
+  // The other first open: no cover beside the book, so one has to be decoded
+  // out of it. That open leads with the plate -- which now SAYS what the wait
+  // is for -- and ends with the finished cover, full size, and a beep. The
+  // sequence is what is asserted: plate first (mostly white, framed), cover
+  // second (the fixture's face), one confirm beep between them.
+  {
+    g_dumpEnabled = false;
+    // The long-named book: no sidecar, and no CrossInk cover.bmp planted for
+    // it by an earlier guard, so its cover can only come from the decoder --
+    // which is the path this guard is about.
+    static const char kUnwrap[] =
+        "/books/A Book With The Kind Of Very Long Release Filename Publishers Actually Use Vol "
+        "01.epub";
+    {  // put the book back to never-opened: no thumbnail, no big face
+      char p[48];
+      bthumb::path(kUnwrap, p, sizeof(p));
+      tfs::remove(p);
+      bthumb::bigPath(kUnwrap, p, sizeof(p));
+      tfs::remove(p);
+    }
+    if (bthumb::have(kUnwrap)) {
+      printf("UNWRAP FAIL: the book still had a cover; this guard needs a first open\n");
+      abort();
+    }
+    toybox.goHub();
+    toybox.open(false, 10, false);
+    auto* eu = static_cast<EpubTool*>(toybox.hostActive());
+    const int frame0 = g_dumpCounter;
+    const int beeps0 = buzzer::g_confirms;
+    g_dumpEnabled = true;
+    setScreen("unwrap");
+    if (!eu->openDirect(kUnwrap)) {
+      printf("UNWRAP FAIL: the book did not open\n");
+      abort();
+    }
+    g_dumpEnabled = false;
+    const int frames = g_dumpCounter - frame0;
+    if (frames < 2) {
+      printf("UNWRAP FAIL: %d paint(s) -- the cover never landed after the plate\n", frames);
+      abort();
+    }
+    if (buzzer::g_confirms - beeps0 < 1) {
+      printf("UNWRAP FAIL: the finished cover did not beep\n");
+      abort();
+    }
+    if (!bthumb::have(kUnwrap)) {
+      printf("UNWRAP FAIL: the open built no cover at all\n");
+      abort();
+    }
+    // Which paint is which, told apart where it actually matters: inside the
+    // plate's frame. The plate leaves it empty; a cover fills it with art.
+    // (Counting ink over the whole panel would call a pale cover a plate,
+    // which is exactly the mistake this guard made when it was written.)
+    auto frameInk = [](int idx) {
+      char fname[128];
+      snprintf(fname, sizeof(fname), "preview_%02d_unwrap.pgm", idx);
+      FILE* fp = fopen(fname, "rb");
+      if (!fp) {
+        printf("UNWRAP FAIL: no frame %s\n", fname);
+        abort();
+      }
+      char head[64];
+      for (int k = 0; k < 3; k++) (void)!fgets(head, sizeof(head), fp);
+      static uint8_t px[PANEL_W * PANEL_H];
+      const size_t got = fread(px, 1, sizeof(px), fp);
+      fclose(fp);
+      if (got < sizeof(px)) {
+        printf("UNWRAP FAIL: frame %s was short (%zu)\n", fname, got);
+        abort();
+      }
+      // The dumps are in the panel's own frame; the plate's frame in canvas
+      // coordinates, inset so the border itself is not counted.
+      long ink = 0;
+      for (int y = bthumb::FRAME_Y + 10; y < bthumb::FRAME_Y + bthumb::FRAME_H - 10; y++)
+        for (int x = bthumb::FRAME_X + 10; x < bthumb::FRAME_X + bthumb::FRAME_W - 10; x++) {
+          int pxx = 0, pyy = 0;
+          epdMapPixel(0, epd.panelFlipX(), epd.panelFlipY(), x, y, pxx, pyy);
+          if (px[pyy * PANEL_W + pxx] < 128) ink++;
+        }
+      return ink;
+    };
+    const long plateInk = frameInk(frame0), coverInk = frameInk(frame0 + 1);
+    const long area = (long)(bthumb::FRAME_W - 20) * (bthumb::FRAME_H - 20);
+    if (plateInk * 20 > area) {
+      printf("UNWRAP FAIL: the first paint had art in the frame (%ld/%ld) -- not the plate\n",
+             plateInk, area);
+      abort();
+    }
+    if (coverInk <= plateInk * 4) {
+      printf("UNWRAP FAIL: the second paint added no cover (%ld vs %ld of %ld)\n", coverInk,
+             plateInk, area);
+      abort();
+    }
+    toybox.goHub();
+    printf("unwrapping ok (empty plate %ld, cover %ld of %ld, %d paints, beeped)\n", plateInk,
+           coverInk, area, frames);
     g_dumpEnabled = true;
   }
 

@@ -440,6 +440,7 @@ class BookTool : public ToolApp {
     // is a passing one. See makeAndSave.
     // The sidecars were tried before the loading paint; what is left is the
     // book's own content -- the embedded cover, then page 0 as last resort.
+    bool unwrapped = false;
     if (!bthumb::have(_books[i].file)) {
       bool made = false;
       if (_books[i].cover) {
@@ -457,10 +458,16 @@ class BookTool : public ToolApp {
                                      bthumb::makeAndSave(host(), _books[i].file, _pageBuf, 1));
       }
       if (!made) _note = "the cover could not be made - it will try again";
+      unwrapped = made;
     }
-    // No repaint when a cover was just built: the loading face stays put and
-    // the page is the next paint. The mid-open framed-cover step is gone --
-    // on glass it read as the book going backwards.
+    // The unwrapping finishes where it promised: the cover just built, full
+    // size, and a beep to say the wait is over. Only on the one open that had
+    // something to wait for. The screen is still Loading, so this paint IS
+    // the cover.
+    if (unwrapped) {
+      host().refresh(true);
+      host().beep(1);
+    }
     // ...and, if the sleeping panel is set to wear a cover, this book's goes
     // into flash now. After the builder above, so the very first open of a
     // book still gets one.
@@ -470,7 +477,7 @@ class BookTool : public ToolApp {
       return;
     }
     _screen = Screen::Page;
-    host().beep(1);
+    if (!unwrapped) host().beep(1);  // an unwrapped open already sounded, at the cover
     showPage();
   }
 

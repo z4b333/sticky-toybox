@@ -489,16 +489,22 @@ class EpubTool : public ToolApp {
     // The decode fallback: only a book with no cover from any cheap source
     // (tried above, before the loading paint) pays for the JPEG decode --
     // once, and a cover that will not decode is marked so it is not retried.
+    bool unwrapped = false;
     if (!bthumb::have(_books[i].file) && !bthumb::failed(_books[i].file)) {
       bool transient = false;
       if (!epubcov::makeThumb(host(), _book, _books[i].file, &transient) && !transient)
         bthumb::markFailed(_books[i].file);
+      unwrapped = bthumb::have(_books[i].file);
     }
-    // No repaint when a cover was just built: the loading face stays as it
-    // was painted -- the full cover, or the plain plate on a true first open
-    // -- and the next thing the panel shows is the page. The old mid-open
-    // "here is your new cover, small, in a frame" step read on glass as the
-    // book going backwards.
+    // The unwrapping finishes where it promised: the cover that was just
+    // decoded, full size, and a beep to say the wait is over. Only on the one
+    // open that had something to wait for -- every later open already led
+    // with this face, and repainting it there would read as a stutter. The
+    // screen is still Loading, so the paint IS the cover.
+    if (unwrapped) {
+      host().refresh(true);
+      host().beep(1);
+    }
     // ...and, if the sleeping panel is set to wear a cover, this book's goes
     // into flash now. After the decode above, so the very first open of a
     // book still gets one.
@@ -530,7 +536,7 @@ class EpubTool : public ToolApp {
     _screen = Screen::Page;
     host().setCanvasRotation(_rot);  // gotoPlace lays out at this width
     _rotLaid = _rot;
-    host().beep(1);
+    if (!unwrapped) host().beep(1);  // an unwrapped open already sounded, at the cover
     if (!gotoPlace(spine, off)) {
       // A book whose first chapter will not parse is a book we cannot show.
       _note = withHeap(_book.error()[0] ? _book.error() : "could not read the chapter");

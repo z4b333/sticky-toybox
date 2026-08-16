@@ -645,25 +645,19 @@ inline bool makeAndSave(ToolsHost& h, const char* file, const uint8_t* page, int
 // resampling. Centred, with the title below.
 inline constexpr int FRAME_X = 144, FRAME_Y = 190, FRAME_W = W * 2, FRAME_H = H * 2;
 
-// The plate a first open shows: a frame where the cover is about to appear,
-// and the title. `fresh` fills the frame with the cover that was built a
-// moment ago -- the plate keeping its promise -- so the person waiting on the
-// slowest open a book ever has watches the cover arrive where the empty frame
-// said it would.
-inline void drawPlate(ToolsCanvas& c, const char* file, const char* title, bool fresh) {
+// The plate a first open shows: an empty frame where the cover is about to
+// appear, the title, and -- the point of the whole screen -- a line saying
+// what the wait is for. A first open is the slowest one a book ever has (the
+// cover is being decoded from inside the file), and the honest thing to do
+// with a slow wait is name it. The cover lands full-bleed when it is ready,
+// in the frame's place, with a beep; see the readers' openBook.
+//
+// "opening the book" is the wording for a book whose cover will never come
+// (the decode was tried once and marked failed): promising an unwrapping
+// that cannot happen would be a lie the second time round.
+inline void drawPlate(ToolsCanvas& c, const char* file, const char* title) {
   c.drawRect(FRAME_X - 8, FRAME_Y - 8, FRAME_W + 16, FRAME_H + 16, 2, true);
-  static uint8_t small[BYTES];
-  if (fresh && load(file, small)) {
-    for (int y = 0; y < H; y++) {
-      const uint8_t* row = small + (size_t)y * (W / 8);
-      for (int x = 0; x < W; x++)
-        if (!(row[x >> 3] & (0x80 >> (x & 7))))
-          c.fillRect(FRAME_X + x * 2, FRAME_Y + y * 2, 2, 2, true);
-    }
-  } else {
-    // Empty: a rule inside the frame, a cover-to-be.
-    c.drawRect(FRAME_X - 2, FRAME_Y - 2, FRAME_W + 4, FRAME_H + 4, 1, true);
-  }
+  c.drawRect(FRAME_X - 2, FRAME_Y - 2, FRAME_W + 4, FRAME_H + 4, 1, true);
   // Clipped: this is the one place a book's own title is set large, and a
   // release filename is longer than the panel at that size.
   {
@@ -676,22 +670,19 @@ inline void drawPlate(ToolsCanvas& c, const char* file, const char* title, bool 
       c.textCentered(c.width() / 2, 560, cap, TS_LARGE, true, true);
     }
   }
-  c.textCentered(c.width() / 2, 620, "opening the book", TS_SMALL, true);
+  const bool coverComing = !failed(file);
+  c.textCentered(c.width() / 2, 620,
+                 coverComing ? "unwrapping the new book" : "opening the book", TS_SMALL, true);
+  if (coverComing)
+    c.textCentered(c.width() / 2, 652, "its cover is on the way", TS_SMALL, true);
 }
 
 // The loading screen a book opens behind. Best available: the full-size
 // cover blitted straight to the panel, the small one blown up if the big has
-// been dropped to make room, and a titled plate for a book being opened for
-// the very first time -- which is the one open where the cover does not exist
-// yet, because this is when it gets made. `fresh` means it just was: the
-// plate is kept (this open started on it) and its frame gets the new cover,
-// rather than jumping to the full-bleed face every LATER open leads with.
-inline void drawLoading(ToolsHost& h, ToolsCanvas& c, const char* file, const char* title,
-                        bool fresh = false) {
-  if (fresh) {
-    drawPlate(c, file, title, true);
-    return;
-  }
+// been dropped to make room, and the titled plate above for a book being
+// opened for the very first time -- the one open where the cover does not
+// exist yet, because this is when it gets made.
+inline void drawLoading(ToolsHost& h, ToolsCanvas& c, const char* file, const char* title) {
   // Off the card, borrowing the bus for the read if the reader has not taken
   // it yet. That costs about 150 ms and leaves the panel re-initialised,
   // which is free here: this is drawn as part of a full refresh anyway.
@@ -721,7 +712,7 @@ inline void drawLoading(ToolsHost& h, ToolsCanvas& c, const char* file, const ch
     return;
   }
 
-  drawPlate(c, file, title, false);
+  drawPlate(c, file, title);
 }
 
 }  // namespace bthumb

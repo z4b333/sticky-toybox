@@ -5,3 +5,6 @@ test/host/preview*
 test/host/test_logic
 test/host/*.pgm
 __pycache__/
+
+# The harness dumps frames wherever it is run from, not only test/host.
+*.pgm
