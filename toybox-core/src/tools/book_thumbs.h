@@ -640,64 +640,83 @@ inline bool makeAndSave(ToolsHost& h, const char* file, const uint8_t* page, int
   return b.finish();
 }
 
-// The first-open plate's frame, sized so the strip thumbnail drops into it at
-// exactly twice its size -- 96x160 becomes 192x320, integer scale, no
-// resampling. Centred, with the title below.
-inline constexpr int FRAME_X = 144, FRAME_Y = 190, FRAME_W = W * 2, FRAME_H = H * 2;
-
-// The plate a first open shows: an empty frame where the cover is about to
-// appear, the title, and -- the point of the whole screen -- a line saying
-// what the wait is for. A first open is the slowest one a book ever has (the
-// cover is being decoded from inside the file), and the honest thing to do
-// with a slow wait is name it. The cover lands full-bleed when it is ready,
-// in the frame's place, with a beep; see the readers' openBook.
-//
-// "opening the book" is the wording for a book whose cover will never come
-// (the decode was tried once and marked failed): promising an unwrapping
-// that cannot happen would be a lie the second time round.
-inline void drawPlate(ToolsCanvas& c, const char* file, const char* title) {
-  c.drawRect(FRAME_X - 8, FRAME_Y - 8, FRAME_W + 16, FRAME_H + 16, 2, true);
-  c.drawRect(FRAME_X - 2, FRAME_Y - 2, FRAME_W + 4, FRAME_H + 4, 1, true);
-  // The whole title, wrapped over as many lines as it needs. This is the one
-  // place a book's own name is set large, and half a name -- "The Apothecary
-  // Diaries - V..." -- is not a name. Whole words while they fit; the last
-  // line is clipped only if a title outruns even three of them.
-  const int maxW = c.width() - 48;
-  char cap[64];
-  snprintf(cap, sizeof(cap), "%s", title ? title : "");
-  const char* s = cap;
-  int y = 536;
-  constexpr int MAXL = 3, STEP = 40;
-  for (int line = 0; *s && line < MAXL; line++, y += STEP) {
-    if (line == MAXL - 1 || c.textWidth(s, TS_LARGE, true) <= maxW) {
-      // The rest, whole if it fits and clipped if this is the last line.
-      if (c.textWidth(s, TS_LARGE, true) > maxW)
-        c.textClipped(24, y, maxW, s, TS_LARGE, true, true);
-      else
-        c.textCentered(c.width() / 2, y, s, TS_LARGE, true, true);
-      y += STEP;
-      break;
+// Breaks `s` into lines that fit `maxW`, whole words wherever it can, and
+// says whether it ran out of lines before it ran out of text. Measuring is
+// the canvas's job, so this works for any face the caller has set.
+inline int wrapLines(ToolsCanvas& c, const char* s, TSize sz, bool bold, int maxW,
+                     char out[][64], int maxLines, bool* truncated) {
+  *truncated = false;
+  int n = 0;
+  while (*s && n < maxLines) {
+    if (c.textWidth(s, sz, bold) <= maxW) {  // the rest fits on this line
+      snprintf(out[n++], 64, "%s", s);
+      return n;
     }
-    // The longest run of whole words that fits, measured forward.
     char buf[64];
     int fit = 0, brk = 0;
     for (int i = 0; s[i] && i < (int)sizeof(buf) - 1; i++) {
       buf[i] = s[i];
       buf[i + 1] = 0;
-      if (c.textWidth(buf, TS_LARGE, true) > maxW) break;
+      if (c.textWidth(buf, sz, bold) > maxW) break;
       fit = i + 1;
       if (s[i] == ' ') brk = i;
     }
-    int take = brk > 0 ? brk : (fit > 0 ? fit : 1);  // a single huge word breaks mid-word
-    memcpy(buf, s, (size_t)take);
-    buf[take] = 0;
-    c.textCentered(c.width() / 2, y, buf, TS_LARGE, true, true);
+    const int take = brk > 0 ? brk : (fit > 0 ? fit : 1);  // a huge word breaks mid-word
+    memcpy(out[n], s, (size_t)take);
+    out[n][take] = 0;
+    n++;
     s += take;
     while (*s == ' ') s++;
   }
-  // One line under it, saying what the wait is for.
-  c.textCentered(c.width() / 2, y + 14, failed(file) ? "opening the book" : "unwrapping the new book",
-                 TS_SMALL, true);
+  *truncated = (*s != 0);
+  return n;
+}
+
+// The plate a first open shows. Nothing but the book's name, as large as the
+// name allows, and one line saying what the wait is for.
+//
+// It used to draw an empty frame here -- a picture-shaped hole where the
+// cover was about to go. On glass that read as a screen that had failed to
+// load, which is the opposite of what it was for: this is the slowest open a
+// book ever has (the cover is being decoded out of the file) and the screen's
+// whole job is to say so calmly. The cover arrives full-bleed a moment later,
+// with a beep; see the readers' openBook.
+//
+// "opening the book" is the wording for a book whose cover will never come
+// (the decode was tried once and marked failed): promising an unwrapping that
+// cannot happen would be a lie the second time round.
+inline void drawPlate(ToolsCanvas& c, const char* file, const char* title) {
+  const int maxW = c.width() - 48;
+  char cap[64];
+  snprintf(cap, sizeof(cap), "%s", title ? title : "");
+
+  // As large as it fits: the biggest face if the name lands in two lines,
+  // one step down if it needs more. A name is what the person is waiting to
+  // see confirmed, so it gets the room.
+  char lines[4][64];
+  bool over = false;
+  TSize sz = TS_HUGE;
+  int n = wrapLines(c, cap, sz, true, maxW, lines, 2, &over);
+  if (over) {
+    sz = TS_LARGE;
+    n = wrapLines(c, cap, sz, true, maxW, lines, 4, &over);
+  }
+
+  // The block sits a little above the middle, where a title belongs on a
+  // portrait page -- optically centred rather than arithmetically.
+  const int step = c.textHeight(sz) + 14;
+  const int subH = c.textHeight(TS_SMALL);
+  const int blockH = n * step + 22 + subH;
+  int y = 360 - blockH / 2;
+  if (y < 120) y = 120;
+  for (int i = 0; i < n; i++, y += step) {
+    if (i == n - 1 && over)  // only a name too long for four lines is cut
+      c.textClipped(24, y, maxW, lines[i], sz, true, true);
+    else
+      c.textCentered(c.width() / 2, y, lines[i], sz, true, true);
+  }
+  c.textCentered(c.width() / 2, y + 22,
+                 failed(file) ? "opening the book" : "unwrapping the new book", TS_SMALL, true);
 }
 
 // The loading screen a book opens behind. Best available: the full-size

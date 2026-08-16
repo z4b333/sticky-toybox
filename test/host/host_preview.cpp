@@ -3262,11 +3262,11 @@ int main() {
       printf("UNWRAP FAIL: the open built no cover at all\n");
       abort();
     }
-    // Which paint is which, told apart where it actually matters: inside the
-    // plate's frame. The plate leaves it empty; a cover fills it with art.
-    // (Counting ink over the whole panel would call a pale cover a plate,
-    // which is exactly the mistake this guard made when it was written.)
-    auto frameInk = [](int idx) {
+    // Which paint is which. The plate is words on white -- a few percent ink
+    // at most, now that it draws no frame -- and a cover is a picture, which
+    // is a different order of magnitude. Both tests together: a pale cover
+    // could pass the first on its own, and a dark plate could pass neither.
+    auto panelInk = [](int idx) {
       char fname[128];
       snprintf(fname, sizeof(fname), "preview_%02d_unwrap.pgm", idx);
       FILE* fp = fopen(fname, "rb");
@@ -3276,28 +3276,20 @@ int main() {
       }
       char head[64];
       for (int k = 0; k < 3; k++) (void)!fgets(head, sizeof(head), fp);
-      static uint8_t px[PANEL_W * PANEL_H];
-      const size_t got = fread(px, 1, sizeof(px), fp);
+      long ink = 0, n = 0;
+      for (int ch; (ch = fgetc(fp)) != EOF; n++)
+        if (ch < 128) ink++;
       fclose(fp);
-      if (got < sizeof(px)) {
-        printf("UNWRAP FAIL: frame %s was short (%zu)\n", fname, got);
+      if (n < PANEL_W * PANEL_H) {
+        printf("UNWRAP FAIL: frame %s was short (%ld)\n", fname, n);
         abort();
       }
-      // The dumps are in the panel's own frame; the plate's frame in canvas
-      // coordinates, inset so the border itself is not counted.
-      long ink = 0;
-      for (int y = bthumb::FRAME_Y + 10; y < bthumb::FRAME_Y + bthumb::FRAME_H - 10; y++)
-        for (int x = bthumb::FRAME_X + 10; x < bthumb::FRAME_X + bthumb::FRAME_W - 10; x++) {
-          int pxx = 0, pyy = 0;
-          epdMapPixel(0, epd.panelFlipX(), epd.panelFlipY(), x, y, pxx, pyy);
-          if (px[pyy * PANEL_W + pxx] < 128) ink++;
-        }
       return ink;
     };
-    const long plateInk = frameInk(frame0), coverInk = frameInk(frame0 + 1);
-    const long area = (long)(bthumb::FRAME_W - 20) * (bthumb::FRAME_H - 20);
-    if (plateInk * 20 > area) {
-      printf("UNWRAP FAIL: the first paint had art in the frame (%ld/%ld) -- not the plate\n",
+    const long area = (long)PANEL_W * PANEL_H;
+    const long plateInk = panelInk(frame0), coverInk = panelInk(frame0 + 1);
+    if (plateInk * 12 > area) {
+      printf("UNWRAP FAIL: the first paint inked %ld of %ld -- a picture, not the plate\n",
              plateInk, area);
       abort();
     }
@@ -3309,7 +3301,15 @@ int main() {
     toybox.goHub();
     printf("unwrapping ok (empty plate %ld, cover %ld of %ld, %d paints, beeped)\n", plateInk,
            coverInk, area, frames);
+    // The plate again with a short name, which takes the biggest face rather
+    // than the step down a long one falls back to. Drawn directly because
+    // every book in the fixture that would show it has a cover already; the
+    // point is the overflow detector seeing 44 px type on a 480 px panel.
     g_dumpEnabled = true;
+    setScreen("unwrap_short_name");
+    epd.clear();
+    bthumb::drawPlate(stickyHost.sharedCanvas(), "/books/wind.epub", "Strange Houses");
+    epd.displayFull();
   }
 
   // --- the loading screen is portrait, whatever the page's angle -------------
