@@ -50,7 +50,7 @@ and the image repeats down the panel over a field of noise.
 
 | partition | size | contents |
 |---|---|---|
-| factory (app) | 4 MB | firmware, currently 3.47 MB — about 700 KB spare |
+| factory (app) | 4 MB | firmware, currently about 3.9 MB — roughly 280 KB spare |
 | zh_font | 4.4 MB | optional Chinese font pack |
 | ko_font | 2.4 MB | optional Korean font pack |
 | ja_font | 0.8 MB | optional Japanese font pack |

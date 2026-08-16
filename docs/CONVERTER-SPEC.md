@@ -5,7 +5,7 @@ the pictures that go with them, for the Seeed reTerminal Sticky running Toybox.
 Self-contained: byte layouts, naming rules, the rules the firmware enforces,
 and what it does with each thing once it has it.
 
-Written against **v1.0.0-beta.32**. Reference implementations live in this repo
+Written against **v1.0.0-beta.41**. Reference implementations live in this repo
 and are the tie-breaker if anything here disagrees with the device:
 
 | tool | what it makes |

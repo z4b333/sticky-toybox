@@ -2,7 +2,7 @@
 
 For anyone producing pictures for this device — the PC converter, the
 wallpapers site, or another firmware reading the same card. Current as of
-the CrossInk-compatibility work after v1.0.0-beta.40.
+v1.0.0-beta.41.
 
 ## Two source formats
 

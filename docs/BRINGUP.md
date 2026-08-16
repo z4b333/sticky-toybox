@@ -1,15 +1,13 @@
 # First boot
 
-This firmware has never run on a physical device. Every screen has been drawn
-and checked on a PC, and the game logic is tested, but the parts that touch
-hardware — pin numbers, display scan direction, touch orientation, the power
-latch — come from the vendor's demo code, the V01 schematic and community
-notes. They are educated guesses. Some of them will be wrong.
+This page is for bringing up Toybox on a device for the first time. The
+firmware runs on real hardware (it is developed and tested on one), but
+panels, touch controllers and boards vary between units — so this is the
+order to check things in, and what to do when a step fails.
 
-This page is the order to do things in, and what to do when something does not
-work. Work through it top to bottom. Each step assumes the ones before it
-passed, because most of them cannot be judged otherwise: you cannot tell
-whether touch is mapped correctly until you trust what is on the screen.
+Work through it top to bottom. Each step assumes the ones before it passed:
+you cannot tell whether touch is mapped correctly until you trust what is on
+the screen.
 
 Set aside an hour. Nothing here is difficult, but rushing past a failed step
 makes the next three impossible to interpret.
