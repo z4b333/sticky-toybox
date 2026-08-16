@@ -87,6 +87,10 @@ class FlashTool : public ToolApp {
     }
   }
 
+  // The access point must not outlive the screen that started it, however
+  // the tool is left -- the hub button included.
+  ~FlashTool() override { _net.stop(); }
+
   void enter(ToolsHost& h) override {
     ToolApp::enter(h);
     fcard::fsBegin();

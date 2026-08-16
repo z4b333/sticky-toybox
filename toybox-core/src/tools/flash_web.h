@@ -81,13 +81,21 @@ class ImportServer {
     for (int i = 0; i < 8; i++) _pass[i] = '0' + (char)(esp_random() % 10);
     _pass[8] = 0;
 
+    // Built only here, never as a member by value: a DNSServer owns an
+    // AsyncUDP whose destructor reaches into lwIP, and destroying one that
+    // never ran asserts inside FreeRTOS on a mutex that does not exist --
+    // which is what backing out of the import screen without ever starting
+    // it would do. Same lesson as ~Portal and recipe_web.h.
+    if (!_dns) _dns = new DNSServer();
+    if (!_dns) return false;
+
     WiFi.mode(WIFI_AP);
     if (!WiFi.softAP(_ssid, _pass)) return false;
     delay(200);
     _ip = WiFi.softAPIP();
 
-    _dns.setErrorReplyCode(DNSReplyCode::NoError);
-    _dns.start(53, "*", _ip);  // every lookup resolves to us -> captive portal
+    _dns->setErrorReplyCode(DNSReplyCode::NoError);
+    _dns->start(53, "*", _ip);  // every lookup resolves to us -> captive portal
 
     _server.on("/", HTTP_GET, [this] { sendPage(); });
     _server.on("/save", HTTP_POST, [this] { handleSave(); });
@@ -104,17 +112,25 @@ class ImportServer {
   }
 
   void stop() {
-    if (!_running) return;
+    if (!_running) {
+      // Nothing ran, but a start() that failed after building the DNS server
+      // leaves one behind; it has to go while the stack is still up.
+      delete _dns;
+      _dns = nullptr;
+      return;
+    }
     _server.stop();
-    _dns.stop();
+    _dns->stop();
     WiFi.softAPdisconnect(true);
     WiFi.mode(WIFI_OFF);
+    delete _dns;
+    _dns = nullptr;
     _running = false;
   }
 
   void loop() {
     if (!_running) return;
-    _dns.processNextRequest();
+    _dns->processNextRequest();
     _server.handleClient();
   }
 
@@ -175,7 +191,7 @@ class ImportServer {
   }
 
   WebServer _server{80};
-  DNSServer _dns;
+  DNSServer* _dns = nullptr;  // built in start(); a by-value one crashes on exit
   IPAddress _ip;
   bool _running = false, _received = false;
   int _count = 0;
