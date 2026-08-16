@@ -27,25 +27,25 @@ inline constexpr int HINT_R = 13;  // 26 px across: the smallest size at which
 
 // Drawer pages: two columns of hairline-divided cells under a big title.
 inline constexpr int FOLDER_TOP = 164;     // below the title and its rule
-inline constexpr int FOLDER_BOTTOM = 796;
+// Every drawer keeps the dock along its bottom now -- one tap between
+// drawers, no trip home -- so every mode lays out above it.
+inline constexpr int FOLDER_BOTTOM = DOCK_Y - 8;
 inline constexpr int TILE = 104;           // icon size
-inline constexpr int ROW_STEP = 196;       // >= 190 px cells, per the design
+inline constexpr int ROW_STEP = 180;       // cells above the dock
 
 // As a guest inside another firmware there is no home page at all -- the
 // drawers are the top level, so they carry the dock themselves and the rows
 // tighten to fit above it. Three rows of 180 in the 556 px between the title
 // rule and the dock; the "+ add" ghost cell is dropped (the gear is right
 // there in the header), which is what keeps a drawer to three rows at most.
-inline constexpr int GUEST_ROW_STEP = 180;
-inline constexpr int GUEST_FOLDER_BOTTOM = DOCK_Y - 8;
 
 // The recently-read strip on the Study drawer: the last two books as covers,
 // under the app tiles. Only drawn standalone with the tiles in two rows or
 // fewer -- three rows (hidden apps growing the + add cell) leave no room, and
 // the guest drawers give the space to the dock instead.
-inline constexpr int REC_THUMB_W = 96, REC_THUMB_H = 160;  // a .tbk page over 5
-inline constexpr int REC_HEAD_H = 44;                      // heading + rule
-inline constexpr int REC_GAP = 4;                          // tiles to heading
+inline constexpr int REC_ROW_H = 48;   // a recently-read title row
+inline constexpr int REC_HEAD_H = 44;  // heading + rule
+inline constexpr int REC_GAP = 4;      // tiles to heading
 }  // namespace hubui
 
 #ifdef TOYBOX_HOST

@@ -302,6 +302,14 @@ static void checkHubRouting(const char* label) {
       printf("HUB ROUTING FAIL: dock corner of third %d missed\n", gi);
       abort();
     }
+    // The dock rides every drawer now: its thirds hop straight between
+    // drawers, no trip home in between.
+    toybox.onTap(80 + ((gi + 1) % 3) * 160, hubui::DOCK_Y + hubui::DOCK_H / 2);
+    if (toybox.hostInApp() || toybox.hostHub().folder() != (gi + 1) % 3) {
+      printf("HUB ROUTING FAIL: the dock did not hop from drawer %d\n", gi);
+      abort();
+    }
+    toybox.onTap(80 + gi * 160, hubui::DOCK_Y + hubui::DOCK_H / 2);  // and back
     // When apps are hidden the drawer grows a "+ add" ghost cell after the
     // last app, and it takes part in the geometry like any other cell.
     const bool hasAdd = G[gi].n < ALL[gi].n;
@@ -2559,11 +2567,11 @@ int main() {
     stickyHost.refresh(true);
     g_dumpEnabled = false;
 
-    // The covers sit under the two tile rows; left is slot 0 (the epub).
-    const int coverY = hubui::FOLDER_TOP + 2 * hubui::ROW_STEP + hubui::REC_GAP +
-                       hubui::REC_HEAD_H + hubui::REC_THUMB_H / 2;
+    // The title rows sit under the two tile rows; row 0 is the epub.
+    const int rowY = hubui::FOLDER_TOP + 2 * hubui::ROW_STEP + hubui::REC_GAP +
+                     hubui::REC_HEAD_H;
     stickyHost.hostResetPaints();
-    toybox.onTap(EPD_W / 4, coverY);
+    toybox.onTap(EPD_W / 4, rowY + 10);
     if (!toybox.hostInApp() || strcmp(toybox.activeTitle(), "EPUB") != 0 ||
         static_cast<EpubTool*>(toybox.hostActive())->hostScreen() != 1) {
       printf("RECENTS FAIL: the epub cover did not reopen the book\n");
@@ -2579,7 +2587,7 @@ int main() {
     }
     toybox.onButton(SideBtn::Ok);  // close the book
     toybox.goHub();
-    toybox.onTap(3 * EPD_W / 4, coverY);  // slot 1: the .tbk
+    toybox.onTap(EPD_W / 2, rowY + hubui::REC_ROW_H + 10);  // row 1: the .tbk
     if (!toybox.hostInApp() || toybox.hostIdx() != 9 ||
         static_cast<BookTool*>(toybox.hostActive())->hostScreen() != 1) {
       printf("RECENTS FAIL: the tbk cover did not reopen the book\n");

@@ -91,8 +91,8 @@ void walkFolder(int folder, bool guest, bool topAnchor, F f) {
   if (!guest && n < grp.n) vis[n++] = Item{false, ADD_IDX};
   if (n == 0) return;
 
-  const int step = guest ? GUEST_ROW_STEP : ROW_STEP;
-  const int bottom = guest ? GUEST_FOLDER_BOTTOM : FOLDER_BOTTOM;
+  const int step = ROW_STEP;
+  const int bottom = FOLDER_BOTTOM;
   const int rows = (n + 1) / 2;
   const int block = rows * step;
   const int avail = bottom - FOLDER_TOP;
@@ -167,46 +167,18 @@ void drawDock(ToolsCanvas& c, int active) {
   }
 }
 
-// One recently-read cover: a stored .tbk thumbnail when there is one, and a
-// drawn card with the open-book mark for everything else (EPUBs render no
-// images, so their cover is the caption under a clean plate).
-void drawRecentCover(ToolsCanvas& c, const recents::Entry& e, int x, int top) {
-  // Both kinds keep thumbnails in the same store now -- a .tbk's is its first
-  // page, an EPUB's its decoded cover image. The drawn plate with the
-  // open-book mark is the fallback for books whose cover would not decode.
-  bool drew = false;
-  static uint8_t thumb[bthumb::BYTES];
-  if (bthumb::load(e.file, thumb)) {
-    for (int y = 0; y < REC_THUMB_H; y++) {
-      const uint8_t* row = thumb + (size_t)y * (REC_THUMB_W / 8);
-      for (int px = 0; px < REC_THUMB_W; px++)
-        if (!(row[px >> 3] & (0x80 >> (px & 7)))) c.fillRect(x + px, top + y, 1, 1, true);
-    }
-    drew = true;
-  }
-  if (!drew) ticons::epub(c, x + REC_THUMB_W / 2, top + REC_THUMB_H / 2, 56);
-  c.drawRect(x, top, REC_THUMB_W, REC_THUMB_H, 1, true);
-}
-
+// The recently-read list: title rows, not covers. The dock owns the height
+// the 96 px thumbnails wanted, and a title answers "which book" faster at
+// arm's length than a stamp-sized cover ever did.
 void drawRecentStrip(ToolsCanvas& c, int stripTop, const recents::Entry* rec, int recN) {
-  c.textTracked(24, stripTop + 6, "RECENTLY READ", TS_SMALL, true, false, 1);
+  c.textTracked(24, stripTop + 6, "CARRY ON READING", TS_SMALL, true, false, 1);
   c.fillRect(16, stripTop + 32, SCREEN_W - 32, 1, true);
-  const int coverTop = stripTop + REC_HEAD_H;
   for (int i = 0; i < recN; i++) {
-    const int cx = SCREEN_W / 4 + i * (SCREEN_W / 2);
-    drawRecentCover(c, rec[i], cx - REC_THUMB_W / 2, coverTop);
-    // The caption, trimmed to its half of the page on UTF-8 boundaries.
-    char cap[41];
-    strncpy(cap, rec[i].title, sizeof(cap) - 1);
-    cap[sizeof(cap) - 1] = 0;
-    const int capW = SCREEN_W / 2 - 24;
-    size_t len = strlen(cap);
-    while (len > 0 && c.textWidth(cap, TS_SMALL) > capW) {
-      len--;
-      while (len > 0 && ((uint8_t)cap[len] & 0xC0) == 0x80) len--;
-      cap[len] = 0;
-    }
-    c.textCentered(cx, coverTop + REC_THUMB_H + 10, cap, TS_SMALL, true);
+    const int y = stripTop + REC_HEAD_H + i * REC_ROW_H;
+    c.textClipped(24, y + 8, SCREEN_W - 120, rec[i].title, TS_MED, true);
+    const char* kind = rec[i].kind == recents::KIND_EPUB ? "epub" : "book";
+    c.text(SCREEN_W - 24 - c.textWidth(kind, TS_SMALL), y + 14, kind, TS_SMALL, true);
+    if (i + 1 < recN) c.fillRect(24, y + REC_ROW_H - 2, SCREEN_W - 48, 1, true);
   }
 }
 
@@ -262,12 +234,12 @@ void renderFolder(ToolsHost& host, ToolsCanvas& c, int folder, const recents::En
     const TSize sz = c.textWidth(label, TS_MED) <= SCREEN_W / 2 - 24 ? TS_MED : TS_SMALL;
     c.textCentered(cx, cy2 + TILE / 2 + 26, label, sz, true);
   });
-  if (guest) drawDock(c, folder);
+  drawDock(c, folder);
   if (strip) drawRecentStrip(c, stripTopFor(cellCount), rec, recN);
   if (cells == 0) return;
 
   // Hairline dividers between cells, not boxes around them.
-  const int step = guest ? GUEST_ROW_STEP : ROW_STEP;
+  const int step = ROW_STEP;
   const int rows = (cells + 1) / 2;
   if (cells > 1) c.fillRect(SCREEN_W / 2, top, 1, bottom - top, true);
   for (int r = 1; r < rows; r++)
@@ -370,7 +342,7 @@ HubScreen::Tap HubScreen::hit(const ToolsHost& host, int x, int y) const {
       t.kind = Tap::Settings;  // the gear in the header corner
       return t;
     }
-    if (guest && y >= DOCK_Y) {
+    if (y >= DOCK_Y) {
       t.kind = Tap::Folder;
       t.idx = x / (SCREEN_W / 3);
       if (t.idx > 2) t.idx = 2;
@@ -380,14 +352,11 @@ HubScreen::Tap HubScreen::hit(const ToolsHost& host, int x, int y) const {
     const int cellCount = folderCells(folder, guest);
     const bool strip = folder == 2 && !guest && _recN > 0 && stripFits(cellCount);
     if (strip) {
-      const int coverTop = stripTopFor(cellCount) + REC_HEAD_H;
-      if (y >= coverTop - 8 && y < coverTop + REC_THUMB_H + 32) {
-        const int slot = x < SCREEN_W / 2 ? 0 : 1;
-        if (slot < _recN) {
-          t.kind = Tap::Recent;
-          t.idx = slot;
-          return t;
-        }
+      const int rowTop = stripTopFor(cellCount) + REC_HEAD_H;
+      if (y >= rowTop && y < rowTop + _recN * REC_ROW_H) {
+        t.kind = Tap::Recent;
+        t.idx = (y - rowTop) / REC_ROW_H;
+        return t;
       }
     }
     bool found = false;
