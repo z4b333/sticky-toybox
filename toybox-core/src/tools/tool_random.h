@@ -66,6 +66,7 @@ class RandomTool : public ToolApp {
   void onTap(int x, int y) override {
     using namespace randui;
     if (host().isBackTap(x, y)) {
+      host().beep(1);
       host().goHub();
       return;
     }

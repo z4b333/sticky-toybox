@@ -310,6 +310,7 @@ void WordleApp::onTap(int x, int y) {
   // "< HUB" leaves the only way out of the app behind a button you have to
   // find first, and the sudoku and battleship screens never did that.
   if (host().isBackTap(x, y)) {
+    host().beep(1);
     host().goHub();
     return;
   }

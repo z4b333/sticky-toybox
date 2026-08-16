@@ -162,6 +162,7 @@ class EpubTool : public ToolApp {
       if (host().isBackTap(x, y)) {
         // The back arrow climbs one level at a time: out of the series
         // first, out of the app second. One arrow, no second control.
+        host().beep(1);
         if (inFolder()) {
           snprintf(_dir, sizeof(_dir), "%s", shelf::TOP);
           _note = nullptr;

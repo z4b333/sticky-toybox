@@ -146,6 +146,7 @@ class SudokuTool : public ToolApp {
   void onTap(int x, int y) override {
     using namespace sdui;
     if (host().isBackTap(x, y)) {
+      host().beep(1);
       host().goHub();
       return;
     }

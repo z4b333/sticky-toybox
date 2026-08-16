@@ -169,10 +169,12 @@ class FlashTool : public ToolApp {
         releaseCards();
         _screen = Screen::Decks;
         refreshDeckList();
+        host().beep(1);
         host().refreshUi();
       } else if (_screen == Screen::Import) {
         closeImport();
       } else {
+        host().beep(1);
         host().goHub();
       }
       return;

@@ -74,6 +74,7 @@ class CoinTool : public ToolApp {
   void onTap(int x, int y) override {
     using namespace coinui;
     if (host().isBackTap(x, y)) {
+      host().beep(1);
       host().goHub();
       return;
     }

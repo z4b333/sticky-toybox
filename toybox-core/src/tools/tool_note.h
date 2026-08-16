@@ -256,6 +256,7 @@ class NoteTool : public ToolApp {
       } else if (_screen == Screen::Pair) {
         closePair();
       } else {
+        host().beep(1);
         host().goHub();
       }
       return;
@@ -398,6 +399,7 @@ class NoteTool : public ToolApp {
     _buf = nullptr;
     _screen = Screen::List;
     refreshList();
+    host().beep(1);
     host().refreshUi();
   }
 

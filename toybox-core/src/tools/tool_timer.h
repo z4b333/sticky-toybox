@@ -87,6 +87,7 @@ class TimerTool : public ToolApp {
   void onTap(int x, int y) override {
     using namespace timerui;
     if (host().isBackTap(x, y)) {
+      host().beep(1);
       host().goHub();
       return;
     }

@@ -144,6 +144,7 @@ class PickerTool : public ToolApp {
     if (_screen == Screen::Pair) return tapPair(x, y);
     using namespace pickui;
     if (host().isBackTap(x, y)) {
+      host().beep(1);
       host().goHub();
       return;
     }

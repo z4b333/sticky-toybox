@@ -133,6 +133,7 @@ class DiceTool : public ToolApp {
   void onTap(int x, int y) override {
     using namespace diceui;
     if (host().isBackTap(x, y)) {
+      host().beep(1);
       host().goHub();
       return;
     }

@@ -129,6 +129,7 @@ class SeaTool : public ToolApp {
   void onTap(int x, int y) override {
     if (host().isBackTap(x, y)) {
       if (_duelMode) _duel.end();
+      host().beep(1);
       host().goHub();
       return;
     }
