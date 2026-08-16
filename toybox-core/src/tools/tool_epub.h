@@ -548,6 +548,9 @@ class EpubTool : public ToolApp {
       host().refresh(true);
       return;
     }
+    // A book whose first page is its cover art opens portrait, whatever the
+    // reading rotation: see syncPageRot.
+    syncPageRot();
     host().refresh(true);
   }
 
@@ -625,7 +628,23 @@ class EpubTool : public ToolApp {
     ~FaceScope() { h.setTypeface(prev); }
   };
 
+  // The line breaker measures against the canvas, so the canvas has to be at
+  // the READING rotation while it works -- even when the panel is standing up
+  // for a picture page (syncPageRot) or for the menu. Put back on the way out,
+  // so whoever is drawing keeps the screen they set up.
+  struct LayoutRot {
+    ToolsHost& h;
+    const int was;
+    LayoutRot(ToolsHost& host, int want) : h(host), was(host.canvasRotation()) {
+      if (was != want) h.setCanvasRotation(want);
+    }
+    ~LayoutRot() {
+      if (h.canvasRotation() != was) h.setCanvasRotation(was);
+    }
+  };
+
   int layoutPage() {
+    LayoutRot lr(host(), _rot);
     FaceScope fs(host(), _face);
     ToolsCanvas& c = host().canvas();
     const TSize ts = epubui::sizeAt(_size);
@@ -1054,7 +1073,36 @@ class EpubTool : public ToolApp {
   // A cosmetic repaint: fast unless the owner turned that off. Never used
   // where the panel MUST be clean -- opening or closing a book releases the
   // card bus and re-initialises the controller, and those still ask for full.
-  void paint() { host().refreshFast(rmenu::cleanEvery(mode())); }
+  // An illustration is a portrait object -- exactly 480x800, prepared for
+  // this panel -- so a landscape canvas does not turn it, it CROPS it: on
+  // glass, a cover lying on its side with its bottom half missing. The panel
+  // therefore stands up for a picture page and lies back down for text.
+  //
+  // The LAYOUT is never re-measured for this. That is the whole trick: a
+  // picture page has no lines to lay out, and the text pages either side keep
+  // the measurements they already have at the reading rotation, so pagination
+  // does not shift under the reader and no restyle is paid for. Only the
+  // drawing (and the touch map that follows it) turns.
+  //
+  // Returns true if the panel turned, which needs a full refresh -- a quarter
+  // turn changes every pixel and a partial cannot describe it.
+  bool syncPageRot() {
+    // The menu and the picker are portrait designs of their own, already
+    // stood up by menuOpen; only the page itself answers to this.
+    if (_screen != Screen::Page || _menu != rmenu::Page::None || _picking) return false;
+    const int want = _pageImage[0] ? 0 : _rot;
+    if (host().canvasRotation() == want) return false;
+    host().setCanvasRotation(want);
+    return true;
+  }
+
+  void paint() {
+    if (syncPageRot()) {
+      host().refresh(true);
+      return;
+    }
+    host().refreshFast(rmenu::cleanEvery(mode()));
+  }
 
   rmenu::Refresh mode() { return rmenu::refreshMode(prefs(), true); }
 
@@ -1081,6 +1129,10 @@ class EpubTool : public ToolApp {
     _menu = rmenu::Page::None;
     ensureStream();  // the contents list reads other entries out of the zip
     applyRot(_rot);  // the page's rotation, back on (and a reflow if it changed)
+    // ...unless the page under the menu is a picture, which is portrait
+    // whatever the text around it does. The layout above stays measured at
+    // the reading rotation either way.
+    syncPageRot();
     host().beep(0);
     // A quarter turn changes every pixel; the partial path cannot describe it.
     if (host().canvasRotation() != 0)

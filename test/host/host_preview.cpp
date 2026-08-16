@@ -3348,6 +3348,89 @@ int main() {
     g_dumpEnabled = true;
   }
 
+  // --- an illustration stands up, mid-book, in a sideways reader ------------
+  // The one the owner actually hit: reading in landscape, the book's own
+  // artwork (its cover, as page one of many EPUBs) was blitted 480x800 into
+  // an 800x480 canvas -- cropped to a square, not turned. The page must stand
+  // the panel up for a picture and lie it back down for the text after it,
+  // without re-laying the text out.
+  {
+    g_dumpEnabled = false;
+    stickyHost.prefs().putUInt("rd_rot", 1);
+    toybox.goHub();
+    toybox.open(false, 10, false);
+    auto* ea = static_cast<EpubTool*>(toybox.hostActive());
+    if (!ea->openDirect("/books/wind.epub")) {
+      printf("ART ROT FAIL: the book did not open\n");
+      abort();
+    }
+    // The book resumes wherever an earlier guard left it, so walk rather than
+    // assume: to a text page first (which must lie down)...
+    for (int k = 0; k < 12 && ea->hostPageImage()[0]; k++) toybox.onButton(SideBtn::Down);
+    if (ea->hostPageImage()[0] || stickyHost.canvasRotation() != 1) {
+      printf("ART ROT FAIL: no sideways text page found (img '%s' rot %d)\n",
+             ea->hostPageImage(), stickyHost.canvasRotation());
+      abort();
+    }
+    const int linesSideways = ea->hostLineCount();
+    const int spineBefore = ea->hostSpine(), pageBefore = ea->hostPage();
+    // ...then on until the illustration turns up.
+    for (int k = 0; k < 12 && !ea->hostPageImage()[0]; k++) toybox.onButton(SideBtn::Down);
+    if (!ea->hostPageImage()[0]) {
+      printf("ART ROT FAIL: paging forward never reached the illustration\n");
+      abort();
+    }
+    if (stickyHost.canvasRotation() != 0) {
+      printf("ART ROT FAIL: the picture painted at rotation %d -- cropped, not turned\n",
+             stickyHost.canvasRotation());
+      abort();
+    }
+    // ...and back to text the other way (the fixture ends on artwork, so
+    // forward has nowhere to go). Consecutive pictures must stay standing on
+    // the way, never flapping the panel between them.
+    for (int k = 0; k < 12 && ea->hostPageImage()[0]; k++) {
+      toybox.onButton(SideBtn::Up);
+      if (ea->hostPageImage()[0] && stickyHost.canvasRotation() != 0) {
+        printf("ART ROT FAIL: a second picture in a row lay down (%d)\n",
+               stickyHost.canvasRotation());
+        abort();
+      }
+    }
+    if (ea->hostPageImage()[0]) {
+      printf("ART ROT FAIL: never got back to text (s%d p%d img '%s')\n", ea->hostSpine(),
+             ea->hostPage(), ea->hostPageImage());
+      abort();
+    }
+    if (stickyHost.canvasRotation() != 1) {
+      printf("ART ROT FAIL: the text after a picture did not lie back down (%d)\n",
+             stickyHost.canvasRotation());
+      abort();
+    }
+    // ...and the text was never re-measured at the picture's rotation. Walk
+    // back to the very page we started on and compare: the same page laid out
+    // at a different width is a different number of lines, which is exactly
+    // what a reader sees as the text reflowing under them.
+    for (int k = 0; k < 12 && (ea->hostSpine() != spineBefore || ea->hostPage() != pageBefore);
+         k++)
+      toybox.onButton(SideBtn::Up);
+    if (ea->hostSpine() != spineBefore || ea->hostPage() != pageBefore) {
+      printf("ART ROT FAIL: could not get back to s%d p%d (at s%d p%d)\n", spineBefore,
+             pageBefore, ea->hostSpine(), ea->hostPage());
+      abort();
+    }
+    if (ea->hostLineCount() != linesSideways) {
+      printf("ART ROT FAIL: s%d p%d now lays out %d lines, was %d -- measured at the "
+             "picture's width\n",
+             spineBefore, pageBefore, ea->hostLineCount(), linesSideways);
+      abort();
+    }
+    toybox.goHub();
+    stickyHost.setCanvasRotation(0);
+    stickyHost.prefs().putUInt("rd_rot", 0);
+    printf("art rotation ok (picture stands up, text lies back down, no relayout)\n");
+    g_dumpEnabled = true;
+  }
+
   // --- recipes ---------------------------------------------------------------
   // The parser first, on JSON shaped like the internet actually serves it:
   // @graph with an Article in the way, @type as an array, HowToStep objects,
