@@ -33,6 +33,15 @@ python -m esptool --chip esp32s3 merge-bin \
 # already in place.
 cp "$BUILD/firmware.bin" prebuilt/toybox_full.bin
 
+# The pieces, individually, for the installer page. Writing them at their own
+# offsets -- instead of one merged image whose 0xFF padding rolls over
+# everything between them -- is what lets INSTALL leave NVS (settings, saved
+# pages, stats) alone, and lets UPDATE write nothing but the app.
+cp "$BUILD/bootloader.bin" docs/firmware/toybox-boot.bin
+cp "$BUILD/partitions.bin" docs/firmware/toybox-parts.bin
+cp "$BOOT_APP0"            docs/firmware/toybox-ota0.bin
+cp "$BUILD/firmware.bin"   docs/firmware/toybox-app.bin
+
 # What the flasher page prints beside the install button. The version is the
 # same string the firmware carries, so what the page says it is about to write
 # and what the service screen says afterwards can be compared directly.

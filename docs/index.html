@@ -49,11 +49,19 @@
   .variant:has(input:checked) { border-color: var(--fg); }
   .variant input { margin-top: 5px; accent-color: var(--fg); }
   .variant small { color: var(--muted); }
-  .install { margin: 0 0 12px; }
+  .install { margin: 0 0 12px; display: flex; gap: 12px; flex-wrap: wrap; }
   esp-web-install-button {
     --esp-tools-button-color: var(--accent);
     --esp-tools-button-text-color: #fff;
     --esp-tools-button-border-radius: 10px;
+  }
+  .actbtn {
+    padding: 14px 22px; border: 0; border-radius: 10px;
+    background: var(--accent); color: #fff; font: 600 16px system-ui;
+    cursor: pointer;
+  }
+  .actbtn.secondary {
+    background: #fff; color: var(--fg); border: 1.5px solid var(--fg);
   }
   .hint {
     font-size: 14px;
@@ -160,14 +168,21 @@
          first boot log opens with the version that just landed, and the panel
          line arrives a fifth of a second later. Opened by hand afterwards, the
          first report back had already missed both. -->
-    <esp-web-install-button manifest="manifest.json" log-console></esp-web-install-button>
+    <esp-web-install-button id="btn-update" manifest="manifest.json" log-console>
+      <button slot="activate" class="actbtn">UPDATE &mdash; keep everything</button>
+    </esp-web-install-button>
+    <esp-web-install-button id="btn-install" manifest="manifest.json" log-console>
+      <button slot="activate" class="actbtn secondary">FIRST INSTALL</button>
+    </esp-web-install-button>
   </div>
-  <p class="hint">Needs Chrome or Edge on a computer, and a USB-C data
-  cable. Your notes, decks, wallpaper and reading positions are kept &mdash;
-  installing writes the firmware and nothing else. The serial console opens by
-  itself when the write finishes, so the first boot is captured from its first
-  line &mdash; that log is the most useful thing to send if anything goes
-  wrong.</p>
+  <p class="hint"><b>UPDATE</b> writes only the firmware itself: settings,
+  stats, saved reading pages, notes, decks, pictures and font packs all stay
+  exactly as they were. Use it for every build after your first.
+  <b>FIRST&nbsp;INSTALL</b> also writes the bootloader and partition table
+  &mdash; needed once on a new device, or if an update ever refuses to boot.
+  Neither erases your notes. Both need Chrome or Edge and a USB-C data cable;
+  the serial console opens when the write finishes, and that first-boot log is
+  the most useful thing to send if anything goes wrong.</p>
 
   <div class="steps">
     <h2>After installing</h2>
@@ -202,10 +217,13 @@
 
   <details>
     <summary>Prefer the command line?</summary>
+    <p>Update, keeping everything:</p>
+    <p><code>esptool --chip esp32s3 write_flash 0x10000 toybox-app.bin</code></p>
+    <p>First install (also writes bootloader and partition table; note this
+    one resets the device's settings):</p>
     <p><code>esptool --chip esp32s3 write_flash 0x0 toybox-full.bin</code></p>
-    <p>Download <a href="firmware/toybox-full.bin">toybox-full.bin</a>. It's
-    a single merged image (bootloader, partition table and app), flashed to
-    offset 0.</p>
+    <p>Download <a href="firmware/toybox-app.bin">toybox-app.bin</a> or
+    <a href="firmware/toybox-full.bin">toybox-full.bin</a>.</p>
   </details>
 
   <footer>
@@ -216,47 +234,60 @@
   </footer>
 </main>
 <script>
-  // The install button reads a manifest URL. Base firmware is always included;
-  // each checked pack adds one more file, written to that pack's own flash
-  // partition. The combined manifest is generated here and served as a blob.
+  // Two buttons, two manifests, one rule: every part is written at its own
+  // offset and the gaps between them are never touched. NVS (0x9000) keeps
+  // the settings, the stats and every book's saved page; LittleFS (0xB50000)
+  // keeps the notes, the decks and the pictures. The old single merged image
+  // padded the gaps with 0xFF, which quietly erased NVS on every install --
+  // that is exactly what these part-wise writes exist to stop.
+  //
+  // UPDATE writes the app alone (plus any ticked font packs). FIRST INSTALL
+  // also writes the bootloader, the partition table and the OTA-data block --
+  // needed once on a blank device, or to recover one.
   var OFFSETS = { zh: 0x410000, ko: 0x840000, ja: 0xa90000 };
-  var lastUrl = null;
+  var urls = { update: null, install: null };
 
   // Appended to every firmware URL. A new build has a new commit, so it has a
   // new URL, so the browser cannot hand ESP Web Tools a copy of the last one --
   // which is a mistake you only notice after flashing and seeing no change.
   var bust = '';
 
-  function updateManifest() {
-    var parts = [{ path: new URL('firmware/toybox-full.bin' + bust, location.href).href, offset: 0 }];
+  function fw(name) { return new URL('firmware/' + name + bust, location.href).href; }
+
+  function makeManifest(kind) {
+    var parts = [];
+    if (kind === 'install') {
+      parts.push({ path: fw('toybox-boot.bin'), offset: 0x0 });
+      parts.push({ path: fw('toybox-parts.bin'), offset: 0x8000 });
+      parts.push({ path: fw('toybox-ota0.bin'), offset: 0xe000 });
+    }
+    parts.push({ path: fw('toybox-app.bin'), offset: 0x10000 });
     document.querySelectorAll('input[name="pack"]:checked').forEach(function (c) {
       parts.push({
         path: new URL('firmware/' + c.value + '_full.tfp', location.href).href,
         offset: OFFSETS[c.value]
       });
     });
-    var manifest = {
+    return {
       name: 'Toybox',
       version: '1.0',
-      // Never erase. The parts above are written at their own offsets --
-      // bootloader, partition table, app, and any font packs ticked -- and
-      // nothing else on the chip is touched. NVS (0x9000) keeps the settings
-      // and every book's saved page; LittleFS (0xB50000) keeps the notes,
-      // the decks and the pictures. The hint under the button promises this,
-      // so anything added here that would break it has to change that line
-      // too.
       new_install_prompt_erase: false,
       builds: [{ chipFamily: 'ESP32-S3', parts: parts }]
     };
-    if (lastUrl) URL.revokeObjectURL(lastUrl);
-    lastUrl = URL.createObjectURL(
-      new Blob([JSON.stringify(manifest)], { type: 'application/json' }));
-    document.querySelector('esp-web-install-button').setAttribute('manifest', lastUrl);
+  }
+
+  function updateManifests() {
+    ['update', 'install'].forEach(function (kind) {
+      if (urls[kind]) URL.revokeObjectURL(urls[kind]);
+      urls[kind] = URL.createObjectURL(new Blob([JSON.stringify(makeManifest(kind))],
+                                                { type: 'application/json' }));
+      document.getElementById('btn-' + kind).setAttribute('manifest', urls[kind]);
+    });
   }
   document.querySelectorAll('input[name="pack"]').forEach(function (c) {
-    c.addEventListener('change', updateManifest);
+    c.addEventListener('change', updateManifests);
   });
-  updateManifest();
+  updateManifests();
 
   // Written next to the image by tools/make_image.sh. Fetched with no-store so
   // this line describes the firmware on the server rather than one from an
@@ -266,7 +297,7 @@
     .then(function (r) { return r.json(); })
     .then(function (v) {
       bust = '?v=' + encodeURIComponent(v.commit);
-      updateManifest();
+      updateManifests();
       var mb = (v.bytes / 1048576).toFixed(2);
       document.getElementById('ver').innerHTML =
         'About to install <b>' + v.version + '</b> &middot; built ' + v.date +
