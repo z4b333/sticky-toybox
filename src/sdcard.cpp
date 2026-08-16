@@ -270,7 +270,7 @@ static const char kFakeCh1[] =
 static const char kFakeCh3[] =
     "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
     "<html xmlns=\"http://www.w3.org/1999/xhtml\">\n"
-    "<body><div><img src=\"images/plate.png\" alt=\"a plate\"/></div></body>\n"
+    "<body><div><img src=\"images/art2.png\" alt=\"a second plate\"/></div></body>\n"
     "</html>\n";
 
 // An EPUB3 navigation document, the real shape: a nav marked toc, an ordered
@@ -355,6 +355,41 @@ uint32_t fakeTbiBuild() {
     for (int x = 200; x < 280; x++) ink(x, y);
   return len;
 }
+// The same picture again, as the .bmp a converter writes now: 1 bpp, 480x800,
+// bottom-up with a black-then-white palette -- the shape the reader streams
+// straight to the glass. Built from the .tbi's bits so the two entries are the
+// same image, and a guard that measures ink can be pointed at either.
+uint8_t* g_fakeArtBmp = nullptr;
+uint32_t fakeArtBmpBuild() {
+  const int W = 480, H = 800, STRIDE = W / 8;
+  const uint32_t off = 62, len = off + (uint32_t)STRIDE * H;
+  if (g_fakeArtBmp) return len;
+  fakeTbiBuild();
+  g_fakeArtBmp = (uint8_t*)calloc(len, 1);
+  uint8_t* b = g_fakeArtBmp;
+  b[0] = 'B'; b[1] = 'M';
+  b[2] = (uint8_t)len; b[3] = (uint8_t)(len >> 8); b[4] = (uint8_t)(len >> 16);
+  b[10] = (uint8_t)off;
+  b[14] = 40;
+  b[18] = (uint8_t)(W & 255); b[19] = (uint8_t)(W >> 8);
+  b[22] = (uint8_t)(H & 255); b[23] = (uint8_t)(H >> 8);  // positive: bottom-up
+  b[26] = 1; b[28] = 1;                                   // one plane, one bit
+  b[46] = 2;                                              // two colours used
+  b[58] = b[59] = b[60] = 255;                            // 0 = black, 1 = white
+  // The .tbi's picture is very nearly symmetric top to bottom -- a frame, an
+  // X and a centred blob -- so a file read upside down would look identical.
+  // This copy gets a solid mark near the TOP, which is what makes the flip
+  // visible to a guard (and to an eye, on the screenshot).
+  static uint8_t top[(size_t)(480 / 8) * 800];
+  memcpy(top, g_fakeTbi + 8, sizeof(top));
+  for (int y = 60; y < 100; y++)
+    for (int x = 40; x < 120; x++)
+      top[(size_t)y * STRIDE + (x >> 3)] &= (uint8_t)~(0x80 >> (x & 7));
+  for (int r = 0; r < H; r++)  // the file's first row is the picture's last
+    memcpy(b + off + (size_t)r * STRIDE, top + (size_t)(H - 1 - r) * STRIDE, (size_t)STRIDE);
+  return len;
+}
+
 // A stand-in for the original image the book still carries. Nothing decodes
 // it in pass one; it is here so the entry the .tbi shadows actually exists.
 const uint8_t kFakePlatePng[] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
@@ -369,7 +404,8 @@ void buildFakeEpub() {
     uint32_t lho;
   };
   const uint32_t tbiLen = fakeTbiBuild();
-  E ents[10] = {
+  const uint32_t artBmpLen = fakeArtBmpBuild();
+  E ents[12] = {
       {"META-INF/container.xml", (const uint8_t*)kFakeContainer, (uint32_t)strlen(kFakeContainer),
        (uint32_t)strlen(kFakeContainer), 0, 0},
       {"OEBPS/content.opf", (const uint8_t*)kFakeOpf, (uint32_t)strlen(kFakeOpf),
@@ -387,6 +423,11 @@ void buildFakeEpub() {
       {"OEBPS/images/plate.png", kFakePlatePng, (uint32_t)sizeof(kFakePlatePng),
        (uint32_t)sizeof(kFakePlatePng), 0, 0},
       {"toybox/OEBPS/images/plate.tbi", g_fakeTbi, tbiLen, tbiLen, 0, 0},
+      // The second illustration is prepared the new way, as a .bmp, so both
+      // routes into drawImagePage are walked by the guards.
+      {"OEBPS/images/art2.png", kFakePlatePng, (uint32_t)sizeof(kFakePlatePng),
+       (uint32_t)sizeof(kFakePlatePng), 0, 0},
+      {"toybox/OEBPS/images/art2.bmp", g_fakeArtBmp, artBmpLen, artBmpLen, 0, 0},
       {"OEBPS/images/missing.png", kFakePlatePng, (uint32_t)sizeof(kFakePlatePng),
        (uint32_t)sizeof(kFakePlatePng), 0, 0},
       {"OEBPS/nav.xhtml", (const uint8_t*)kFakeNav, (uint32_t)strlen(kFakeNav),

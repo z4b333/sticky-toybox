@@ -2135,7 +2135,7 @@ int main() {
     g_dumpEnabled = false;
     toybox.onTap(240, shelf::Y0 + 2 * shelf::ROW_H + 20);  // the third chapter
     if (et->hostMenu() != 0 || et->hostSpine() != 2 ||
-        strcmp(et->hostPageImage(), "OEBPS/images/plate.png") != 0) {
+        strcmp(et->hostPageImage(), "OEBPS/images/art2.png") != 0) {
       printf("EPUB APP FAIL: the contents jump landed on s%d img '%s'\n", et->hostSpine(),
              et->hostPageImage());
       abort();
@@ -2535,7 +2535,7 @@ int main() {
       auto* et3 = static_cast<EpubTool*>(toybox.hostActive());
       toybox.onTap(240, epubui::LIST_Y0 + epubui::LIST_ROW_H + 10);
       if (et3->hostScreen() != 1 || et3->hostSpine() != 2 ||
-          strcmp(et3->hostPageImage(), "OEBPS/images/plate.png") != 0) {
+          strcmp(et3->hostPageImage(), "OEBPS/images/art2.png") != 0) {
         printf("EPUB APP FAIL: the picture-only chapter opened as s%d img '%s'\n",
                et3->hostSpine(), et3->hostPageImage());
         abort();
@@ -2551,7 +2551,7 @@ int main() {
       // a blank sheet.
       toybox.onButton(SideBtn::Down);
       if (et3->hostSpine() != 2 ||
-          strcmp(et3->hostPageImage(), "OEBPS/images/plate.png") != 0) {
+          strcmp(et3->hostPageImage(), "OEBPS/images/art2.png") != 0) {
         printf("EPUB APP FAIL: DOWN back into the picture chapter gave s%d img '%s'\n",
                et3->hostSpine(), et3->hostPageImage());
         abort();
@@ -3428,6 +3428,73 @@ int main() {
     stickyHost.setCanvasRotation(0);
     stickyHost.prefs().putUInt("rd_rot", 0);
     printf("art rotation ok (picture stands up, text lies back down, no relayout)\n");
+    g_dumpEnabled = true;
+  }
+
+  // --- artwork prepared as .bmp ---------------------------------------------
+  // The one format, inside the book too: chapter three's illustration is a
+  // 1-bit 480x800 BMP (chapter one's is still a .tbi, so both routes stay
+  // walked). The fixture builds the BMP from the .tbi's own bits, so "did it
+  // draw" is the same question, with the same answer: a frame, two diagonals
+  // and a blob. A BMP read as if it were top-down would put the picture on
+  // the panel upside down -- which the blob, sitting above the middle, is
+  // there to catch.
+  {
+    g_dumpEnabled = false;
+    toybox.goHub();
+    toybox.open(false, 10, false);
+    auto* eb = static_cast<EpubTool*>(toybox.hostActive());
+    if (!eb->openDirect("/books/wind.epub")) {
+      printf("BMP ART FAIL: the book did not open\n");
+      abort();
+    }
+    // Walk to chapter three, which is the picture-only one.
+    for (int k = 0; k < 30 && eb->hostSpine() != 2; k++) toybox.onButton(SideBtn::Down);
+    if (eb->hostSpine() != 2 || strcmp(eb->hostPageImage(), "OEBPS/images/art2.png") != 0) {
+      printf("BMP ART FAIL: never reached the .bmp illustration (s%d img '%s')\n",
+             eb->hostSpine(), eb->hostPageImage());
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_epub_art_bmp");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    int ink = 0;
+    for (uint32_t i = 0; i < EPD_BUF_SIZE; i++) ink += __builtin_popcount((uint8_t)~epd.fb()[i]);
+    int inkRows = 0;
+    for (int y = 0; y < 480; y++)
+      for (int xb = 0; xb < 100; xb++)
+        if ((uint8_t)~epd.fb()[(size_t)y * 100 + xb]) {
+          inkRows++;
+          break;
+        }
+    if (ink < 9000 || inkRows < 400) {
+      printf("BMP ART FAIL: the .bmp illustration drew %d px over %d rows\n", ink, inkRows);
+      abort();
+    }
+    // Right way up. A BMP stores its rows bottom-first, so reading one as if
+    // it were top-down flips the picture -- and the fixture's frame, X and
+    // centred blob are symmetric enough that a flip would look identical.
+    // The BMP therefore carries a solid mark near its TOP (rows 60-100), and
+    // the mirror of that band must be empty.
+    auto bandInk = [&](int y0, int y1) {
+      long n = 0;
+      for (int y = y0; y < y1; y++)
+        for (int x = 40; x < 120; x++) {
+          int px = 0, py = 0;
+          epdMapPixel(0, epd.panelFlipX(), epd.panelFlipY(), x, y, px, py);
+          if (!(epd.fb()[(size_t)py * 100 + (px >> 3)] & (0x80 >> (px & 7)))) n++;
+        }
+      return n;
+    };
+    const long topBand = bandInk(60, 100), bottomBand = bandInk(700, 740);
+    if (topBand < 2000 || bottomBand > topBand / 4) {
+      printf("BMP ART FAIL: mark %ld at the top, %ld at the bottom -- rows upside down\n",
+             topBand, bottomBand);
+      abort();
+    }
+    toybox.goHub();
+    printf("bmp artwork ok (%d px, %d rows, right way up)\n", ink, inkRows);
     g_dumpEnabled = true;
   }
 

@@ -992,14 +992,16 @@ class EpubTool : public ToolApp {
   }
 
   // The pre-rendered picture beside an image: same path inside the zip, with a
-  // "toybox/" prefix and a .tbi extension, which is what the PC app writes.
-  void tbiEntryFor(const char* img, char* out, int cap) {
+  // "toybox/" prefix and the extension swapped. `.bmp` is what a converter
+  // should write now -- one picture format for the whole device, and a file
+  // anything can open -- and `.tbi` is what the older ones wrote.
+  void artEntryFor(const char* img, const char* ext, char* out, int cap) {
     char stem[200];
     snprintf(stem, sizeof(stem), "toybox/%s", img);
     char* dot = strrchr(stem, '.');
     const char* slash = strrchr(stem, '/');
     if (dot && (!slash || dot > slash)) *dot = 0;  // ".jpg" goes, a dotted folder stays
-    snprintf(out, (size_t)cap, "%s.tbi", stem);
+    snprintf(out, (size_t)cap, "%s%s", stem, ext);
   }
 
   bool blobReadFull(uint8_t* dst, int n) {
@@ -1015,13 +1017,68 @@ class EpubTool : public ToolApp {
   // Blits the picture for this page, a band at a time. The whole picture is
   // 48 KB and this device has no 48 KB to spare, so it never exists whole:
   // 16 rows arrive, 16 rows are drawn, and the buffer is reused 50 times.
+  // A prepared .bmp inside the book. Streamed, never buffered: a BMP written
+  // for this panel -- 1 bpp, 480 wide, 800 tall -- is the same 48 KB of bits
+  // a .tbi is, in a wrapper the rest of the world can open, and its rows can
+  // go straight to the glass as they arrive. Bottom-up storage (the usual
+  // way) is not a problem for a one-pass read: the first row off the file is
+  // simply the last row of the picture, and it is drawn there.
+  //
+  // Anything else -- another size, another depth, a top-down file -- is left
+  // to the caller's .tbi fallback rather than decoded here. The converter is
+  // told exactly what to write (docs/CONVERTER-SPEC.md); a book that ignores
+  // that gets the honest "no picture prepared" plate instead of a slow decode
+  // in the middle of a page turn.
+  bool drawBmpPage(ToolsCanvas& c, const char* entry) {
+    if (!_book.blobOpen(entry)) return false;
+    uint8_t h[62];  // file header + DIB header + two palette entries
+    if (!blobReadFull(h, sizeof(h))) {
+      _book.blobClose();
+      return false;
+    }
+    auto u16 = [&](int i) { return (uint32_t)h[i] | ((uint32_t)h[i + 1] << 8); };
+    auto u32 = [&](int i) {
+      return u16(i) | ((uint32_t)h[i + 2] << 16) | ((uint32_t)h[i + 3] << 24);
+    };
+    const uint32_t offBits = u32(10), dib = u32(14), comp = u32(30);
+    const int32_t w = (int32_t)u32(18), rawH = (int32_t)u32(22);
+    const uint32_t bpp = u16(28);
+    const bool bottomUp = rawH > 0;
+    const int32_t hh = bottomUp ? rawH : -rawH;
+    if (dib < 40 || comp != 0 || bpp != 1 || w != tbimg::W || hh != tbimg::H ||
+        offBits != sizeof(h)) {
+      _book.blobClose();
+      return false;
+    }
+    // Which bit is ink. The palette is read, never assumed: a BMP whose first
+    // entry is white is a picture in negative, and plenty of tools write one.
+    const bool zeroIsInk = (h[54] + h[55] + h[56]) < (h[58] + h[59] + h[60]);
+    for (int r = 0; r < tbimg::H; r++) {
+      if (!blobReadFull(epubui::g_imgBand, tbimg::STRIDE)) break;  // half a picture
+      const int y = bottomUp ? tbimg::H - 1 - r : r;
+      for (int xb = 0; xb < tbimg::STRIDE; xb++) {
+        uint8_t v = epubui::g_imgBand[xb];
+        if (!zeroIsInk) v = (uint8_t)~v;
+        if (v == 0xFF) continue;  // a run of white, which is most of most art
+        for (int k = 0; k < 8; k++)
+          if (!(v & (0x80 >> k))) c.fillRect(xb * 8 + k, y, 1, 1, true);
+      }
+    }
+    _book.blobClose();
+    return true;
+  }
+
   bool drawImagePage(ToolsCanvas& c) {
     char entry[224];
-    tbiEntryFor(_pageImage, entry, sizeof(entry));
     // Reading another entry spends the chapter stream; ensureStream() rebuilds
     // it when a turn next needs it.
     _book.chapterClose();
     _streamLost = true;
+    // The one format first, the old one after it: a book carrying both is a
+    // book being converted, and the new picture is the one to believe.
+    artEntryFor(_pageImage, ".bmp", entry, sizeof(entry));
+    if (drawBmpPage(c, entry)) return true;
+    artEntryFor(_pageImage, ".tbi", entry, sizeof(entry));
     if (!_book.blobOpen(entry)) return false;
     if (_book.blobSize() != tbimg::FILE_SIZE) {
       _book.blobClose();

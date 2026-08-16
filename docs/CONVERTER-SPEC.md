@@ -5,7 +5,7 @@ the pictures that go with them, for the Seeed reTerminal Sticky running Toybox.
 Self-contained: byte layouts, naming rules, the rules the firmware enforces,
 and what it does with each thing once it has it.
 
-Written against **v1.0.0-beta.41**. Reference implementations live in this repo
+Written against **v1.0.0-beta.48**. Reference implementations live in this repo
 and are the tie-breaker if anything here disagrees with the device:
 
 | tool | what it makes |
@@ -59,9 +59,29 @@ the device's own file manager warns about this at the moment of renaming.
 
 ---
 
-## 2. `.tbi` — the one picture format
+## 2. Pictures — write `.bmp`
 
-Wallpapers, lock screens, book covers and EPUB artwork are all the same file.
+Wallpapers, lock screens, sleeping-screen art, book covers and EPUB artwork are
+all the same file, and that file is **a plain uncompressed BMP**. One format is
+the whole point: the picture a person drops in `/wallpapers` is the picture
+they can rename `<book>.cover.bmp` and put beside a book, and it is the same
+picture a converter embeds in an EPUB.
+
+- **From the card** (wallpaper, lock screen, sleep art, `.cover.bmp` sidecars):
+  any plain uncompressed BMP — 1/2/4/8/24/32 bpp, either row order, palettes
+  honoured, up to 4096×4096. The device scales it to 480×800 on white and
+  dithers it. A **4-level-grey 8 bpp BMP at 480×800** is the ideal: the greys
+  survive where the device shows grey, and the 1-bit re-dither of four flat
+  tones at 1:1 is clean where it does not.
+- **Inside an EPUB** (§5): exactly 480×800, 1 bpp, uncompressed — the device
+  streams those rows straight to the panel mid-page-turn, so there is no room
+  to scale or decode. The exact byte shape is in §5.
+
+`.tbi` below is the **older prepared format**. The firmware still reads it
+everywhere it ever did, so nothing on an existing card breaks, but new tools
+should not write it.
+
+### `.tbi`, for reference
 
 ```
 offset  type      value
@@ -313,19 +333,40 @@ Light novels carry character art and story plates, and the reader shows them.
 ### What to add
 
 For every image the device should display, add **one extra zip entry**, at the
-original entry's path with a `toybox/` prefix and a `.tbi` extension:
+original entry's path with a `toybox/` prefix and a `.bmp` extension:
 
 ```
 OEBPS/Images/insert-01.jpg          <- the original, left exactly as it is
-toybox/OEBPS/Images/insert-01.tbi   <- what the device draws
+toybox/OEBPS/Images/insert-01.bmp   <- what the device draws
 ```
 
 - The path is the **resolved zip entry name** of the original, not the `src`
   attribute. `<img src="../Images/x.jpg">` inside `OEBPS/Text/ch1.xhtml`
   resolves to `OEBPS/Images/x.jpg`, so the artwork entry is
-  `toybox/OEBPS/Images/x.tbi`.
-- Only the **last** extension is replaced: `a.b.jpg` → `toybox/a.b.tbi`.
-- The file is a full `.tbi` **with** its 8-byte header — 48,008 bytes.
+  `toybox/OEBPS/Images/x.bmp`.
+- Only the **last** extension is replaced: `a.b.jpg` → `toybox/a.b.bmp`.
+- **The BMP must be exactly this shape**, because the device streams it
+  straight to the glass rather than decoding it:
+
+  | field | value |
+  |---|---|
+  | width | **480** |
+  | height | **800** (positive, i.e. bottom-up rows — the ordinary way) |
+  | bits per pixel | **1** |
+  | compression | **0** (BI_RGB, uncompressed) |
+  | palette | 2 entries, at offset 54; the device reads them, so either order works |
+  | pixel data offset | **62** — a 14-byte file header, a 40-byte DIB header, two palette entries |
+
+  Total 48,062 bytes. Rows are 60 bytes and already 4-byte aligned, so there
+  is no padding to think about. Anything else — another size, another depth,
+  a top-down file — is refused, and the device shows its "no picture prepared"
+  plate rather than stalling a page turn on a decode.
+
+- `.tbi` (§2) is still read if no `.bmp` is there, so books made by older
+  converters keep working. New ones should write `.bmp`: it is the same 48 KB
+  of bits, in a file anything can open, and it is the one picture format the
+  whole device uses — the same file works as a wallpaper, a lock picture or a
+  `.cover.bmp` sidecar.
 - **Store them uncompressed (zip method 0)** if your library allows it. They
   are already one bit per pixel and compress by a few percent, and a stored
   entry lets the device seek straight to the pixels instead of inflating 48 KB
