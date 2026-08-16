@@ -602,20 +602,41 @@ int main() {
     abort();
   }
   {
-    // Every row has to cycle and land back where it started, or a setting can
-    // be moved into a state it cannot be moved out of.
+    // The four on/off rows have to toggle and land back where they started,
+    // or a setting can be moved into a state it cannot be moved out of.
     g_dumpEnabled = false;
-    for (int r = 0; r < setui::LR_COUNT; r++) {
-      // Two rows are not cyclers: one is a set of chips, the other a pair of
-      // buttons. Both are checked below, by their parts.
-      if (r == setui::LR_EMPTY || r == setui::LR_PICTURE) continue;
+    for (int r = setui::LR_ROTATE; r <= setui::LR_BATT; r++) {
       const lock::Config before = lock::config();
-      const int steps = (r == setui::LR_SLEEP) ? lock::SLEEP_COUNT : 2;
-      for (int k = 0; k < steps; k++) tapRect(setui::lockRect(r));
+      for (int k = 0; k < 2; k++) tapRect(setui::lockRect(r));
       if (memcmp(&before, &lock::config(), sizeof(lock::Config)) != 0) {
         printf("LOCK FAIL: row %d did not return to where it started\n", r);
         abort();
       }
+    }
+    // Sleep timing and the wake target are chips now: every one reachable,
+    // every one the one that ends up chosen.
+    {
+      const uint8_t wasIdx = lock::config().sleepIdx;
+      for (int k = 0; k < lock::SLEEP_COUNT; k++) {
+        tapRect(setui::sleepChipRect(k));
+        if (lock::config().sleepIdx != k) {
+          printf("LOCK FAIL: sleep chip %d chose %d\n", k, lock::config().sleepIdx);
+          abort();
+        }
+      }
+      tapRect(setui::sleepChipRect(wasIdx));
+      const uint8_t wasWake = lock::config().wake;
+      tapRect(setui::wakeChipRect(1));
+      if (lock::config().wake != lock::WAKE_HUB) {
+        printf("LOCK FAIL: the hub wake chip did not take\n");
+        abort();
+      }
+      tapRect(setui::wakeChipRect(0));
+      if (lock::config().wake != lock::WAKE_NOTE) {
+        printf("LOCK FAIL: the note wake chip did not take\n");
+        abort();
+      }
+      tapRect(setui::wakeChipRect(wasWake == lock::WAKE_HUB ? 1 : 0));
     }
 
     // Every chip has to be reachable and has to be the one that ends up filled.

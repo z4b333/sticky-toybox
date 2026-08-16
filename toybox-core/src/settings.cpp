@@ -65,9 +65,67 @@ const char* soundLabel(const ToolsHost& host) {
   }
 }
 
+// The lock screen's mode, in the register a value-on-the-right speaks.
+const char* emptyLabelSmall(uint8_t e) {
+  switch (e) {
+    case lock::EMPTY_PICTURE: return "picture";
+    case lock::EMPTY_GOODBYE: return "goodbye";
+    case lock::EMPTY_COVER: return "cover";
+    default: return "blank";
+  }
+}
+
 const char* nameOf(const applist::Item& it) {
   return it.game ? gicons::NAMES[it.idx] : ticons::NAMES[it.idx];
 }
+
+// Little line icons for the settings rows, one per Action, drawn in a ~30 px
+// box centred on (cx, cy). Primitives only, like the hub's app icons, so
+// both font passes render them identically.
+namespace setico {
+inline void draw(ToolsCanvas& c, int act, int cx, int cy, bool dark) {
+  using namespace setui;
+  switch (act) {
+    case ACT_WALL:  // a framed picture: mountain and sun
+      c.drawRect(cx - 15, cy - 12, 30, 24, 2, dark);
+      c.fillCircle(cx + 7, cy - 5, 3, dark);
+      c.drawLine(cx - 11, cy + 8, cx - 3, cy - 2, 2, dark);
+      c.drawLine(cx - 3, cy - 2, cx + 5, cy + 8, 2, dark);
+      break;
+    case ACT_LOCK:  // a padlock
+      c.drawCircle(cx, cy - 6, 7, 2, dark);
+      c.fillRect(cx - 11, cy - 3, 22, 15, dark);
+      break;
+    case ACT_APPS:  // four tiles
+      c.drawRect(cx - 14, cy - 14, 12, 12, 2, dark);
+      c.drawRect(cx + 2, cy - 14, 12, 12, 2, dark);
+      c.drawRect(cx - 14, cy + 2, 12, 12, 2, dark);
+      c.drawRect(cx + 2, cy + 2, 12, 12, 2, dark);
+      break;
+    case ACT_FILES:  // a phone
+      c.drawRect(cx - 9, cy - 14, 18, 28, 2, dark);
+      c.fillRect(cx - 4, cy + 8, 8, 2, dark);
+      break;
+    case ACT_SOUND:  // a speaker and its sound
+      c.fillRect(cx - 13, cy - 5, 6, 10, dark);
+      c.drawLine(cx - 7, cy - 5, cx - 1, cy - 11, 2, dark);
+      c.drawLine(cx - 1, cy - 11, cx - 1, cy + 11, 2, dark);
+      c.drawLine(cx - 1, cy + 11, cx - 7, cy + 5, 2, dark);
+      c.fillRect(cx + 5, cy - 4, 2, 8, dark);
+      c.fillRect(cx + 10, cy - 8, 2, 16, dark);
+      break;
+    case ACT_CARDS:  // the "?" the how-to cards wear
+      c.drawCircle(cx, cy, 14, 2, dark);
+      c.textInBox(cx - 10, cy - 11, 20, 22, "?", TS_SMALL, dark, true);
+      break;
+    default:  // ACT_RESET: a circle coming back around
+      c.drawCircle(cx, cy, 11, 2, dark);
+      c.drawLine(cx + 6, cy - 12, cx + 13, cy - 13, 2, dark);
+      c.drawLine(cx + 13, cy - 13, cx + 10, cy - 6, 2, dark);
+      break;
+  }
+}
+}  // namespace setico
 
 // Must match the names the apps pass to help::suppressed(). The flashcards
 // and reader cards live here too: the row says "how to play", but what it
@@ -374,22 +432,61 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
   drawTopBar(c, "SETTINGS");
 
   using namespace setui;
-  // The pages first, then the things that act right here.
-  const TRect sa = actionRect(ACT_APPS), sw = actionRect(ACT_WALL);
-  const TRect s1 = actionRect(ACT_LOCK), s0 = actionRect(ACT_SOUND);
-  const TRect sf = actionRect(ACT_FILES);
-  const TRect s2 = actionRect(ACT_CARDS), s3 = actionRect(ACT_RESET);
-  c.listRow(sa.x, sa.y, sa.w, sa.h, "Apps on the hub...");
-  c.listRow(sw.x, sw.y, sw.w, sw.h, "Wallpaper...");
-  c.listRow(s1.x, s1.y, s1.w, s1.h, "Lock screen...");
-  c.listRow(sf.x, sf.y, sf.w, sf.h, "Files over WiFi...");
-  c.listRow(s0.x, s0.y, s0.w, s0.h, soundLabel(host));
-  c.listRow(s2.x, s2.y, s2.w, s2.h, "Show how to play again");
-  c.listRow(s3.x, s3.y, s3.w, s3.h,
-            _armed ? "Tap again to erase scores" : "Reset stats and tallies", false, _armed);
+  // Group headings above their first rows, from the same position table the
+  // rects come from -- so a row cannot move without its heading following.
+  {
+    static const char* kHeads[5] = {"LOOK", "APPS", "PHONE", "DEVICE", "EXTRAS"};
+    static const int kFirstRow[5] = {0, 2, 3, 4, 5};
+    for (int k = 0; k < 5; k++) {
+      const int y = ROOT_Y0 + kFirstRow[k] * BTN_STEP + (k + 1) * ROOT_HEAD - 28;
+      c.textTracked(BTN_X, y, kHeads[k], TS_SMALL, true, false, 1);
+      c.fillRect(BTN_X, y + 22, BTN_W, 1, true);
+    }
+  }
 
-  c.textCentered(SCREEN_W / 2, 776, _note ? _note : "rows ending in ... open a page of their own",
-                 TS_SMALL, true);
+  // Each row: icon, name, and the CURRENT VALUE on the right -- the page
+  // answers before it is asked. A chevron on the rows that open pages.
+  char apps[16];
+  snprintf(apps, sizeof(apps), "%d shown", appvis::shown());
+  const char* sound = soundLabel(host);
+  const char* soundV = strchr(sound, ' ') ? strchr(sound, ' ') + 1 : sound;
+  struct Row {
+    int act;
+    const char* name;
+    const char* value;
+    bool page;  // opens a page of its own
+  };
+  const Row rows[ACT_COUNT] = {
+      {ACT_WALL, "Wallpaper", wallimg::have() ? "set" : "none", true},
+      {ACT_LOCK, "Lock screen", emptyLabelSmall(lock::config().empty), true},
+      {ACT_APPS, "Apps on the hub", apps, true},
+      {ACT_FILES, "Files over WiFi", "", true},
+      {ACT_SOUND, "Sound", soundV, false},
+      {ACT_CARDS, "Show the how-to cards again", "", false},
+      {ACT_RESET, _armed ? "Tap again to erase scores" : "Reset stats and tallies", "", false},
+  };
+  for (const Row& r : rows) {
+    const TRect a = actionRect(r.act);
+    const bool inverted = r.act == ACT_RESET && _armed;
+    if (inverted) c.fillRect(a.x, a.y, a.w, a.h, true);
+    setico::draw(c, r.act, a.x + 22, a.y + a.h / 2, !inverted);
+    c.text(a.x + 52, a.y + (a.h - c.textHeight(TS_MED)) / 2, r.name, TS_MED, !inverted);
+    int rx = a.x + a.w - 8;
+    if (r.page) {
+      // The chevron: two strokes, quieter than a glyph and always the same.
+      const int cy = a.y + a.h / 2;
+      c.drawLine(rx - 14, cy - 9, rx - 5, cy, 2, !inverted);
+      c.drawLine(rx - 5, cy, rx - 14, cy + 9, 2, !inverted);
+      rx -= 26;
+    }
+    if (r.value[0]) {
+      const int vw = c.textWidth(r.value, TS_MED, true);
+      c.text(rx - vw, a.y + (a.h - c.textHeight(TS_MED)) / 2, r.value, TS_MED, !inverted, true);
+    }
+  }
+
+  c.textCentered(SCREEN_W / 2, 776, _note ? _note : "tap a row to open or change it", TS_SMALL,
+                 true);
 }
 
 // --- the apps page ------------------------------------------------------------
@@ -445,46 +542,15 @@ const char* emptyLabel(uint8_t e) {
     default: return "BLANK";
   }
 }
+// The four on/off rows.
 const char* rowName(int i) {
   switch (i) {
-    case setui::LR_SLEEP: return "SLEEP AFTER";
-    case setui::LR_EMPTY: return "WITH NO NOTE PINNED";
-    case setui::LR_PICTURE: return "THE PICTURE";
-    case setui::LR_WAKE: return "WAKE TO";
-    case setui::LR_ROTATE: return "TURN WITH THE DEVICE";
-    case setui::LR_TIME: return "SHOW THE TIME";
-    case setui::LR_TEMP: return "SHOW THE TEMPERATURE";
-    default: return "SHOW THE BATTERY";
+    case setui::LR_ROTATE: return "Turn with the device";
+    case setui::LR_TIME: return "Show the time";
+    case setui::LR_TEMP: return "Show the temperature";
+    default: return "Show the battery";
   }
 }
-const char* rowHint(int i) {
-  switch (i) {
-    case setui::LR_SLEEP: return "the panel keeps its image with the power off";
-    case setui::LR_EMPTY: return "what is on the panel when nothing is pinned";
-    case setui::LR_PICTURE:
-      // Short, because the buttons start where a longer line would run on.
-      // What the picture is for is said by the chip above it.
-      return lockimg::have() ? "one is stored" : "none chosen yet";
-    case setui::LR_WAKE: return "where the power button takes you";
-    case setui::LR_ROTATE:
-      // When it is off, say what happens instead -- otherwise the note simply
-      // stops turning and it looks like the angle came from nowhere.
-      return lock::config().autoRotate ? "only the pinned note turns; apps stay portrait"
-                                       : "the note rests at the angle it was pinned at";
-    default: return nullptr;
-  }
-}
-// Only for the rows that carry a value. The four yes/no rows answer nullptr and
-// draw a checkbox instead: "yes" and "no" set in 32 px bold made four rows shout
-// their state at you, and a tick is the same answer in a form the eye can skip.
-const char* rowValue(int i, const lock::Config& c) {
-  switch (i) {
-    case setui::LR_SLEEP: return lock::sleepLabel(c);
-    case setui::LR_WAKE: return c.wake == lock::WAKE_HUB ? "the hub" : "the note";
-    default: return nullptr;
-  }
-}
-// The other four.
 bool rowChecked(int i, const lock::Config& c) {
   switch (i) {
     case setui::LR_ROTATE: return c.autoRotate;
@@ -494,53 +560,82 @@ bool rowChecked(int i, const lock::Config& c) {
   }
 }
 bool rowIsCheck(int i) { return i >= setui::LR_ROTATE; }
+
+// A section heading in the root page's register: small tracked caps over a
+// hairline, with one quiet line of explanation.
+void lockHead(ToolsCanvas& c, int y, const char* name, const char* sub) {
+  c.textTracked(setui::LOCK_X, y, name, TS_SMALL, true, false, 1);
+  if (sub) {
+    const int sw = c.textWidth(sub, TS_SMALL);
+    c.text(setui::LOCK_X + setui::LOCK_W - sw, y, sub, TS_SMALL, true);
+  }
+  c.fillRect(setui::LOCK_X, y + 22, setui::LOCK_W, 1, true);
+}
 }  // namespace
 
 void SettingsScreen::renderLock(ToolsHost& host, ToolsCanvas& c) {
   using namespace setui;
   drawTopBar(c, "LOCK SCREEN");
-  c.textTracked(16, 56, "WHEN THE DEVICE IS ASLEEP", TS_MED, true, false, 1);
 
-  for (int i = 0; i < LR_COUNT; i++) {
-    const TRect r = lockRect(i);
-    // The three footer rows are one thought, so they get a rule above them
-    // rather than a heading -- they say what the line along the bottom of the
-    // sleeping note carries, and that is obvious once they are together.
-    if (i == LR_TIME) c.drawLine(r.x, r.y - 6, r.x + r.w, r.y - 6, 1, true);
+  // WHEN IT SLEEPS: the five timings as chips, the current one filled.
+  lockHead(c, 64, "WHEN IT SLEEPS", "the panel keeps its image");
+  static const char* kSleep[lock::SLEEP_COUNT] = {"never", "1 min", "5 min", "15 min", "30 min"};
+  for (int k = 0; k < lock::SLEEP_COUNT; k++) {
+    const TRect ch = sleepChipRect(k);
+    c.button(ch.x, ch.y, ch.w, ch.h, kSleep[k], _lock.sleepIdx == k, TS_SMALL);
+  }
 
-    const char* hint = rowHint(i);
-    const int nameY = hint ? r.y + 8 : r.y + (r.h - c.textHeight(TS_MED)) / 2;
-    c.text(r.x + 4, nameY, rowName(i), TS_MED, true);
-    if (hint) c.text(r.x + 4, nameY + c.textHeight(TS_MED) + 6, hint, TS_SMALL, true);
-
-    if (rowIsCheck(i)) {
-      checkbox(c, r.x + r.w - 4 - BOX, r.y + (r.h - BOX) / 2, rowChecked(i, _lock));
-    } else if (i == LR_EMPTY) {
-      // Four chips, the chosen one filled. Which of the four is on is the thing
-      // the row exists to say, and a filled chip says it from further away than
-      // a word does.
-      for (int k = 0; k < lock::EMPTY_COUNT; k++) {
-        const uint8_t v = (uint8_t)(lock::EMPTY_FIRST + k);
-        const TRect ch = chipRect(k);
-        c.button(ch.x, ch.y, ch.w, ch.h, emptyLabel(v), _lock.empty == v, TS_SMALL);
-      }
-    } else if (i == LR_PICTURE) {
-      const TRect sr = sendRect();
-      c.button(sr.x, sr.y, sr.w, sr.h, lockimg::have() ? "REPLACE" : "FROM CARD", false,
-               TS_MED);
-      if (lockimg::have()) {
-        const TRect rm = removeRect();
-        c.button(rm.x, rm.y, rm.w, rm.h, "x", false, TS_MED);
-      }
-    } else {
-      const char* v = rowValue(i, _lock);
-      const int vw = c.textWidth(v, TS_LARGE, true);
-      c.text(r.x + r.w - 4 - vw, r.y + (r.h - c.textHeight(TS_LARGE)) / 2, v, TS_LARGE, true,
-             true);
+  // WHAT IT SHOWS, with no note pinned: the four faces, then the picture's
+  // own row -- its state on the left, its actions on the right.
+  lockHead(c, 162, "WHAT IT SHOWS", "with no note pinned");
+  for (int k = 0; k < lock::EMPTY_COUNT; k++) {
+    const uint8_t v = (uint8_t)(lock::EMPTY_FIRST + k);
+    const TRect ch = chipRect(k);
+    c.button(ch.x, ch.y, ch.w, ch.h, emptyLabel(v), _lock.empty == v, TS_SMALL);
+  }
+  {
+    const TRect r = lockRect(LR_PICTURE);
+    c.text(r.x + 4, r.y + 8, "The picture", TS_MED, true);
+    c.text(r.x + 4, r.y + 36, lockimg::have() ? "one is stored" : "none chosen yet", TS_SMALL,
+           true);
+    const TRect sr = sendRect();
+    c.button(sr.x, sr.y, sr.w, sr.h, lockimg::have() ? "REPLACE" : "FROM CARD", false, TS_MED);
+    if (lockimg::have()) {
+      const TRect rm = removeRect();
+      c.button(rm.x, rm.y, rm.w, rm.h, "x", false, TS_MED);
     }
   }
 
-  c.textCentered(SCREEN_W / 2, 776, _note ? _note : "tap a row to change it", TS_SMALL, true);
+  // THE FOOTER LINE: what the sleeping panel's bottom line carries.
+  lockHead(c, 324, "THE FOOTER LINE", "under a note or a goodbye");
+  for (int i = LR_TIME; i <= LR_BATT; i++) {
+    const TRect r = lockRect(i);
+    c.text(r.x + 4, r.y + (r.h - c.textHeight(TS_MED)) / 2, rowName(i), TS_MED, true);
+    checkbox(c, r.x + r.w - 4 - BOX, r.y + (r.h - BOX) / 2, rowChecked(i, _lock));
+  }
+
+  // WAKING: where the power button lands, and whether the note follows the
+  // device's angle while it sleeps.
+  lockHead(c, 528, "WAKING", "the power button, and the angle");
+  {
+    const TRect a = wakeChipRect(0), b = wakeChipRect(1);
+    c.button(a.x, a.y, a.w, a.h, "WAKE TO THE NOTE", _lock.wake == lock::WAKE_NOTE, TS_SMALL);
+    c.button(b.x, b.y, b.w, b.h, "WAKE TO THE HUB", _lock.wake == lock::WAKE_HUB, TS_SMALL);
+  }
+  {
+    const TRect r = lockRect(LR_ROTATE);
+    c.text(r.x + 4, r.y + 6, rowName(LR_ROTATE), TS_MED, true);
+    // When it is off, say what happens instead -- otherwise the note simply
+    // stops turning and it looks like the angle came from nowhere.
+    c.text(r.x + 4, r.y + 34,
+           _lock.autoRotate ? "only the pinned note turns; apps stay portrait"
+                            : "the note rests at the angle it was pinned at",
+           TS_SMALL, true);
+    checkbox(c, r.x + r.w - 4 - BOX, r.y + (r.h - BOX) / 2, _lock.autoRotate);
+  }
+
+  c.textCentered(SCREEN_W / 2, 776, _note ? _note : "everything here takes effect at once",
+                 TS_SMALL, true);
 }
 
 bool SettingsScreen::tapLock(ToolsHost& host, int x, int y) {
@@ -596,12 +691,28 @@ bool SettingsScreen::tapLock(ToolsHost& host, int x, int y) {
     return false;
   }
 
+  // The sleep and wake chips: a direct choice each, nothing to cycle through.
+  for (int k = 0; k < lock::SLEEP_COUNT; k++) {
+    if (!sleepChipRect(k).hit(x, y)) continue;
+    _lock.sleepIdx = (uint8_t)k;
+    lock::save(host.prefs(), _lock);
+    lock::setConfig(_lock);
+    host.beep(0);
+    return true;
+  }
+  for (int k = 0; k < 2; k++) {
+    if (!wakeChipRect(k).hit(x, y)) continue;
+    _lock.wake = k == 0 ? lock::WAKE_NOTE : lock::WAKE_HUB;
+    lock::save(host.prefs(), _lock);
+    lock::setConfig(_lock);
+    host.beep(0);
+    return true;
+  }
+
   for (int i = 0; i < LR_COUNT; i++) {
     if (!lockRect(i).hit(x, y)) continue;
-    if (i == LR_EMPTY || i == LR_PICTURE) return false;  // handled above, by part
+    if (!rowIsCheck(i)) return false;  // chips and buttons were handled above
     switch (i) {
-      case LR_SLEEP: _lock.sleepIdx = (_lock.sleepIdx + 1) % lock::SLEEP_COUNT; break;
-      case LR_WAKE: _lock.wake = _lock.wake == lock::WAKE_HUB ? lock::WAKE_NOTE : lock::WAKE_HUB; break;
       case LR_ROTATE: _lock.autoRotate = !_lock.autoRotate; break;
       case LR_TIME: _lock.showTime = !_lock.showTime; break;
       case LR_TEMP: _lock.showTemp = !_lock.showTemp; break;

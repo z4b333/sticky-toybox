@@ -8,14 +8,13 @@
 // Geometry the preview harness aims at. Remembered coordinates go stale the
 // moment a row moves; these do not.
 namespace setui {
-// The main page is buttons and nothing else -- the app checkboxes moved to
-// their own page, which gave everything back its breathing room: 62 px
-// buttons at a 76 px step, comfortably over the 7 mm a fingertip wants and
-// still clear of the footer with seven of them. The four that end in "..."
-// open pages; the other three act right here.
-inline constexpr int BTN_X = 16, BTN_W = SCREEN_W - 32, BTN_H = 62, BTN_STEP = 76;
-inline constexpr int BTN_Y0 = 116;
-inline TRect actionRect(int i) { return TRect{BTN_X, BTN_Y0 + i * BTN_STEP, BTN_W, BTN_H}; }
+// The main page: grouped rows under small tracked headings, an icon on the
+// left of each, and the CURRENT VALUE on the right -- the page answers at a
+// glance instead of hiding every state behind a tap. Rows that open a page
+// carry a chevron; rows that act in place do not. 60 px rows at a 68 px
+// step, over the 7 mm a fingertip wants.
+inline constexpr int BTN_X = 16, BTN_W = SCREEN_W - 32, BTN_H = 60, BTN_STEP = 68;
+inline constexpr int ROOT_Y0 = 64, ROOT_HEAD = 36;
 enum Action : int {
   ACT_APPS,
   ACT_WALL,
@@ -26,6 +25,16 @@ enum Action : int {
   ACT_RESET,
   ACT_COUNT
 };
+// Visual order groups the rows by what they are about (LOOK first -- the
+// rows people come for); the enum order stays put so nothing that aims at a
+// row by name has to care where it sits.
+inline constexpr int ROOT_POS[ACT_COUNT] = {2, 0, 1, 3, 4, 5, 6};
+// How many group headings sit above each visual row.
+inline constexpr int ROOT_HEADS[ACT_COUNT] = {1, 1, 2, 3, 4, 5, 5};
+inline TRect actionRect(int i) {
+  const int r = ROOT_POS[i];
+  return TRect{BTN_X, ROOT_Y0 + r * BTN_STEP + ROOT_HEADS[r] * ROOT_HEAD, BTN_W, BTN_H};
+}
 
 // The files-over-wifi page. Two pairing steps, then a summary of what the
 // phone did -- the file list itself lives on the phone, which is where the
@@ -40,12 +49,12 @@ inline constexpr int WALL_Y0 = 172, WALL_ROW_H = 56, WALL_ROW_STEP = 62;
 inline TRect wallRect(int i) { return TRect{16, WALL_Y0 + i * WALL_ROW_STEP, SCREEN_W - 32, WALL_ROW_H}; }
 inline TRect wallRemoveRect() { return TRect{16, 84, SCREEN_W - 32, 50}; }
 
-// The lock screen page. Rows are not all the same height: most are a name, a
-// hint and an answer, but the one that chooses what an empty panel shows needs
-// a row of four choices under it, and the three footer switches need less than
-// any of them. A table of heights is easier to keep honest than a constant
-// everything has to be talked out of.
-inline constexpr int LOCK_Y0 = 92, LOCK_X = 16, LOCK_W = SCREEN_W - 32;
+// The lock screen page, in four sections a person can name -- WHEN IT
+// SLEEPS, WHAT IT SHOWS, THE FOOTER LINE, WAKING -- instead of one column of
+// eight unlike rows. Everything choice-of-N is a chip row with the current
+// one filled (sleep timing and wake target included: a value that cycles on
+// a tap hides its other options); everything on/off is a checkbox.
+inline constexpr int LOCK_X = 16, LOCK_W = SCREEN_W - 32;
 enum LockRow : int {
   LR_SLEEP,
   LR_EMPTY,
@@ -57,22 +66,29 @@ enum LockRow : int {
   LR_BATT,
   LR_COUNT
 };
-inline constexpr int LOCK_HEIGHTS[LR_COUNT] = {76, 128, 76, 76, 76, 62, 62, 62};
-inline TRect lockRect(int i) {
-  int y = LOCK_Y0;
-  for (int k = 0; k < i; k++) y += LOCK_HEIGHTS[k];
-  return TRect{LOCK_X, y, LOCK_W, LOCK_HEIGHTS[i] - 8};
-}
+// Explicit positions, because the sections interleave the enum's order.
+inline constexpr int LOCK_ROW_Y[LR_COUNT] = {100, 198, 252, 564, 614, 360, 410, 460};
+inline constexpr int LOCK_ROW_H[LR_COUNT] = {46, 46, 56, 46, 62, 44, 44, 44};
+inline TRect lockRect(int i) { return TRect{LOCK_X, LOCK_ROW_Y[i], LOCK_W, LOCK_ROW_H[i]}; }
 
-// The things an empty panel can show, as chips under their heading. A value
-// that cycles on a tap hides its other options; chips with the current one
-// filled say what the choices are and which one is on, in the space the cycling
-// answer was using anyway.
-inline constexpr int CHIP_H = 46, CHIP_GAP = 6, CHIP_N = lock::EMPTY_COUNT;
+inline constexpr int CHIP_GAP = 6;
+// The empty-panel chips, over their row.
 inline TRect chipRect(int i) {
   const TRect r = lockRect(LR_EMPTY);
-  const int w = (r.w - (CHIP_N - 1) * CHIP_GAP) / CHIP_N;
-  return TRect{r.x + i * (w + CHIP_GAP), r.y + r.h - CHIP_H, w, CHIP_H};
+  const int w = (r.w - (lock::EMPTY_COUNT - 1) * CHIP_GAP) / lock::EMPTY_COUNT;
+  return TRect{r.x + i * (w + CHIP_GAP), r.y, w, r.h};
+}
+// Sleep timing as five chips: never, 1, 5, 15, 30 minutes.
+inline TRect sleepChipRect(int i) {
+  const TRect r = lockRect(LR_SLEEP);
+  const int w = (r.w - (lock::SLEEP_COUNT - 1) * CHIP_GAP) / lock::SLEEP_COUNT;
+  return TRect{r.x + i * (w + CHIP_GAP), r.y, w, r.h};
+}
+// Where the power button wakes to: the note, or the hub.
+inline TRect wakeChipRect(int i) {
+  const TRect r = lockRect(LR_WAKE);
+  const int w = (r.w - CHIP_GAP) / 2;
+  return TRect{r.x + i * (w + CHIP_GAP), r.y, w, r.h};
 }
 
 // The picture row's actions, right-aligned: choose one from the card, and
