@@ -314,15 +314,23 @@
   }
   function checkAppSize(v) {
     if (!v.appBytes) return;  // an older version.json: nothing to check against
-    fetch('firmware/toybox-app.bin' + bust, { method: 'HEAD', cache: 'no-store' })
+    // Ask for one byte: the Content-Range total is the file's real size. A
+    // plain HEAD's content-length lies here -- GitHub Pages serves the binary
+    // gzip-compressed and reports the compressed size.
+    fetch('firmware/toybox-app.bin' + bust,
+          { headers: { Range: 'bytes=0-0' }, cache: 'no-store' })
       .then(function (r) {
-        var len = parseInt(r.headers.get('content-length') || '0', 10);
-        if (r.ok && len && len !== v.appBytes)
+        var len = 0;
+        var cr = /\/(\d+)\s*$/.exec(r.headers.get('content-range') || '');
+        if (r.status === 206 && cr) len = parseInt(cr[1], 10);
+        else if (r.ok && !r.headers.get('content-encoding'))
+          len = parseInt(r.headers.get('content-length') || '0', 10);
+        if (len && len !== v.appBytes)
           disableButtons('The server is not serving the firmware this page expects (' +
                          len + ' bytes vs ' + v.appBytes + ') - not flashing from it. ' +
                          'Hard-refresh, or wait for the site to finish deploying.');
       })
-      .catch(function () {});  // no HEAD support: the flasher's own fetch decides
+      .catch(function () {});  // no ranges, no verdict: the flasher's own fetch decides
   }
 
   // Written next to the image by tools/make_image.sh. Fetched with no-store so
