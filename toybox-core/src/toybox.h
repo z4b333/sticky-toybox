@@ -33,7 +33,10 @@ class Toybox {
 
   // Opens an app by its place in the two icon tables, the same coordinates the
   // hub and the visibility mask use.
-  void open(bool game, int idx);
+  // `paint` false skips the entry paint: the recents shortcuts use it so a
+  // tapped cover goes straight to the book's own loading face instead of
+  // flashing the shelf list on the way.
+  void open(bool game, int idx, bool paint = true);
   // Opens the notes tool at its pairing screen. Settings uses this for the lock
   // screen picture; see ToolsHost::goPairPicture.
   void openPairPicture();

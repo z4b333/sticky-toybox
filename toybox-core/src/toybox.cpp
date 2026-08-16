@@ -89,7 +89,7 @@ int folderOf(bool game, int idx) {
 }
 }  // namespace
 
-void Toybox::open(bool game, int idx) {
+void Toybox::open(bool game, int idx, bool paint) {
   _settings.leave();  // an access point must not outlive the screen that ran it
   if (!build(game, idx)) {
     _where = Where::Hub;  // out of memory: better to bounce back than draw nothing
@@ -109,7 +109,13 @@ void Toybox::open(bool game, int idx) {
   // partial in a way hairlines never do), or entry itself borrowed the SD bus
   // -- the readers' shelves list the card, which re-initialises the panel and
   // leaves nothing valid to diff against.
-  _host->refresh(_active->enterTouchesCard() || wallimg::have());
+  //
+  // Not painted at all when the caller says so: a recents cover heading
+  // straight into openDirect() would show the shelf for one refresh only to
+  // replace it with the book's loading face -- a screen nobody asked for at
+  // 1.7 s a showing. The caller then owns the first paint on BOTH paths,
+  // opened and not-found alike.
+  if (paint) _host->refresh(_active->enterTouchesCard() || wallimg::have());
 }
 
 void Toybox::openSettings() {
@@ -141,10 +147,11 @@ bool Toybox::carryOnReading() {
   if (n == 0) return resumeLast();  // nothing read yet: the old behaviour
   const int idx = rec[0].kind == recents::KIND_EPUB ? 10 : 9;
   _hub.openFolder(folderOf(false, idx));
-  open(false, idx);
-  // If the book is gone (card out, file renamed), the reader's list is now up
-  // and says so -- still the right screen to land on.
-  if (_active) _active->openDirect(rec[0].file);
+  // Unpainted: carrying on reading should land on the book's own face, not
+  // the shelf it happens to live on. If the book is gone (card out, file
+  // renamed), the list is painted here instead, and it says so.
+  open(false, idx, false);
+  if (_active && !_active->openDirect(rec[0].file)) _host->refresh(true);
   return true;
 }
 
@@ -232,14 +239,15 @@ void Toybox::onTap(int x, int y) {
       return;
     case HubScreen::Tap::Recent: {
       // A recently-read cover: open its reader, then the book itself, which
-      // resumes at the saved position the way it always does. If the book is
-      // gone (card out, file renamed) the reader stays on its list, which
-      // says so better than a beep would.
+      // resumes at the saved position the way it always does -- with no stop
+      // at the shelf on the way: the cover was the promise, the loading face
+      // keeps it. If the book is gone (card out, file renamed) the reader's
+      // list is painted instead, which says so better than a beep would.
       recents::Entry rec[recents::MAX];
       const int n = recents::list(_host->prefs(), rec);
       if (t.idx >= n) return;
-      open(false, rec[t.idx].kind == recents::KIND_EPUB ? 10 : 9);
-      if (_active) _active->openDirect(rec[t.idx].file);
+      open(false, rec[t.idx].kind == recents::KIND_EPUB ? 10 : 9, false);
+      if (_active && !_active->openDirect(rec[t.idx].file)) _host->refresh(true);
       return;
     }
     default:

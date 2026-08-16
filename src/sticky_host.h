@@ -70,6 +70,9 @@ class StickyHost : public ToolsHost {
   ToolsCanvas& canvas() override { return _canvas; }
   Preferences& prefs() override;
   void refresh(bool full) override {
+#ifdef TOYBOX_HOST
+    _paints++;  // so a guard can count what a flow costs the panel
+#endif
     epd.clear();
     toybox.render(_canvas);
     if (full)
@@ -193,6 +196,12 @@ class StickyHost : public ToolsHost {
   int _fastCount = 0;
 
 #ifdef TOYBOX_HOST
+  // Paint accounting, for guards that assert a flow's cost in refreshes --
+  // e.g. that a recents cover goes straight to the loading face rather than
+  // showing the shelf for one refresh first.
+  int hostPaints() const { return _paints; }
+  void hostResetPaints() { _paints = 0; }
+
   // The standalone firmware is the whole device, so it never offers a way out.
   // The preview flips this to render the hub as it will look inside the reader.
   bool canExit() const override { return _canExit; }
@@ -206,6 +215,7 @@ class StickyHost : public ToolsHost {
   StickyCanvas _canvas;
 #ifdef TOYBOX_HOST
   bool _canExit = false, _exited = false;
+  int _paints = 0;
 #endif
 };
 

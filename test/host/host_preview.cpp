@@ -2541,10 +2541,19 @@ int main() {
     // The covers sit under the two tile rows; left is slot 0 (the epub).
     const int coverY = hubui::FOLDER_TOP + 2 * hubui::ROW_STEP + hubui::REC_GAP +
                        hubui::REC_HEAD_H + hubui::REC_THUMB_H / 2;
+    stickyHost.hostResetPaints();
     toybox.onTap(EPD_W / 4, coverY);
     if (!toybox.hostInApp() || strcmp(toybox.activeTitle(), "EPUB") != 0 ||
         static_cast<EpubTool*>(toybox.hostActive())->hostScreen() != 1) {
       printf("RECENTS FAIL: the epub cover did not reopen the book\n");
+      abort();
+    }
+    // ...and straight to the book: the loading face and the first page, two
+    // paints. Three would mean the shelf list flashed on the way, the screen
+    // this shortcut exists to skip.
+    if (stickyHost.hostPaints() > 2) {
+      printf("RECENTS FAIL: the cover tap cost %d paints - did the shelf show?\n",
+             stickyHost.hostPaints());
       abort();
     }
     toybox.onButton(SideBtn::Ok);  // close the book
