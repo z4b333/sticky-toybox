@@ -53,13 +53,15 @@ COMMIT="$VERSION"
 DATE=$(git log -1 --format=%cd --date=format:'%d %b %Y' 2>/dev/null || echo '')
 BYTES=$(stat -c %s docs/firmware/toybox-full.bin)
 SHA=$(sha256sum docs/firmware/toybox-full.bin | cut -c1-16)
+APP_BYTES=$(stat -c %s docs/firmware/toybox-app.bin)
 cat > docs/firmware/version.json <<JSON
 {
   "version": "$VERSION",
   "commit": "$COMMIT",
   "date": "$DATE",
   "bytes": $BYTES,
-  "sha256": "$SHA"
+  "sha256": "$SHA",
+  "appBytes": $APP_BYTES
 }
 JSON
 cat docs/firmware/version.json

@@ -289,6 +289,41 @@
   });
   updateManifests();
 
+  // Two ways a flash gets fed bad bytes, both refused before a single sector
+  // is erased. A page opened straight from disk cannot reliably hand its
+  // binaries to the flasher -- a write that starts and dies leaves no app to
+  // boot, which looks exactly like a dead device. And a server that answers
+  // the wrong size for the app (a stale cache, a truncated upload) is caught
+  // by comparing what it serves against what the build recorded.
+  var dead = false;  // once refused, nothing later may talk over the reason
+  function disableButtons(msg) {
+    dead = true;
+    document.querySelectorAll('esp-web-install-button').forEach(function (b) {
+      b.setAttribute('manifest', '');
+      b.style.display = 'none';
+    });
+    var el = document.getElementById('ver');
+    el.innerHTML = '<b>' + msg + '</b>';
+  }
+  if (location.protocol === 'file:') {
+    disableButtons('This page cannot flash when opened from disk - the browser ' +
+                   'will not feed local files to the flasher, and a write that ' +
+                   'dies partway leaves the device unbootable. Use the hosted ' +
+                   'page, or esptool from the command line.');
+  }
+  function checkAppSize(v) {
+    if (!v.appBytes) return;  // an older version.json: nothing to check against
+    fetch('firmware/toybox-app.bin' + bust, { method: 'HEAD', cache: 'no-store' })
+      .then(function (r) {
+        var len = parseInt(r.headers.get('content-length') || '0', 10);
+        if (r.ok && len && len !== v.appBytes)
+          disableButtons('The server is not serving the firmware this page expects (' +
+                         len + ' bytes vs ' + v.appBytes + ') - not flashing from it. ' +
+                         'Hard-refresh, or wait for the site to finish deploying.');
+      })
+      .catch(function () {});  // no HEAD support: the flasher's own fetch decides
+  }
+
   // Written next to the image by tools/make_image.sh. Fetched with no-store so
   // this line describes the firmware on the server rather than one from an
   // earlier visit. The same version string is on the device's service screen,
@@ -296,8 +331,10 @@
   fetch('firmware/version.json', { cache: 'no-store' })
     .then(function (r) { return r.json(); })
     .then(function (v) {
+      if (dead) return;
       bust = '?v=' + encodeURIComponent(v.commit);
       updateManifests();
+      checkAppSize(v);
       var mb = (v.bytes / 1048576).toFixed(2);
       document.getElementById('ver').innerHTML =
         'About to install <b>' + v.version + '</b> &middot; built ' + v.date +
@@ -306,6 +343,7 @@
         'the same version, so you can check it took.';
     })
     .catch(function () {
+      if (dead) return;
       document.getElementById('ver').textContent =
         'Could not read the version file, so I cannot say which build this is.';
     });
