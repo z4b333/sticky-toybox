@@ -2361,12 +2361,13 @@ int main() {
     toybox.onButton(SideBtn::Ok);  // the panel again, for the close row below
 
     // And the way out is a row, not the button.
-    // The rotation row: one tap chooses landscape, and the turn lands when the
-    // panel closes -- laid out at the wide width, reading offset pinned still.
+    // Rotation is three buttons in the row: LEFT (3), PORTRAIT (0), RIGHT
+    // (1), one tap each -- and the turn still lands when the panel closes.
     {
+      const int rotY = rmenu::rootRect(4, 480).y + 79;  // through the buttons
       const uint32_t offR = et->hostPageOffset();
       const int linesPortrait = et->hostLineCount();
-      toybox.onTap(240, rmenu::rootRect(4, 480).y + 40);  // portrait -> landscape
+      toybox.onTap(380, rotY);  // RIGHT: landscape
       if (stickyHost.canvasRotation() != 0) {
         printf("EPUB APP FAIL: the panel turned before it closed\n");
         abort();
@@ -2397,16 +2398,23 @@ int main() {
         printf("EPUB APP FAIL: the panel opened sideways\n");
         abort();
       }
-      // Back to portrait: two more taps on the row, then close.
-      toybox.onTap(240, rmenu::rootRect(4, 480).y + 40);  // -> flipped
-      toybox.onTap(240, rmenu::rootRect(4, 480).y + 40);  // -> portrait
+      // The other landscape, one tap, no cycling through portrait to get
+      // there; then straight home the same way.
+      toybox.onTap(98, rotY);  // LEFT: the flipped landscape
+      toybox.onButton(SideBtn::Ok);
+      if (stickyHost.canvasRotation() != 3) {
+        printf("EPUB APP FAIL: LEFT did not land the flipped landscape\n");
+        abort();
+      }
+      toybox.onButton(SideBtn::Ok);
+      toybox.onTap(239, rotY);  // PORTRAIT
       toybox.onButton(SideBtn::Ok);
       if (stickyHost.canvasRotation() != 0 ||
           stickyHost.prefs().getUInt("rd_rot", 99) != 0) {
-        printf("EPUB APP FAIL: three rotation taps did not come back to portrait\n");
+        printf("EPUB APP FAIL: PORTRAIT did not stand the page back up\n");
         abort();
       }
-      printf("rotation ok (turns on close, offset pinned, panel stays portrait)\n");
+      printf("rotation ok (three buttons, turns on close, offset pinned)\n");
       toybox.onButton(SideBtn::Ok);  // panel up for the close row below
     }
     toybox.onTap(240, rmenu::rootRect(5, 480).y + 40);

@@ -587,10 +587,13 @@ class EpubTool : public ToolApp {
   }
 
   // 0 portrait, 1 and 3 the two landscapes. Which of the two you want depends
-  // on which hand holds the device, so both are offered.
-  static uint8_t nextRot(uint8_t r) { return r == 0 ? 1 : r == 1 ? 3 : 0; }
-  static const char* rotName(uint8_t r) {
-    return r == 1 ? "landscape" : r == 3 ? "landscape, flipped" : "portrait";
+  // on which hand holds the device, so both are offered -- as buttons, in
+  // the order the arrows suggest: turn it left, keep it upright, turn it
+  // right.
+  static constexpr uint8_t kRotBtn[3] = {3, 0, 1};
+  static TRect rotBtnRect(const TRect& row, int k) {
+    const int bw = (row.w - 32) / 3;
+    return {row.x + 8 + k * (bw + 8), row.y + 56, bw, 46};
   }
 
   // The panel's screens are drawn portrait; the page is drawn at the chosen
@@ -1368,22 +1371,44 @@ class EpubTool : public ToolApp {
                epubui::leadName(_lead));
       items[2].sub = _rootSub[2];
       int n = 3;
-      if (host().typefaceCount() > 1) {
-        // A row that cycles in place, like the .tbk reader's page turns: the
-        // row states the answer, so there is nowhere to go.
+      const int rowFace = host().typefaceCount() > 1 ? n : -1;
+      if (rowFace >= 0) {
+        // A row that cycles in place -- but its answer is SHOWN, not named:
+        // the line under the label is the book's own words drawn in the face,
+        // so each tap is a live specimen rather than a name to imagine.
         items[n].label = "Typeface";
-        snprintf(_rootSub[n], sizeof(_rootSub[n]), "%s  -  the page reflows", faceName(_face));
-        items[n].sub = _rootSub[n];
+        items[n].sub = "";
         n++;
       }
+      const int rowRot = n;
       items[n].label = "Rotation";
-      snprintf(_rootSub[n], sizeof(_rootSub[n]), "%s  -  lands when the panel closes",
-               rotName(_rot));
-      items[n].sub = _rootSub[n];
+      items[n].sub = "";  // three buttons, drawn below
       n++;
       items[n].label = "Close the book";
       items[n].sub = _books[_cur].title;
       rmenu::drawRoot(host(), c, "Options", items, n + 1);
+      if (rowFace >= 0) {
+        const TRect r = rmenu::rootRect(rowFace, c.width());
+        char sample[120];
+        // The face's name, then the page being read -- the words already on
+        // the reader's mind are the fairest test of a font.
+        snprintf(sample, sizeof(sample), "%s - %s", faceName(_face),
+                 _lineN > 0 && _lines[0].t[0] ? _lines[0].t : "The quick brown fox");
+        FaceScope fs(host(), _face);
+        c.textClipped(r.x + 8, r.y + 66, r.w - 16, sample, TS_MED, true);
+      }
+      {
+        // Rotation as three buttons -- one tap to any of the three, no
+        // cycling through the one you do not want. The arrows say which way
+        // the device turns; the filled one is where you are. The turn itself
+        // still lands when the panel closes.
+        const TRect r = rmenu::rootRect(rowRot, c.width());
+        static const char* kLab[3] = {"< LEFT", "PORTRAIT", "RIGHT >"};
+        for (int k = 0; k < 3; k++) {
+          const TRect b = rotBtnRect(r, k);
+          c.button(b.x, b.y, b.w, b.h, kLab[k], _rot == kRotBtn[k], TS_SMALL);
+        }
+      }
       return;
     }
 
@@ -1549,13 +1574,19 @@ class EpubTool : public ToolApp {
         return;
       }
       if (hit == rowRot) {
-        // The row cycles; the turn itself waits for the panel to close, so
-        // the panel is never asked to draw itself sideways.
-        _rot = nextRot(_rot);
-        prefs().putUInt("rd_rot", _rot);
-        host().beep(0);
-        paint();
-        return;
+        // One of the three buttons; the turn itself waits for the panel to
+        // close, so the panel is never asked to draw itself sideways.
+        const TRect r = rmenu::rootRect(rowRot, W);
+        for (int k = 0; k < 3; k++) {
+          if (!rotBtnRect(r, k).hit(x, y)) continue;
+          if (_rot == kRotBtn[k]) return;  // already there: nothing to say
+          _rot = kRotBtn[k];
+          prefs().putUInt("rd_rot", _rot);
+          host().beep(0);
+          paint();
+          return;
+        }
+        return;  // the row outside the buttons chooses nothing
       }
       if (hit == rowClose) {
         _menu = rmenu::Page::None;
