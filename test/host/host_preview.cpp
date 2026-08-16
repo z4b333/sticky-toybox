@@ -3135,6 +3135,71 @@ int main() {
     g_dumpEnabled = true;
   }
 
+  // --- first open leads with the sidecar cover --------------------------------
+  // A never-opened book with a .cover.bmp beside it: the FIRST paint of its
+  // open must already be the cover, not the titled plate. (Beta.43 built the
+  // cover after the loading paint, so a book's very first open showed the
+  // plate even when the owner had supplied the picture.) The sidecar is
+  // all-black on purpose: the loudest possible difference from the plate's
+  // white field, measurable straight off the dumped frame.
+  {
+    g_dumpEnabled = false;
+    static uint8_t bmp[14 + 40 + 1024 + 240 * 400];
+    {
+      const int W = 240, H = 400;
+      const uint32_t off = 14 + 40 + 1024, img = (uint32_t)W * H, total = off + img;
+      memset(bmp, 0, sizeof(bmp));
+      bmp[0] = 'B'; bmp[1] = 'M';
+      bmp[2] = (uint8_t)total; bmp[3] = (uint8_t)(total >> 8); bmp[4] = (uint8_t)(total >> 16);
+      bmp[10] = (uint8_t)off; bmp[11] = (uint8_t)(off >> 8);
+      bmp[14] = 40;
+      bmp[18] = (uint8_t)(W & 255); bmp[19] = (uint8_t)(W >> 8);
+      bmp[22] = (uint8_t)(H & 255); bmp[23] = (uint8_t)(H >> 8);
+      bmp[26] = 1; bmp[28] = 8;
+      // The palette stays all zeroes: every pixel is black.
+    }
+    sdcard::hostPutCardFile("/books/Uketsu/strange-houses.cover.bmp", bmp, (int)sizeof(bmp));
+    if (bthumb::have("/books/Uketsu/strange-houses.epub")) {
+      printf("SIDECAR-OPEN FAIL: the book already had a cover; this guard needs a first open\n");
+      abort();
+    }
+    toybox.goHub();
+    toybox.open(false, 10, false);
+    auto* eso = static_cast<EpubTool*>(toybox.hostActive());
+    const int frame0 = g_dumpCounter;
+    g_dumpEnabled = true;
+    setScreen("sidecar_first_open");
+    if (!eso->openDirect("/books/Uketsu/strange-houses.epub")) {
+      printf("SIDECAR-OPEN FAIL: the book did not open\n");
+      abort();
+    }
+    g_dumpEnabled = false;
+    char fname[128];
+    snprintf(fname, sizeof(fname), "preview_%02d_sidecar_first_open.pgm", frame0);
+    FILE* fr = fopen(fname, "rb");
+    if (!fr) {
+      printf("SIDECAR-OPEN FAIL: no frame was painted (%s)\n", fname);
+      abort();
+    }
+    char head[64];
+    (void)!fgets(head, sizeof(head), fr);
+    (void)!fgets(head, sizeof(head), fr);
+    (void)!fgets(head, sizeof(head), fr);
+    long dark = 0, totalPx = 0;
+    for (int ch; (ch = fgetc(fr)) != EOF; totalPx++)
+      if (ch < 128) dark++;
+    fclose(fr);
+    if (totalPx < 480 * 800 || dark * 2 < totalPx) {
+      printf("SIDECAR-OPEN FAIL: first paint was %ld/%ld dark -- the plate, not the cover\n",
+             dark, totalPx);
+      abort();
+    }
+    toybox.goHub();
+    printf("sidecar first open ok (first paint %ld%% dark = the cover)\n",
+           dark * 100 / totalPx);
+    g_dumpEnabled = true;
+  }
+
   // --- recipes ---------------------------------------------------------------
   // The parser first, on JSON shaped like the internet actually serves it:
   // @graph with an Article in the way, @type as an array, HowToStep objects,
