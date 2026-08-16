@@ -180,7 +180,9 @@
   exactly as they were. Use it for every build after your first.
   <b>FIRST&nbsp;INSTALL</b> also writes the bootloader and partition table
   &mdash; needed once on a new device, or if an update ever refuses to boot.
-  Neither erases your notes. Both need Chrome or Edge and a USB-C data cable;
+  Neither erases your notes. When the dialog asks about <b>erasing the
+  device, leave the box unchecked</b> &mdash; ticking it wipes notes,
+  settings and font packs. Both need Chrome or Edge and a USB-C data cable;
   the serial console opens when the write finishes, and that first-boot log is
   the most useful thing to send if anything goes wrong.</p>
 
@@ -272,7 +274,15 @@
     return {
       name: 'Toybox',
       version: '1.0',
-      new_install_prompt_erase: false,
+      // MUST stay true. Toybox has no Improv serial, so esp-web-tools can
+      // never recognise it as "the same firmware" -- and its dialog reacts to
+      // an unrecognised device with prompt_erase:false by SILENTLY ERASING
+      // THE WHOLE CHIP before writing. An UPDATE (app only) then leaves no
+      // bootloader behind: flash reads 0xFF below 0x10000 and the board is
+      // dead until a USB reflash. Seen on a real device, dump verified.
+      // With true, the dialog asks, the checkbox defaults to unchecked, and
+      // an unchecked Next writes only the listed parts.
+      new_install_prompt_erase: true,
       builds: [{ chipFamily: 'ESP32-S3', parts: parts }]
     };
   }
