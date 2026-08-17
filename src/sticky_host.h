@@ -38,11 +38,19 @@ class StickyCanvas : public ToolsCanvas {
   void drawCircle(int cx, int cy, int r, int t, bool black) override {
     epd.drawCircle(cx, cy, r, black ? 0 : 1, t);
   }
-  void text(int x, int y, const char* s, TSize sz, bool black, bool bold) override {
+  // The italic flag is a gfx-level knob rather than an argument (see gfx.h),
+  // so it is turned on for the call and off again -- never left set, or the
+  // next thing to draw would inherit it.
+  void text(int x, int y, const char* s, TSize sz, bool black, bool bold, bool ital) override {
+    if (ital) gfx::setItalic(true);
     gfx::drawText(x, y, s, scaleOf(sz), black ? 0 : 1, bold);
+    if (ital) gfx::setItalic(false);
   }
-  int textWidth(const char* s, TSize sz, bool bold) const override {
-    return gfx::textWidth(s, scaleOf(sz), bold);
+  int textWidth(const char* s, TSize sz, bool bold, bool ital) const override {
+    if (ital) gfx::setItalic(true);
+    const int w = gfx::textWidth(s, scaleOf(sz), bold);
+    if (ital) gfx::setItalic(false);
+    return w;
   }
   int textHeight(TSize sz) const override { return gfx::textHeight(scaleOf(sz)); }
   void textPad(const char* s, TSize sz, int& l, int& r, int& t, int& b) const override {
@@ -108,7 +116,7 @@ class StickyHost : public ToolsHost {
     touch.setRotation(r);
   }
   int canvasRotation() const override { return epd.rotation(); }
-  int typefaceCount() const override { return 3; }
+  int typefaceCount() const override { return 2; }
   int typeface() const override { return gfx::typeface(); }
   void setTypeface(int n) override { gfx::setTypeface(n); }
   int deviceOrientation() override {

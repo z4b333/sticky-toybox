@@ -46,10 +46,16 @@ bool isNonVisible(const char* name) {
          nameIs(name, "title") || nameIs(name, "rp");
 }
 
-// The two inline tags this reader honours. <em> and <i> are deliberately not
-// here: the device carries no italic face, and a slanted-by-shear glyph on a
-// 1-bit panel reads as a printing fault rather than emphasis.
+// The inline tags this reader honours. Bold and italic, and nothing else:
+// everything further that CSS can say about a span is a rabbit hole with no
+// floor.
 bool isBoldTag(const char* name) { return nameIs(name, "b") || nameIs(name, "strong"); }
+
+// <cite> joins <i> and <em> because that is what a book uses it for -- the
+// name of another book, set in italic by every stylesheet that bothers.
+bool isItalTag(const char* name) {
+  return nameIs(name, "i") || nameIs(name, "em") || nameIs(name, "cite");
+}
 
 // h1..h6, as a level. Headings are block tags too (below), so a heading has
 // its own paragraph and can be laid out at its own size without splitting a
@@ -983,6 +989,7 @@ bool Book::chapterOpen(int spineIdx) {
   _wordStyle = 0;
   _outStyle = 0;
   _boldDepth = 0;  // a chapter opens in body type, whatever the last one left
+  _italDepth = 0;
   _headLevel = 0;
   _outReady = false;
   _wordSinceBreak = false;
@@ -1053,7 +1060,8 @@ void Book::tokEmitCp(uint32_t cp, const char* utf8, int len) {
   }
   if (_wordLen == 0) {
     _wordStart = at;
-    _wordStyle = (uint8_t)((_boldDepth ? STYLE_BOLD : 0) | (_headLevel << 4));
+    _wordStyle = (uint8_t)((_boldDepth ? STYLE_BOLD : 0) | (_italDepth ? STYLE_ITAL : 0) |
+                           (_headLevel << 4));
   }
   if (sub) {
     _word[_wordLen++] = sub;
@@ -1172,6 +1180,7 @@ int Book::tokPump() {
         }
         if (_insideBody && _nonVisibleDepth == 0) {
           if (isBoldTag(name) && _boldDepth) _boldDepth--;
+          if (isItalTag(name) && _italDepth) _italDepth--;
           if (headingLevel(name)) _headLevel = 0;
         }
         if (_insideBody && _nonVisibleDepth == 0 && isBlockTag(name)) tokBlockBreak();
@@ -1182,6 +1191,7 @@ int Book::tokPump() {
         if (_insideBody && _nonVisibleDepth == 0 && isBlockTag(name)) tokBlockBreak();
         if (_insideBody && _nonVisibleDepth == 0 && !selfClose) {
           if (isBoldTag(name) && _boldDepth < 250) _boldDepth++;
+          if (isItalTag(name) && _italDepth < 250) _italDepth++;
           if (const int hl = headingLevel(name)) _headLevel = (uint8_t)hl;
         }
         if (selfClose && skip) _nonVisibleDepth--;

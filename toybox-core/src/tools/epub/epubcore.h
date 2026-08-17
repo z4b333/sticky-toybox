@@ -87,9 +87,12 @@ class Book {
   // STARTS, which is the only place a run can be said to begin -- a word
   // straddling a tag boundary belongs to the style it was opened in.
   //
-  // Only these two. Italic would need a face this device does not carry, and
-  // everything else CSS can say about a span is a rabbit hole with no floor.
+  // Bold and italic. Both faces the reader can be set to now carry a real
+  // italic -- a drawn one, not a sheared roman, which on a 1-bit panel at
+  // 16 px reads as a printing fault rather than as emphasis. Everything else
+  // CSS can say about a span is a rabbit hole with no floor.
   static constexpr uint8_t STYLE_BOLD = 1;
+  static constexpr uint8_t STYLE_ITAL = 2;
   uint8_t wordStyle() const { return _outStyle; }
   int wordHeading() const { return _outStyle >> 4; }
 
@@ -209,6 +212,7 @@ class Book {
   uint8_t _wordStyle = 0;   // the style the word in hand started in
   uint8_t _outStyle = 0;    // ...and the one the caller is holding
   uint8_t _boldDepth = 0;   // nested <b>/<strong>
+  uint8_t _italDepth = 0;   // nested <i>/<em>/<cite>
   uint8_t _headLevel = 0;   // 1..6 while inside an <h1>..<h6>
   char _outWord[WORD_CAP];
   uint32_t _outStart = 0;

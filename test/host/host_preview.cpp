@@ -2335,14 +2335,16 @@ int main() {
     g_dumpEnabled = false;
     toybox.onButton(SideBtn::Ok);  // back to the root
 
-    // The typeface row cycles in place: three taps come back to DejaVu, the
-    // preference sticks, and the page never leaves the panel. In between, a
-    // different face must actually measure differently -- that is the whole
+    // The typeface row cycles in place: a tap per face comes back to DejaVu,
+    // the preference sticks, and the page never leaves the panel. In between,
+    // a different face must actually measure differently -- that is the whole
     // point -- so the second face's line count is allowed to differ but the
-    // reading offset must not move.
+    // reading offset must not move. Counted from the host rather than written
+    // down here: dropping Atkinson took the count from three to two, and a
+    // literal 3 would have walked one face past the end.
     {
       const uint32_t offBefore = et->hostPageOffset();
-      for (int i = 0; i < 3; i++) {
+      for (int i = 0; i < stickyHost.typefaceCount(); i++) {
         toybox.onTap(240, rmenu::rootRect(3, 480).y + 40);
         if (et->hostMenu() == 0) {
           printf("EPUB APP FAIL: the typeface row left the panel\n");
@@ -2355,7 +2357,7 @@ int main() {
         }
       }
       if (stickyHost.prefs().getUInt("rd_face", 99) != 0) {
-        printf("EPUB APP FAIL: three typeface taps did not come back to DejaVu\n");
+        printf("EPUB APP FAIL: a full cycle of typeface taps did not come back to DejaVu\n");
         abort();
       }
       printf("typeface ok (three faces cycle, the place read from stands still)\n");
@@ -3493,8 +3495,47 @@ int main() {
         printf("STYLE FAIL: byte %d of '%s' lost its bold\n", i, l1);
         abort();
       }
+    // ...and the italic, which is a different face rather than a sheared one:
+    // "ende" is inside an <em>, every byte of it is marked, and the italic
+    // measures narrower than the roman. That last check is the one that would
+    // catch the tables being wired to the roman by mistake -- a fallback the
+    // bake script warns about but the firmware could not otherwise notice.
+    es->hostGoto(0, 27);  // "ende", the paragraph after the illustrations
+    const char* le = nullptr;
+    int lineIdx = -1;
+    for (int i = 0; i < es->hostLineCount(); i++)
+      if (strstr(es->hostLine(i), "ende")) { le = es->hostLine(i); lineIdx = i; }
+    if (!le) {
+      printf("STYLE FAIL: no line holding the italic word\n");
+      abort();
+    }
+    for (int i = 0; le[i]; i++)
+      if (!es->hostLineItalAt(lineIdx, i)) {
+        printf("STYLE FAIL: byte %d of '%s' lost its italic\n", i, le);
+        abort();
+      }
+    {
+      // Measured under LITERATA, not the default face. DejaVu's oblique is
+      // drawn to the roman's own advance widths -- that is how the family is
+      // designed -- so a width test there proves nothing either way. Literata
+      // draws a true italic with its own narrower fit, so if the bake ever
+      // falls back to the roman (make_fonts_read.py warns, and warnings get
+      // scrolled past) these two numbers become equal and this fails.
+#ifndef TOYBOX_CP_FONTS
+      gfx::setTypeface(1);
+      const int roman = stickyHost.canvas().textWidth("ende", TS_MED, false, false);
+      const int ital = stickyHost.canvas().textWidth("ende", TS_MED, false, true);
+      gfx::setTypeface(0);
+      if (roman == ital) {
+        printf("STYLE FAIL: Literata's italic measures the same as its roman (%d px)"
+               " - the italic tables are the roman face\n", roman);
+        abort();
+      }
+#endif  // the CrossPoint stand-in family has one weight and no italic
+    }
     toybox.goHub();
-    printf("headings and bold ok (h2 whole and large, <b> exact to the byte)\n");
+    printf("headings, bold and italic ok (h2 whole and large, <b> and <em> exact"
+           " to the byte, italic a face of its own)\n");
     g_dumpEnabled = true;
   }
 

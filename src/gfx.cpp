@@ -63,9 +63,27 @@ namespace {
 // family and ignores the knob, faithfully to that firmware.
 int g_typeface = 0;
 
+// Italic, set the same way and for the same reason as the typeface: the reader
+// turns it on around one run of a line and off again. A signature-wide flag
+// would have to be threaded through drawChar, textInk and the font-pack path
+// as well, and every caller that never sets it would carry it.
+//
+// There is no bold-italic face. Bold wins where a book nests the two: it is
+// the stronger of the two signals, and a run that is both is nearly always a
+// heading or a name rather than a sentence.
+bool g_italic = false;
+
 const UiFont* faceFor(int px, bool bold) {
 #ifdef UI_HAS_EXTRAS
   if (g_typeface == 1) {
+    if (g_italic && !bold) {
+      switch (px) {
+        case 24: return &FONT_LIT_24_ITAL;
+        case 32: return &FONT_LIT_32_ITAL;
+        case 44: return &FONT_LIT_44_ITAL;
+        default: return &FONT_LIT_16_ITAL;
+      }
+    }
     switch (px) {
       case 24: return bold ? &FONT_LIT_24_BOLD : &FONT_LIT_24_REG;
       case 32: return bold ? &FONT_LIT_32_BOLD : &FONT_LIT_32_REG;
@@ -73,12 +91,14 @@ const UiFont* faceFor(int px, bool bold) {
       default: return bold ? &FONT_LIT_16_BOLD : &FONT_LIT_16_REG;
     }
   }
-  if (g_typeface == 2) {
+#endif
+#ifdef UI_HAS_ITALIC
+  if (g_italic && !bold) {
     switch (px) {
-      case 24: return bold ? &FONT_ATK_24_BOLD : &FONT_ATK_24_REG;
-      case 32: return bold ? &FONT_ATK_32_BOLD : &FONT_ATK_32_REG;
-      case 44: return bold ? &FONT_ATK_44_BOLD : &FONT_ATK_44_REG;
-      default: return bold ? &FONT_ATK_16_BOLD : &FONT_ATK_16_REG;
+      case 24: return &FONT_24_ITAL;
+      case 32: return &FONT_32_ITAL;
+      case 44: return &FONT_44_ITAL;
+      default: return &FONT_16_ITAL;
     }
   }
 #endif
@@ -209,8 +229,10 @@ int intlAdvance(int px, uint32_t cp) {
 }
 }  // namespace
 
-void setTypeface(int n) { g_typeface = (n < 0 || n > 2) ? 0 : n; }
+void setTypeface(int n) { g_typeface = (n < 0 || n > 1) ? 0 : n; }
 int typeface() { return g_typeface; }
+void setItalic(bool on) { g_italic = on; }
+bool italic() { return g_italic; }
 
 void drawChar(int x, int y, char c, int px, uint8_t color) {
   const UiFont* f = faceFor(px, false);

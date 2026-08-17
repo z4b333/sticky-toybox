@@ -150,14 +150,16 @@ by Toybox's own decoder over the vendored miniz inflate
 
 ## Reading typefaces (tools/fonts/, baked into src/fonts_read.h)
 
-The EPUB reader's two optional typefaces, both under the SIL Open Font
-License 1.1, rasterised to 1-bit tables by tools/make_fonts_read.py from the
-files vendored in tools/fonts/:
+The EPUB reader's optional typeface, under the SIL Open Font License 1.1,
+rasterised to 1-bit tables by tools/make_fonts_read.py from the files vendored
+in tools/fonts/ — roman, bold and italic:
 
 - **Literata** — copyright TypeTogether, commissioned by Google for Play
   Books. https://github.com/googlefonts/literata
-- **Atkinson Hyperlegible** — copyright Braille Institute of America.
-  https://brailleinstitute.org/freefont
+
+Atkinson Hyperlegible (copyright Braille Institute of America) was carried
+here as a third reading face until the italics went in, and its 92 KB of
+tables paid for them. It is no longer vendored.
 
 The OFL permits embedding and redistribution; the font files themselves are
 carried unmodified in tools/fonts/ so the tables can be regenerated.

@@ -250,9 +250,9 @@ static const char kFakeCh1[] =
     "<style>p { margin: 0; }</style>\n"
     "</head>\n"
     "<body>\n"
-    // A heading and a bold phrase, made out of the text that was already
-    // here: tags carry no visible codepoints, so every offset the other
-    // guards pin down stays exactly where it was.
+    // A heading, a bold phrase and (below) an italic one, made out of the
+    // text that was already here: tags carry no visible codepoints, so every
+    // offset the other guards pin down stays exactly where it was.
     "<h2>One two&nbsp;three</h2>\n"
     "<p>caf&#233; <b>&amp; more</b></p>\n"
     // The illustration, deliberately on the same line as the paragraph after
@@ -262,7 +262,7 @@ static const char kFakeCh1[] =
     // A second picture, at the same offset as the first and as "ende", whose
     // toybox/ counterpart the book does NOT carry: the reader draws its plate
     // instead, and a back-turn still has to tell the two of them apart.
-    "<img src=\"images/missing.png\" alt=\"unprepared\"/></div><p>ende</p>\n"
+    "<img src=\"images/missing.png\" alt=\"unprepared\"/></div><p><em>ende</em></p>\n"
     "</body>\n"
     "</html>\n";
 

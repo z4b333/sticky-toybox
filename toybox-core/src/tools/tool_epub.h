@@ -341,6 +341,7 @@ class EpubTool : public ToolApp {
   const char* hostLine(int i) const { return i < _lineN ? _lines[i].t : ""; }
   int hostLineHead(int i) const { return i < _lineN ? _lines[i].head : 0; }
   bool hostLineBoldAt(int i, int at) const { return i < _lineN && _lines[i].boldAt(at); }
+  bool hostLineItalAt(int i, int at) const { return i < _lineN && _lines[i].italAt(at); }
   int hostLineCount() const { return _lineN; }
   const char* hostDir() const { return _dir; }
   int hostFolders() const { return _nf; }
@@ -414,7 +415,12 @@ class EpubTool : public ToolApp {
     // text is 25 bytes of flags; runs would be smaller only for lines that
     // do not exist in real books.
     uint8_t bold[25];
+    // ...and which are italic, on the same terms. Two bitmaps rather than one
+    // two-bit field: the run-splitter reads them independently, and a line is
+    // far more often all-roman than mixed.
+    uint8_t ital[25];
     bool boldAt(int i) const { return (bold[i >> 3] >> (i & 7)) & 1; }
+    bool italAt(int i) const { return (ital[i >> 3] >> (i & 7)) & 1; }
     void setBold(int i) { bold[i >> 3] |= (uint8_t)(1 << (i & 7)); }
   };
 
@@ -659,9 +665,7 @@ class EpubTool : public ToolApp {
 
   // Lays out the next page from the stream into _lines. Returns the number of
   // words placed (0 means the chapter had nothing left).
-  static const char* faceName(int f) {
-    return f == 1 ? "Literata" : f == 2 ? "Atkinson" : "DejaVu";
-  }
+  static const char* faceName(int f) { return f == 1 ? "Literata" : "DejaVu"; }
 
   // 0 portrait, 1 and 3 the two landscapes. Which of the two you want depends
   // on which hand holds the device, so both are offered -- as buttons, in
@@ -743,6 +747,7 @@ class EpubTool : public ToolApp {
     // bytes are bold.
     int curHead = 0;
     uint8_t curBold[25] = {};
+    uint8_t curItal[25] = {};
     int placed = 0;
     uint32_t pageStart = 0;
     bool started = false;
@@ -768,12 +773,14 @@ class EpubTool : public ToolApp {
       _lines[_lineN].y = (short)y;
       _lines[_lineN].head = (uint8_t)curHead;
       memcpy(_lines[_lineN].bold, curBold, sizeof(curBold));
+      memcpy(_lines[_lineN].ital, curItal, sizeof(curItal));
       _lineN++;
       y += h;
       curLen = 0;
       curW = 0;
       curHead = 0;
       memset(curBold, 0, sizeof(curBold));
+      memset(curItal, 0, sizeof(curItal));
       return true;
     };
     auto roomForLine = [&](int head) {
@@ -798,6 +805,10 @@ class EpubTool : public ToolApp {
       }
       const int wHead = st >> 4;
       const bool wBold = (st & epubc::Book::STYLE_BOLD) != 0;
+      // Bold wins where a book nests the two: there is no bold-italic face,
+      // and gfx would ignore the italic anyway. Deciding it here keeps the
+      // measured width and the drawn width the same thing.
+      const bool wItal = !wBold && (st & epubc::Book::STYLE_ITAL) != 0;
 
       if (tok == epubc::TOK_END || tok == epubc::TOK_ERR) {
         _atEnd = true;
@@ -834,7 +845,7 @@ class EpubTool : public ToolApp {
 
       // a word, measured in the face it will be drawn in
       const TSize wts = epubui::sizeFor(_size, wHead);
-      const int ww = c.textWidth(w, wts, wBold);
+      const int ww = c.textWidth(w, wts, wBold, wItal);
       // A heading never shares a line with body text: they are different
       // blocks, so a change of level flushes what is in hand.
       if (curLen && wHead != curHead) {
@@ -852,7 +863,7 @@ class EpubTool : public ToolApp {
       // rather than three and the width the layout counted is the width the
       // drawing spends.
       const int wSpaceW =
-          c.textWidth(" ", wts, wBold) > 0 ? c.textWidth(" ", wts, wBold) : spaceW;
+          c.textWidth(" ", wts, wBold, wItal) > 0 ? c.textWidth(" ", wts, wBold, wItal) : spaceW;
       if (!started) {
         pageStart = off;
         started = true;
@@ -865,9 +876,11 @@ class EpubTool : public ToolApp {
       // Records which bytes of `cur` this word occupies, so the line can be
       // drawn in runs later.
       auto markBold = [&](int from, int len) {
-        if (!wBold) return;
-        for (int i = from; i < from + len && i < (int)sizeof(curBold) * 8; i++)
-          curBold[i >> 3] |= (uint8_t)(1 << (i & 7));
+        if (!wBold && !wItal) return;
+        for (int i = from; i < from + len && i < (int)sizeof(curBold) * 8; i++) {
+          if (wBold) curBold[i >> 3] |= (uint8_t)(1 << (i & 7));
+          if (wItal) curItal[i >> 3] |= (uint8_t)(1 << (i & 7));
+        }
       };
       // A line is only ever STARTED if there is room for it to land. Room
       // used to be checked when the line was flushed, a word too late: a page
@@ -947,7 +960,7 @@ class EpubTool : public ToolApp {
           else if (lead >= 0xC0) step = 2;
           memcpy(probe, rest, (size_t)(fitBytes + step));
           probe[fitBytes + step] = 0;
-          if (c.textWidth(probe, wts, wBold) > lineW) break;
+          if (c.textWidth(probe, wts, wBold, wItal) > lineW) break;
           fitBytes += step;
         }
         if (fitBytes == 0) fitBytes = 1;  // a glyph wider than the line still moves on
@@ -956,7 +969,7 @@ class EpubTool : public ToolApp {
         markBold(0, fitBytes);
         memcpy(probe, rest, (size_t)fitBytes);
         probe[fitBytes] = 0;
-        curW = c.textWidth(probe, wts, wBold);
+        curW = c.textWidth(probe, wts, wBold, wItal);
         rest += fitBytes;
         if (*rest && !flushLine()) {
           strcpy(_pend, rest);
@@ -2042,25 +2055,31 @@ class EpubTool : public ToolApp {
       if (_chrome) renderFooter(c);
       return;
     }
-    // Each line in its own type, and in runs where the weight changes inside
-    // it: the parser said which bytes were inside a <b> or <strong>, and a
-    // heading line carries its level. Drawn left to right, each run measured
-    // as it is placed, which is the same arithmetic the layout did.
+    // Each line in its own type, and in runs where the STYLE changes inside
+    // it: the parser said which bytes were inside a <b> or <strong> and which
+    // inside an <i>, <em> or <cite>, and a heading line carries its level.
+    // Drawn left to right, each run measured as it is placed, which is the
+    // same arithmetic the layout did.
     for (int i = 0; i < _lineN; i++) {
       const Line& ln = _lines[i];
       const TSize lts = epubui::sizeFor(_size, ln.head);
       const int n = (int)strlen(ln.t);
       int x = epubui::MARGIN;
+      // A heading is bold throughout, and bold beats italic (see gfx.h), so
+      // both questions are answered per byte and a run is a stretch where
+      // neither answer changes.
+      auto boldOf = [&](int i2) { return ln.boldAt(i2) || ln.head != 0; };
+      auto italOf = [&](int i2) { return ln.italAt(i2) && !boldOf(i2); };
       for (int a = 0; a < n;) {
-        const bool bold = ln.boldAt(a) || ln.head != 0;  // a heading is bold throughout
+        const bool bold = boldOf(a), ital = italOf(a);
         int b = a + 1;
-        while (b < n && (ln.boldAt(b) || ln.head != 0) == bold) b++;
+        while (b < n && boldOf(b) == bold && italOf(b) == ital) b++;
         char seg[201];
         const int len = b - a;
         memcpy(seg, ln.t + a, (size_t)len);
         seg[len] = 0;
-        c.text(x, ln.y, seg, lts, true, bold);
-        x += c.textWidth(seg, lts, bold);
+        c.text(x, ln.y, seg, lts, true, bold, ital);
+        x += c.textWidth(seg, lts, bold, ital);
         a = b;
       }
     }

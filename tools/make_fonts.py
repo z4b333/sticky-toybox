@@ -30,9 +30,13 @@ EXTRAS = ([c for c in range(0xC0, 0x100)] + [0x152, 0x153, 0x160, 0x161, 0x17D, 
 # go before the counters in a, e and o start to close at 12 px.
 THRESH = 176
 
+# ITAL is DejaVu's own oblique, drawn by the type designer rather than sheared
+# from the roman by the renderer. On a 1-bit panel at 16 px a shear closes the
+# counters and reads as a printing fault; the drawn face keeps its stems.
 FACES = {
     'REG': '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
     'BOLD': '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+    'ITAL': '/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf',
 }
 # name -> pixel height of the line box, one per TSize.
 #
@@ -141,6 +145,9 @@ def main():
     print('};')
     print()
     print('#define UI_HAS_EXTRAS 1')
+    # The CrossPoint stand-in family in test/host/fonts_cp.h has no italic, so
+    # the renderer asks whether one was baked rather than assuming it.
+    print('#define UI_HAS_ITALIC 1')
     print('// Codepoints appended after ASCII index 94, same order in every face.')
     print('constexpr int UI_EXTRA_COUNT = %d;' % len(EXTRAS))
     print('const uint16_t UI_EXTRA_CPS[UI_EXTRA_COUNT] PROGMEM = {')

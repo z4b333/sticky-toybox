@@ -48,8 +48,13 @@ class ToolsCanvas {
   virtual void fillCircle(int cx, int cy, int r, bool black) = 0;
   virtual void drawCircle(int cx, int cy, int r, int thickness, bool black) = 0;
 
-  virtual void text(int x, int y, const char* s, TSize sz, bool black, bool bold = false) = 0;
-  virtual int textWidth(const char* s, TSize sz, bool bold = false) const = 0;
+  // `ital` is the EPUB reader's alone: it is the only screen with a style run
+  // inside a line. Measured and drawn through the same argument on purpose --
+  // an italic is narrower than its roman, and a line measured in one face and
+  // drawn in another runs off the edge of the panel.
+  virtual void text(int x, int y, const char* s, TSize sz, bool black, bool bold = false,
+                    bool ital = false) = 0;
+  virtual int textWidth(const char* s, TSize sz, bool bold = false, bool ital = false) const = 0;
   virtual int textHeight(TSize sz) const = 0;
 
   // Blank space the glyphs leave inside textWidth/textHeight. A bitmap font
