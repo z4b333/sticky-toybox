@@ -456,6 +456,22 @@ class EpubTool : public ToolApp {
     saveKoreader();
   }
 
+  // How long a chapter is, in minutes, from the size the zip's central
+  // directory already reported -- so the contents list costs no reading at
+  // all to draw. Markup bytes divided by 8.5 is close to a word count across
+  // the books this has been checked against, and 220 words a minute is an
+  // unhurried reader. Both are estimates and the label says so by being
+  // round: nobody wants "17.4 min".
+  void chapterLength(int spine, char* out, int cap) const {
+    const uint32_t bytes = _book.spineBytes(spine);
+    const int words = (int)((double)bytes / 8.5);
+    const int mins = (int)((double)words / 220.0 + 0.5);
+    if (mins < 1)
+      snprintf(out, (size_t)cap, "under a minute");
+    else
+      snprintf(out, (size_t)cap, "%d min", mins);
+  }
+
   // How far through the whole book we are, as KOReader wants it: 0..1.
   //
   // Chapter boundaries are exact -- the zip said how big every chapter is --
@@ -1021,6 +1037,14 @@ class EpubTool : public ToolApp {
   // last page that starts at or before it, which is CrossPoint's own rule.
   bool gotoPlace(int spineIdx, uint32_t off) {
     if (!chapterStart(spineIdx)) return false;
+    // The layout runs to the END of the chapter, not just far enough to find
+    // the page wanted. How many pages a chapter has is a fact about the panel
+    // and the type, not about the file, so laying it out is the only way to
+    // learn it -- and the footer has to be able to say "p 3 of 12" the moment
+    // a chapter opens, not only after somebody has read to the end of it. One
+    // extra pass over a chapter's words, against a full refresh that costs
+    // 1.7 s regardless. Turning back INTO a chapter already worked this way.
+    int target = -1;
     while (true) {
       const int placed = layoutPage();
       if (placed == 0) {
@@ -1029,22 +1053,24 @@ class EpubTool : public ToolApp {
         // and no words produces exactly one page and then comes back empty,
         // and reading "empty" as "skip to the next chapter" is what made the
         // cover page, the gallery and the character art unreachable.
-        if (_lutN > 0) {
-          _page = _lutN - 1;
-          return true;
-        }
+        if (_lutN > 0) break;
         if (spineIdx + 1 < _book.spineCount()) return gotoPlace(spineIdx + 1, 0);
         _lineN = 0;
         _page = 0;
         return false;
       }
-      _page = _lutN - 1;
-      if (_lutN >= 2 && epubui::pageOff(_lut[_lutN - 1]) > off) {
-        // overshot by one: the page before this one contains `off`
-        return showPageAt(_lutN - 2);
-      }
-      if (_atEnd && !_pendValid) return true;  // the chapter's last page
+      // The first page that starts PAST the mark means the one before it holds
+      // it. Noted rather than jumped to, so the count can finish.
+      if (target < 0 && _lutN >= 2 && epubui::pageOff(_lut[_lutN - 1]) > off) target = _lutN - 2;
+      if (_atEnd && !_pendValid) break;  // the chapter's last page
+      if (_lutN >= epubui::MAX_PAGES) break;  // a chapter longer than the table
     }
+    if (_chapterPages <= 0) _chapterPages = _lutN;
+    _page = _lutN - 1;
+    // A mark past the last page start belongs on the last page, which is the
+    // one the layout has just left on the screen: no replay needed.
+    if (target < 0 || target == _page) return true;
+    return showPageAt(target);
   }
 
   // Drawing an illustration reads another entry out of the same zip, and this
@@ -1776,7 +1802,20 @@ class EpubTool : public ToolApp {
         char label[64];
         int spine = 0;
         tocRow(idx, label, sizeof(label), spine);
-        snprintf(buf, sizeof(buf), "chapter %d", spine + 1);
+        // How LONG it is, not which chapter it is. A book that carries its own
+        // contents has already numbered its chapters, and the spine index
+        // counts different things -- the cover, the copyright page, the
+        // inserts -- so printing it put "chapter 4" under a row the book
+        // itself calls "Chapter 1: Maomao". Two numbering systems on one row,
+        // and the one the reader trusts is the book's. Length is the fact the
+        // book has not already given, and the one that decides whether to
+        // start a chapter now.
+        char len[24];
+        chapterLength(spine, len, sizeof(len));
+        if (idx == 0)
+          snprintf(buf, sizeof(buf), "the start \xc2\xb7 %s", len);
+        else
+          snprintf(buf, sizeof(buf), "%s", len);
         rmenu::drawRow(c, k, label, buf, shelf::rowSep(k, idx, total), spine == _spine);
       } else {
         char label[marks::LABEL + 8], where[40];
