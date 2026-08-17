@@ -1,8 +1,8 @@
 {
-  "version": "v1.0.0-beta.53",
-  "commit": "v1.0.0-beta.53",
+  "version": "v1.0.0-beta.54",
+  "commit": "v1.0.0-beta.54",
   "date": "17 Aug 2026",
-  "bytes": 3979296,
-  "sha256": "0608a3579fb67277",
-  "appBytes": 3913760
+  "bytes": 3981296,
+  "sha256": "358ba4c398cc0254",
+  "appBytes": 3915760
 }
