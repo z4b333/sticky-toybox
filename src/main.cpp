@@ -320,9 +320,17 @@ void handleSideButtons() {
       noteActivity();
       // Carry on READING: straight back into the last book at its saved page.
       // With nothing read yet it falls through to reopening the last app.
-      if (toybox.carryOnReading()) {
-        TB_LOG("home: DOWN held, carrying on\n");
+      //
+      // The beep comes FIRST, like the settings hold's does. It used to wait
+      // for carryOnReading() to say whether it had worked -- which meant it
+      // sounded after a book had been found, opened and painted, seconds
+      // after the finger earned it, and on glass that reads as no feedback at
+      // all. Asking canCarryOn() first costs one NVS read and lets the sound
+      // land on the hold itself.
+      if (toybox.canCarryOn()) {
         buzzer::confirm();
+        TB_LOG("home: DOWN held, carrying on\n");
+        toybox.carryOnReading();
       } else {
         // Nothing to resume. The screen does not change: a low note that says
         // "there isn't one" reads better than a dead button or a detour.

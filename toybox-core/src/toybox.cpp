@@ -141,6 +141,14 @@ bool Toybox::resumeLast() {
   return true;
 }
 
+bool Toybox::canCarryOn() const {
+  recents::Entry rec[recents::MAX];
+  if (recents::list(_host->prefs(), rec) > 0) return true;
+  Preferences& p = _host->prefs();
+  if (!p.isKey("last_i") || !p.isKey("last_g")) return false;
+  return appvis::visible(p.getBool("last_g"), (int)p.getInt("last_i"));
+}
+
 bool Toybox::carryOnReading() {
   recents::Entry rec[recents::MAX];
   const int n = recents::list(_host->prefs(), rec);

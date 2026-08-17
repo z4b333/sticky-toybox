@@ -49,6 +49,11 @@ class Toybox {
   // False means there is nothing to resume (or it is hidden), and the caller
   // owns the low beep that says so.
   bool resumeLast();
+  // Whether the DOWN hold has anywhere to go, asked BEFORE the work starts so
+  // the beep that acknowledges the hold can sound at the moment the finger
+  // earns it rather than after a book has finished opening. Same two sources
+  // carryOnReading() uses, in the same order.
+  bool canCarryOn() const;
   // The DOWN hold on home: back into the most recently read book, directly at
   // its saved page. With nothing read yet it falls through to resumeLast().
   bool carryOnReading();
