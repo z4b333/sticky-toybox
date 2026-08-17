@@ -418,9 +418,16 @@ class EpubTool : public ToolApp {
     void setBold(int i) { bold[i >> 3] |= (uint8_t)(1 << (i & 7)); }
   };
 
-  void progressPath(char* out, int cap, bool legacy = false) {
+  // Two directories hold a position for the same book, and both matter.
+  //
+  // `crossPoint` is the 32-bit-hash one -- confirmed against a real
+  // CrossPoint card: it keeps its whole parsed cache there (book.bin,
+  // sections/, html/) and its progress.bin beside it, and it looks nowhere
+  // else. The 64-bit FNV one is Toybox's own, and older builds of this
+  // firmware read only that. So: read CrossPoint's first, write both.
+  void progressPath(char* out, int cap, bool crossPoint = false) {
     char dir[96];
-    if (legacy)
+    if (crossPoint)
       epubc::cacheDirLegacy(_books[_cur].file, dir, sizeof(dir));
     else
       epubc::cacheDir(_books[_cur].file, dir, sizeof(dir));
@@ -437,8 +444,14 @@ class EpubTool : public ToolApp {
     p.hasOffset = true;
     uint8_t buf[10];
     const int n = epubc::encodeProgress(p, buf);
+    // BOTH directories, every time. CrossPoint keeps its cache under a
+    // 32-bit hash of the book's path and reads its position from there; older
+    // Toybox builds read the 64-bit one. Ten bytes twice is nothing, and it
+    // means whichever firmware the card is carried to finds the place.
     char path[128];
-    progressPath(path, sizeof(path));
+    progressPath(path, sizeof(path), true);  // CrossPoint's
+    host().sdWriteFileAtomic(path, buf, n);
+    progressPath(path, sizeof(path));  // ours
     host().sdWriteFileAtomic(path, buf, n);
     saveKoreader();
   }
@@ -553,16 +566,20 @@ class EpubTool : public ToolApp {
     if (bthumb::complete(host(), _books[i].file)) host().crossCoverPut(_books[i].file);
 
     // Where were we? The card remembers, in CrossPoint's format.
+    // CrossPoint's directory FIRST. It is the shared one -- that firmware
+    // writes its position there and nowhere else -- so it is also the one
+    // that is fresh when a card has just come back from it. Reading ours
+    // first is what made a book flashed to CrossPoint and back resume at the
+    // place Toybox last saw rather than the place the reader actually
+    // stopped, while CrossPoint, which never looks at ours, opened the same
+    // book at page one. Both halves of that were one wrong preference.
     epubc::Progress p;
     uint8_t buf[10];
     char path[128];
-    progressPath(path, sizeof(path));
+    progressPath(path, sizeof(path), true);
     int n = host().sdReadFile(path, buf, sizeof(buf));
     if (n <= 0) {
-      // A card written by an older CrossPoint (or an older Toybox) keeps its
-      // position under the Murmur directory. Read it once; the next save
-      // writes the FNV one and the position has migrated.
-      progressPath(path, sizeof(path), true);
+      progressPath(path, sizeof(path));  // ours, for a card no CrossPoint has touched
       n = host().sdReadFile(path, buf, sizeof(buf));
     }
     int spine = 0;

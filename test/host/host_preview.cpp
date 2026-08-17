@@ -2492,7 +2492,13 @@ int main() {
       // No session is open here, and the card calls now refuse that -- as the
       // device does. This is the harness standing in for another firmware
       // having left the file behind, so it plants it directly.
-      sdcard::hostPlantSide("/.crosspoint/epub_1175141337288249041/progress.bin", buf, n);
+      //
+      // Into CROSSPOINT's directory: the 32-bit hash of the book's path, which
+      // is where that firmware keeps its cache and its position, and the only
+      // place it looks (confirmed against a real card). Toybox's own 64-bit
+      // directory already holds a position by now -- which is exactly the
+      // situation the owner hit, and the reason CrossPoint's file has to win.
+      sdcard::hostPlantSide("/.crosspoint/epub_836526750/progress.bin", buf, n);
       toybox.open(false, 10);  // EPUB, fresh
       auto* et2 = static_cast<EpubTool*>(toybox.hostActive());
       toybox.onTap(240, epubui::LIST_Y0 + epubui::LIST_ROW_H + 10);
@@ -2533,7 +2539,7 @@ int main() {
       cp.hasOffset = true;
       uint8_t buf[10];
       const int n = epubc::encodeProgress(cp, buf);
-      sdcard::hostPlantSide("/.crosspoint/epub_1175141337288249041/progress.bin", buf, n);
+      sdcard::hostPlantSide("/.crosspoint/epub_836526750/progress.bin", buf, n);
       toybox.open(false, 10);
       auto* et3 = static_cast<EpubTool*>(toybox.hostActive());
       toybox.onTap(240, epubui::LIST_Y0 + epubui::LIST_ROW_H + 10);
@@ -3489,6 +3495,71 @@ int main() {
       }
     toybox.goHub();
     printf("headings and bold ok (h2 whole and large, <b> exact to the byte)\n");
+    g_dumpEnabled = true;
+  }
+
+  // --- a card that has been to CrossPoint and back ----------------------------
+  // The bug the owner found by doing it: read a book in Toybox, flash
+  // CrossPoint, read further, flash back -- and Toybox opened at the place it
+  // had last seen, while CrossPoint had opened at page one. Two halves of one
+  // wrong preference: Toybox wrote its position under a 64-bit hash of the
+  // path and read that first, and CrossPoint keeps its whole cache (and its
+  // progress.bin) under a 32-bit hash and looks nowhere else.
+  //
+  // So: CrossPoint's directory is read FIRST, and every save writes both.
+  // Both halves are checked here, because fixing one without the other still
+  // leaves a reader losing their place.
+  {
+    g_dumpEnabled = false;
+    static const char kCross[] = "/.crosspoint/epub_836526750/progress.bin";      // 32-bit
+    static const char kOurs[] = "/.crosspoint/epub_1175141337288249041/progress.bin";  // 64-bit
+    // Toybox's own file says chapter one; CrossPoint's says chapter two,
+    // which is where the reader actually stopped.
+    {
+      epubc::Progress mine{};
+      mine.spine = 0; mine.page = 0; mine.pageCount = 1; mine.offset = 0; mine.hasOffset = true;
+      uint8_t b[10];
+      sdcard::hostPlantSide(kOurs, b, epubc::encodeProgress(mine, b));
+      epubc::Progress theirs{};
+      theirs.spine = 1; theirs.page = 0; theirs.pageCount = 9; theirs.offset = 2500;
+      theirs.hasOffset = true;
+      uint8_t c[10];
+      sdcard::hostPlantSide(kCross, c, epubc::encodeProgress(theirs, c));
+    }
+    toybox.goHub();
+    toybox.open(false, 10, false);
+    auto* ec = static_cast<EpubTool*>(toybox.hostActive());
+    if (!ec->openDirect("/books/wind.epub")) {
+      printf("CROSSPOINT FAIL: the book did not open\n");
+      abort();
+    }
+    if (ec->hostSpine() != 1) {
+      printf("CROSSPOINT FAIL: opened chapter %d -- ours won over CrossPoint's\n",
+             ec->hostSpine());
+      abort();
+    }
+    // ...and reading on writes BOTH, so flashing back the other way finds it.
+    toybox.onButton(SideBtn::Down);
+    const int spineNow = ec->hostSpine();
+    const uint32_t offNow = ec->hostPageOffset();
+    toybox.goHub();  // closing the book saves
+    uint8_t back[10];
+    if (sdcard::hostReadSide(kCross, back, sizeof(back)) != 10) {
+      printf("CROSSPOINT FAIL: nothing was written where CrossPoint reads\n");
+      abort();
+    }
+    epubc::Progress got{};
+    if (!epubc::decodeProgress(back, 10, got) || got.spine != spineNow ||
+        got.offset != offNow) {
+      printf("CROSSPOINT FAIL: their file says s%u off %u, the reader was at s%d off %u\n",
+             got.spine, got.offset, spineNow, offNow);
+      abort();
+    }
+    if (sdcard::hostReadSide(kOurs, back, sizeof(back)) != 10) {
+      printf("CROSSPOINT FAIL: our own directory stopped being written\n");
+      abort();
+    }
+    printf("crosspoint round trip ok (their place wins, both files kept current)\n");
     g_dumpEnabled = true;
   }
 
