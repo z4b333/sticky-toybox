@@ -138,6 +138,18 @@ inline bool have(const char* file) {
   path(file, p, sizeof(p));
   return tfs::size(p) == (size_t)BYTES;
 }
+// A book's cover is only DONE when both halves are there: the strip
+// thumbnail in flash and the full-size picture on the card. Asking only about
+// the thumbnail is how a book covered by an older firmware -- back when the
+// loading screen was the 96x160 blown up five times, and no full-size cover
+// was kept at all -- kept showing that blocky enlargement for ever: the
+// builder looked, saw a thumbnail, and skipped. It rebuilds now, once, on the
+// next open.
+inline bool haveBig(ToolsHost& h, const char* file);
+inline bool complete(ToolsHost& h, const char* file) {
+  return have(file) && haveBig(h, file);
+}
+
 inline bool haveBig(ToolsHost& h, const char* file) {
   char p[48];
   bigPath(file, p, sizeof(p));

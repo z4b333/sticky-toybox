@@ -484,7 +484,7 @@ class EpubTool : public ToolApp {
     // face instead of the titled plate. (The sidecar check runs every open
     // anyway -- that is how a replaced sidecar is noticed.)
     if (!bthumb::coverFromSidecar(host(), _books[i].file) &&
-        !bthumb::have(_books[i].file) && !bthumb::failed(_books[i].file)) {
+        !bthumb::complete(host(), _books[i].file) && !bthumb::failed(_books[i].file)) {
       if (!host().coverFromBmp(_books[i].file)) host().crossCoverGrab(_books[i].file);
     }
     // The cover as the loading screen. An EPUB spends real seconds opening
@@ -528,11 +528,11 @@ class EpubTool : public ToolApp {
     // (tried above, before the loading paint) pays for the JPEG decode --
     // once, and a cover that will not decode is marked so it is not retried.
     bool unwrapped = false;
-    if (!bthumb::have(_books[i].file) && !bthumb::failed(_books[i].file)) {
+    if (!bthumb::complete(host(), _books[i].file) && !bthumb::failed(_books[i].file)) {
       bool transient = false;
       if (!epubcov::makeThumb(host(), _book, _books[i].file, &transient) && !transient)
         bthumb::markFailed(_books[i].file);
-      unwrapped = bthumb::have(_books[i].file);
+      unwrapped = bthumb::complete(host(), _books[i].file);
     }
     // The unwrapping finishes where it promised: the cover that was just
     // decoded, full size, and a beep to say the wait is over. Only on the one
@@ -550,7 +550,7 @@ class EpubTool : public ToolApp {
     // The favour returned: leave the finished cover where CrossInk looks for
     // one, so ITS first open of this book skips the decode too. One exists()
     // check when the file is already there.
-    if (bthumb::have(_books[i].file)) host().crossCoverPut(_books[i].file);
+    if (bthumb::complete(host(), _books[i].file)) host().crossCoverPut(_books[i].file);
 
     // Where were we? The card remembers, in CrossPoint's format.
     epubc::Progress p;

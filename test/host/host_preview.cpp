@@ -3492,6 +3492,51 @@ int main() {
     g_dumpEnabled = true;
   }
 
+  // --- a cover from an older firmware is rebuilt ------------------------------
+  // Books covered before full-size covers moved to the card have the strip
+  // thumbnail and nothing else, and the loading screen answers that by
+  // blowing the 96x160 up five times into blocks. The builder used to look at
+  // the thumbnail alone, see one, and skip -- so that blocky enlargement was
+  // what those books showed for ever. Half a cover is not a cover.
+  {
+    g_dumpEnabled = false;
+    const char* kOld = "/books/wind.epub";
+    // Leave the book exactly as an old firmware would have: thumbnail yes,
+    // full-size no.
+    {
+      static uint8_t small[bthumb::BYTES];
+      if (!bthumb::load(kOld, small)) {
+        printf("REBUILD FAIL: no thumbnail to start from\n");
+        abort();
+      }
+      char big[48];
+      bthumb::bigPath(kOld, big, sizeof(big));
+      sdcard::hostPutCardFile(big, "", 0);  // truncate the full-size cover away
+    }
+    if (!bthumb::have(kOld) || bthumb::haveBig(stickyHost, kOld)) {
+      printf("REBUILD FAIL: could not stage a half-covered book\n");
+      abort();
+    }
+    if (bthumb::complete(stickyHost, kOld)) {
+      printf("REBUILD FAIL: half a cover counted as complete\n");
+      abort();
+    }
+    toybox.goHub();
+    toybox.open(false, 10, false);
+    auto* eo = static_cast<EpubTool*>(toybox.hostActive());
+    if (!eo->openDirect(kOld)) {
+      printf("REBUILD FAIL: the book did not open\n");
+      abort();
+    }
+    if (!bthumb::haveBig(stickyHost, kOld)) {
+      printf("REBUILD FAIL: opening it did not rebuild the full-size cover\n");
+      abort();
+    }
+    toybox.goHub();
+    printf("stale cover ok (thumbnail without a full cover is rebuilt on open)\n");
+    g_dumpEnabled = true;
+  }
+
   // --- the shelf holds the card ----------------------------------------------
   // Browsing used to power the card up and put it down again for every
   // listing, and a release re-initialises the panel, so moving one level cost

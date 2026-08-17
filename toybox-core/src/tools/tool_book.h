@@ -432,7 +432,8 @@ class BookTool : public ToolApp {
     // replaced sidecar is noticed. With it in place even a first open leads
     // with the book's own face.
     _cur = i;
-    if (!bthumb::coverFromSidecar(host(), _books[i].file) && !bthumb::have(_books[i].file))
+    if (!bthumb::coverFromSidecar(host(), _books[i].file) &&
+        !bthumb::complete(host(), _books[i].file))
       host().coverFromBmp(_books[i].file);
     // The cover as the loading screen, so the open happens behind the book's
     // own face rather than a stale list. Portrait, like the cover itself and
@@ -466,7 +467,7 @@ class BookTool : public ToolApp {
     // The sidecars were tried before the loading paint; what is left is the
     // book's own content -- the embedded cover, then page 0 as last resort.
     bool unwrapped = false;
-    if (!bthumb::have(_books[i].file)) {
+    if (!bthumb::complete(host(), _books[i].file)) {
       bool made = false;
       if (_books[i].cover) {
         // The embedded cover is 48,000 bytes of one bit and wants a buffer
