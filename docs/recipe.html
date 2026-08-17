@@ -44,6 +44,23 @@
   .card li { margin: 2px 0; }
   .hint { font-size: 14px; color: var(--muted); margin-top: 16px; }
   .hint code { font-size: 13px; }
+  /* --- the compatibility list ---------------------------------------------
+     Reports live as issues on the repo, one per site, titled "recipe site:
+     <domain>". Votes are the issue's own thumbs. Nothing is stored here and
+     there is no server: the list is one unauthenticated GET, which is why it
+     is cached for the session -- GitHub allows sixty an hour per address and
+     a visitor who fetches three recipes should not spend three of them. */
+  .sites { margin-top: 40px; border-top: 1px solid var(--line); padding-top: 28px; }
+  .sitelist { list-style: none; padding: 0; margin: 14px 0 0; }
+  .siterow {
+    display: flex; align-items: baseline; gap: 12px;
+    padding: 10px 0; border-bottom: 1px solid var(--line);
+  }
+  .siterow a.dom { font-weight: 600; text-decoration: none; }
+  .siterow .who { color: var(--muted); font-size: 14px; }
+  .siterow .tally { margin-left: auto; white-space: nowrap; font-size: 14px; color: var(--muted); }
+  .siterow .tally b { color: var(--fg); font-weight: 600; }
+  .sitenote { font-size: 14px; color: var(--muted); margin-top: 12px; }
 </style>
 </head>
 <body>
@@ -92,6 +109,21 @@
     <input type="text" id="fname" spellcheck="false">
     <button class="act wide" id="save">Download .json</button>
   </div>
+
+  <div class="sites">
+    <div class="ghead">Sites that work</div>
+    <p class="sub" style="margin:6px 0 0">Reported by whoever tried them. The
+    grabber lives or dies on whether a site publishes its recipe as JSON-LD, so
+    this answers the question the page above provokes: will it work on mine?</p>
+
+    <ul class="sitelist" id="sitelist">
+      <li class="sitenote" id="sitestat">reading the reports&hellip;</li>
+    </ul>
+
+    <p class="sitenote" id="siteadd"></p>
+  </div>
+
+  <p class="sitenote" id="worked" style="display:none"></p>
 
   <p class="hint">Put the file in <code>/recipes</code> on the SD card — the
   RECIPES app lists everything there (up to 256&nbsp;KB per file). A device
@@ -199,6 +231,16 @@ function tryText(text, from, advice){
   if (!r) { err.textContent = 'No recipe data found in ' + from + ' — ' + advice; return false; }
   err.textContent = '';
   show(r);
+  // A working extraction is the only evidence the list wants, and this is the
+  // moment it exists. Offered rather than sent: nothing leaves the browser
+  // unless the reader clicks.
+  var d = domainOf(document.getElementById('url').value.trim());
+  var w = document.getElementById('worked');
+  if (d) {
+    w.innerHTML = 'Worked on <b>' + d + '</b>. ' +
+                  '<a href="' + siteIssueUrl(d) + '">Add it to the list below</a>.';
+    w.style.display = '';
+  }
   return true;
 }
 
@@ -254,6 +296,102 @@ document.getElementById('save').addEventListener('click', function(){
   a.click();
   URL.revokeObjectURL(a.href);
 });
+// --- which sites this works on ----------------------------------------------
+// The grabber lives or dies on whether a site publishes its recipe as JSON-LD,
+// so the useful thing to tell a visitor is which sites do. There is no server
+// here and nowhere to keep a list, so the list is kept where the project
+// already lives: one issue per site on the repo, titled "recipe site: <domain>",
+// and the issue's own thumbs are the votes.
+//
+// Reading it is one unauthenticated GET. GitHub allows sixty of those an hour
+// per address, and a visitor who fetches three recipes should not spend three
+// of them, so the answer is kept for the session.
+var REPO = 'z4b333/sticky-toybox';
+var TITLE_PREFIX = 'recipe site:';
+
+function siteIssueUrl(domain) {
+  var body =
+    'The recipe grabber at https://z4b333.github.io/sticky-toybox/recipe.html\n' +
+    'worked on this site.\n\n' +
+    'Example recipe URL: \n\n' +
+    '_Thumbs-up this issue if it worked for you too, thumbs-down if it did not._\n';
+  return 'https://github.com/' + REPO + '/issues/new?title=' +
+         encodeURIComponent(TITLE_PREFIX + ' ' + (domain || '')) +
+         '&body=' + encodeURIComponent(body);
+}
+
+function domainOf(u) {
+  try { return new URL(u).hostname.replace(/^www\./, ''); } catch (e) { return ''; }
+}
+
+function renderSites(items) {
+  var list = document.getElementById('sitelist');
+  var stat = document.getElementById('sitestat');
+  var rows = items
+    .filter(function (it) {
+      return !it.pull_request &&
+             (it.title || '').toLowerCase().indexOf(TITLE_PREFIX) === 0;
+    })
+    .map(function (it) {
+      var r = it.reactions || {};
+      return {
+        domain: it.title.slice(TITLE_PREFIX.length).trim() || '(unnamed)',
+        url: it.html_url,
+        who: (it.user && it.user.login) || '',
+        up: r['+1'] || 0,
+        down: r['-1'] || 0
+      };
+    })
+    .sort(function (a, b) { return (b.up - b.down) - (a.up - a.down) || a.domain.localeCompare(b.domain); });
+
+  if (!rows.length) {
+    stat.textContent = 'No sites reported yet. If the grabber works on yours, ' +
+                       'say so and it lands here.';
+    return;
+  }
+  list.innerHTML = '';
+  rows.forEach(function (r) {
+    var li = document.createElement('li');
+    li.className = 'siterow';
+    var a = document.createElement('a');
+    a.className = 'dom';
+    a.href = r.url;
+    a.textContent = r.domain;
+    var who = document.createElement('span');
+    who.className = 'who';
+    who.textContent = r.who ? 'reported by ' + r.who : '';
+    var tally = document.createElement('span');
+    tally.className = 'tally';
+    tally.innerHTML = '<b>' + r.up + '</b> worked' +
+                      (r.down ? ' &middot; ' + r.down + ' did not' : '');
+    li.appendChild(a); li.appendChild(who); li.appendChild(tally);
+    list.appendChild(li);
+  });
+}
+
+function loadSites() {
+  var add = document.getElementById('siteadd');
+  add.innerHTML = '<a href="' + siteIssueUrl('') + '">Report a site that works</a>' +
+                  ' &mdash; it opens a pre-filled issue; vote with the thumbs there.';
+  var cached = null;
+  try { cached = sessionStorage.getItem('toybox_sites'); } catch (e) {}
+  if (cached) { try { renderSites(JSON.parse(cached)); return; } catch (e) {} }
+  fetch('https://api.github.com/repos/' + REPO + '/issues?state=all&per_page=100',
+        { headers: { Accept: 'application/vnd.github+json' } })
+    .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+    .then(function (j) {
+      try { sessionStorage.setItem('toybox_sites', JSON.stringify(j)); } catch (e) {}
+      renderSites(j);
+    })
+    .catch(function () {
+      // Rate-limited, offline, or blocked: say so plainly rather than leaving
+      // "reading the reports..." on the screen for ever.
+      document.getElementById('sitestat').innerHTML =
+        'Could not read the reports just now. They are ' +
+        '<a href="https://github.com/' + REPO + '/issues">on the repo</a>.';
+    });
+}
+loadSites();
 </script>
 </body>
 </html>
