@@ -16,6 +16,7 @@
 #include "help.h"
 #include "recipe_data.h"
 #include "recipe_store.h"
+#include "reader_menu.h"
 #include "recipe_web.h"
 #include "tools_ui.h"
 
@@ -26,10 +27,26 @@ inline constexpr int LIST_Y0 = 148, LIST_ROW = 84, LIST_PER = 6;
 inline constexpr int DEL_W = 44;
 inline TRect listRect(int i) { return TRect{0, LIST_Y0 + i * LIST_ROW, 480 - DEL_W, LIST_ROW}; }
 inline TRect delRect(int i) { return TRect{480 - DEL_W, LIST_Y0 + i * LIST_ROW, DEL_W, LIST_ROW}; }
-// the recipe page
-inline constexpr int ING_Y0 = 228, ING_ROW = 66, ING_PER = 6;
-inline TRect ingRect(int i) { return TRect{0, ING_Y0 + i * ING_ROW, 480, ING_ROW}; }
-inline constexpr TRect COOK_BTN{40, 692, 400, 72};
+// The recipe page and the cooking page are the two you read with your hands
+// busy, so both take a text size and a rotation. Neither can keep a constant
+// row height or a constant number of rows: bigger type means fewer, and a
+// turned panel is 480 tall rather than 800, which the old y=228 start and six
+// rows of 66 ran straight off the bottom of. Everything here is measured from
+// the canvas that is live at the time.
+inline constexpr int SIZES = 3;
+inline const char* sizeName(int i) { return i <= 0 ? "normal" : (i == 1 ? "large" : "largest"); }
+// The ingredient list and the step page do not want the same jump: a step is
+// already set large because it is read from arm's length, so its top size is
+// the panel's biggest, while an ingredient starts one below.
+inline TSize ingSize(int i) { return i <= 0 ? TS_MED : (i == 1 ? TS_LARGE : TS_HUGE); }
+inline TSize stepSize(int i) { return i <= 0 ? TS_LARGE : TS_HUGE; }
+
+inline const char* rotName(int r) {
+  return r == 1 ? "turned left" : (r == 3 ? "turned right" : "upright");
+}
+// Upright, then the two landscapes, in the order the arrows suggest.
+inline int nextRot(int r) { return r == 0 ? 1 : (r == 1 ? 3 : 0); }
+
 // the cooking page
 inline constexpr int COOK_FOOT = 96;
 // the phone page (same geometry as the flashcards import, deliberately: one
@@ -50,6 +67,11 @@ class RecipeTool : public ToolApp {
     _help = !help::suppressed(prefs(), "rcp");
     _note = nullptr;
     _page = 0;
+    _size = (uint8_t)prefs().getUInt("rc_size", 0);
+    if (_size >= rcpui::SIZES) _size = 0;
+    _rot = (uint8_t)prefs().getUInt("rc_rot", 0);
+    if (_rot != 1 && _rot != 3) _rot = 0;
+    _menu = false;
     reload();
   }
 
@@ -64,6 +86,10 @@ class RecipeTool : public ToolApp {
     if (_help && _screen == Screen::List) {
       host().topBar("RECIPES", true);
       renderHelp(c);
+      return;
+    }
+    if (_menu) {
+      renderMenu(c);
       return;
     }
     switch (_screen) {
@@ -91,6 +117,10 @@ class RecipeTool : public ToolApp {
       host().refreshUi();
       return;
     }
+    if (_menu) {
+      tapMenu(x, y);
+      return;
+    }
     switch (_screen) {
       case Screen::List: tapList(x, y); break;
       case Screen::View: tapView(x, y); break;
@@ -100,14 +130,24 @@ class RecipeTool : public ToolApp {
   }
 
   bool onButton(SideBtn b) override {
+    // OK opens the panel, and closes it, on the two screens it governs --
+    // the same button that opens the readers' own options.
+    if (b == SideBtn::Ok && (_screen == Screen::View || _screen == Screen::Cook)) {
+      _menu = !_menu;
+      host().setCanvasRotation(_menu ? 0 : _rot);
+      host().beep(1);
+      host().refresh(true);  // the whole screen changes, and it may have turned
+      return true;
+    }
+    if (_menu) return false;  // the panel is a list of rows, not a pager
     if (_screen == Screen::Cook) {
       if (b == SideBtn::Up) stepTo(_step - 1);
       else if (b == SideBtn::Down) stepTo(_step + 1);
       else return false;
       return true;
     }
-    if (_screen == Screen::View && _r.nIng > rcpui::ING_PER) {
-      const int pages = (_r.nIng + rcpui::ING_PER - 1) / rcpui::ING_PER;
+    if (_screen == Screen::View && _r.nIng > ingPer()) {
+      const int pages = ingPages();
       if (b == SideBtn::Up && _ingPage > 0) _ingPage--;
       else if (b == SideBtn::Down && _ingPage < pages - 1) _ingPage++;
       else return false;
@@ -147,6 +187,16 @@ class RecipeTool : public ToolApp {
 
 #ifdef TOYBOX_HOST
   int hostScreen() const { return (int)_screen; }
+  // The geometry the guards aim at: computed now, so a guard that wrote the
+  // old constants down would tap empty panel the first time the size or the
+  // rotation moved.
+  int hostIngTop() { return ingTop(); }
+  int hostIngRowH() { return ingRowH(); }
+  int hostIngPer() { return ingPer(); }
+  TRect hostCookBtn() { return cookBtn(); }
+  int hostSize() const { return _size; }
+  int hostRot() const { return _rot; }
+  bool hostMenu() const { return _menu; }
   int hostCount() const { return _nFlash + _nCard; }
   const rcp::Recipe& hostRecipe() const { return _r; }
   int hostStep() const { return _step; }
@@ -157,6 +207,55 @@ class RecipeTool : public ToolApp {
 
  private:
   enum class Screen : uint8_t { List, View, Cook, Import };
+  uint8_t _size = 0;   // rcpui::SIZES
+  uint8_t _rot = 0;    // 0 upright, 1 and 3 the two landscapes
+  bool _menu = false;  // the options panel, over the recipe or the step
+
+  // Where the ingredient list starts, how tall its rows are and how many fit:
+  // all three follow the chosen size and the live canvas, so a bigger face and
+  // a turned panel are the same question asked twice.
+  //
+  // Landscape gets a shorter head -- one line of title, no headline -- because
+  // 480 px of height has to hold the name, the label and at least two rows,
+  // and a headline is the least of those.
+  bool landscape() { return host().canvas().width() > host().canvas().height(); }
+
+  int ingTop() { return landscape() ? 128 : 228; }
+
+  int ingRowH() {
+    ToolsCanvas& c = host().canvas();
+    const int line = c.textHeight(rcpui::ingSize(_size));
+    // Two wrapped lines in portrait, one in landscape: the panel is wider that
+    // way round, so an ingredient that needed two lines rarely still does.
+    return landscape() ? line + 26 : line * 2 + 18;
+  }
+
+  // The bottom of the list: above the COOK button when there is one, above the
+  // pager line when there is not.
+  int ingBottom() {
+    ToolsCanvas& c = host().canvas();
+    return c.height() - (_r.nSteps > 0 ? 116 : 52);
+  }
+
+  int ingPer() {
+    const int n = (ingBottom() - ingTop()) / ingRowH();
+    return n < 1 ? 1 : n;
+  }
+  int ingPages() {
+    const int per = ingPer();
+    return (_r.nIng + per - 1) / per;
+  }
+  TRect ingRow(int k) {
+    return TRect{0, ingTop() + k * ingRowH(), host().canvas().width(), ingRowH()};
+  }
+
+  // Anchored to the bottom rather than written down: on a turned panel y=692
+  // is off the screen entirely.
+  TRect cookBtn() {
+    ToolsCanvas& c = host().canvas();
+    const int w = c.width() - 80 > 400 ? 400 : c.width() - 80;
+    return TRect{(c.width() - w) / 2, c.height() - 88, w, 72};
+  }
 
   Preferences& prefs() { return host().prefs(); }
 
@@ -271,8 +370,61 @@ class RecipeTool : public ToolApp {
     memset(_tick, 0, sizeof(_tick));
     _ingPage = 0;
     _screen = Screen::View;
+    host().setCanvasRotation(_rot);  // the two reading screens wear the angle
     host().beep(1);
     // Same reason: a card read released the bus and reset the panel.
+    host().refresh(true);
+  }
+
+  // --- the options panel ------------------------------------------------------
+  // Two rows, both about the screen you are reading rather than the recipe on
+  // it, which is why they are here and not in settings. Portrait whatever the
+  // page under it is doing: the panel is a portrait design, like every screen
+  // that is not the page itself.
+
+  void renderMenu(ToolsCanvas& c) {
+    char sizeSub[40], rotSub[40];
+    snprintf(sizeSub, sizeof(sizeSub), "%s", rcpui::sizeName(_size));
+    snprintf(rotSub, sizeof(rotSub), "%s", rcpui::rotName(_rot));
+    const rmenu::Item items[2] = {
+        {"Text size", sizeSub, true},
+        {"Rotation", rotSub, true},
+    };
+    rmenu::drawRoot(host(), c, "OPTIONS", items, 2,
+                    _screen == Screen::Cook ? "STEP" : "RECIPE");
+    c.textCentered(c.width() / 2, c.height() - 96,
+                   _screen == Screen::Cook ? "these apply to the steps and the recipe"
+                                           : "these apply to the recipe and the steps",
+                   TS_SMALL, true);
+    c.textCentered(c.width() / 2, c.height() - 64, "the OK button closes this", TS_SMALL, true);
+  }
+
+  void tapMenu(int x, int y) {
+    if (host().isBackTap(x, y)) {
+      closeMenu();
+      return;
+    }
+    const int row = rmenu::hitRoot(x, y, 2, host().canvas().width());
+    if (row < 0) return;
+    // Row or plus, both cycle: there are three sizes and three angles, and a
+    // stepper for three things is a stepper nobody needs.
+    if (row == 0) {
+      _size = (uint8_t)((_size + 1) % rcpui::SIZES);
+      prefs().putUInt("rc_size", _size);
+      _ingPage = 0;  // fewer rows per page: the old page number may not exist
+    } else {
+      _rot = (uint8_t)rcpui::nextRot(_rot);
+      prefs().putUInt("rc_rot", _rot);
+      _ingPage = 0;
+    }
+    host().beep(0);
+    host().refreshUi();
+  }
+
+  void closeMenu() {
+    _menu = false;
+    host().setCanvasRotation(_rot);
+    host().beep(1);
     host().refresh(true);
   }
 
@@ -281,7 +433,10 @@ class RecipeTool : public ToolApp {
   void renderView(ToolsCanvas& c) {
     using namespace rcpui;
     host().topBar("RECIPE", false, "RECIPES");
-    // The name, up to two lines, wrapped forward a word at a time.
+    const TSize its = ingSize(_size);
+    const int top = ingTop(), rowH = ingRowH(), per = ingPer();
+    const bool land = landscape();
+    // The name: two lines when there is room for two, one when there is not.
     {
       char line[rcp::NAME_LEN] = "", cand[rcp::NAME_LEN + 4];
       const char* rest = nullptr;
@@ -297,27 +452,30 @@ class RecipeTool : public ToolApp {
         p = e;
         while (*p == ' ') p++;
       }
-      c.textCentered(c.width() / 2, 70, line, TS_LARGE, true, true);
-      if (rest) c.textClipped(24, 112, c.width() - 48, rest, TS_LARGE, true, true);
+      c.textCentered(c.width() / 2, land ? 58 : 70, line, TS_LARGE, true, true);
+      if (rest && !land) c.textClipped(24, 112, c.width() - 48, rest, TS_LARGE, true, true);
     }
-    char head[48];
-    rcp::headline(_r, head, sizeof(head));
-    if (head[0]) c.textCentered(c.width() / 2, 158, head, TS_SMALL, true);
-    c.textTracked(16, ING_Y0 - 34, "INGREDIENTS", TS_MED, true, false, 1);
-    c.fillRect(16, ING_Y0 - 8, c.width() - 32, 1, true);
-    if (_r.nIng == 0) c.text(24, ING_Y0 + 10, "the recipe lists none", TS_MED, true);
-    const int first = _ingPage * ING_PER;
-    for (int k = 0; k < ING_PER; k++) {
+    if (!land) {
+      char head[48];
+      rcp::headline(_r, head, sizeof(head));
+      if (head[0]) c.textCentered(c.width() / 2, 158, head, TS_SMALL, true);
+    }
+    c.textTracked(16, top - 34, "INGREDIENTS", TS_MED, true, false, 1);
+    c.fillRect(16, top - 8, c.width() - 32, 1, true);
+    if (_r.nIng == 0) c.text(24, top + 10, "the recipe lists none", its, true);
+    const int first = _ingPage * per;
+    for (int k = 0; k < per; k++) {
       const int i = first + k;
       if (i >= _r.nIng) break;
-      const int y = ING_Y0 + k * ING_ROW;
+      const int y = top + k * rowH;
       // The tick box: gathering is half of cooking.
+      const int by = y + (rowH - 28) / 2;  // the box, centred in whatever the row is
       if (_tick[i]) {
-        c.fillRect(20, y + 18, 28, 28, true);
-        c.drawLine(26, y + 32, 32, y + 38, 3, false);
-        c.drawLine(32, y + 38, 42, y + 26, 3, false);
+        c.fillRect(20, by, 28, 28, true);
+        c.drawLine(26, by + 14, 32, by + 20, 3, false);
+        c.drawLine(32, by + 20, 42, by + 8, 3, false);
       } else {
-        c.drawRect(20, y + 18, 28, 28, 2, true);
+        c.drawRect(20, by, 28, 28, 2, true);
       }
       // Up to two lines of the ingredient, wrapped like the name.
       char line[rcp::ING_LEN] = "", cand[rcp::ING_LEN + 4];
@@ -327,7 +485,7 @@ class RecipeTool : public ToolApp {
         const char* e = p;
         while (*e && *e != ' ') e++;
         snprintf(cand, sizeof(cand), "%s%s%.*s", line, line[0] ? " " : "", (int)(e - p), p);
-        if (line[0] && c.textWidth(cand, TS_MED) > tw) {
+        if (line[0] && c.textWidth(cand, its) > tw) {
           rest = p;
           break;
         }
@@ -335,40 +493,50 @@ class RecipeTool : public ToolApp {
         p = e;
         while (*p == ' ') p++;
       }
-      c.textClipped(tx, y + 4, tw, line, TS_MED, true);
-      if (rest) c.textClipped(tx, y + 32, tw, rest, TS_MED, true);
+      // One line where a row is one line high, two where it is two. A second
+      // line drawn into a landscape row would sit on top of the row below it.
+      const int lh = c.textHeight(its);
+      if (land) {
+        c.textClipped(tx, y + (rowH - lh) / 2, tw, line, its, true);
+      } else {
+        c.textClipped(tx, y + 4, tw, line, its, true);
+        if (rest) c.textClipped(tx, y + 4 + lh + 4, tw, rest, its, true);
+      }
     }
-    const int pages = (_r.nIng + ING_PER - 1) / ING_PER;
+    const int pages = ingPages();
     if (pages > 1) {
       char buf[40];
       snprintf(buf, sizeof(buf), "%d of %d - side buttons page", _ingPage + 1, pages);
-      c.textCentered(c.width() / 2, 648, buf, TS_SMALL, true);
+      c.textCentered(c.width() / 2, ingBottom() + 12, buf, TS_SMALL, true);
     }
-    if (_r.nSteps > 0)
-      c.button(COOK_BTN.x, COOK_BTN.y, COOK_BTN.w, COOK_BTN.h, "COOK - STEP BY STEP", true,
-               TS_LARGE);
+    if (_r.nSteps > 0) {
+      const TRect b = cookBtn();
+      c.button(b.x, b.y, b.w, b.h, "COOK - STEP BY STEP", true, TS_LARGE);
+    }
   }
 
   void tapView(int x, int y) {
     using namespace rcpui;
     if (host().isBackTap(x, y)) {
       _screen = Screen::List;
+      host().setCanvasRotation(0);  // every other screen here is portrait
       host().beep(1);
-      host().refreshUi();
+      host().refresh(true);         // the panel may have just stood up
       return;
     }
-    if (_r.nSteps > 0 && COOK_BTN.hit(x, y)) {
+    if (_r.nSteps > 0 && cookBtn().hit(x, y)) {
       _step = 0;
       _screen = Screen::Cook;
       host().beep(1);
       host().refreshUi();
       return;
     }
-    const int first = _ingPage * ING_PER;
-    for (int k = 0; k < ING_PER; k++) {
+    const int per = ingPer();
+    const int first = _ingPage * per;
+    for (int k = 0; k < per; k++) {
       const int i = first + k;
       if (i >= _r.nIng) break;
-      if (!ingRect(k).hit(x, y)) continue;
+      if (!ingRow(k).hit(x, y)) continue;
       _tick[i] = !_tick[i];
       host().beep(0);
       host().refreshUi();
@@ -397,19 +565,24 @@ class RecipeTool : public ToolApp {
     char bar[24];
     snprintf(bar, sizeof(bar), "STEP %d OF %d", _step + 1, (int)_r.nSteps);
     host().topBar(bar, false, "RECIPE");
-    // The step, large, wrapped over the whole page. TS_LARGE because this is
-    // read from arm's length with wet hands; a 320-byte step fits.
+    // The step, large, wrapped over the whole page -- read from arm's length
+    // with wet hands, which is why its smallest size is the recipe page's
+    // largest. The line step follows the face rather than a written-down 46:
+    // at the biggest size that number overlapped every line with the next.
     {
+      const TSize sts = rcpui::stepSize(_size);
+      const int lineH = c.textHeight(sts) + 10;
       char line[96] = "", cand[96 + 4];
-      int y = 130;
+      int y = landscape() ? 88 : 130;
       const int w = c.width() - 56;
-      for (const char* p = _r.steps[_step]; *p && y < c.height() - COOK_FOOT - 40;) {
+      const int floorY = c.height() - COOK_FOOT - lineH;
+      for (const char* p = _r.steps[_step]; *p && y < floorY;) {
         const char* e = p;
         while (*e && *e != ' ') e++;
         snprintf(cand, sizeof(cand), "%s%s%.*s", line, line[0] ? " " : "", (int)(e - p), p);
-        if (line[0] && c.textWidth(cand, TS_LARGE) > w) {
-          c.text(28, y, line, TS_LARGE, true);
-          y += 46;
+        if (line[0] && c.textWidth(cand, sts) > w) {
+          c.text(28, y, line, sts, true);
+          y += lineH;
           line[0] = 0;
           continue;  // the word that did not fit starts the next line
         }
@@ -417,7 +590,7 @@ class RecipeTool : public ToolApp {
         p = e;
         while (*p == ' ') p++;
       }
-      if (line[0] && y < c.height() - COOK_FOOT - 40) c.text(28, y, line, TS_LARGE, true);
+      if (line[0] && y < floorY) c.text(28, y, line, sts, true);
     }
     // The footer: two tap zones a knuckle can hit.
     const int fy = c.height() - COOK_FOOT;

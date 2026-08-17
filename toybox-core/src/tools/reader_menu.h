@@ -107,8 +107,12 @@ inline TRect plusRect(int i, int w) {
   return {r.x + r.w - 84, r.y + (r.h - 72) / 2, 72, 72};
 }
 
-inline void drawRoot(ToolsHost& h, ToolsCanvas& c, const char* title, const Item* items, int n) {
-  h.topBar(title, false, "READ");
+// `back` names what the panel is over. The readers are over a book, so it
+// says READ; the recipe app is over a recipe, and telling a cook to go back to
+// "READ" is a word from another screen.
+inline void drawRoot(ToolsHost& h, ToolsCanvas& c, const char* title, const Item* items, int n,
+                     const char* back = "READ") {
+  h.topBar(title, false, back);
   for (int i = 0; i < n; i++) {
     const TRect r = rootRect(i, c.width());
     if (i > 0) c.fillRect(r.x, r.y, r.w, 1, true);  // hairlines between, none around

@@ -3990,7 +3990,7 @@ int main() {
       printf("RECIPE FAIL: the card recipe did not open (screen %d)\n", rt->hostScreen());
       abort();
     }
-    toybox.onTap(100, rcpui::ING_Y0 + 20);  // tick the onions
+    toybox.onTap(100, rt->hostIngTop() + rt->hostIngRowH() / 2);  // tick the onions
     if (!rt->hostTicked(0)) {
       printf("RECIPE FAIL: the tick did not take\n");
       abort();
@@ -3999,7 +3999,7 @@ int main() {
     setScreen("tool_recipe_view");
     stickyHost.refresh(true);
     g_dumpEnabled = false;
-    toybox.onTap(240, rcpui::COOK_BTN.y + 30);
+    toybox.onTap(240, rt->hostCookBtn().y + 30);
     if (rt->hostScreen() != 2 || rt->hostStep() != 0) {
       printf("RECIPE FAIL: COOK did not open step one\n");
       abort();
@@ -4045,6 +4045,106 @@ int main() {
       printf("RECIPE FAIL: the phone recipe did not open\n");
       abort();
     }
+
+    // --- the options panel ---------------------------------------------------
+    // Size and rotation, and the thing they are really testing: that the
+    // ingredient list is measured rather than written down. A turned panel is
+    // 480 px tall where the old layout started its rows at 228 and ran six of
+    // 66 -- 624 px of list into 480 px of screen. The overflow detector cannot
+    // see that (the rows are drawn, just off the bottom), so the count is
+    // checked here and the paint is left to the detector for the rest.
+    {
+      const int perPortrait = rt->hostIngPer();
+      const int rowPortrait = rt->hostIngRowH();
+      toybox.onButton(SideBtn::Ok);
+      if (!rt->hostMenu()) {
+        printf("RECIPE FAIL: OK did not open the options panel\n");
+        abort();
+      }
+      g_dumpEnabled = true;
+      setScreen("tool_recipe_options");
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+
+      // Bigger type, taller rows, and never more of them. The height is the
+      // strict test: under a font family whose medium and large are close --
+      // CrossPoint's are 24 and 29 px -- a taller row can still divide into
+      // the same count, and asserting fewer rows there is asserting something
+      // about the font rather than about this code.
+      toybox.onTap(240, rmenu::rootRect(0, 480).y + 40);
+      if (rt->hostSize() != 1) {
+        printf("RECIPE FAIL: the size row did not step (%d)\n", rt->hostSize());
+        abort();
+      }
+      toybox.onButton(SideBtn::Ok);  // close, back to the recipe
+      const int perLarge = rt->hostIngPer(), rowLarge = rt->hostIngRowH();
+      if (rowLarge <= rowPortrait || perLarge > perPortrait) {
+        printf("RECIPE FAIL: large type gives rows of %d (was %d), %d per page (was %d)\n",
+               rowLarge, rowPortrait, perLarge, perPortrait);
+        abort();
+      }
+      g_dumpEnabled = true;
+      setScreen("tool_recipe_view_large");
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+
+      // ...and turned. Every row, and the COOK button, must still be on the
+      // panel: that is the whole of what the old constants got wrong.
+      toybox.onButton(SideBtn::Ok);
+      toybox.onTap(240, rmenu::rootRect(1, 480).y + 40);
+      if (rt->hostRot() != 1) {
+        printf("RECIPE FAIL: the rotation row did not step (%d)\n", rt->hostRot());
+        abort();
+      }
+      toybox.onButton(SideBtn::Ok);
+      if (stickyHost.canvas().width() <= stickyHost.canvas().height()) {
+        printf("RECIPE FAIL: the recipe page did not turn (%d x %d)\n",
+               stickyHost.canvas().width(), stickyHost.canvas().height());
+        abort();
+      }
+      const int per = rt->hostIngPer();
+      const int lastRow = rt->hostIngTop() + per * rt->hostIngRowH();
+      if (per < 1 || lastRow > stickyHost.canvas().height()) {
+        printf("RECIPE FAIL: %d turned rows end at %d on a %d-tall panel\n", per, lastRow,
+               stickyHost.canvas().height());
+        abort();
+      }
+      const TRect cb = rt->hostCookBtn();
+      if (cb.y + cb.h > stickyHost.canvas().height() || cb.x + cb.w > stickyHost.canvas().width()) {
+        printf("RECIPE FAIL: the COOK button is off a turned panel\n");
+        abort();
+      }
+      g_dumpEnabled = true;
+      setScreen("tool_recipe_view_turned");
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+      toybox.onTap(cb.x + 30, cb.y + 30);  // and the steps, turned and large
+      if (rt->hostScreen() != 2) {
+        printf("RECIPE FAIL: COOK did not open on a turned panel\n");
+        abort();
+      }
+      g_dumpEnabled = true;
+      setScreen("tool_recipe_cook_turned");
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+      toybox.onTap(50, 26);  // back to the recipe
+
+      // Put it back, and check the panel goes portrait with it: the list and
+      // the pairing screen are portrait designs and have no landscape.
+      toybox.onButton(SideBtn::Ok);
+      toybox.onTap(240, rmenu::rootRect(0, 480).y + 40);  // size back to normal
+      toybox.onTap(240, rmenu::rootRect(0, 480).y + 40);
+      toybox.onTap(240, rmenu::rootRect(1, 480).y + 40);  // rotation: left -> right
+      toybox.onTap(240, rmenu::rootRect(1, 480).y + 40);  // -> upright
+      if (rt->hostSize() != 0 || rt->hostRot() != 0) {
+        printf("RECIPE FAIL: the panel did not cycle back (size %d, rot %d)\n", rt->hostSize(),
+               rt->hostRot());
+        abort();
+      }
+      toybox.onButton(SideBtn::Ok);
+      printf("recipe options ok (size and rotation measured, not written down)\n");
+    }
+
     toybox.onTap(50, 26);  // back to the list
     toybox.onTap(rcpui::delRect(0).x + 20, rcpui::delRect(0).y + 20);  // delete it
     if (rt->hostCount() != 1) {
