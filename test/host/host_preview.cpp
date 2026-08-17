@@ -4185,11 +4185,33 @@ int main() {
       stickyHost.refresh(true);
       g_dumpEnabled = false;
 
+      // Line spacing: three steps back round to where it started, and the
+      // rows breathe on the way. Same measured property as the size -- the
+      // row height has to follow it, or "airy" is a word with no effect.
+      toybox.onButton(SideBtn::Ok);
+      toybox.onTap(240, rmenu::rootRect(1, 480).y + 40);  // normal -> airy
+      if (rt->hostLead() != 2) {
+        printf("RECIPE FAIL: the spacing row did not step (%d)\n", rt->hostLead());
+        abort();
+      }
+      toybox.onButton(SideBtn::Ok);
+      const int rowAiry = rt->hostIngRowH();
+      if (rowAiry <= rowLarge) {
+        printf("RECIPE FAIL: airy rows are %d, normal ones %d\n", rowAiry, rowLarge);
+        abort();
+      }
+      toybox.onButton(SideBtn::Ok);
+      toybox.onTap(240, rmenu::rootRect(1, 480).y + 40);  // airy -> tight
+      toybox.onTap(240, rmenu::rootRect(1, 480).y + 40);  // tight -> normal
+      if (rt->hostLead() != 1) {
+        printf("RECIPE FAIL: the spacing did not cycle back (%d)\n", rt->hostLead());
+        abort();
+      }
+
       // ...and turned. Every row, and the COOK button, must still be on the
       // panel: that is the whole of what the old constants got wrong.
-      toybox.onButton(SideBtn::Ok);
       {  // the LEFT button of the three, the same control the readers have
-        const TRect b = rmenu::rotBtnRect(rmenu::rootRect(1, 480), 0);
+        const TRect b = rmenu::rotBtnRect(rmenu::rootRect(2, 480), 0);
         toybox.onTap(b.x + b.w / 2, b.y + b.h / 2);
       }
       if (rt->hostRot() != 1) {
@@ -4235,7 +4257,7 @@ int main() {
       toybox.onTap(240, rmenu::rootRect(0, 480).y + 40);  // size back to normal
       toybox.onTap(240, rmenu::rootRect(0, 480).y + 40);
       {  // and PORTRAIT, the middle of the three
-        const TRect b = rmenu::rotBtnRect(rmenu::rootRect(1, 480), 1);
+        const TRect b = rmenu::rotBtnRect(rmenu::rootRect(2, 480), 1);
         toybox.onTap(b.x + b.w / 2, b.y + b.h / 2);
       }
       if (rt->hostSize() != 0 || rt->hostRot() != 0) {
@@ -4244,7 +4266,7 @@ int main() {
         abort();
       }
       toybox.onButton(SideBtn::Ok);
-      printf("recipe options ok (size and rotation measured, not written down)\n");
+      printf("recipe options ok (size, spacing and rotation measured, not written down)\n");
     }
 
     toybox.onTap(50, 26);  // back to the list

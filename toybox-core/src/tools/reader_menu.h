@@ -140,6 +140,15 @@ inline int hitRoot(int x, int y, int n, int w) {
 // from the row: the row opens the list, the + adds to it.
 inline bool hitPlus(int x, int y, int i, int w) { return plusRect(i, w).hit(x, y); }
 
+// --- line spacing -----------------------------------------------------------
+// Three settings, shared: the EPUB reader, the comic reader and the recipe
+// app all put air between lines and there is no reason for three vocabularies
+// or three sets of numbers. The gap is added to the line's own height, so it
+// means the same thing at every text size.
+inline constexpr int LEADS = 3;
+inline const char* leadName(int i) { return i <= 0 ? "tight" : (i == 1 ? "normal" : "airy"); }
+inline int leadAir(int i) { return i <= 0 ? 6 : (i == 1 ? 10 : 18); }
+
 // --- rotation, as three buttons ---------------------------------------------
 // One tap to any of the three, rather than a cycle through the one you do not
 // want. The arrows say which way the device turns and the filled one is where

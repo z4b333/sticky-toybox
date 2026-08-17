@@ -37,11 +37,14 @@ inline constexpr int BOTTOM_INSET = 30, FOOT_H = 56;
 // and nothing SMALLER than the body size the whole firmware settled on: 24 px
 // is 2.6 mm on this 235 DPI panel, already about seven point, and the one time
 // this project shipped smaller text than that nobody could read the screen.
-inline constexpr int SIZES = 3, LEADS = 3;
+inline constexpr int SIZES = 3, LEADS = rmenu::LEADS;
 inline TSize sizeAt(int i) { return i <= 0 ? TS_MED : (i == 1 ? TS_LARGE : TS_HUGE); }
 inline const char* sizeName(int i) { return i <= 0 ? "normal" : (i == 1 ? "large" : "largest"); }
-inline const char* leadName(int i) { return i <= 0 ? "tight" : (i == 1 ? "normal" : "airy"); }
-inline int leadAir(int i) { return i <= 0 ? 6 : (i == 1 ? 10 : 18); }
+// Line spacing lives in reader_menu.h now: the recipe app offers the same
+// three, and a setting that reads "airy" on one screen and something else on
+// another is two settings.
+inline const char* leadName(int i) { return rmenu::leadName(i); }
+inline int leadAir(int i) { return rmenu::leadAir(i); }
 // A heading is set one size up from the body and bold. One step, not six:
 // h1 through h6 all mean "this is a heading" to a reader holding a phone-sized
 // panel, and a six-level hierarchy would spend the panel's whole size range on
