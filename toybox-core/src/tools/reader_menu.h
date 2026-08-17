@@ -140,6 +140,39 @@ inline int hitRoot(int x, int y, int n, int w) {
 // from the row: the row opens the list, the + adds to it.
 inline bool hitPlus(int x, int y, int i, int w) { return plusRect(i, w).hit(x, y); }
 
+// --- rotation, as three buttons ---------------------------------------------
+// One tap to any of the three, rather than a cycle through the one you do not
+// want. The arrows say which way the device turns and the filled one is where
+// you are. Shared: the readers and the recipe app set the same thing, and a
+// setting that looks like two controls is two controls to learn.
+//
+// Confirmed on glass: rotation 1 turns the text toward the panel's left side,
+// 3 toward its right. Offered in the order the arrows suggest.
+inline constexpr uint8_t ROT_BTN[3] = {1, 0, 3};
+
+inline TRect rotBtnRect(const TRect& row, int k) {
+  const int bw = (row.w - 32) / 3;
+  return {row.x + 8 + k * (bw + 8), row.y + 48, bw, 42};
+}
+
+inline void drawRotRow(ToolsCanvas& c, int slot, uint8_t rot) {
+  const TRect r = rootRect(slot, c.width());
+  static const char* kLab[3] = {"< LEFT", "PORTRAIT", "RIGHT >"};
+  for (int k = 0; k < 3; k++) {
+    const TRect b = rotBtnRect(r, k);
+    c.button(b.x, b.y, b.w, b.h, kLab[k], rot == ROT_BTN[k], TS_SMALL);
+  }
+}
+
+// Which rotation that tap chose, or -1 for none: the row outside the buttons
+// chooses nothing rather than the nearest thing.
+inline int hitRot(int x, int y, int slot, int w) {
+  const TRect r = rootRect(slot, w);
+  for (int k = 0; k < 3; k++)
+    if (rotBtnRect(r, k).hit(x, y)) return ROT_BTN[k];
+  return -1;
+}
+
 // A list page: the same seven rows and the same pager as a shelf, with a
 // second line per row for whatever the row is about.
 inline void drawRow(ToolsCanvas& c, int slot, const char* label, const char* sub, bool rule,

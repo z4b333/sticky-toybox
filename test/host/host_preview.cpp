@@ -3960,6 +3960,73 @@ int main() {
       }
     }
 
+    // A real recipe off a real site, for the screens rather than the parser:
+    // seven ingredients long enough to wrap, twelve steps long enough to page,
+    // and fractions and footnote marks that send the renderer to the
+    // international face. The dal above is two lines and proves nothing about
+    // a layout.
+    static const char kPizza[] =
+        "{\"@type\":\"Recipe\",\"name\":\"The Best Pizza Dough Recipe\",\"recipeYield\":[\"12\",\"12 "
+        "servings (makes one 10-12\\\" pizza)\"],\"totalTime\":\"PT60M\",\"recipeIngredient\":[\"2-2 "
+        "⅓ cups all-purpose flour OR bread flour¹ (divided (250-295g))\",\"1 packet instant yeast² (("
+        "2 ¼ teaspoon))\",\"1 ½ teaspoons sugar\",\"¾ teaspoon salt\",\"⅛-¼ teaspoon garlic powder an"
+        "d/or dried basil leaves (optional)\",\"2 Tablespoons olive oil (+ additional )\",\"¾ cup  wa"
+        "rm water³ ((175ml))\"],\"recipeInstructions\":[{\"@type\":\"HowToStep\",\"text\":\"Combine 1"
+        " cup (125g) of flour, instant yeast, sugar, and salt in a large bowl. If desired, add garlic"
+        " powder and dried basil at this point as well.\",\"name\":\"Combine 1 cup (125g) of flour, i"
+        "nstant yeast, sugar, and salt in a large bowl. If desired, add garlic powder and dried basil"
+        " at this point as well.\"},{\"@type\":\"HowToStep\",\"text\":\"Add olive oil and warm water "
+        "and use a wooden spoon to stir well very well.\",\"name\":\"Add olive oil and warm water and"
+        " use a wooden spoon to stir well very well.\"},{\"@type\":\"HowToStep\",\"text\":\"Gradually"
+        " add another 1 cup (125g) of flour. Add any additional flour as needed (I&#039;ve found that"
+        " sometimes I need as much as an additional ⅓ cup), stirring until the dough is forming into "
+        "a cohesive, elastic ball and is beginning to pull away from the sides of the bowl (see video"
+        " above recipe for visual cue). The dough will still be slightly sticky but still should be m"
+        "anageable with your hands.\",\"name\":\"Gradually add another 1 cup (125g) of flour. Add any"
+        " additional flour as needed (I&#039;ve found that sometimes I need as much as an additional "
+        "⅓ cup), stirring until the dough is forming into a cohesive, elastic ball and is beginning t"
+        "o pull away from the sides of the bowl (see video above recipe for visual cue). The dough wi"
+        "ll still be slightly sticky but still should be manageable with your hands.\"},{\"@type\":\""
+        "HowToStep\",\"text\":\"Drizzle a separate, large, clean bowl generously with olive oil and u"
+        "se a pastry brush to brush up the sides of the bowl.\",\"name\":\"Drizzle a separate, large,"
+        " clean bowl generously with olive oil and use a pastry brush to brush up the sides of the bo"
+        "wl.\"},{\"@type\":\"HowToStep\",\"text\":\"Lightly dust your hands with flour and form your "
+        "pizza dough into a round ball and transfer to your olive oil-brushed bowl. Use your hands to"
+        " roll the pizza dough along the inside of the bowl until it is coated in olive oil, then cov"
+        "er the bowl tightly with plastic wrap and place it in a warm place.\",\"name\":\"Lightly dus"
+        "t your hands with flour and form your pizza dough into a round ball and transfer to your oli"
+        "ve oil-brushed bowl. Use your hands to roll the pizza dough along the inside of the bowl unt"
+        "il it is coated in olive oil, then cover the bowl tightly with plastic wrap and place it in "
+        "a warm place.\"},{\"@type\":\"HowToStep\",\"text\":\"Allow dough to rise for 30 minutes or u"
+        "ntil doubled in size. If you intend to bake this dough into a pizza, I also recommend prehea"
+        "ting your oven to 425F (215C) at this point so that it will have reached temperature once yo"
+        "ur pizza is ready to bake.\",\"name\":\"Allow dough to rise for 30 minutes or until doubled "
+        "in size. If you intend to bake this dough into a pizza, I also recommend preheating your ove"
+        "n to 425F (215C) at this point so that it will have reached temperature once your pizza is r"
+        "eady to bake.\"},{\"@type\":\"HowToStep\",\"text\":\"Once the dough has risen, use your hand"
+        "s to gently deflate it and transfer to a lightly floured surface and knead briefly until smo"
+        "oth (about 3-5 times).&nbsp;\",\"name\":\"Once the dough has risen, use your hands to gently"
+        " deflate it and transfer to a lightly floured surface and knead briefly until smooth (about "
+        "3-5 times).&nbsp;\"},{\"@type\":\"HowToStep\",\"text\":\"Use either your hands or a rolling "
+        "pin to work the dough into 12\\\" circle.\",\"name\":\"Use either your hands or a rolling pi"
+        "n to work the dough into 12\\\" circle.\"},{\"@type\":\"HowToStep\",\"text\":\"Transfer doug"
+        "h to a parchment paper lined pizza pan and either pinch the edges or fold them over to form "
+        "a crust.\",\"name\":\"Transfer dough to a parchment paper lined pizza pan and either pinch t"
+        "he edges or fold them over to form a crust.\"},{\"@type\":\"HowToStep\",\"text\":\"Drizzle a"
+        "dditional olive oil (about a Tablespoon) over the top of the pizza and use your pastry brush"
+        " to brush the entire surface of the pizza (including the crust) with olive oil.&nbsp;\",\"na"
+        "me\":\"Drizzle additional olive oil (about a Tablespoon) over the top of the pizza and use y"
+        "our pastry brush to brush the entire surface of the pizza (including the crust) with olive o"
+        "il.&nbsp;\"},{\"@type\":\"HowToStep\",\"text\":\"Use a fork to poke holes all over the cente"
+        "r of the pizza to keep the dough from bubbling up in the oven.\",\"name\":\"Use a fork to po"
+        "ke holes all over the center of the pizza to keep the dough from bubbling up in the oven.\"}"
+        ",{\"@type\":\"HowToStep\",\"text\":\"Add desired toppings (see the notes for a link to my fa"
+        "vorite, 5-minute pizza sauce recipe!) and bake in a 425F (215C) preheated oven for 13-15 min"
+        "utes or until toppings are golden brown. Slice and serve.\",\"name\":\"Add desired toppings "
+        "(see the notes for a link to my favorite, 5-minute pizza sauce recipe!) and bake in a 425F ("
+        "215C) preheated oven for 13-15 minutes or until toppings are golden brown. Slice and serve."
+        "\"}]}";
+
     // The app itself, over a card recipe and a phone one.
     sdcard::hostPutCardFile("/recipes/tarte.json", kPage, (int)strlen(kPage));
     toybox.open(false, 11);
@@ -4054,8 +4121,38 @@ int main() {
     // see that (the rows are drawn, just off the bottom), so the count is
     // checked here and the paint is left to the detector for the rest.
     {
+      // On the pizza: seven ingredients and twelve steps, so the pager and
+      // the wrapping are both in play. It lands on the card here rather than
+      // at the top of this guard so that every check above still runs against
+      // the one recipe it was written for. Found by opening rows rather than
+      // by index -- the list is flash-first and its order is not this guard's
+      // business.
+      sdcard::hostPutCardFile("/recipes/pizza.json", kPizza, (int)strlen(kPizza));
+      toybox.open(false, 11);  // a fresh entry re-reads /recipes
+      rt = static_cast<RecipeTool*>(toybox.hostActive());
+      toybox.onTap(240, 650);  // GOT IT, the help card again
+      bool found = false;
+      for (int k = 0; k < rcpui::LIST_PER && !found; k++) {
+        toybox.onTap(240, rcpui::LIST_Y0 + k * rcpui::LIST_ROW + 20);
+        if (rt->hostScreen() == 1 && rt->hostRecipe().nIng == 7) found = true;
+        else if (rt->hostScreen() == 1) toybox.onTap(50, 26);
+      }
+      if (!found) {
+        printf("RECIPE FAIL: the pizza did not open off the card\n");
+        abort();
+      }
+      if (rt->hostRecipe().nSteps != 12) {
+        printf("RECIPE FAIL: the pizza has %d steps, wanted 12\n",
+               (int)rt->hostRecipe().nSteps);
+        abort();
+      }
       const int perPortrait = rt->hostIngPer();
       const int rowPortrait = rt->hostIngRowH();
+      if (rt->hostRecipe().nIng <= perPortrait) {
+        printf("RECIPE FAIL: seven ingredients fit on one page (%d), so the pager"
+               " is untested\n", perPortrait);
+        abort();
+      }
       toybox.onButton(SideBtn::Ok);
       if (!rt->hostMenu()) {
         printf("RECIPE FAIL: OK did not open the options panel\n");
@@ -4091,9 +4188,12 @@ int main() {
       // ...and turned. Every row, and the COOK button, must still be on the
       // panel: that is the whole of what the old constants got wrong.
       toybox.onButton(SideBtn::Ok);
-      toybox.onTap(240, rmenu::rootRect(1, 480).y + 40);
+      {  // the LEFT button of the three, the same control the readers have
+        const TRect b = rmenu::rotBtnRect(rmenu::rootRect(1, 480), 0);
+        toybox.onTap(b.x + b.w / 2, b.y + b.h / 2);
+      }
       if (rt->hostRot() != 1) {
-        printf("RECIPE FAIL: the rotation row did not step (%d)\n", rt->hostRot());
+        printf("RECIPE FAIL: the rotation buttons did not turn it (%d)\n", rt->hostRot());
         abort();
       }
       toybox.onButton(SideBtn::Ok);
@@ -4134,8 +4234,10 @@ int main() {
       toybox.onButton(SideBtn::Ok);
       toybox.onTap(240, rmenu::rootRect(0, 480).y + 40);  // size back to normal
       toybox.onTap(240, rmenu::rootRect(0, 480).y + 40);
-      toybox.onTap(240, rmenu::rootRect(1, 480).y + 40);  // rotation: left -> right
-      toybox.onTap(240, rmenu::rootRect(1, 480).y + 40);  // -> upright
+      {  // and PORTRAIT, the middle of the three
+        const TRect b = rmenu::rotBtnRect(rmenu::rootRect(1, 480), 1);
+        toybox.onTap(b.x + b.w / 2, b.y + b.h / 2);
+      }
       if (rt->hostSize() != 0 || rt->hostRot() != 0) {
         printf("RECIPE FAIL: the panel did not cycle back (size %d, rot %d)\n", rt->hostSize(),
                rt->hostRot());
@@ -4147,7 +4249,7 @@ int main() {
 
     toybox.onTap(50, 26);  // back to the list
     toybox.onTap(rcpui::delRect(0).x + 20, rcpui::delRect(0).y + 20);  // delete it
-    if (rt->hostCount() != 1) {
+    if (rt->hostCount() != 2) {  // the two on the card, which no x can remove
       printf("RECIPE FAIL: delete left %d recipes\n", rt->hostCount());
       abort();
     }

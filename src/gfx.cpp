@@ -117,16 +117,26 @@ constexpr int UI_EXTRA_COUNT = 0;
 const uint16_t UI_EXTRA_CPS[1] PROGMEM = {0};
 #endif
 
-// The baked faces carry ASCII at indices 0..94 and the accented-Latin
-// extras after them, in UI_EXTRA_CPS order. -1 means the face does not have
-// it and the caller falls through to the international tables.
+// The baked faces carry ASCII at indices 0..94 and the extras after them, in
+// UI_EXTRA_CPS order -- which the generator sorts, so this is a binary search.
+// -1 means the face does not have it and the caller falls through to the
+// international tables.
+//
+// It used to scan, behind a hand-written "is it roughly in the Latin range"
+// guess. The first codepoints added outside that guess -- the vulgar fractions
+// a recipe measures flour in -- were refused before the scan ever ran, and drew
+// a box with the table sitting there holding them. A search that reads the
+// table cannot disagree with the table.
 int glyphIndex(uint32_t cp) {
   if (cp >= 32 && cp <= 126) return (int)cp - 32;
-  const bool latin = cp >= 0xC0 && cp <= 0x17E;
-  const bool punct = cp >= 0x2013 && cp <= 0x2026;
-  if (!latin && !punct) return -1;  // cheap bounds before the scan
-  for (int i = 0; i < UI_EXTRA_COUNT; i++)
-    if (pgm_read_word(&UI_EXTRA_CPS[i]) == cp) return 95 + i;
+  int lo = 0, hi = UI_EXTRA_COUNT - 1;
+  while (lo <= hi) {
+    const int mid = (lo + hi) / 2;
+    const uint32_t at = pgm_read_word(&UI_EXTRA_CPS[mid]);
+    if (at == cp) return 95 + mid;
+    if (at < cp) lo = mid + 1;
+    else hi = mid - 1;
+  }
   return -1;
 }
 

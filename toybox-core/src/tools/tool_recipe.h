@@ -41,12 +41,6 @@ inline const char* sizeName(int i) { return i <= 0 ? "normal" : (i == 1 ? "large
 inline TSize ingSize(int i) { return i <= 0 ? TS_MED : (i == 1 ? TS_LARGE : TS_HUGE); }
 inline TSize stepSize(int i) { return i <= 0 ? TS_LARGE : TS_HUGE; }
 
-inline const char* rotName(int r) {
-  return r == 1 ? "turned left" : (r == 3 ? "turned right" : "upright");
-}
-// Upright, then the two landscapes, in the order the arrows suggest.
-inline int nextRot(int r) { return r == 0 ? 1 : (r == 1 ? 3 : 0); }
-
 // the cooking page
 inline constexpr int COOK_FOOT = 96;
 // the phone page (same geometry as the flashcards import, deliberately: one
@@ -230,11 +224,14 @@ class RecipeTool : public ToolApp {
     return landscape() ? line + 26 : line * 2 + 18;
   }
 
-  // The bottom of the list: above the COOK button when there is one, above the
-  // pager line when there is not.
+  // The bottom of the list: above the pager line, which is itself above the
+  // COOK button when there is one. Measured, because the pager is set in the
+  // smallest face and the smallest face has moved once already.
+  int pagerH() { return host().canvas().textHeight(TS_SMALL) + 14; }
   int ingBottom() {
     ToolsCanvas& c = host().canvas();
-    return c.height() - (_r.nSteps > 0 ? 116 : 52);
+    const int below = (_r.nSteps > 0 ? 88 + 16 : 8) + pagerH();
+    return c.height() - below;
   }
 
   int ingPer() {
@@ -383,15 +380,17 @@ class RecipeTool : public ToolApp {
   // that is not the page itself.
 
   void renderMenu(ToolsCanvas& c) {
-    char sizeSub[40], rotSub[40];
-    snprintf(sizeSub, sizeof(sizeSub), "%s", rcpui::sizeName(_size));
-    snprintf(rotSub, sizeof(rotSub), "%s", rcpui::rotName(_rot));
     const rmenu::Item items[2] = {
-        {"Text size", sizeSub, true},
-        {"Rotation", rotSub, true},
+        {"Text size", rcpui::sizeName(_size), true},
+        {"Rotation", "", false},  // three buttons, drawn under the label
     };
     rmenu::drawRoot(host(), c, "OPTIONS", items, 2,
                     _screen == Screen::Cook ? "STEP" : "RECIPE");
+    // The same three buttons the readers offer, from the same place: one tap
+    // to any of the three rather than a cycle through the one you do not
+    // want. The turn waits for the panel to close, so the panel is never
+    // asked to draw itself sideways.
+    rmenu::drawRotRow(c, 1, _rot);
     c.textCentered(c.width() / 2, c.height() - 96,
                    _screen == Screen::Cook ? "these apply to the steps and the recipe"
                                            : "these apply to the recipe and the steps",
@@ -404,16 +403,21 @@ class RecipeTool : public ToolApp {
       closeMenu();
       return;
     }
-    const int row = rmenu::hitRoot(x, y, 2, host().canvas().width());
+    const int w = host().canvas().width();
+    const int row = rmenu::hitRoot(x, y, 2, w);
     if (row < 0) return;
-    // Row or plus, both cycle: there are three sizes and three angles, and a
-    // stepper for three things is a stepper nobody needs.
     if (row == 0) {
+      // Three sizes, so the row itself cycles: a stepper for three things is
+      // a stepper nobody needs. Rotation gets buttons because its three are
+      // not a sequence -- left and right are alternatives, not more of each
+      // other.
       _size = (uint8_t)((_size + 1) % rcpui::SIZES);
       prefs().putUInt("rc_size", _size);
       _ingPage = 0;  // fewer rows per page: the old page number may not exist
     } else {
-      _rot = (uint8_t)rcpui::nextRot(_rot);
+      const int want = rmenu::hitRot(x, y, 1, w);
+      if (want < 0 || want == _rot) return;  // the row outside them chooses nothing
+      _rot = (uint8_t)want;
       prefs().putUInt("rc_rot", _rot);
       _ingPage = 0;
     }
@@ -507,7 +511,7 @@ class RecipeTool : public ToolApp {
     if (pages > 1) {
       char buf[40];
       snprintf(buf, sizeof(buf), "%d of %d - side buttons page", _ingPage + 1, pages);
-      c.textCentered(c.width() / 2, ingBottom() + 12, buf, TS_SMALL, true);
+      c.textCentered(c.width() / 2, ingBottom() + 6, buf, TS_SMALL, true);
     }
     if (_r.nSteps > 0) {
       const TRect b = cookBtn();

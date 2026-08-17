@@ -20,7 +20,21 @@ EXTRAS = ([c for c in range(0xC0, 0x100)] + [0x152, 0x153, 0x160, 0x161, 0x17D, 
           # Typographic punctuation: commercial EPUBs use curly quotes, real
           # dashes and the ellipsis on nearly every line, and at 44 px they
           # had the same dropped-glyph problem the accents did.
-          + [0x2013, 0x2014, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2026])
+          + [0x2013, 0x2014, 0x2018, 0x2019, 0x201C, 0x201D, 0x2022, 0x2026]
+          # Recipes: a degree sign, footnote marks, and the vulgar fractions a
+          # cup measure is written in. A real recipe page opened on the device
+          # with a box where its two-thirds should be -- the fractions past
+          # Latin-1 are not in any face this carries, and the ones inside it
+          # were coming from the international fallback, half a size off the
+          # words either side of them.
+          + [0x00B0, 0x00B2, 0x00B3, 0x00B9, 0x00BC, 0x00BD, 0x00BE]
+          + [0x2153, 0x2154, 0x215B, 0x215C, 0x215D, 0x215E])
+# SORTED, and it matters: the renderer binary-searches this table rather than
+# scanning it, which is both faster per glyph and the end of a trap. It used to
+# scan, behind a hand-written "is it roughly in the Latin range" test -- and the
+# first codepoints added outside that range (the fractions above) were rejected
+# before the scan and drew a box, with the table itself perfectly correct.
+EXTRAS = sorted(set(EXTRAS))
 # Ink is any pixel darker than this on a white ground, so a higher number pulls
 # more of the antialiased edge into the glyph and thickens every stroke without
 # changing the typeface or moving a single layout.

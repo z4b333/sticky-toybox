@@ -667,18 +667,6 @@ class EpubTool : public ToolApp {
   // words placed (0 means the chapter had nothing left).
   static const char* faceName(int f) { return f == 1 ? "Literata" : "DejaVu"; }
 
-  // 0 portrait, 1 and 3 the two landscapes. Which of the two you want depends
-  // on which hand holds the device, so both are offered -- as buttons, in
-  // the order the arrows suggest: turn it left, keep it upright, turn it
-  // right.
-  // Confirmed on glass: rotation 1 turns the text toward the panel's left
-  // side, 3 toward its right.
-  static constexpr uint8_t kRotBtn[3] = {1, 0, 3};
-  static TRect rotBtnRect(const TRect& row, int k) {
-    const int bw = (row.w - 32) / 3;
-    return {row.x + 8 + k * (bw + 8), row.y + 48, bw, 42};
-  }
-
   // The panel's screens are drawn portrait; the page is drawn at the chosen
   // rotation. The reflow decision compares against the rotation the CURRENT
   // LAYOUT was made at -- not the canvas, which is always portrait while the
@@ -1708,18 +1696,9 @@ class EpubTool : public ToolApp {
         FaceScope fs(host(), _face);
         c.textClipped(r.x + 8, r.y + 58, r.w - 16, sample, TS_MED, true);
       }
-      {
-        // Rotation as three buttons -- one tap to any of the three, no
-        // cycling through the one you do not want. The arrows say which way
-        // the device turns; the filled one is where you are. The turn itself
-        // still lands when the panel closes.
-        const TRect r = rmenu::rootRect(rowRot, c.width());
-        static const char* kLab[3] = {"< LEFT", "PORTRAIT", "RIGHT >"};
-        for (int k = 0; k < 3; k++) {
-          const TRect b = rotBtnRect(r, k);
-          c.button(b.x, b.y, b.w, b.h, kLab[k], _rot == kRotBtn[k], TS_SMALL);
-        }
-      }
+      // The turn itself still waits for the panel to close, so the panel is
+      // never asked to draw itself sideways.
+      rmenu::drawRotRow(c, rowRot, _rot);
       return;
     }
 
@@ -1914,19 +1893,13 @@ class EpubTool : public ToolApp {
         return;
       }
       if (hit == rowRot) {
-        // One of the three buttons; the turn itself waits for the panel to
-        // close, so the panel is never asked to draw itself sideways.
-        const TRect r = rmenu::rootRect(rowRot, W);
-        for (int k = 0; k < 3; k++) {
-          if (!rotBtnRect(r, k).hit(x, y)) continue;
-          if (_rot == kRotBtn[k]) return;  // already there: nothing to say
-          _rot = kRotBtn[k];
-          prefs().putUInt("rd_rot", _rot);
-          host().beep(0);
-          paint();
-          return;
-        }
-        return;  // the row outside the buttons chooses nothing
+        const int want = rmenu::hitRot(x, y, rowRot, W);
+        if (want < 0 || want == _rot) return;  // already there: nothing to say
+        _rot = (uint8_t)want;
+        prefs().putUInt("rd_rot", _rot);
+        host().beep(0);
+        paint();
+        return;
       }
       if (hit == rowClose) {
         _menu = rmenu::Page::None;
