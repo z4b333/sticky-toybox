@@ -194,6 +194,13 @@ esp-web-install-button {
 .device img {
   display: block;
   width: 100%;
+  /* height:auto is what makes aspect-ratio mean anything. An <img> with
+     width and height attributes gets them as presentation hints, so
+     height stayed pinned at 800 px while the width was capped -- the
+     screens were drawn twice as tall as the panel and every square in a
+     Sudoku grid came out a rectangle. It got worse, not better, when the
+     plates were made narrower. */
+  height: auto;
   aspect-ratio: 480 / 800;
   border-radius: 6px;
   image-rendering: crisp-edges;

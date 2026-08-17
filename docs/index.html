@@ -117,57 +117,85 @@
       <p class="eyebrow">What it does</p>
       <h2>Six screens, out of about eighty.</h2>
       <p class="lede prose">Rendered by the firmware itself at the panel's own
-      480&times;800 &mdash; what the device draws, not a picture of it.</p>
+      480&times;800 &mdash; what the device draws, not a picture of it.
+      <a href="#what" id="reshuffle" hidden>Show me six others.</a></p>
 
-      <div class="grid cols-3" style="margin-top:40px">
+      <div class="grid cols-3" id="gallery" style="margin-top:40px">
         <figure class="shot">
           <div class="device"><img src="shots/shelf.png" width="480" height="800"
             alt="The EPUB shelf listing a series folder and two books."></div>
           <figcaption><h3>An EPUB reader</h3>
-          <p>Reads the books already on the card and keeps your place there
-          &mdash; in CrossPoint's own format, so a card can move between the
-          two firmwares.</p></figcaption>
+          <p>Reads the books already on the card and keeps your place there &mdash; in CrossPoint's own format, so a card can move between the two firmwares.</p></figcaption>
         </figure>
 
         <figure class="shot">
           <div class="device"><img src="shots/contents.png" width="480" height="800"
             alt="A book's contents list, each chapter with how long it takes to read."></div>
           <figcaption><h3>The book's own contents</h3>
-          <p>Chapter names as the publisher wrote them, each with how long it
-          runs &mdash; so you know whether there is time for another.</p></figcaption>
+          <p>Chapter names as the publisher wrote them, each with how long it runs &mdash; so you know whether there is time for another.</p></figcaption>
         </figure>
 
         <figure class="shot">
           <div class="device"><img src="shots/notes.png" width="480" height="800"
             alt="A pinned shopping list with two items ticked off."></div>
           <figcaption><h3>Notes from your phone</h3>
-          <p>Scan the QR code, type or dictate, and it appears. Pin one and it
-          survives the power going off. English, Thai, Chinese, Korean,
-          Japanese and Vietnamese.</p></figcaption>
+          <p>Scan the QR code, type or dictate, and it appears. Pin one and it survives the power going off. English, Thai, Chinese, Korean, Japanese and Vietnamese.</p></figcaption>
+        </figure>
+
+        <figure class="shot">
+          <div class="device"><img src="shots/noteslist.png" width="480" height="800"
+            alt="The notes list beside the panel explaining how to write from a phone."></div>
+          <figcaption><h3>Written from anywhere</h3>
+          <p>The device serves a little editor to your phone over its own network. Nothing to install at either end.</p></figcaption>
         </figure>
 
         <figure class="shot">
           <div class="device"><img src="shots/wordle.png" width="480" height="800"
             alt="A game of Wordle in progress on the e-paper panel."></div>
           <figcaption><h3>Games that suit e-paper</h3>
-          <p>Wordle, Nonogram, 2048, XO, Ships and Sudoku. Turn-based things,
-          where a screen that redraws in a fifth of a second is plenty.</p></figcaption>
+          <p>Turn-based things, where a screen that redraws in a fifth of a second is plenty.</p></figcaption>
+        </figure>
+
+        <figure class="shot">
+          <div class="device"><img src="shots/nonogram.png" width="480" height="800"
+            alt="A ten by ten nonogram part-solved."></div>
+          <figcaption><h3>Nonogram</h3>
+          <p>Ten by ten with a hint budget, or five by five while you learn the trick.</p></figcaption>
+        </figure>
+
+        <figure class="shot">
+          <div class="device"><img src="shots/g2048.png" width="480" height="800"
+            alt="A game of 2048 resumed mid-board."></div>
+          <figcaption><h3>Picked up where you left it</h3>
+          <p>The board is written down as you play, so closing the lid is a pause rather than a loss.</p></figcaption>
+        </figure>
+
+        <figure class="shot">
+          <div class="device"><img src="shots/ships.png" width="480" height="800"
+            alt="A game of battleships against the device."></div>
+          <figcaption><h3>Ships</h3>
+          <p>Against the device or against somebody holding the other end &mdash; the panel keeps both fleets honest.</p></figcaption>
         </figure>
 
         <figure class="shot">
           <div class="device"><img src="shots/sudoku.png" width="480" height="800"
             alt="A Sudoku grid mid-solve with a number pad below it."></div>
-          <figcaption><h3>Kept between sittings</h3>
-          <p>Puzzles, streaks and reading positions are written down as you go.
-          A week in a drawer costs nothing.</p></figcaption>
+          <figcaption><h3>Sudoku</h3>
+          <p>Three difficulties, a number pad, and a record it keeps for you.</p></figcaption>
+        </figure>
+
+        <figure class="shot">
+          <div class="device"><img src="shots/flashcards.png" width="480" height="800"
+            alt="A flashcard showing the word molarity."></div>
+          <figcaption><h3>Flashcards</h3>
+          <p>Decks imported from a phone or a card, one card at a time, marked off as they stick.</p></figcaption>
         </figure>
 
         <figure class="shot">
           <div class="device"><img src="shots/tools.png" width="480" height="800"
             alt="The Utility drawer: coin, dice, random number, name picker, timer and recipes."></div>
           <figcaption><h3>Tools in a drawer</h3>
-          <p>Coin, dice, timer, random number, name picker, flashcards, recipe
-          card. Any of them can be hidden if you never use it.</p></figcaption>
+          <p>Coin, dice, timer, random number, name picker, flashcards, recipe card. Any of them can be hidden if you never use it.</p></figcaption>
         </figure>
       </div>
     </div>
@@ -344,6 +372,34 @@
 </footer>
 
 <script>
+  // The gallery holds every screen worth showing and puts six of them out,
+  // shuffled, so a second visit is not the same page. Written into the HTML
+  // rather than built here: with no JavaScript you get all eleven, which is a
+  // longer page and not a broken one.
+  (function () {
+    var g = document.getElementById('gallery');
+    if (!g) return;
+    var all = [].slice.call(g.children);
+    var SHOW = 6;
+    if (all.length <= SHOW) return;
+    function deal() {
+      for (var i = all.length - 1; i > 0; i--) {
+        var j = Math.floor(Math.random() * (i + 1));
+        var t = all[i]; all[i] = all[j]; all[j] = t;
+      }
+      all.forEach(function (el, k) {
+        el.hidden = k >= SHOW;
+        g.appendChild(el);  // appending a node already in the DOM moves it
+      });
+    }
+    deal();
+    var btn = document.getElementById('reshuffle');
+    if (btn) {
+      btn.hidden = false;
+      btn.addEventListener('click', function (e) { e.preventDefault(); deal(); });
+    }
+  })();
+
   // Two buttons, two manifests, one rule: every part is written at its own
   // offset and the gaps between them are never touched. NVS (0x9000) keeps
   // the settings, the stats and every book's saved page; LittleFS (0xB50000)
