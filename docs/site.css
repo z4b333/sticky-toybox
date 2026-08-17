@@ -77,25 +77,30 @@ section + section { border-top: 1px solid var(--line); }
   gap: 24px;
 }
 
-/* The device's own wordmark: six letters in six boxes, alternating, exactly as
-   the hub paints it. Drawn in CSS rather than shipped as an image so it stays
-   sharp and costs no request. */
+/* The device's own wordmark, copied off the hub rather than guessed at: six
+   letters in six SQUARE plates that TOUCH, with the T and the B filled and the
+   other four outlined. It was alternating here, which is a different mark --
+   see hub.cpp, where FILLED is {true, false, false, true, false, false}.
+   Plates touch because a wordmark reads as one word, not six tiles. */
 .mark {
   display: inline-flex;
-  gap: 2px;
+  gap: 0;
   text-decoration: none;
   font-weight: 700;
   font-size: 13px;
   letter-spacing: 0.02em;
 }
 .mark span {
-  width: 19px;
+  width: 21px;
   height: 21px;
   display: grid;
   place-items: center;
   border: 1.5px solid var(--fg);
+  margin-right: -1.5px;  /* one shared hairline where two plates meet */
 }
-.mark span:nth-child(even) { background: var(--fg); color: var(--panel); }
+.mark span:last-child { margin-right: 0; }
+.mark span:nth-child(1),
+.mark span:nth-child(4) { background: var(--fg); color: var(--panel); }
 
 .site-nav {
   margin-left: auto;
