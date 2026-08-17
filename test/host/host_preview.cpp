@@ -4168,7 +4168,7 @@ int main() {
       // CrossPoint's are 24 and 29 px -- a taller row can still divide into
       // the same count, and asserting fewer rows there is asserting something
       // about the font rather than about this code.
-      toybox.onTap(240, rmenu::rootRect(0, 480).y + 40);
+      toybox.onTap(480 - 66, RecipeTool::hostStepperY(0) + 64);  // the + of the size stepper
       if (rt->hostSize() != 1) {
         printf("RECIPE FAIL: the size row did not step (%d)\n", rt->hostSize());
         abort();
@@ -4189,7 +4189,7 @@ int main() {
       // rows breathe on the way. Same measured property as the size -- the
       // row height has to follow it, or "airy" is a word with no effect.
       toybox.onButton(SideBtn::Ok);
-      toybox.onTap(240, rmenu::rootRect(1, 480).y + 40);  // normal -> airy
+      toybox.onTap(480 - 66, RecipeTool::hostStepperY(1) + 64);  // spacing +: normal -> airy
       if (rt->hostLead() != 2) {
         printf("RECIPE FAIL: the spacing row did not step (%d)\n", rt->hostLead());
         abort();
@@ -4201,8 +4201,7 @@ int main() {
         abort();
       }
       toybox.onButton(SideBtn::Ok);
-      toybox.onTap(240, rmenu::rootRect(1, 480).y + 40);  // airy -> tight
-      toybox.onTap(240, rmenu::rootRect(1, 480).y + 40);  // tight -> normal
+      toybox.onTap(66, RecipeTool::hostStepperY(1) + 64);  // spacing -: airy -> normal
       if (rt->hostLead() != 1) {
         printf("RECIPE FAIL: the spacing did not cycle back (%d)\n", rt->hostLead());
         abort();
@@ -4211,7 +4210,7 @@ int main() {
       // ...and turned. Every row, and the COOK button, must still be on the
       // panel: that is the whole of what the old constants got wrong.
       {  // the LEFT button of the three, the same control the readers have
-        const TRect b = rmenu::rotBtnRect(rmenu::rootRect(2, 480), 0);
+        const TRect b = rt->hostRotRect(0);
         toybox.onTap(b.x + b.w / 2, b.y + b.h / 2);
       }
       if (rt->hostRot() != 1) {
@@ -4254,10 +4253,9 @@ int main() {
       // Put it back, and check the panel goes portrait with it: the list and
       // the pairing screen are portrait designs and have no landscape.
       toybox.onButton(SideBtn::Ok);
-      toybox.onTap(240, rmenu::rootRect(0, 480).y + 40);  // size back to normal
-      toybox.onTap(240, rmenu::rootRect(0, 480).y + 40);
+      toybox.onTap(66, RecipeTool::hostStepperY(0) + 64);  // size -, back to normal
       {  // and PORTRAIT, the middle of the three
-        const TRect b = rmenu::rotBtnRect(rmenu::rootRect(2, 480), 1);
+        const TRect b = rt->hostRotRect(1);
         toybox.onTap(b.x + b.w / 2, b.y + b.h / 2);
       }
       if (rt->hostSize() != 0 || rt->hostRot() != 0) {

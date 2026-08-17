@@ -193,6 +193,8 @@ class RecipeTool : public ToolApp {
   int hostSize() const { return _size; }
   int hostRot() const { return _rot; }
   int hostLead() const { return _lead; }
+  TRect hostRotRect(int k) { return rotRect(k); }
+  static int hostStepperY(int r) { return stepperY(r); }
   bool hostMenu() const { return _menu; }
   int hostCount() const { return _nFlash + _nCard; }
   const rcp::Recipe& hostRecipe() const { return _r; }
@@ -387,24 +389,48 @@ class RecipeTool : public ToolApp {
   // page under it is doing: the panel is a portrait design, like every screen
   // that is not the page itself.
 
+  // Three controls, and all three are the ones the readers already use: two
+  // minus/plus steppers and the rotation buttons, drawn from reader_menu.h.
+  // Size and spacing are scales with ends you can reach, so they step;
+  // rotation is three alternatives, so it does not.
+  static constexpr int MENU_Y0 = 96;
+  static int stepperY(int r) { return MENU_Y0 + r * rmenu::STEP_H; }
+  int rotY() { return stepperY(2) - 10; }
+
   void renderMenu(ToolsCanvas& c) {
-    const rmenu::Item items[3] = {
-        {"Text size", rcpui::sizeName(_size), true},
-        {"Line spacing", rmenu::leadName(_lead), true},
-        {"Rotation", "", false},  // three buttons, drawn under the label
-    };
-    rmenu::drawRoot(host(), c, "OPTIONS", items, 3,
-                    _screen == Screen::Cook ? "STEP" : "RECIPE");
-    // The same three buttons the readers offer, from the same place: one tap
-    // to any of the three rather than a cycle through the one you do not
-    // want. The turn waits for the panel to close, so the panel is never
-    // asked to draw itself sideways.
-    rmenu::drawRotRow(c, 2, _rot);
-    c.textCentered(c.width() / 2, c.height() - 96,
-                   _screen == Screen::Cook ? "these apply to the steps and the recipe"
-                                           : "these apply to the recipe and the steps",
+    host().topBar("OPTIONS", false, _screen == Screen::Cook ? "STEP" : "RECIPE");
+    rmenu::drawStepper(c, stepperY(0), "Text size", rcpui::sizeName(_size));
+    rmenu::drawStepper(c, stepperY(1), "Line spacing", rmenu::leadName(_lead));
+    c.fillRect(24, rotY() - 8, c.width() - 48, 1, true);
+    c.text(28, rotY() + 14, "Rotation", TS_SMALL, true);
+    // The turn waits for the panel to close, so the panel is never asked to
+    // draw itself sideways.
+    for (int k = 0; k < 3; k++) {
+      static const char* kLab[3] = {"< LEFT", "PORTRAIT", "RIGHT >"};
+      const TRect b = rotRect(k);
+      c.button(b.x, b.y, b.w, b.h, kLab[k], _rot == rmenu::ROT_BTN[k], TS_SMALL);
+    }
+    // A sample, for the same reason the reader has one: nobody can picture
+    // "largest, airy" from the words. Two lines, because two lines is what a
+    // long ingredient takes and the spacing between them is half the setting.
+    {
+      const int sy = rotY() + 128;
+      c.fillRect(24, sy - 16, c.width() - 48, 1, true);
+      const TSize its = rcpui::ingSize(_size);
+      const int lh = c.textHeight(its);
+      c.drawRect(28, sy + (lh - 28) / 2, 28, 28, 2, true);
+      c.textClipped(72, sy, c.width() - 96, "2-2 ⅓ cups all-purpose", its, true);
+      c.textClipped(72, sy + lh + air(), c.width() - 96, "flour, divided", its, true);
+    }
+    c.textCentered(c.width() / 2, c.height() - 96, "these apply to the recipe and the steps",
                    TS_SMALL, true);
     c.textCentered(c.width() / 2, c.height() - 64, "the OK button closes this", TS_SMALL, true);
+  }
+
+  TRect rotRect(int k) {
+    ToolsCanvas& c = host().canvas();
+    const int bw = (c.width() - 56 - 16) / 3;
+    return TRect{28 + k * (bw + 8), rotY() + 44, bw, 52};
   }
 
   void tapMenu(int x, int y) {
@@ -413,29 +439,33 @@ class RecipeTool : public ToolApp {
       return;
     }
     const int w = host().canvas().width();
-    const int row = rmenu::hitRoot(x, y, 3, w);
-    if (row < 0) return;
-    // Size and spacing cycle -- three of each, in an order, and a stepper for
-    // three things is a stepper nobody needs. Rotation gets buttons because
-    // its three are not a sequence: left and right are alternatives, not more
-    // of each other.
-    if (row == 0) {
-      _size = (uint8_t)((_size + 1) % rcpui::SIZES);
-      prefs().putUInt("rc_size", _size);
+    for (int r = 0; r < 2; r++) {
+      const int step = rmenu::hitStepper(x, y, stepperY(r), w);
+      if (step == 0) continue;
+      uint8_t& v = r == 0 ? _size : _lead;
+      const int lim = r == 0 ? rcpui::SIZES : rmenu::LEADS;
+      const int nv = (int)v + step;
+      if (nv < 0 || nv >= lim) {
+        host().beep(2);  // the end of the scale, and it says so
+        return;
+      }
+      v = (uint8_t)nv;
+      prefs().putUInt(r == 0 ? "rc_size" : "rc_lead", v);
       _ingPage = 0;  // fewer rows per page: the old page number may not exist
-    } else if (row == 1) {
-      _lead = (uint8_t)((_lead + 1) % rmenu::LEADS);
-      prefs().putUInt("rc_lead", _lead);
-      _ingPage = 0;
-    } else {
-      const int want = rmenu::hitRot(x, y, 2, w);
-      if (want < 0 || want == _rot) return;  // the row outside them chooses nothing
-      _rot = (uint8_t)want;
+      host().beep(0);
+      host().refreshUi();
+      return;
+    }
+    for (int k = 0; k < 3; k++) {
+      if (!rotRect(k).hit(x, y)) continue;
+      if (_rot == rmenu::ROT_BTN[k]) return;  // already there: nothing to say
+      _rot = rmenu::ROT_BTN[k];
       prefs().putUInt("rc_rot", _rot);
       _ingPage = 0;
+      host().beep(0);
+      host().refreshUi();
+      return;
     }
-    host().beep(0);
-    host().refreshUi();
   }
 
   void closeMenu() {

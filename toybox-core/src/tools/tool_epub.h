@@ -1747,20 +1747,10 @@ class EpubTool : public ToolApp {
       host().topBar("TEXT", false, "OPTIONS");
       const char* labels[2] = {"Size", "Spacing"};
       const char* values[2] = {epubui::sizeName(_size), epubui::leadName(_lead)};
-      for (int r = 0; r < 2; r++) {
-        const int y = 110 + r * 120;
-        // Circles, matching the + that keeps a bookmark: the same gesture
-        // deserves the same mark, and a hairline circle is the quietest
-        // control this panel has.
-        c.text(28, y, labels[r], TS_SMALL, true);
-        const int cy = y + 64;
-        c.drawCircle(66, cy, 34, 1, true);
-        c.fillRect(66 - 15, cy - 1, 30, 2, true);
-        c.drawCircle(c.width() - 66, cy, 34, 1, true);
-        c.fillRect(c.width() - 66 - 15, cy - 1, 30, 2, true);
-        c.fillRect(c.width() - 66 - 1, cy - 15, 2, 30, true);
-        c.textCentered(c.width() / 2, cy - c.textHeight(TS_LARGE) / 2, values[r], TS_LARGE, true);
-      }
+      // The steppers live in reader_menu.h now; the recipe app offers the
+      // same two and should not have to draw its own circles.
+      for (int r = 0; r < 2; r++)
+        rmenu::drawStepper(c, 110 + r * rmenu::STEP_H, labels[r], values[r]);
       // Page turns: three cadences, cycled by tapping the row. A row rather
       // than a stepper because there is no scale here to step along -- the
       // three are named things, and arrows either side of one would suggest a
@@ -1930,17 +1920,12 @@ class EpubTool : public ToolApp {
         return;
       }
       for (int r = 0; r < 2; r++) {
-        const int y0 = 110 + r * 120 + 30;
-        if (y < y0 || y >= y0 + 68) continue;
+        const int step = rmenu::hitStepper(x, y, 110 + r * rmenu::STEP_H,
+                                           host().canvas().width());
+        if (step == 0) continue;
         uint8_t& v = r == 0 ? _size : _lead;
         const int lim = r == 0 ? epubui::SIZES : epubui::LEADS;
-        int nv = v;
-        if (x < 120)
-          nv--;
-        else if (x >= host().canvas().width() - 120)
-          nv++;
-        else
-          return;
+        const int nv = (int)v + step;
         if (nv < 0 || nv >= lim) {
           host().beep(2);
           return;

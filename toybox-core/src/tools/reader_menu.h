@@ -140,6 +140,40 @@ inline int hitRoot(int x, int y, int n, int w) {
 // from the row: the row opens the list, the + adds to it.
 inline bool hitPlus(int x, int y, int i, int w) { return plusRect(i, w).hit(x, y); }
 
+// --- a minus/plus stepper ---------------------------------------------------
+// Two hairline circles either side of the value it changes, which is how the
+// reader's TEXT page has always offered size and spacing. Shared so the recipe
+// app offers it the same way: a stepper on one screen and a cycling row on
+// another are two controls for one idea, and the second one has to be learned.
+//
+// A stepper rather than a cycle because these ARE a scale -- smaller and
+// bigger, tighter and airier, with ends you can reach. Rotation is not a
+// scale, which is why it gets three buttons instead.
+inline constexpr int STEP_H = 120;   // one stepper, label and all
+inline constexpr int STEP_R = 34;    // the circles
+inline constexpr int STEP_IN = 66;   // their centres, in from each edge
+
+inline void drawStepper(ToolsCanvas& c, int y, const char* label, const char* value) {
+  c.text(28, y, label, TS_SMALL, true);
+  const int cy = y + 64;
+  c.drawCircle(STEP_IN, cy, STEP_R, 1, true);
+  c.fillRect(STEP_IN - 15, cy - 1, 30, 2, true);
+  c.drawCircle(c.width() - STEP_IN, cy, STEP_R, 1, true);
+  c.fillRect(c.width() - STEP_IN - 15, cy - 1, 30, 2, true);
+  c.fillRect(c.width() - STEP_IN - 1, cy - 15, 2, 30, true);
+  c.textCentered(c.width() / 2, cy - c.textHeight(TS_LARGE) / 2, value, TS_LARGE, true);
+}
+
+// -1 for the minus, +1 for the plus, 0 for anywhere else on the row. The
+// middle is the value, and tapping a value should not change it.
+inline int hitStepper(int x, int y, int rowY, int w) {
+  const int y0 = rowY + 30;
+  if (y < y0 || y >= y0 + 68) return 0;
+  if (x < 120) return -1;
+  if (x >= w - 120) return 1;
+  return 0;
+}
+
 // --- line spacing -----------------------------------------------------------
 // Three settings, shared: the EPUB reader, the comic reader and the recipe
 // app all put air between lines and there is no reason for three vocabularies
