@@ -48,6 +48,8 @@ class BookTool : public ToolApp {
     // behind our back, and the panel is re-initialised by the close, which is
     // why leaving an app always repaints in full.
     if (_open && _host) host().bookClose();
+    if (_host) host().sdBrowseClose();  // ...and the shelf's own session
+    _browsing = false;
     free(_pageBuf);
   }
 
@@ -59,6 +61,10 @@ class BookTool : public ToolApp {
     _open = false;
     _note = nullptr;
     snprintf(_dir, sizeof(_dir), "%s", shelf::TOP);
+    // The card stays up for as long as a shelf is on screen, so listings
+    // borrow one session and folder moves cost a partial rather than the full
+    // refresh a release forces. See tool_epub.h.
+    _browsing = h.sdBrowseOpen();
     reload();
     // The page buffer is NOT taken here. It used to be, at the grey size, for
     // every book on the shelf whether or not one was ever opened -- 96 KB of
@@ -134,7 +140,7 @@ class BookTool : public ToolApp {
           snprintf(_dir, sizeof(_dir), "%s", shelf::TOP);
           _note = nullptr;
           reload();
-          host().refresh(true);
+          host().refresh(!_browsing);  // partial while the shelf holds the card
         } else {
           host().goHub();
         }
@@ -326,7 +332,9 @@ class BookTool : public ToolApp {
     _note = nullptr;
     reload();
     host().beep(0);
-    host().refresh(true);
+    // Partial while the shelf holds the card: nothing released, so nothing
+    // re-initialised the panel. See enter().
+    host().refresh(!_browsing);
   }
 
   // Position keys are 4-byte FNV hashes of the file name: "b" + 8 hex chars
@@ -950,6 +958,7 @@ class BookTool : public ToolApp {
   uint8_t* _pageBuf = nullptr;
   uint32_t _pageBufBytes = 0;
   const char* _note = nullptr;
+  bool _browsing = false;    // this app owns the card's shelf session
   bool _resetArmed = false;  // "Start again" asked once, waiting on a second tap
   bool _help = false;       // the HOW TO READ card, once per device
   char _noteBuf[80] = {};

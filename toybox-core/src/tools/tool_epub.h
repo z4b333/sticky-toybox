@@ -89,6 +89,10 @@ class EpubTool : public ToolApp {
 
   ~EpubTool() override {
     if (_open && _host) closeBook(false);
+    // The shelf's own card session, if it is still up. Nothing above this app
+    // may inherit a powered card: the hub draws with no session at all.
+    if (_host) host().sdBrowseClose();
+    _browsing = false;
     free(_lut);
   }
 
@@ -99,6 +103,11 @@ class EpubTool : public ToolApp {
     _help = !help::suppressed(prefs(), "ep");
     _note = nullptr;
     snprintf(_dir, sizeof(_dir), "%s", shelf::TOP);
+    // Hold the card for the whole time a shelf is on screen. Every listing
+    // inside it then borrows this session instead of powering the card up and
+    // putting it down again -- and, because nothing releases, moving between
+    // folders is a partial refresh rather than the full one a release forces.
+    _browsing = h.sdBrowseOpen();
     reload();
     _size = (uint8_t)prefs().getUInt("rd_size", 0);
     _lead = (uint8_t)prefs().getUInt("rd_lead", 1);
@@ -176,7 +185,7 @@ class EpubTool : public ToolApp {
           snprintf(_dir, sizeof(_dir), "%s", shelf::TOP);
           _note = nullptr;
           reload();
-          host().refresh(true);
+          host().refresh(!_browsing);  // partial while the shelf holds the card
         } else {
           host().goHub();
         }
@@ -328,6 +337,7 @@ class EpubTool : public ToolApp {
   // happens in books with no navigation document, and the fixture has one. So
   // the harness throws it away to walk the other path.
   void hostDropToc() { _ntoc = 0; }
+  bool hostInFolder() const { return inFolder(); }
   const char* hostLine(int i) const { return i < _lineN ? _lines[i].t : ""; }
   int hostLineHead(int i) const { return i < _lineN ? _lines[i].head : 0; }
   bool hostLineBoldAt(int i, int at) const { return i < _lineN && _lines[i].boldAt(at); }
@@ -383,7 +393,10 @@ class EpubTool : public ToolApp {
     _note = nullptr;
     reload();
     host().beep(0);
-    host().refresh(true);
+    // A list replacing a list is text on white, the kindest thing a partial
+    // can draw -- legal here only because the shelf session means no release
+    // re-initialised the panel underneath it.
+    host().refresh(!_browsing);
   }
 
   struct HostIO : epubc::IO {
@@ -2051,6 +2064,7 @@ class EpubTool : public ToolApp {
   char _rootSub[5][48] = {};
   uint8_t _size = 0, _lead = 1;
   uint8_t _face = 0;  // 0 DejaVu, 1 Literata, 2 Atkinson
+  bool _browsing = false;    // this app owns the card's shelf session
   bool _resetArmed = false;  // "Start again" asked once and waiting on a second tap
   uint8_t _rot = 0;      // the page view's rotation; every menu screen is portrait
   uint8_t _rotLaid = 0;  // the rotation the current layout was measured at

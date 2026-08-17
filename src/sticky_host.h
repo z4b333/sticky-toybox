@@ -168,6 +168,8 @@ class StickyHost : public ToolsHost {
   void epubClose() override;
   int sdReadFile(const char* path, void* dst, int max) override;
   bool sdWriteFileAtomic(const char* path, const void* data, int n) override;
+  bool sdBrowseOpen() override { return sdcard::browseOpen(); }
+  void sdBrowseClose() override { sdcard::browseClose(); }
   bool sdMgrOpen() override { return sdcard::mgrOpen(); }
   void sdMgrClose() override { sdcard::mgrClose(); }
   int sdMgrList(SdFile* out, int max) override;

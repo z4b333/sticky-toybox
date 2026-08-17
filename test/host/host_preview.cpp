@@ -3492,6 +3492,49 @@ int main() {
     g_dumpEnabled = true;
   }
 
+  // --- the shelf holds the card ----------------------------------------------
+  // Browsing used to power the card up and put it down again for every
+  // listing, and a release re-initialises the panel, so moving one level cost
+  // a FULL refresh: about two seconds to open a folder. The shelf now holds
+  // one session for as long as it is on screen, which makes those moves
+  // partial -- and that is what this guard measures, because "feels faster"
+  // is not a thing a test can see.
+  {
+    g_dumpEnabled = false;
+    toybox.goHub();
+    toybox.open(false, 10);  // the EPUB shelf, painted
+    if (!sdcard::hostBrowsing()) {
+      printf("BROWSE FAIL: the shelf did not take the card\n");
+      abort();
+    }
+    auto* eb2 = static_cast<EpubTool*>(toybox.hostActive());
+    const int f0 = g_fullCount;
+    // Into the series folder (row 0 of the top shelf) and back out again.
+    toybox.onTap(240, shelf::Y0 + 10);
+    if (!eb2->hostInFolder()) {
+      printf("BROWSE FAIL: the folder did not open\n");
+      abort();
+    }
+    toybox.onTap(20, 20);  // back to the top shelf
+    if (eb2->hostInFolder()) {
+      printf("BROWSE FAIL: back did not leave the folder\n");
+      abort();
+    }
+    if (g_fullCount != f0) {
+      printf("BROWSE FAIL: a folder round trip cost %d full refresh(es)\n", g_fullCount - f0);
+      abort();
+    }
+    // ...and the card is put down when the app is, so the hub never draws
+    // with a powered card behind it.
+    toybox.goHub();
+    if (sdcard::hostBrowsing()) {
+      printf("BROWSE FAIL: leaving the shelf left the card up\n");
+      abort();
+    }
+    printf("shelf session ok (folder in and out, no full refresh, card released)\n");
+    g_dumpEnabled = true;
+  }
+
   // --- start again, per book -------------------------------------------------
   // Two taps on one row, and this book forgets where it was. The first tap
   // only asks: a row that erased a reading position on one tap would be the

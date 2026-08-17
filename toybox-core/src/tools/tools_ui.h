@@ -513,6 +513,14 @@ class ToolsHost {
     char path[128];
     uint32_t size = 0;
   };
+  // A shelf session: the card held powered while a list of books is on
+  // screen, so moving between folders costs a partial refresh rather than the
+  // full one that follows every release. Opened when a reader's list appears
+  // and closed when it leaves; a book opened from that list borrows the same
+  // session rather than claiming another.
+  virtual bool sdBrowseOpen() { return false; }
+  virtual void sdBrowseClose() {}
+
   virtual bool sdMgrOpen() { return false; }
   virtual void sdMgrClose() {}
   virtual int sdMgrList(SdFile* out, int max) {

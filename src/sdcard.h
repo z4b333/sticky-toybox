@@ -129,6 +129,16 @@ bool writeFileAtomic(const char* path, const void* data, int n);
 // Is any session -- a book, an epub, the phone -- currently holding the bus?
 bool busHeld();
 
+// A shelf session: the card powered for as long as a list is on screen, so
+// moving between folders is a partial refresh rather than a full one. See the
+// long note in sdcard.cpp. Nested claims are refused; whoever opened it closes
+// it.
+bool browseOpen();
+void browseClose();
+#ifdef TOYBOX_HOST
+bool hostBrowsing();  // for the guards: is the shelf holding the card?
+#endif
+
 // Does this exact path exist on the card? Borrows the bus if nothing holds it
 // (same 150 ms cost and full-refresh-afterwards rule as readWhole).
 bool exists(const char* path);

@@ -784,7 +784,20 @@ std::string g_streamBuf;
 bool g_streaming = false;
 }  // namespace
 
-bool busHeld() { return g_mgrUp || g_fakeEpubOpen || g_fakeOpenPages > 0; }
+// The host's half of the shelf session (see the device side below): the
+// guards care that it is OPEN, because that is what decides whether a folder
+// move costs a partial or a full refresh.
+bool g_browseUp = false;
+bool busHeld() { return g_mgrUp || g_fakeEpubOpen || g_fakeOpenPages > 0 || g_browseUp; }
+
+bool browseOpen() {
+  if (g_browseUp) return true;
+  if (busHeld()) return false;
+  g_browseUp = true;
+  return true;
+}
+void browseClose() { g_browseUp = false; }
+bool hostBrowsing() { return g_browseUp; }
 
 bool streamOpen(const char* path) {
   g_streamPath = path;
@@ -1203,7 +1216,10 @@ bool parseTbkHeader(File& f, BookMeta& out) {
 }  // namespace
 
 int bookList(BookMeta* out, int max, const char* dir) {
-  if (!busClaim()) {
+  // Borrowed when a browsing session (or a reader) already has the card: the
+  // release is what costs a full refresh, so it must not happen mid-shelf.
+  const bool mine = !busHeld();
+  if (mine && !busClaim()) {
     busRelease();
     return -1;
   }
@@ -1230,7 +1246,7 @@ int bookList(BookMeta* out, int max, const char* dir) {
       out[n++] = m;
     }
   }
-  busRelease();
+  if (mine) busRelease();
   return n;
 }
 
@@ -1238,7 +1254,10 @@ int bookList(BookMeta* out, int max, const char* dir) {
 // holds. Counting means opening every folder, which is one directory listing
 // apiece -- cheap next to the bus claim that wraps the lot.
 int shelfFolders(ShelfFolder* out, int max, const char* ext) {
-  if (!busClaim()) {
+  // Borrowed when a browsing session (or a reader) already has the card: the
+  // release is what costs a full refresh, so it must not happen mid-shelf.
+  const bool mine = !busHeld();
+  if (mine && !busClaim()) {
     busRelease();
     return -1;
   }
@@ -1282,7 +1301,7 @@ int shelfFolders(ShelfFolder* out, int max, const char* ext) {
       out[n++] = f;
     }
   }
-  busRelease();
+  if (mine) busRelease();
   return n;
 }
 
@@ -1311,7 +1330,10 @@ void makeParents(const char* path) {
 }  // namespace
 
 int epubList(EpubMeta* out, int max, const char* dir) {
-  if (!busClaim()) {
+  // Borrowed when a browsing session (or a reader) already has the card: the
+  // release is what costs a full refresh, so it must not happen mid-shelf.
+  const bool mine = !busHeld();
+  if (mine && !busClaim()) {
     busRelease();
     return -1;
   }
@@ -1347,17 +1369,22 @@ int epubList(EpubMeta* out, int max, const char* dir) {
       out[n++] = m;
     }
   }
-  busRelease();
+  if (mine) busRelease();
   return n;
 }
 
 bool epubOpen(const char* path) {
   epubClose();
-  if (!busClaim()) {
+  // A browsing session may already have the card up -- opening a book from a
+  // shelf is the common case. Borrow it rather than claiming a second time,
+  // and leave it running afterwards: the shelf is where the reader goes back
+  // to, and releasing here would cost it a full refresh on the way.
+  const bool borrowed = busHeld();
+  if (!borrowed && !busClaim()) {
     busRelease();
     return false;
   }
-  g_epubBusUp = true;
+  g_epubBusUp = !borrowed;
   g_epub = SD.open(path, FILE_READ);
   if (!g_epub || g_epub.isDirectory()) {
     epubClose();
@@ -1446,7 +1473,39 @@ bool mgrSafePath(const char* p) {
 }
 }  // namespace
 
-bool busHeld() { return g_epubBusUp || g_bookBusUp || g_mgrUp; }
+// A BROWSING session: the card powered for as long as a shelf is on screen,
+// rather than for each listing call inside it.
+//
+// The point is not the listing time -- a directory walk is quick -- it is what
+// releasing the bus costs afterwards. busRelease() re-initialises the panel,
+// so the next paint has nothing valid to diff against and must be a FULL
+// refresh: 1.7 s. Opening a folder used to claim and release twice (folders,
+// then books) and then pay that full refresh, about two seconds to move one
+// level. Held, the same move is a partial: about a third of a second.
+//
+// The readers already hold the bus for as long as a book is open, so this is
+// that rule extended to the screen in front of it, not a new kind of thing.
+// The card stays powered while the shelf is up, which is the cost.
+bool g_browseUp = false;
+
+bool busHeld() { return g_epubBusUp || g_bookBusUp || g_mgrUp || g_browseUp; }
+
+bool browseOpen() {
+  if (g_browseUp) return true;
+  if (busHeld()) return false;  // somebody else owns the card; do not nest
+  if (!busClaim()) {
+    busRelease();
+    return false;
+  }
+  g_browseUp = true;
+  return true;
+}
+
+void browseClose() {
+  if (!g_browseUp) return;
+  g_browseUp = false;
+  busRelease();
+}
 
 namespace {
 File g_stream;
@@ -1784,11 +1843,12 @@ bool writeFileAtomic(const char* path, const void* data, int n) {
 
 bool bookOpen(const char* file) {
   bookClose();
-  if (!busClaim()) {
+  const bool borrowed = busHeld();  // see epubOpen: a shelf session lends it
+  if (!borrowed && !busClaim()) {
     busRelease();
     return false;
   }
-  g_bookBusUp = true;
+  g_bookBusUp = !borrowed;
   // bookList hands out absolute paths now that books can sit in series
   // folders, so the first candidate is the name itself; the /books and root
   // guesses stay for anything still passing a bare name.
