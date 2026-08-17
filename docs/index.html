@@ -51,6 +51,14 @@
   .steps ol { padding-left: 22px; }
   .steps li { margin: 10px 0; }
 
+  /* The panel is a tall 480x800, so at a third of a 1120 px page each plate
+     came out 566 px high and mostly white -- these are e-paper screens, and
+     they are meant to have air in them. Capped and centred instead: the
+     screen is still legible, and the page stops being a column of tall empty
+     rectangles. */
+  .shot .device { max-width: 250px; margin: 0 auto; }
+  .shot figcaption { max-width: 320px; margin-left: auto; margin-right: auto; }
+
   @media (max-width: 860px) {
     .hero { padding: 40px 0 8px; }
     .hero .inner { grid-template-columns: minmax(0, 1fr); gap: 32px; padding: 0 18px; }
@@ -70,6 +78,7 @@
       <a href="index.html" aria-current="page">Install</a>
       <a href="wallpaper.html">Wallpapers</a>
       <a href="recipe.html">Recipes</a>
+      <a href="https://github.com/z4b333/Toybox-slicer">Slicer</a>
       <a href="checklist.html">First-boot checklist</a>
       <a href="https://github.com/z4b333/sticky-toybox">Source</a>
     </nav>
@@ -82,10 +91,10 @@
     <div class="inner">
       <div>
         <h1>A screen that keeps what you put on it.</h1>
-        <p class="lede">Toybox is firmware for the Seeed reTerminal Sticky: an
-        e-book reader, a notes board you write to from your phone, and a
-        drawer of small games. The panel holds its last picture with the power
-        off, so a pinned note stays readable on the fridge for months.</p>
+        <p class="lede">Firmware for the Seeed reTerminal Sticky: an e-book
+        reader, a notes board you write to from your phone, and a drawer of
+        small games. E-paper holds its last picture with the power off, so a
+        pinned note stays on the fridge for months.</p>
         <div class="cta">
           <a class="actbtn" href="#install">Install from this page</a>
           <a class="actbtn secondary" href="#what">See what it does</a>
@@ -107,19 +116,17 @@
     <div class="wrap">
       <p class="eyebrow">What it does</p>
       <h2>Six screens, out of about eighty.</h2>
-      <p class="lede prose">Every picture here is rendered by the firmware
-      itself, at the panel's own 480&times;800, by the test harness that ships
-      with the source &mdash; so this is what the device draws, not a mockup of
-      it.</p>
+      <p class="lede prose">Rendered by the firmware itself at the panel's own
+      480&times;800 &mdash; what the device draws, not a picture of it.</p>
 
       <div class="grid cols-3" style="margin-top:40px">
         <figure class="shot">
           <div class="device"><img src="shots/shelf.png" width="480" height="800"
             alt="The EPUB shelf listing a series folder and two books."></div>
           <figcaption><h3>An EPUB reader</h3>
-          <p>Opens the books already on the card, remembers the page, and reads
-          and writes CrossPoint's reading position so a card can be carried
-          between the two firmwares.</p></figcaption>
+          <p>Reads the books already on the card and keeps your place there
+          &mdash; in CrossPoint's own format, so a card can move between the
+          two firmwares.</p></figcaption>
         </figure>
 
         <figure class="shot">
@@ -127,7 +134,7 @@
             alt="A book's contents list, each chapter with how long it takes to read."></div>
           <figcaption><h3>The book's own contents</h3>
           <p>Chapter names as the publisher wrote them, each with how long it
-          runs, so you can tell whether there is time for the next one.</p></figcaption>
+          runs &mdash; so you know whether there is time for another.</p></figcaption>
         </figure>
 
         <figure class="shot">
@@ -135,35 +142,58 @@
             alt="A pinned shopping list with two items ticked off."></div>
           <figcaption><h3>Notes from your phone</h3>
           <p>Scan the QR code, type or dictate, and it appears. Pin one and it
-          stays on the glass with the power off &mdash; tickable, in English,
-          Thai, Chinese, Korean, Japanese and Vietnamese.</p></figcaption>
+          survives the power going off. English, Thai, Chinese, Korean,
+          Japanese and Vietnamese.</p></figcaption>
         </figure>
 
         <figure class="shot">
           <div class="device"><img src="shots/wordle.png" width="480" height="800"
             alt="A game of Wordle in progress on the e-paper panel."></div>
           <figcaption><h3>Games that suit e-paper</h3>
-          <p>Wordle, Nonogram, 2048, XO, Ships and Sudoku &mdash; turn-based
-          things, where a screen that redraws in a fifth of a second is
-          plenty.</p></figcaption>
+          <p>Wordle, Nonogram, 2048, XO, Ships and Sudoku. Turn-based things,
+          where a screen that redraws in a fifth of a second is plenty.</p></figcaption>
         </figure>
 
         <figure class="shot">
           <div class="device"><img src="shots/sudoku.png" width="480" height="800"
             alt="A Sudoku grid mid-solve with a number pad below it."></div>
           <figcaption><h3>Kept between sittings</h3>
-          <p>Puzzles, streaks and reading positions are written down as you go,
-          so putting the device in a drawer for a week costs nothing.</p></figcaption>
+          <p>Puzzles, streaks and reading positions are written down as you go.
+          A week in a drawer costs nothing.</p></figcaption>
         </figure>
 
         <figure class="shot">
           <div class="device"><img src="shots/tools.png" width="480" height="800"
             alt="The Utility drawer: coin, dice, random number, name picker, timer and recipes."></div>
           <figcaption><h3>Tools in a drawer</h3>
-          <p>Coin, dice, timer, random number, name picker, flashcards and a
-          recipe card &mdash; and any of them can be hidden if you never use
-          it.</p></figcaption>
+          <p>Coin, dice, timer, random number, name picker, flashcards, recipe
+          card. Any of them can be hidden if you never use it.</p></figcaption>
         </figure>
+      </div>
+    </div>
+  </section>
+
+  <section id="fill">
+    <div class="wrap grid cols-2">
+      <div>
+        <p class="eyebrow">Filling the card</p>
+        <h2>Comics and books, cut to fit.</h2>
+        <p class="lede prose">The reader opens EPUBs off the card as they are.
+        Comics are the harder case &mdash; a webtoon is one strip a mile long,
+        and a manga page is wider than the panel &mdash; so there is a desktop
+        tool for that.</p>
+      </div>
+      <div class="prose">
+        <p><a href="https://github.com/z4b333/Toybox-slicer"><b>Toybox Slicer</b></a> takes
+        <code>.cbz</code> chapters, loose images or an EPUB and writes
+        <code>.tbk</code> pages at the panel's own 480&times;800. For a webtoon
+        it stitches the slices back into one strip and re-cuts it, snapping
+        every cut to a blank gutter so a page never lands through a face or a
+        speech bubble. It makes sleep art and wallpapers too, in batches, which
+        is the difference between it and the
+        <a href="wallpaper.html">one-picture converter</a> here.</p>
+        <p class="sub" style="font-size:15px">Python, with a window if you
+        double-click it and a command line if you would rather script it.</p>
       </div>
     </div>
   </section>
@@ -173,8 +203,7 @@
       <p class="eyebrow">Install</p>
       <h2>Flash it from this page.</h2>
       <p class="lede prose">Plug the Sticky in with a data-capable USB-C cable
-      and press a button. Nothing to download, nothing to install on your
-      computer.</p>
+      and press a button. Nothing to download, nothing to install.</p>
 
       <div class="card installer" style="margin-top:36px">
         <div>
@@ -218,16 +247,15 @@
             </esp-web-install-button>
           </div>
 
-          <p class="hint"><b>UPDATE</b> writes only the firmware itself: settings,
-          stats, saved reading pages, notes, decks, pictures and font packs all stay
-          exactly as they were. Use it for every build after your first.
-          <b>FIRST&nbsp;INSTALL</b> also writes the bootloader and partition table
-          &mdash; needed once on a new device, or if an update ever refuses to boot.
-          Neither erases your notes. When the dialog asks about <b>erasing the
-          device, leave the box unchecked</b> &mdash; ticking it wipes notes,
-          settings and font packs. Both need Chrome or Edge and a USB-C data cable;
-          the serial console opens when the write finishes, and that first-boot log is
-          the most useful thing to send if anything goes wrong.</p>
+          <p class="hint"><b>UPDATE</b> writes the firmware and nothing else &mdash;
+          notes, settings, saved pages, decks and font packs all survive. It is the
+          one to use for every build after your first. <b>FIRST&nbsp;INSTALL</b> adds
+          the bootloader and partition table, needed once on a new device or to
+          rescue one that will not boot.</p>
+          <p class="hint">Neither erases your notes, but the browser's dialog offers
+          to: when it asks, <b>leave the erase box unchecked</b>. The serial console
+          opens when the write finishes &mdash; that first-boot log is the most
+          useful thing to send if something goes wrong.</p>
         </div>
       </div>
     </div>
@@ -238,9 +266,9 @@
       <div>
         <p class="eyebrow">After installing</p>
         <h2>Two minutes, once.</h2>
-        <p class="lede prose">The service screen is worth visiting before
-        anything else: it reports what the board answered on each bus, and it
-        can correct the screen or touch orientation if your unit disagrees with
+        <p class="lede prose">The service screen is worth a visit before
+        anything else. It reports what the board answered on each bus, and can
+        correct the screen or touch orientation if your unit disagrees with
         mine.</p>
       </div>
       <div class="steps prose">
@@ -308,6 +336,7 @@
     <span>Toybox for the Seeed reTerminal Sticky</span>
     <a href="wallpaper.html">Wallpaper maker</a>
     <a href="recipe.html">Recipe grabber</a>
+    <a href="https://github.com/z4b333/Toybox-slicer">Toybox Slicer</a>
     <a href="checklist.html">First-boot checklist</a>
     <a href="https://github.com/z4b333/sticky-toybox">Source on GitHub</a>
     <a href="https://github.com/z4b333/sticky-toybox/blob/master/docs/BRINGUP.md">Bring-up guide</a>

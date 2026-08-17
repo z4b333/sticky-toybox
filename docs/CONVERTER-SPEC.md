@@ -15,6 +15,14 @@ and are the tie-breaker if anything here disagrees with the device:
 | `tools/add_epub_art.py` | adds pre-rendered artwork to an existing EPUB |
 | `test/host/epub_cli` | reports what the device would find in an EPUB |
 
+The tools above are the minimum that proves each rule. **[Toybox
+Slicer](https://github.com/z4b333/Toybox-slicer)** is the one to actually use:
+it reads `.cbz` chapters, loose images and EPUBs, and writes `.tbk` pages,
+`.bmp` sleep art and `.tbi` wallpapers. For a webtoon it stitches a chapter's
+slices back into one continuous strip and re-cuts it to the page, snapping
+every cut to a blank gutter so a page never breaks through a face or a speech
+bubble -- which is the part of this that is real work rather than byte layout.
+
 ---
 
 ## 0. The panel, in one paragraph
