@@ -3,7 +3,7 @@
 
 This exists so the host preview harness can render every Toybox screen with the
 fonts the CrossPoint port would actually use, rather than the ones the Sticky
-firmware carries. Toybox's layouts assume line boxes of 16 / 24 / 32 / 44 px;
+firmware carries. Toybox's layouts assume line boxes of 18 / 24 / 32 / 44 px;
 CrossPoint's UI faces are 23 / 24 / 29 / 51, so the question "does the port
 still fit on the panel" can only be answered by looking at it.
 
@@ -29,7 +29,7 @@ FIRST, LAST = 32, 126
 # Toybox bucket -> (CrossPoint regular face, bold face or None).
 # This is the mapping in src/activities/toybox/ToolsCanvasCp.h::fontOf.
 BUCKETS = [
-    ('16', 'notosans_8_regular', None),                    # TS_SMALL  -> SMALL_FONT_ID
+    ('18', 'notosans_8_regular', None),                    # TS_SMALL  -> SMALL_FONT_ID
     ('24', 'ubuntu_10_regular', 'ubuntu_10_bold'),         # TS_MED    -> UI_10_FONT_ID
     ('32', 'ubuntu_12_regular', 'ubuntu_12_bold'),         # TS_LARGE  -> UI_12_FONT_ID
     ('44', 'notosans_18_regular', 'notosans_18_bold'),     # TS_HUGE   -> NOTOSANS_18_FONT_ID
@@ -202,7 +202,7 @@ def main():
     print('//')
     print("// CrossPoint's four UI faces in the Sticky's table format, so the preview")
     print('// harness can render every screen the way the CrossPoint port would.')
-    print('// Heights are 23 / 24 / 29 / 51 against the 16 / 24 / 32 / 44 the layouts')
+    print('// Heights are 23 / 24 / 29 / 51 against the 18 / 24 / 32 / 44 the layouts')
     print('// were drawn for -- which is the whole reason to look.')
     print('#pragma once')
     print('#include <pgmspace.h>')

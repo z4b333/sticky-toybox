@@ -46,10 +46,13 @@ FACES = {
 # device said so immediately. Every size moves up one step: body text is now
 # 2.6 mm, roughly seven and a half point, which is ordinary book size.
 #
-# The smallest is 16 rather than 12 for the same reason it was once 12 rather
-# than 8. A face turns to mush below about eleven pixels, and anything under a
-# millimetre and a half is decoration rather than text.
-SIZES = [('16', 16), ('24', 24), ('32', 32), ('44', 44)]
+# The smallest is 18 rather than 16, and was 12 before that, for the same
+# reason it was once 12 rather than 8. A face turns to mush below about eleven
+# pixels, and anything under a millimetre and a half is decoration rather than
+# text -- 16 px is 1.7 mm, which several people read by holding the device
+# closer. 18 is 1.9 mm, about six point. The table name keeps the pixel height
+# so nothing has to guess which is which.
+SIZES = [('18', 18), ('24', 24), ('32', 32), ('44', 44)]
 
 
 def fit(path, px):

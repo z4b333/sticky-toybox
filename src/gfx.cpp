@@ -81,14 +81,14 @@ const UiFont* faceFor(int px, bool bold) {
         case 24: return &FONT_LIT_24_ITAL;
         case 32: return &FONT_LIT_32_ITAL;
         case 44: return &FONT_LIT_44_ITAL;
-        default: return &FONT_LIT_16_ITAL;
+        default: return &FONT_LIT_18_ITAL;
       }
     }
     switch (px) {
       case 24: return bold ? &FONT_LIT_24_BOLD : &FONT_LIT_24_REG;
       case 32: return bold ? &FONT_LIT_32_BOLD : &FONT_LIT_32_REG;
       case 44: return bold ? &FONT_LIT_44_BOLD : &FONT_LIT_44_REG;
-      default: return bold ? &FONT_LIT_16_BOLD : &FONT_LIT_16_REG;
+      default: return bold ? &FONT_LIT_18_BOLD : &FONT_LIT_18_REG;
     }
   }
 #endif
@@ -98,7 +98,7 @@ const UiFont* faceFor(int px, bool bold) {
       case 24: return &FONT_24_ITAL;
       case 32: return &FONT_32_ITAL;
       case 44: return &FONT_44_ITAL;
-      default: return &FONT_16_ITAL;
+      default: return &FONT_18_ITAL;
     }
   }
 #endif
@@ -106,7 +106,7 @@ const UiFont* faceFor(int px, bool bold) {
     case 24: return bold ? &FONT_24_BOLD : &FONT_24_REG;
     case 32: return bold ? &FONT_32_BOLD : &FONT_32_REG;
     case 44: return bold ? &FONT_44_BOLD : &FONT_44_REG;
-    default: return bold ? &FONT_16_BOLD : &FONT_16_REG;
+    default: return bold ? &FONT_18_BOLD : &FONT_18_REG;
   }
 }
 
@@ -162,7 +162,13 @@ void blit(const UiFont* f, const FontGlyph& g, int x, int y, uint8_t color) {
 // thing every typesetter does when the size they want is not in the drawer.
 const IntlFace* intlFor(int px, int& yAdjust) {
   yAdjust = 0;
-  if (px <= 16) return &INTL_16;
+  // Up to 20, not up to 16: the smallest Latin bucket moved to 18 px and the
+  // non-Latin faces did not follow it. They are baked in threes (16/24/32),
+  // and so are the font packs already installed on people's devices -- a new
+  // size here would be a size those packs do not carry, and every Chinese
+  // character in small text would fall back to nothing. A 16 px glyph inside
+  // an 18 px line reads a shade small; a missing one reads as a hole.
+  if (px <= 20) return &INTL_16;
   if (px <= 24) return &INTL_24;
   if (px <= 32) return &INTL_32;
   yAdjust = (px - 32) / 2;
