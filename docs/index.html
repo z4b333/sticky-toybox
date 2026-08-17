@@ -22,13 +22,33 @@
   .hero .device { max-width: 320px; margin-left: auto; }
   .cta { margin-top: 32px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
   .cta a.actbtn { text-decoration: none; display: inline-block; }
-  .facts { margin-top: 28px; display: flex; gap: 8px 28px; flex-wrap: wrap; font-size: 15px; color: var(--muted); }
-  .facts b { color: var(--fg); font-weight: 600; }
+  /* The negation triplet: three fragments after the sentence that defines the
+     thing. It is what the device refuses to do, which on an e-paper device is
+     half of what it IS. */
+  .triplet { margin-top: 20px; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
 
-  /* The installer: the card that does the work, wide enough for two columns
-     on a desktop -- packs on one side, what-you-are-writing and the buttons on
-     the other -- and stacked on a phone. */
-  .installer { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 32px; align-items: start; }
+  /* The installer: numbered steps on one side, the button that acts on them
+     on the other, stacked on a phone. Steps rather than prose because that is
+     what every installer worth copying does -- and the build being written is
+     stated inside step three rather than shown as a badge nobody reads. */
+  .installer { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 40px; align-items: start; }
+  .steps-num { margin: 0; padding-left: 24px; }
+  .steps-num > li { margin: 0 0 20px; padding-left: 4px; }
+  .steps-num > li::marker { font-weight: 700; }
+  .steps-num .variants { margin-top: 12px; }
+  #ver { color: var(--muted); }
+  #ver b { color: var(--fg); font-weight: 600; }
+  .warn {
+    border-left: 3px solid var(--fg); padding: 2px 0 2px 14px;
+    margin-bottom: 20px; font-size: 15px; color: var(--muted);
+  }
+  .warn b { color: var(--fg); }
+  /* Shown only to a browser that cannot do this, in place of the buttons. A
+     visitor whose browser works should never read a sentence about Web Serial. */
+  .nosupport {
+    border: 1px solid var(--fg); border-radius: 10px; padding: 16px 18px;
+    font-size: 15px; margin-bottom: 14px;
+  }
   .variants { display: grid; gap: 8px; }
   .variant {
     display: flex; gap: 12px; align-items: flex-start;
@@ -38,12 +58,6 @@
   .variant:has(input:checked) { border-color: var(--fg); }
   .variant input { margin-top: 6px; accent-color: var(--fg); }
   .variant small { color: var(--muted); }
-  .ver {
-    font-size: 14px; color: var(--muted);
-    border: 1px solid var(--line); border-radius: 10px;
-    padding: 12px 14px; margin-bottom: 14px; background: var(--panel);
-  }
-  .ver b { color: var(--fg); font-weight: 600; }
   .install { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
   .hint { font-size: 15px; color: var(--muted); }
   .hint b { color: var(--fg); }
@@ -90,20 +104,16 @@
   <div class="hero">
     <div class="inner">
       <div>
-        <h1>A screen that keeps what you put on it.</h1>
-        <p class="lede">Firmware for the Seeed reTerminal Sticky: an e-book
-        reader, a notes board you write to from your phone, and a drawer of
-        small games. E-paper holds its last picture with the power off, so a
-        pinned note stays on the fridge for months.</p>
+        <h1>A screen that remembers.</h1>
+        <p class="lede">Toybox is firmware for the Seeed reTerminal Sticky &mdash;
+        an e-paper device that reads your books, holds notes you write from your
+        phone, and keeps a drawer of small games.</p>
+        <p class="triplet">No backlight. No notifications. Nothing to charge
+        this week.</p>
         <div class="cta">
-          <a class="actbtn" href="#install">Install from this page</a>
+          <a class="actbtn" href="#install">Install it</a>
           <a class="actbtn secondary" href="#what">See what it does</a>
         </div>
-        <p class="facts">
-          <span><b>Chrome or Edge</b> and a USB-C data cable</span>
-          <span><b>No app</b> to install</span>
-          <span><b>Your notes survive</b> every update</span>
-        </p>
       </div>
       <figure class="device">
         <img src="shots/hub.png" width="480" height="800"
@@ -229,34 +239,44 @@
     <div class="wrap">
       <p class="eyebrow">Install</p>
       <h2>Flash it from this page.</h2>
-      <p class="lede prose">Plug the Sticky in with a data-capable USB-C cable
-      and press a button. Nothing to download, nothing to install.</p>
 
       <div class="card installer" style="margin-top:36px">
-        <div>
-          <p class="eyebrow" style="margin-bottom:10px">Optional language packs</p>
-          <div class="variants">
-            <label class="variant">
-              <input type="checkbox" name="pack" value="zh">
-              <span><strong>Chinese</strong><br>
-              <small>+4.2 MB. Common characters are already included; this adds the
-              rare ones.</small></span>
-            </label>
-            <label class="variant">
-              <input type="checkbox" name="pack" value="ko">
-              <span><strong>Korean</strong><br>
-              <small>+2.3 MB. Adds every possible syllable.</small></span>
-            </label>
-            <label class="variant">
-              <input type="checkbox" name="pack" value="ja">
-              <span><strong>Japanese</strong><br>
-              <small>+0.7 MB. Adds the full kanji set.</small></span>
-            </label>
-          </div>
-        </div>
+        <ol class="steps-num">
+          <li><b>Plug the Sticky in</b> with a USB-C cable that carries data.
+            A charging cable will not do, and it is the commonest reason nothing
+            appears. <a href="#help">Nothing showing up?</a></li>
+          <li><b>Tick any language packs you want.</b> The common characters are
+            already in the firmware; these add the rest.
+            <div class="variants">
+              <label class="variant">
+                <input type="checkbox" name="pack" value="zh">
+                <span><strong>Chinese</strong><br>
+                <small>+4.2 MB. The rare characters.</small></span>
+              </label>
+              <label class="variant">
+                <input type="checkbox" name="pack" value="ko">
+                <span><strong>Korean</strong><br>
+                <small>+2.3 MB. Every possible syllable.</small></span>
+              </label>
+              <label class="variant">
+                <input type="checkbox" name="pack" value="ja">
+                <span><strong>Japanese</strong><br>
+                <small>+0.7 MB. The full kanji set.</small></span>
+              </label>
+            </div>
+          </li>
+          <li id="step-flash"><b>Press UPDATE.</b> <span id="ver">Reading which
+            build is here&hellip;</span></li>
+        </ol>
 
-        <div>
-          <p class="ver" id="ver">checking which version is here&hellip;</p>
+        <div class="doit">
+          <!-- The warning sits here, between the last decision and the button
+               that acts on it, because that is the last moment somebody can
+               change their mind. -->
+          <p class="warn">When the browser asks about <b>erasing the
+          device</b>, leave the box unchecked. Unchecked, an install writes the
+          firmware and nothing else &mdash; notes, settings, saved pages, decks
+          and font packs all survive. Ticked, they do not.</p>
 
           <div class="install">
             <!-- log-console opens the serial console as part of installing, rather than
@@ -273,16 +293,10 @@
               <button slot="activate" class="actbtn secondary">FIRST INSTALL</button>
             </esp-web-install-button>
           </div>
-
-          <p class="hint"><b>UPDATE</b> writes the firmware and nothing else &mdash;
-          notes, settings, saved pages, decks and font packs all survive. It is the
-          one to use for every build after your first. <b>FIRST&nbsp;INSTALL</b> adds
-          the bootloader and partition table, needed once on a new device or to
-          rescue one that will not boot.</p>
-          <p class="hint">Neither erases your notes, but the browser's dialog offers
-          to: when it asks, <b>leave the erase box unchecked</b>. The serial console
-          opens when the write finishes &mdash; that first-boot log is the most
-          useful thing to send if something goes wrong.</p>
+          <p class="hint"><b>UPDATE</b> is the one to use for every build after
+          your first. <b>FIRST&nbsp;INSTALL</b> adds the bootloader and partition
+          table &mdash; needed once on a new device, or to rescue one that will
+          not boot.</p>
         </div>
       </div>
     </div>
@@ -311,6 +325,33 @@
           <li>Pin a note and it stays on the screen even with the power off. That
             is the whole idea.</li>
         </ol>
+      </div>
+    </div>
+  </section>
+
+  <section id="idea">
+    <div class="wrap grid cols-2">
+      <div>
+        <p class="eyebrow">The idea</p>
+        <h2>Why this exists.</h2>
+      </div>
+      <div class="prose">
+        <p>The Sticky is a lovely bit of hardware with an e-paper panel that
+        keeps its last picture when the power is gone. Most things built on
+        that treat the screen as a dashboard &mdash; something to glance at.
+        I wanted the opposite: a screen you put something on and then forget
+        about, because it will still be there in a month.</p>
+        <p>So the notes app is the point, and the reader is what I use it for
+        most, and the games are there because a screen that redraws in a fifth
+        of a second turns out to suit a crossword far better than it suits a
+        video. Everything here is written for this one device and its 480 by
+        800 pixels, which is a constraint I have enjoyed more than I expected
+        to.</p>
+        <p class="sub" style="font-size:15px">Built by KS. The firmware, the
+        converter and this page are all
+        <a href="https://github.com/z4b333/sticky-toybox">open source</a>;
+        if it does something you did not ask for, the code is there to
+        change.</p>
       </div>
     </div>
   </section>
@@ -475,8 +516,22 @@
       b.setAttribute('manifest', '');
       b.style.display = 'none';
     });
-    var el = document.getElementById('ver');
-    el.innerHTML = '<b>' + msg + '</b>';
+    // "Press UPDATE" is a lie once there is no UPDATE, so the step goes with
+    // the buttons and the reason takes their place. Said once, where the
+    // button was, rather than twice in two registers.
+    var step = document.getElementById('step-flash');
+    if (step) step.remove();
+    var doit = document.querySelector('.doit');
+    if (doit) doit.innerHTML = '<p class="nosupport">' + msg + '</p>';
+  }
+  // Shown only to a browser that cannot flash, and shown INSTEAD of the
+  // buttons rather than above them: what is missing, what to use, what will
+  // not work. A visitor on Chrome should never read a word about Web Serial.
+  if (!('serial' in navigator)) {
+    disableButtons('This browser cannot flash a device. Open this page in ' +
+                   'Chrome or Edge on a desktop computer - Safari and Firefox ' +
+                   'do not support the serial connection this needs, and no ' +
+                   'browser on iOS does.');
   }
   if (location.protocol === 'file:') {
     disableButtons('This page cannot flash when opened from disk - the browser ' +
@@ -517,11 +572,14 @@
       updateManifests();
       checkAppSize(v);
       var mb = (v.bytes / 1048576).toFixed(2);
+      // The build goes INSIDE the sentence rather than into a badge beside
+      // it: every installer worth copying says "we will write X to it", and
+      // nobody reads a metadata card.
       document.getElementById('ver').innerHTML =
-        'About to install <b>' + v.version + '</b> &middot; built ' + v.date +
-        '<br>' + mb + ' MB &middot; sha256 <code>' + v.sha256 + '&hellip;</code>' +
-        '<br>Hold a side button at power-on afterwards: the service screen shows ' +
-        'the same version, so you can check it took.';
+        'We will write <b>' + v.version + '</b> to it &mdash; built ' + v.date +
+        ', ' + mb + ' MB, sha256 <code>' + v.sha256 + '&hellip;</code>. ' +
+        'Hold a side button at the next power-on and the service screen says ' +
+        'the same thing back, so you can check it took.';
     })
     .catch(function () {
       if (dead) return;
