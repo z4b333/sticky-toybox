@@ -5,27 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Toybox · Wallpaper Maker</title>
 <meta name="description" content="Convert any picture for Toybox on the Seeed reTerminal Sticky: crop, zoom, brightness, contrast, four dithering algorithms, one grey BMP download — entirely in your browser.">
+<link rel="stylesheet" href="site.css">
 <style>
-  :root {
-    --bg: #fafafa;
-    --fg: #18181b;
-    --muted: #71717a;
-    --line: #e4e4e7;
-  }
-  * { box-sizing: border-box; margin: 0; }
-  body {
-    background: var(--bg);
-    color: var(--fg);
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    font-size: 16px;
-    line-height: 1.6;
-    -webkit-font-smoothing: antialiased;
-  }
-  main { max-width: 760px; margin: 0 auto; padding: 6vh 24px 64px; }
-  h1 { font-size: 32px; font-weight: 650; letter-spacing: -0.02em; }
-  .sub { color: var(--muted); margin: 8px 0 28px; }
+  /* Page-local only; the frame, the type and the header live in site.css. */
+  .page { padding: 48px 24px 64px; max-width: 1000px; }
+  h1 { font-size: clamp(30px, 3.4vw, 40px); }
+  .sub { color: var(--muted); margin: 12px 0 32px; max-width: 68ch; }
   .row { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
-  .panel { flex: 1 1 280px; min-width: 280px; }
+  /* Capped: a slider six hundred pixels wide is harder to place than a
+     short one, and the preview is the thing worth the width. */
+  .panel { flex: 1 1 280px; min-width: 280px; max-width: 560px; }
   .preview-wrap {
     flex: 0 0 auto; border: 1px solid var(--line); border-radius: 10px;
     background: #fff; padding: 12px;
@@ -74,12 +63,26 @@
   }
   .hint { font-size: 14px; color: var(--muted); margin-top: 16px; }
   .hint code { font-size: 13px; }
-  .foot { margin-top: 48px; font-size: 14px; color: var(--muted); }
-  .foot a { color: inherit; }
 </style>
 </head>
 <body>
-<main>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="mark" href="index.html" aria-label="Toybox">
+      <span>T</span><span>O</span><span>Y</span><span>B</span><span>O</span><span>X</span>
+    </a>
+    <nav class="site-nav">
+      <a href="index.html">Install</a>
+      <a href="wallpaper.html" aria-current="page">Wallpapers</a>
+      <a href="recipe.html">Recipes</a>
+      <a href="checklist.html">First-boot checklist</a>
+      <a href="https://github.com/z4b333/sticky-toybox">Source</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap page">
   <h1>Wallpaper maker</h1>
   <p class="sub">Turns any picture into one grey BMP the device uses everywhere
   — wallpaper, lock screen, sleeping screen, book covers. Entirely in this
@@ -177,12 +180,18 @@
   that book's cover. The same files work on the Xteink X3/X4 and
   CrossPoint/CrossInk/matcha family.</p>
 
-  <p class="foot">
-    <a href="index.html">← Web installer</a>
-    · <a href="recipe.html">Recipe grabber</a>
-    · <a href="https://github.com/z4b333/sticky-toybox">Source on GitHub</a>
-  </p>
 </main>
+
+<footer class="site-footer">
+  <div class="inner">
+    <span>Toybox for the Seeed reTerminal Sticky</span>
+    <a href="index.html">Web installer</a>
+    <a href="wallpaper.html">Wallpaper maker</a>
+    <a href="recipe.html">Recipe grabber</a>
+    <a href="checklist.html">First-boot checklist</a>
+    <a href="https://github.com/z4b333/sticky-toybox">Source on GitHub</a>
+  </div>
+</footer>
 
 <script>
 'use strict';

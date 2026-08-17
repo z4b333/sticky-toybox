@@ -3,239 +3,317 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Toybox · Web Installer</title>
-<meta name="description" content="Flash Toybox firmware to the Seeed reTerminal Sticky from your browser.">
+<title>Toybox &middot; a second screen for the Seeed reTerminal Sticky</title>
+<meta name="description" content="Games, tools, an e-book reader and fridge notes for the Seeed reTerminal Sticky. Install it straight from this page.">
+<link rel="stylesheet" href="site.css">
 <style>
-  :root {
-    --bg: #fafafa;
-    --fg: #18181b;
-    --muted: #71717a;
-    --line: #e4e4e7;
-    --accent: #18181b;
-  }
-  * { box-sizing: border-box; margin: 0; }
-  body {
-    background: var(--bg);
-    color: var(--fg);
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    font-size: 16px;
-    line-height: 1.6;
-    -webkit-font-smoothing: antialiased;
-  }
-  main {
-    max-width: 420px;
+  /* Page-local layout only. Everything reusable lives in site.css. */
+  .hero { padding: 72px 0 64px; }
+  .hero .inner {
+    max-width: var(--wrap);
     margin: 0 auto;
-    padding: 12vh 24px 64px;
+    padding: 0 24px;
+    display: grid;
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+    gap: 56px;
+    align-items: center;
   }
-  h1 {
-    font-size: 32px;
-    font-weight: 650;
-    letter-spacing: -0.02em;
-  }
-  .sub {
-    color: var(--muted);
-    margin: 8px 0 40px;
-  }
-  .variants { margin: 0 0 20px; display: grid; gap: 8px; }
-  .varhead {
-    font-size: 13px; font-weight: 600; text-transform: uppercase;
-    letter-spacing: 0.08em; color: var(--muted); margin-bottom: 4px;
-  }
+  .hero h1 { max-width: 15ch; }
+  .hero .device { max-width: 320px; margin-left: auto; }
+  .cta { margin-top: 32px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .cta a.actbtn { text-decoration: none; display: inline-block; }
+  .facts { margin-top: 28px; display: flex; gap: 8px 28px; flex-wrap: wrap; font-size: 15px; color: var(--muted); }
+  .facts b { color: var(--fg); font-weight: 600; }
+
+  /* The installer: the card that does the work, wide enough for two columns
+     on a desktop -- packs on one side, what-you-are-writing and the buttons on
+     the other -- and stacked on a phone. */
+  .installer { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 32px; align-items: start; }
+  .variants { display: grid; gap: 8px; }
   .variant {
     display: flex; gap: 12px; align-items: flex-start;
     border: 1px solid var(--line); border-radius: 10px;
-    padding: 12px 14px; cursor: pointer; background: #fff;
+    padding: 12px 14px; cursor: pointer; background: var(--panel);
   }
   .variant:has(input:checked) { border-color: var(--fg); }
-  .variant input { margin-top: 5px; accent-color: var(--fg); }
+  .variant input { margin-top: 6px; accent-color: var(--fg); }
   .variant small { color: var(--muted); }
-  .install { margin: 0 0 12px; display: flex; gap: 12px; flex-wrap: wrap; }
-  esp-web-install-button {
-    --esp-tools-button-color: var(--accent);
-    --esp-tools-button-text-color: #fff;
-    --esp-tools-button-border-radius: 10px;
-  }
-  .actbtn {
-    padding: 14px 22px; border: 0; border-radius: 10px;
-    background: var(--accent); color: #fff; font: 600 16px system-ui;
-    cursor: pointer;
-  }
-  .actbtn.secondary {
-    background: #fff; color: var(--fg); border: 1.5px solid var(--fg);
-  }
-  .hint {
-    font-size: 14px;
-    color: var(--muted);
-    margin-bottom: 48px;
-  }
-  /* What you are about to write, stated before you write it. */
   .ver {
-    font-size: 13px;
-    color: var(--muted);
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    padding: 10px 12px;
-    margin: 0 0 12px;
-    background: #fff;
+    font-size: 14px; color: var(--muted);
+    border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px 14px; margin-bottom: 14px; background: var(--panel);
   }
   .ver b { color: var(--fg); font-weight: 600; }
-  .ver code {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 12px;
+  .install { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  .hint { font-size: 15px; color: var(--muted); }
+  .hint b { color: var(--fg); }
+
+  .steps ol { padding-left: 22px; }
+  .steps li { margin: 10px 0; }
+
+  @media (max-width: 860px) {
+    .hero { padding: 40px 0 8px; }
+    .hero .inner { grid-template-columns: minmax(0, 1fr); gap: 32px; padding: 0 18px; }
+    .hero .device { max-width: 280px; margin: 0 auto; }
+    .installer { grid-template-columns: minmax(0, 1fr); gap: 24px; }
   }
-  .steps {
-    border-top: 1px solid var(--line);
-    padding-top: 24px;
-    margin-bottom: 40px;
-  }
-  .steps h2, details summary {
-    font-size: 13px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: var(--muted);
-  }
-  .steps h2 { margin-bottom: 12px; }
-  .steps ol {
-    padding-left: 20px;
-  }
-  .steps li { margin: 6px 0; }
-  details {
-    border-top: 1px solid var(--line);
-    padding: 16px 0;
-  }
-  details summary {
-    cursor: pointer;
-    list-style: none;
-  }
-  details summary::after { content: " +"; }
-  details[open] summary::after { content: " –"; }
-  details p, details li {
-    font-size: 15px;
-    margin-top: 10px;
-  }
-  details ul { padding-left: 20px; }
-  code {
-    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-    font-size: 13px;
-    background: #f0f0f2;
-    border-radius: 5px;
-    padding: 2px 6px;
-  }
-  footer {
-    border-top: 1px solid var(--line);
-    padding-top: 16px;
-    margin-top: 40px;
-    font-size: 14px;
-    color: var(--muted);
-  }
-  a { color: inherit; }
 </style>
 </head>
 <body>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="mark" href="index.html" aria-label="Toybox">
+      <span>T</span><span>O</span><span>Y</span><span>B</span><span>O</span><span>X</span>
+    </a>
+    <nav class="site-nav">
+      <a href="index.html" aria-current="page">Install</a>
+      <a href="wallpaper.html">Wallpapers</a>
+      <a href="recipe.html">Recipes</a>
+      <a href="checklist.html">First-boot checklist</a>
+      <a href="https://github.com/z4b333/sticky-toybox">Source</a>
+    </nav>
+  </div>
+</header>
+
 <main>
-  <h1>Toybox</h1>
-  <p class="sub">Games, tools and fridge notes for the Seeed reTerminal
-  Sticky. Install it straight from this page.</p>
 
-  <div class="variants">
-    <p class="varhead">Optional language packs</p>
-    <label class="variant">
-      <input type="checkbox" name="pack" value="zh">
-      <span><strong>Chinese</strong><br>
-      <small>+4.2 MB. Common characters are already included; this adds the
-      rare ones.</small></span>
-    </label>
-    <label class="variant">
-      <input type="checkbox" name="pack" value="ko">
-      <span><strong>Korean</strong><br>
-      <small>+2.3 MB. Adds every possible syllable.</small></span>
-    </label>
-    <label class="variant">
-      <input type="checkbox" name="pack" value="ja">
-      <span><strong>Japanese</strong><br>
-      <small>+0.7 MB. Adds the full kanji set.</small></span>
-    </label>
+  <div class="hero">
+    <div class="inner">
+      <div>
+        <h1>A screen that keeps what you put on it.</h1>
+        <p class="lede">Toybox is firmware for the Seeed reTerminal Sticky: an
+        e-book reader, a notes board you write to from your phone, and a
+        drawer of small games. The panel holds its last picture with the power
+        off, so a pinned note stays readable on the fridge for months.</p>
+        <div class="cta">
+          <a class="actbtn" href="#install">Install from this page</a>
+          <a class="actbtn secondary" href="#what">See what it does</a>
+        </div>
+        <p class="facts">
+          <span><b>Chrome or Edge</b> and a USB-C data cable</span>
+          <span><b>No app</b> to install</span>
+          <span><b>Your notes survive</b> every update</span>
+        </p>
+      </div>
+      <figure class="device">
+        <img src="shots/hub.png" width="480" height="800"
+             alt="The Toybox hub showing the Play drawer: Wordle, Nonogram, 2048, XO, Ships and Sudoku.">
+      </figure>
+    </div>
   </div>
 
-  <p class="ver" id="ver">checking which version is here&hellip;</p>
+  <section id="what">
+    <div class="wrap">
+      <p class="eyebrow">What it does</p>
+      <h2>Six screens, out of about eighty.</h2>
+      <p class="lede prose">Every picture here is rendered by the firmware
+      itself, at the panel's own 480&times;800, by the test harness that ships
+      with the source &mdash; so this is what the device draws, not a mockup of
+      it.</p>
 
-  <div class="install">
-    <!-- log-console opens the serial console as part of installing, rather than
-         leaving it behind a menu afterwards. The chip is in download mode while
-         it is being written and says nothing at all, so there is nothing to see
-         until it resets -- but that is exactly the moment worth catching: the
-         first boot log opens with the version that just landed, and the panel
-         line arrives a fifth of a second later. Opened by hand afterwards, the
-         first report back had already missed both. -->
-    <esp-web-install-button id="btn-update" manifest="manifest.json" log-console>
-      <button slot="activate" class="actbtn">UPDATE &mdash; keep everything</button>
-    </esp-web-install-button>
-    <esp-web-install-button id="btn-install" manifest="manifest.json" log-console>
-      <button slot="activate" class="actbtn secondary">FIRST INSTALL</button>
-    </esp-web-install-button>
-  </div>
-  <p class="hint"><b>UPDATE</b> writes only the firmware itself: settings,
-  stats, saved reading pages, notes, decks, pictures and font packs all stay
-  exactly as they were. Use it for every build after your first.
-  <b>FIRST&nbsp;INSTALL</b> also writes the bootloader and partition table
-  &mdash; needed once on a new device, or if an update ever refuses to boot.
-  Neither erases your notes. When the dialog asks about <b>erasing the
-  device, leave the box unchecked</b> &mdash; ticking it wipes notes,
-  settings and font packs. Both need Chrome or Edge and a USB-C data cable;
-  the serial console opens when the write finishes, and that first-boot log is
-  the most useful thing to send if anything goes wrong.</p>
+      <div class="grid cols-3" style="margin-top:40px">
+        <figure class="shot">
+          <div class="device"><img src="shots/shelf.png" width="480" height="800"
+            alt="The EPUB shelf listing a series folder and two books."></div>
+          <figcaption><h3>An EPUB reader</h3>
+          <p>Opens the books already on the card, remembers the page, and reads
+          and writes CrossPoint's reading position so a card can be carried
+          between the two firmwares.</p></figcaption>
+        </figure>
 
-  <div class="steps">
-    <h2>After installing</h2>
-    <ol>
-      <li>The first boot takes a few extra seconds while it sets up storage.</li>
-      <li><strong>Hold either side button while it powers on</strong> the first
-        time. That reaches the service screen, which says what the board
-        answered on each bus and can correct the screen or touch orientation if
-        your unit disagrees with mine. Worth two minutes before anything else;
-        there is a <a href="checklist.html">tickable checklist</a> for a phone
-        held next to the device.</li>
-      <li>Tap any tile on the hub to play.</li>
-      <li>Open Notes → Write, scan the QR code with your phone, and type or
-        dictate a note. Works in English, Thai, Chinese, Korean, Japanese
-        and Vietnamese.</li>
-      <li>Pin a note and it stays on the screen even with the power off. That
-        is the whole idea.</li>
-    </ol>
-  </div>
+        <figure class="shot">
+          <div class="device"><img src="shots/contents.png" width="480" height="800"
+            alt="A book's contents list, each chapter with how long it takes to read."></div>
+          <figcaption><h3>The book's own contents</h3>
+          <p>Chapter names as the publisher wrote them, each with how long it
+          runs, so you can tell whether there is time for the next one.</p></figcaption>
+        </figure>
 
-  <details>
-    <summary>No serial port showing up?</summary>
-    <ul>
-      <li>Use a data-capable USB-C cable, not a charging cable.</li>
-      <li>On Windows, install the
-        <a href="https://www.wch-ic.com/downloads/CH343SER_ZIP.html">CH343
-        driver</a>. The Sticky uses a CH34x serial chip.</li>
-      <li>Still nothing? Hold the power button while plugging in, then try
-        Install again.</li>
-    </ul>
-  </details>
+        <figure class="shot">
+          <div class="device"><img src="shots/notes.png" width="480" height="800"
+            alt="A pinned shopping list with two items ticked off."></div>
+          <figcaption><h3>Notes from your phone</h3>
+          <p>Scan the QR code, type or dictate, and it appears. Pin one and it
+          stays on the glass with the power off &mdash; tickable, in English,
+          Thai, Chinese, Korean, Japanese and Vietnamese.</p></figcaption>
+        </figure>
 
-  <details>
-    <summary>Prefer the command line?</summary>
-    <p>Update, keeping everything:</p>
-    <p><code>esptool --chip esp32s3 write_flash 0x10000 toybox-app.bin</code></p>
-    <p>First install (also writes bootloader and partition table; note this
-    one resets the device's settings):</p>
-    <p><code>esptool --chip esp32s3 write_flash 0x0 toybox-full.bin</code></p>
-    <p>Download <a href="firmware/toybox-app.bin">toybox-app.bin</a> or
-    <a href="firmware/toybox-full.bin">toybox-full.bin</a>.</p>
-  </details>
+        <figure class="shot">
+          <div class="device"><img src="shots/wordle.png" width="480" height="800"
+            alt="A game of Wordle in progress on the e-paper panel."></div>
+          <figcaption><h3>Games that suit e-paper</h3>
+          <p>Wordle, Nonogram, 2048, XO, Ships and Sudoku &mdash; turn-based
+          things, where a screen that redraws in a fifth of a second is
+          plenty.</p></figcaption>
+        </figure>
 
-  <footer>
-    <a href="wallpaper.html">Wallpaper maker</a>
-    · <a href="recipe.html">Recipe grabber</a>
-    · <a href="https://github.com/z4b333/sticky-toybox">Source on GitHub</a>
-    · <a href="checklist.html">First-boot checklist</a>
-    · <a href="https://github.com/z4b333/sticky-toybox/blob/master/docs/BRINGUP.md">Bring-up guide</a>
-  </footer>
+        <figure class="shot">
+          <div class="device"><img src="shots/sudoku.png" width="480" height="800"
+            alt="A Sudoku grid mid-solve with a number pad below it."></div>
+          <figcaption><h3>Kept between sittings</h3>
+          <p>Puzzles, streaks and reading positions are written down as you go,
+          so putting the device in a drawer for a week costs nothing.</p></figcaption>
+        </figure>
+
+        <figure class="shot">
+          <div class="device"><img src="shots/tools.png" width="480" height="800"
+            alt="The Utility drawer: coin, dice, random number, name picker, timer and recipes."></div>
+          <figcaption><h3>Tools in a drawer</h3>
+          <p>Coin, dice, timer, random number, name picker, flashcards and a
+          recipe card &mdash; and any of them can be hidden if you never use
+          it.</p></figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="wrap">
+      <p class="eyebrow">Install</p>
+      <h2>Flash it from this page.</h2>
+      <p class="lede prose">Plug the Sticky in with a data-capable USB-C cable
+      and press a button. Nothing to download, nothing to install on your
+      computer.</p>
+
+      <div class="card installer" style="margin-top:36px">
+        <div>
+          <p class="eyebrow" style="margin-bottom:10px">Optional language packs</p>
+          <div class="variants">
+            <label class="variant">
+              <input type="checkbox" name="pack" value="zh">
+              <span><strong>Chinese</strong><br>
+              <small>+4.2 MB. Common characters are already included; this adds the
+              rare ones.</small></span>
+            </label>
+            <label class="variant">
+              <input type="checkbox" name="pack" value="ko">
+              <span><strong>Korean</strong><br>
+              <small>+2.3 MB. Adds every possible syllable.</small></span>
+            </label>
+            <label class="variant">
+              <input type="checkbox" name="pack" value="ja">
+              <span><strong>Japanese</strong><br>
+              <small>+0.7 MB. Adds the full kanji set.</small></span>
+            </label>
+          </div>
+        </div>
+
+        <div>
+          <p class="ver" id="ver">checking which version is here&hellip;</p>
+
+          <div class="install">
+            <!-- log-console opens the serial console as part of installing, rather than
+                 leaving it behind a menu afterwards. The chip is in download mode while
+                 it is being written and says nothing at all, so there is nothing to see
+                 until it resets -- but that is exactly the moment worth catching: the
+                 first boot log opens with the version that just landed, and the panel
+                 line arrives a fifth of a second later. Opened by hand afterwards, the
+                 first report back had already missed both. -->
+            <esp-web-install-button id="btn-update" manifest="manifest.json" log-console>
+              <button slot="activate" class="actbtn">UPDATE &mdash; keep everything</button>
+            </esp-web-install-button>
+            <esp-web-install-button id="btn-install" manifest="manifest.json" log-console>
+              <button slot="activate" class="actbtn secondary">FIRST INSTALL</button>
+            </esp-web-install-button>
+          </div>
+
+          <p class="hint"><b>UPDATE</b> writes only the firmware itself: settings,
+          stats, saved reading pages, notes, decks, pictures and font packs all stay
+          exactly as they were. Use it for every build after your first.
+          <b>FIRST&nbsp;INSTALL</b> also writes the bootloader and partition table
+          &mdash; needed once on a new device, or if an update ever refuses to boot.
+          Neither erases your notes. When the dialog asks about <b>erasing the
+          device, leave the box unchecked</b> &mdash; ticking it wipes notes,
+          settings and font packs. Both need Chrome or Edge and a USB-C data cable;
+          the serial console opens when the write finishes, and that first-boot log is
+          the most useful thing to send if anything goes wrong.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="after">
+    <div class="wrap grid cols-2">
+      <div>
+        <p class="eyebrow">After installing</p>
+        <h2>Two minutes, once.</h2>
+        <p class="lede prose">The service screen is worth visiting before
+        anything else: it reports what the board answered on each bus, and it
+        can correct the screen or touch orientation if your unit disagrees with
+        mine.</p>
+      </div>
+      <div class="steps prose">
+        <ol>
+          <li>The first boot takes a few extra seconds while it sets up storage.</li>
+          <li><strong>Hold either side button while it powers on</strong> the first
+            time. That reaches the service screen; there is a
+            <a href="checklist.html">tickable checklist</a> for a phone held next
+            to the device.</li>
+          <li>Tap any tile on the hub to play.</li>
+          <li>Open Notes &rarr; Write, scan the QR code with your phone, and type or
+            dictate a note.</li>
+          <li>Pin a note and it stays on the screen even with the power off. That
+            is the whole idea.</li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section id="help">
+    <div class="wrap">
+      <p class="eyebrow">If something goes wrong</p>
+      <h2>Help.</h2>
+      <div style="margin-top:28px">
+        <details>
+          <summary>No serial port showing up?</summary>
+          <ul>
+            <li>Use a data-capable USB-C cable, not a charging cable.</li>
+            <li>On Windows, install the
+              <a href="https://www.wch-ic.com/downloads/CH343SER_ZIP.html">CH343
+              driver</a>. The Sticky uses a CH34x serial chip.</li>
+            <li>Still nothing? Hold the power button while plugging in, then try
+              Install again.</li>
+          </ul>
+        </details>
+
+        <details>
+          <summary>Prefer the command line?</summary>
+          <p>Update, keeping everything:</p>
+          <p><code>esptool --chip esp32s3 write_flash 0x10000 toybox-app.bin</code></p>
+          <p>First install (also writes bootloader and partition table; note this
+          one resets the device's settings):</p>
+          <p><code>esptool --chip esp32s3 write_flash 0x0 toybox-full.bin</code></p>
+          <p>Download <a href="firmware/toybox-app.bin">toybox-app.bin</a> or
+          <a href="firmware/toybox-full.bin">toybox-full.bin</a>.</p>
+        </details>
+
+        <details>
+          <summary>Will an update wipe my notes?</summary>
+          <p>No. Every part is written at its own offset and the gaps between
+          them are never touched: settings and saved reading pages live in NVS,
+          notes and decks and pictures in the filesystem, and neither is in the
+          firmware's way. The one thing that does wipe them is ticking the
+          <b>erase device</b> box in the browser's dialog, which is why it is
+          worth reading that dialog rather than clicking through it.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
 </main>
+
+<footer class="site-footer">
+  <div class="inner">
+    <span>Toybox for the Seeed reTerminal Sticky</span>
+    <a href="wallpaper.html">Wallpaper maker</a>
+    <a href="recipe.html">Recipe grabber</a>
+    <a href="checklist.html">First-boot checklist</a>
+    <a href="https://github.com/z4b333/sticky-toybox">Source on GitHub</a>
+    <a href="https://github.com/z4b333/sticky-toybox/blob/master/docs/BRINGUP.md">Bring-up guide</a>
+  </div>
+</footer>
+
 <script>
   // Two buttons, two manifests, one rule: every part is written at its own
   // offset and the gaps between them are never touched. NVS (0x9000) keeps

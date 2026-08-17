@@ -5,25 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Toybox · Recipe grabber</title>
 <meta name="description" content="Paste a link to any online recipe and get a .json file for the Toybox RECIPES app on the Seeed reTerminal Sticky. Extraction happens in your browser.">
+<link rel="stylesheet" href="site.css">
 <style>
-  :root {
-    --bg: #fafafa;
-    --fg: #18181b;
-    --muted: #71717a;
-    --line: #e4e4e7;
-  }
-  * { box-sizing: border-box; margin: 0; }
-  body {
-    background: var(--bg);
-    color: var(--fg);
-    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    font-size: 16px;
-    line-height: 1.6;
-    -webkit-font-smoothing: antialiased;
-  }
-  main { max-width: 680px; margin: 0 auto; padding: 6vh 24px 64px; }
-  h1 { font-size: 32px; font-weight: 650; letter-spacing: -0.02em; }
-  .sub { color: var(--muted); margin: 8px 0 28px; }
+  /* Page-local only; the frame, the type and the header live in site.css. */
+  .page { padding: 48px 24px 64px; max-width: 880px; }
+  h1 { font-size: clamp(30px, 3.4vw, 40px); }
+  .sub { color: var(--muted); margin: 12px 0 32px; max-width: 68ch; }
   .ghead {
     font-size: 13px; font-weight: 600; text-transform: uppercase;
     letter-spacing: 0.08em; color: var(--muted); margin: 20px 0 6px;
@@ -57,12 +44,26 @@
   .card li { margin: 2px 0; }
   .hint { font-size: 14px; color: var(--muted); margin-top: 16px; }
   .hint code { font-size: 13px; }
-  .foot { margin-top: 48px; font-size: 14px; color: var(--muted); }
-  .foot a { color: inherit; }
 </style>
 </head>
 <body>
-<main>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="mark" href="index.html" aria-label="Toybox">
+      <span>T</span><span>O</span><span>Y</span><span>B</span><span>O</span><span>X</span>
+    </a>
+    <nav class="site-nav">
+      <a href="index.html">Install</a>
+      <a href="wallpaper.html">Wallpapers</a>
+      <a href="recipe.html" aria-current="page">Recipes</a>
+      <a href="checklist.html">First-boot checklist</a>
+      <a href="https://github.com/z4b333/sticky-toybox">Source</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap page">
   <h1>Recipe grabber</h1>
   <p class="sub">Paste a link to a recipe page and get a <code>.json</code>
   file for the RECIPES app. It reads the hidden recipe data (schema.org
@@ -97,12 +98,18 @@
   without a card can instead take recipes straight from the phone through the
   app's own PHONE page.</p>
 
-  <p class="foot">
-    <a href="index.html">← Web installer</a>
-    · <a href="wallpaper.html">Wallpaper maker</a>
-    · <a href="https://github.com/z4b333/sticky-toybox">Source on GitHub</a>
-  </p>
 </main>
+
+<footer class="site-footer">
+  <div class="inner">
+    <span>Toybox for the Seeed reTerminal Sticky</span>
+    <a href="index.html">Web installer</a>
+    <a href="wallpaper.html">Wallpaper maker</a>
+    <a href="recipe.html">Recipe grabber</a>
+    <a href="checklist.html">First-boot checklist</a>
+    <a href="https://github.com/z4b333/sticky-toybox">Source on GitHub</a>
+  </div>
+</footer>
 
 <script>
 'use strict';

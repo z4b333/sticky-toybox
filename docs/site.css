@@ -1,0 +1,263 @@
+/* One stylesheet for the whole site: the installer, the wallpaper maker and
+   the recipe grabber. Each page used to carry its own copy of nearly the same
+   rules at a different width -- 420, 680 and 760 -- which is why they read as
+   three sites rather than one, and why a desktop window showed the installer
+   as a phone column with 600 px of empty page either side.
+
+   No build step: GitHub Pages serves this file as it is. */
+
+:root {
+  --bg: #fafafa;
+  --panel: #fff;
+  --fg: #18181b;
+  --muted: #71717a;
+  --line: #e4e4e7;
+  --line-strong: #d4d4d8;
+  --accent: #18181b;
+  --radius: 12px;
+  --wrap: 1120px;
+  --shadow: 0 1px 2px rgba(24, 24, 27, 0.04), 0 8px 24px rgba(24, 24, 27, 0.04);
+}
+
+* { box-sizing: border-box; margin: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  /* A short page (the recipe grabber, before a recipe is fetched) used to end
+     halfway up the window with the footer floating in the middle of it. */
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 17px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: inherit; }
+
+body > main { flex: 1 0 auto; }
+
+/* --- the frame ----------------------------------------------------------- */
+/* .wrap is the page's full width; .prose is a measure narrow enough to read.
+   Wide layouts live in .wrap, running text in .prose, and nothing is ever
+   both. */
+
+.wrap {
+  max-width: var(--wrap);
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+.prose { max-width: 68ch; }
+
+section { padding: 64px 0; }
+section + section { border-top: 1px solid var(--line); }
+
+/* --- header -------------------------------------------------------------- */
+
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: rgba(250, 250, 250, 0.88);
+  backdrop-filter: saturate(1.4) blur(8px);
+  border-bottom: 1px solid var(--line);
+}
+
+.site-header .inner {
+  max-width: var(--wrap);
+  margin: 0 auto;
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  gap: 24px;
+}
+
+/* The device's own wordmark: six letters in six boxes, alternating, exactly as
+   the hub paints it. Drawn in CSS rather than shipped as an image so it stays
+   sharp and costs no request. */
+.mark {
+  display: inline-flex;
+  gap: 2px;
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: 0.02em;
+}
+.mark span {
+  width: 19px;
+  height: 21px;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid var(--fg);
+}
+.mark span:nth-child(even) { background: var(--fg); color: var(--panel); }
+
+.site-nav {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  font-size: 15px;
+}
+.site-nav a {
+  text-decoration: none;
+  color: var(--muted);
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+.site-nav a:hover { color: var(--fg); background: #f0f0f2; }
+.site-nav a[aria-current="page"] { color: var(--fg); font-weight: 600; }
+
+/* --- type ---------------------------------------------------------------- */
+
+h1 {
+  font-size: clamp(38px, 5.2vw, 60px);
+  line-height: 1.08;
+  font-weight: 660;
+  letter-spacing: -0.03em;
+}
+h2 {
+  font-size: clamp(24px, 2.6vw, 32px);
+  line-height: 1.2;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+h3 { font-size: 19px; font-weight: 640; letter-spacing: -0.01em; }
+
+.lede { font-size: clamp(18px, 1.6vw, 21px); color: var(--muted); margin-top: 16px; }
+.sub { color: var(--muted); }
+
+.eyebrow {
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+/* --- surfaces ------------------------------------------------------------ */
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 24px;
+  box-shadow: var(--shadow);
+}
+
+.grid { display: grid; gap: 24px; }
+.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+/* --- buttons ------------------------------------------------------------- */
+
+.actbtn {
+  padding: 14px 22px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--accent);
+  color: #fff;
+  font: 600 16px system-ui, sans-serif;
+  cursor: pointer;
+}
+.actbtn:hover { opacity: 0.9; }
+.actbtn.secondary {
+  background: var(--panel);
+  color: var(--fg);
+  border: 1.5px solid var(--fg);
+}
+.actbtn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+esp-web-install-button {
+  --esp-tools-button-color: var(--accent);
+  --esp-tools-button-text-color: #fff;
+  --esp-tools-button-border-radius: 10px;
+}
+
+/* --- device screenshots -------------------------------------------------- */
+/* The panel is 480x800 and every render is that shape, so the frame is given
+   the same ratio and the image is never stretched to fit a box it does not
+   belong in. */
+
+.device {
+  background: var(--panel);
+  border: 1px solid var(--line-strong);
+  border-radius: 14px;
+  padding: 10px;
+  box-shadow: var(--shadow);
+}
+.device img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 480 / 800;
+  border-radius: 6px;
+  image-rendering: crisp-edges;
+}
+.shot figcaption { margin-top: 12px; font-size: 15px; color: var(--muted); }
+.shot h3 + p { margin-top: 4px; }
+
+/* --- small print --------------------------------------------------------- */
+
+code {
+  font-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.86em;
+  background: #f0f0f2;
+  border-radius: 5px;
+  padding: 2px 6px;
+}
+pre code { display: block; padding: 12px 14px; overflow-x: auto; }
+
+details {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 16px 20px;
+}
+details + details { margin-top: 12px; }
+details summary {
+  cursor: pointer;
+  list-style: none;
+  font-weight: 600;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+details summary::-webkit-details-marker { display: none; }
+details summary::after { content: "+"; color: var(--muted); }
+details[open] summary::after { content: "–"; }
+details p, details li { margin-top: 10px; font-size: 16px; }
+details ul, details ol { padding-left: 20px; }
+
+.site-footer {
+  border-top: 1px solid var(--line);
+  padding: 32px 0 48px;
+  font-size: 15px;
+  color: var(--muted);
+}
+.site-footer .inner {
+  max-width: var(--wrap);
+  margin: 0 auto;
+  padding: 0 24px;
+  display: flex;
+  gap: 8px 20px;
+  flex-wrap: wrap;
+}
+
+/* --- narrow screens ------------------------------------------------------ */
+/* The phone layout the site already had, kept: one column, tighter padding.
+   Everything above is written so this is the only breakpoint that matters. */
+
+@media (max-width: 860px) {
+  body { font-size: 16px; }
+  section { padding: 44px 0; }
+  .cols-2, .cols-3 { grid-template-columns: minmax(0, 1fr); }
+  .wrap, .site-header .inner, .site-footer .inner { padding-left: 18px; padding-right: 18px; }
+  .site-nav { font-size: 14px; width: 100%; margin-left: 0; }
+  .site-header .inner { flex-wrap: wrap; gap: 8px; }
+  .card { padding: 18px; }
+}
