@@ -315,7 +315,12 @@ static const char kFakeOpf[] =
     "    <item id=\"img2\" href=\"images/missing.png\" media-type=\"image/png\"/>\n"
     "    <item id=\"css\" href=\"style.css\" media-type=\"text/css\"/>\n"
     "  </manifest>\n"
-    "  <spine><itemref idref=\"c1\"/><itemref idref=\"c2\"/><itemref idref=\"c3\"/></spine>\n"
+    // The ghost itemref names an id no manifest item carries. CrossPoint drops
+    // such an entry; so must this, or every chapter after it is numbered one
+    // higher here than it is there, and a position shared between the two
+    // firmwares reopens in the wrong chapter. The spine is still three.
+    "  <spine><itemref idref=\"c1\"/><itemref idref=\"ghost\"/>"
+    "<itemref idref=\"c2\"/><itemref idref=\"c3\"/></spine>\n"
     "</package>\n";
 
 uint8_t* g_fakeEpub = nullptr;

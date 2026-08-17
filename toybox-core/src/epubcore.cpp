@@ -561,6 +561,19 @@ bool Book::parseOpf(const char* opfPath) {
   });
   entryClose();
 
+  // An <itemref> that no manifest item answers to is dropped, not kept as a
+  // blank chapter. CrossPoint only creates a spine entry when the idref
+  // resolves, so a slot kept here would shift every chapter after it by one
+  // -- and a reading position saved by either firmware would reopen in the
+  // wrong chapter on the other. Nothing is lost: the slot has no path behind
+  // it and no zip entry to stream, so it could never have been shown.
+  {
+    int w = 0;
+    for (int i = 0; i < _spineN; i++)
+      if (_spine[i].ok != 0) _spine[w++] = _spine[i];
+    _spineN = w;
+  }
+
   // Pass three: one walk of the zip directory fills in every matched entry.
   _coverOk = false;
   walkCD([&](const char* name, const Ent& e) {
