@@ -106,6 +106,47 @@ g++ -std=gnu++17 -O2 -w -DTOYBOX_HOST -I . -I mock -I ../../src \
 ./preview
 ```
 
+## The Seeed Playground registry
+
+Seeed keeps a public contribution repo for firmware that appears in the
+reTerminal Sticky Playground catalogue:
+<https://github.com/Seeed-Projects/reterminal-sticky-playground-registry>. A
+merged entry becomes a card on their site with a browser flashing page beside
+it.
+
+They take two kinds of contribution. The SOURCE path hands over a buildable
+tree for their GitHub Actions to compile, and their only build adapter is
+ESP-IDF with CMake -- "Projects that need another build system should open an
+issue first". Toybox is PlatformIO and Arduino, so that path needs their
+agreement first. The FIRMWARE-ONLY path takes the tested binaries with a
+manifest recording every offset, byte size and SHA-256, plus an upstream source
+URL and licence, and that is the one this repo generates:
+
+```
+sh tools/make_image.sh
+python3 tools/make_registry.py --preview path/to/device-photo.jpg
+```
+
+It writes `dist/registry/toybox/` from the same four binaries the installer
+page serves, so Seeed's flasher and this project's own write identical bytes.
+Pass `--preview`: their community entries want a real screenshot or photo, and
+without it the script falls back to a harness render and says so.
+
+To check it the way their reviewers will, clone the registry, drop the entry in
+and run their validator:
+
+```
+git clone --depth 1 https://github.com/Seeed-Projects/reterminal-sticky-playground-registry reg
+cp -R dist/registry/toybox reg/integrations/toybox
+cd reg && npm install && npm test && npm run validate
+```
+
+Two differences to keep in mind when reading a bug report from someone who
+installed from Seeed's page rather than ours: their flasher always writes the
+whole four-part package (there is no app-only UPDATE), and it cannot offer the
+optional CJK font packs, which stay a `/fonts` install from this project's own
+page.
+
 Build with `-DTOYBOX_CP_FONTS` to render every screen with the CrossPoint
 Reader's fonts instead. This checks that the shared code still lays out
 correctly under a different host's font metrics. Sample renders are in

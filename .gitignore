@@ -8,3 +8,8 @@ __pycache__/
 
 # The harness dumps frames wherever it is run from, not only test/host.
 *.pgm
+
+# The Seeed registry entry, rebuilt by tools/make_registry.py from binaries
+# that are already committed under docs/firmware. Four megabytes of duplicate
+# blobs; it belongs in the registry's pull request, not in this repo.
+dist/
