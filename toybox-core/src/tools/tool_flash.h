@@ -247,15 +247,21 @@ class FlashTool : public ToolApp {
     for (int i = 0; i < _deckCount; i++) {
       const TRect r = rowRect(i, _deckCount);
       const TRect d = delRect(i, _deckCount);
-      const int permille =
-          _decks[i].cards ? (_decks[i].mastered * 1000) / _decks[i].cards : 0;
+      // How far the whole deck has come, not how many cards finished it. A
+      // card is mastered only at the top of four boxes, so a bar drawn from the
+      // mastered count sits flat at zero for three sessions and then leaps --
+      // which reads as a deck that is not being learned at all.
+      const int permille = fcard::boxPermille(_decks[i].boxSum, _decks[i].cards);
 
       // A rule between rows rather than a box around each one. Every deck used
       // to be drawn as a button, which put three heavy outlines above IMPORT
       // and made the list compete with the thing you actually press.
       const TSize nsz = scriptFloor(_decks[i].name, TS_MED);
       c.text(r.x + 6, r.y + 4, _decks[i].name, nsz, true);
-      snprintf(buf, sizeof(buf), "%d/%d", _decks[i].mastered, _decks[i].cards);
+      // The row's number matches the bar beside it. It used to be
+      // mastered-over-cards, which read "0/8" against a bar that was visibly a
+      // third full -- two different questions answered in one row.
+      snprintf(buf, sizeof(buf), "%d%%", permille / 10);
       const int tw = c.textWidth(buf, TS_SMALL);
       // Centred on the delete key beside it rather than on the name above it:
       // the two sit on the same edge of the row and a few pixels of daylight
@@ -522,8 +528,8 @@ class FlashTool : public ToolApp {
     if (_srs) {
       snprintf(buf, sizeof(buf), "box %d/%d", card.box, fcard::MAX_BOX);
       c.text(160, 706, buf, TS_MED, true);
-      tdraw::progressBar(c, 20, 744, 250, 18, masteredPermille());
-      snprintf(buf, sizeof(buf), "%d mastered", masteredCount());
+      tdraw::progressBar(c, 20, 744, 250, 18, progressPermille());
+      snprintf(buf, sizeof(buf), "%d%% learned", progressPermille() / 10);
       c.text(286, 742, buf, TS_MED, true);
     }
   }
@@ -534,10 +540,16 @@ class FlashTool : public ToolApp {
     c.textInBox(CARD_BOX.x, CARD_BOX.y - 40, CARD_BOX.w, CARD_BOX.h, "DECK COMPLETE", TS_HUGE,
                 true, true);
     char buf[48];
-    snprintf(buf, sizeof(buf), "%d of %d cards mastered", masteredCount(), _cardCount);
+    // Two numbers, because they answer different questions: how far the deck
+    // has come overall, and how many cards are actually finished with. The
+    // second used to be the only one, and after a good first session it still
+    // read "0 of 8 cards mastered" -- true, and no use to anybody.
+    snprintf(buf, sizeof(buf), "%d%% learned", progressPermille() / 10);
     c.textCentered(c.width() / 2, CARD_BOX.y + CARD_BOX.h / 2 + 30, buf, TS_LARGE, true);
     tdraw::progressBar(c, CARD_BOX.x + 100, CARD_BOX.y + CARD_BOX.h / 2 + 70, CARD_BOX.w - 200,
-                       26, masteredPermille());
+                       26, progressPermille());
+    snprintf(buf, sizeof(buf), "%d of %d cards mastered", masteredCount(), _cardCount);
+    c.textCentered(c.width() / 2, CARD_BOX.y + CARD_BOX.h / 2 + 116, buf, TS_MED, true);
     c.button(RESTART_BTN.x, RESTART_BTN.y, RESTART_BTN.w, RESTART_BTN.h, "AGAIN", true,
              TS_LARGE);
     c.button(DECKS_BTN.x, DECKS_BTN.y, DECKS_BTN.w, DECKS_BTN.h, "DECKS", false, TS_LARGE);
@@ -635,8 +647,12 @@ class FlashTool : public ToolApp {
       if (_cards[i].box >= fcard::MAX_BOX) n++;
     return n;
   }
-  int masteredPermille() const {
-    return _cardCount ? (masteredCount() * 1000) / _cardCount : 0;
+  // Every box of every card against the box they could all be in: it moves
+  // after every session, where the mastered count moves once every four.
+  int progressPermille() const {
+    int sum = 0;
+    for (int i = 0; i < _cardCount; i++) sum += _cards[i].box;
+    return fcard::boxPermille(sum, _cardCount);
   }
 
   void saveProgress() {

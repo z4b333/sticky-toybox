@@ -33,7 +33,18 @@ struct DeckInfo {
   char name[NAME_LEN + 1];
   int cards;
   int mastered;
+  // Every card's box added together. Mastery is four correct answers apart,
+  // so a deck's first three passes move nothing at all if the only number
+  // shown is how many cards reached the top box -- this is the one that moves
+  // after every session, and it is what the progress bars use.
+  int boxSum;
 };
+
+// How far a deck has come, in thousandths: every box of every card counted
+// against the box every card could be in. All at box 2 of 4 reads as 500.
+inline int boxPermille(int boxSum, int cards) {
+  return cards > 0 ? (boxSum * 1000) / (cards * MAX_BOX) : 0;
+}
 
 inline bool fsBegin() {
   tfs::ensureDir("/decks");
@@ -312,6 +323,7 @@ inline int listDecks(DeckInfo* out, int maxDecks) {
     out[i].name[NAME_LEN] = 0;
     out[i].cards = 0;
     out[i].mastered = 0;
+    out[i].boxSum = 0;
 
     String body;
     deckPath(path, sizeof(path), names[i], ".tsv");
@@ -323,8 +335,12 @@ inline int listDecks(DeckInfo* out, int maxDecks) {
     String boxes;
     deckPath(path, sizeof(path), names[i], ".box");
     if (fsRead(path, boxes)) {
-      for (unsigned k = 0; k < boxes.length(); k++)
-        if ((uint8_t)boxes[k] >= MAX_BOX) out[i].mastered++;
+      for (unsigned k = 0; k < boxes.length(); k++) {
+        const uint8_t b = (uint8_t)boxes[k];
+        if (b > MAX_BOX) continue;  // a sidecar from somewhere else
+        out[i].boxSum += b;
+        if (b >= MAX_BOX) out[i].mastered++;
+      }
     }
   }
   return n;
