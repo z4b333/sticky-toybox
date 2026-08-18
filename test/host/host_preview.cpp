@@ -5523,6 +5523,145 @@ int main() {
     printf("record clears ok (two taps, disarms, app-local)\n");
   }
 
+  // --- importing from the card ---------------------------------------------
+  // A note and a deck can arrive on the SD card instead of over wifi: /notes
+  // holds .md or .txt, /decks holds .tsv, .csv or .txt. The editor on the
+  // project's own page writes exactly these two shapes, and so does a text
+  // editor, a phone, or a spreadsheet.
+  {
+    // Planted beside two files that must NOT be offered: a picture, and a note
+    // one folder down. The lister takes four extensions and no subfolders, and
+    // both rules are easier to break than to notice.
+    static const char kCardNote[] =
+        "# Picnic\n"
+        "- [ ] blanket\n"
+        "- [x] flask\n"
+        "- [ ] \xe0\xb8\x82\xe0\xb9\x89\xe0\xb8\xb2\xe0\xb8\xa7\n"  // Thai: rice
+        "\n"
+        "> written on a laptop, carried on the card\n";
+    sdcard::hostPutCardFile("/notes/picnic.md", kCardNote, (int)strlen(kCardNote));
+    sdcard::hostPutCardFile("/notes/holiday.png", "\x89PNG", 4);
+    sdcard::hostPutCardFile("/notes/old/last-year.md", "# old\n", 6);
+
+    note::Info shelf[note::MAX_NOTES];
+    const int before = note::list(shelf, note::MAX_NOTES);
+    if (before >= note::MAX_NOTES) {
+      printf("CARD FAIL: the note shelf was already full before the import guard\n");
+      abort();
+    }
+
+    g_dumpEnabled = false;
+    toybox.open(false, 6);  // notes
+    g_dumpEnabled = true;
+    setScreen("tool_note_card");
+    tapRect(nui::CARD_BTN);
+    if (strcmp(toybox.activeTitle(), "FROM THE CARD") != 0) {
+      printf("CARD FAIL: CARD did not open the card list (\"%s\")\n", toybox.activeTitle());
+      abort();
+    }
+
+    // Row 0 is the only row: if the picture or the subfolder had been listed,
+    // the map's own order ("/notes/holiday.png" first) would put one of them
+    // here and the import below would fail on its contents.
+    setScreen("tool_note_card_done");
+    tapRect(nui::cardRow(0));
+    String got;
+    if (!note::load("picnic", got)) {
+      printf("CARD FAIL: tapping the file did not save a note called picnic\n");
+      abort();
+    }
+    if (strcmp(got.c_str(), kCardNote) != 0) {
+      printf("CARD FAIL: the note that arrived is not the file that was on the card\n");
+      abort();
+    }
+    if (note::list(shelf, note::MAX_NOTES) != before + 1) {
+      printf("CARD FAIL: the notes list did not gain exactly one note\n");
+      abort();
+    }
+    // Importing the same file again replaces that note rather than adding a
+    // second one -- this is how a note edited on a laptop comes back.
+    g_dumpEnabled = false;
+    tapRect(nui::cardRow(0));
+    if (note::list(shelf, note::MAX_NOTES) != before + 1) {
+      printf("CARD FAIL: re-importing the same file made a second note\n");
+      abort();
+    }
+    tapRect(nui::CARD_DONE);
+    if (strcmp(toybox.activeTitle(), "NOTES") != 0) {
+      printf("CARD FAIL: DONE did not go back to the note list\n");
+      abort();
+    }
+    quietTap(0, 0);  // out of notes
+    g_dumpEnabled = true;
+    printf("note card import ok (one .md in, picture and subfolder ignored)\n");
+  }
+
+  {
+    // Decks: a comma file with a comma INSIDE a quoted answer, which is what a
+    // spreadsheet exports and what the quote-aware splitter is for.
+    static const char kCardDeck[] =
+        "front,back\n"
+        "\xe9\xa3\x9f\xe3\xb9\x99\xe3\x82\x8b,\"to eat, to have a meal\"\n"
+        "\xe6\xb0\xb4,water\n"
+        "\xe5\xb1\xb1,mountain\n";
+    sdcard::hostPutCardFile("/decks/kanji n5.csv", kCardDeck, (int)strlen(kCardDeck));
+    sdcard::hostPutCardFile("/decks/verbs.tsv", "aller\tto go\nfaire\tto do\n", 25);
+    sdcard::hostPutCardFile("/decks/cover.bmp", "BM", 2);
+
+    g_dumpEnabled = false;
+    toybox.open(false, 5);  // flashcards
+    tapRect(help::OK_BTN);
+    g_dumpEnabled = true;
+    setScreen("tool_flash_card");
+    tapRect(fcui::CARD_BTN);
+    if (strcmp(toybox.activeTitle(), "FROM THE CARD") != 0) {
+      printf("CARD FAIL: CARD did not open the deck card list (\"%s\")\n",
+             toybox.activeTitle());
+      abort();
+    }
+
+    // The map orders "/decks/cover.bmp" first, so row 0 being the .csv is the
+    // proof that the .bmp was filtered out.
+    setScreen("tool_flash_card_done");
+    tapRect(fcui::cardRow(0));
+    {
+      using namespace fcard;
+      Card* deck = (Card*)malloc(sizeof(Card) * MAX_CARDS);
+      const int n = loadDeck("kanji n5", deck, MAX_CARDS);
+      if (n != 3) {
+        printf("CARD FAIL: the deck came in with %d cards, not 3\n", n);
+        abort();
+      }
+      // The header line is not a card, and the comma inside the quotes is not
+      // a column break.
+      if (strcmp(deck[0].back, "to eat, to have a meal") != 0) {
+        printf("CARD FAIL: the quoted answer arrived as \"%s\"\n", deck[0].back);
+        abort();
+      }
+      // Leitner progress survives a re-import of the same file, which is the
+      // whole reason someone would edit a deck on a laptop and drop it back.
+      deck[1].box = MAX_BOX;
+      saveBoxes("kanji n5", deck, n);
+      g_dumpEnabled = false;
+      tapRect(fcui::cardRow(0));
+      const int again = loadDeck("kanji n5", deck, MAX_CARDS);
+      if (again != 3 || deck[1].box != MAX_BOX) {
+        printf("CARD FAIL: re-import lost the box levels (%d cards, box %d)\n", again,
+               again > 1 ? deck[1].box : -1);
+        abort();
+      }
+      free(deck);
+    }
+    tapRect(fcui::CARD_DONE);
+    if (strcmp(toybox.activeTitle(), "FLASHCARDS") != 0) {
+      printf("CARD FAIL: DONE did not go back to the deck list\n");
+      abort();
+    }
+    quietTap(0, 0);
+    g_dumpEnabled = true;
+    printf("deck card import ok (a spreadsheet .csv in, boxes kept on re-import)\n");
+  }
+
   // --- languages beyond ASCII ---------------------------------------------
   // A note and a flashcard in the five content languages, drawn through the
   // real pipeline. The width checks catch a broken UTF-8 walk (a byte-wise

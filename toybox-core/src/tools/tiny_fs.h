@@ -24,7 +24,7 @@ inline bool begin() { return true; }
 inline bool read(const char* path, String& out) {
   auto it = hostFs().find(path);
   if (it == hostFs().end()) return false;
-  out = it->second.c_str();
+  out = it->second;  // whole bytes: a sidecar may hold NULs (see mock String)
   return true;
 }
 inline bool write(const char* path, const char* data, size_t len) {

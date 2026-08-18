@@ -166,6 +166,13 @@ bool sleepArtGray(uint8_t* gray);
 // is readWhole("/recipes/<name>").
 int listJson(char names[][64], int max);
 
+// Text a person typed, sitting in a folder on the card: notes as .md or .txt,
+// decks as .tsv, .csv or .txt. Bare names, 63 bytes plus the NUL; -1 when no
+// card answered, 0 when the folder is missing or holds nothing of the kind.
+// Same claim-per-call bus rule as listJson. Read one back with
+// readWhole("<dir>/<name>"). Files are skipped if empty or over 256 KB.
+int listText(const char* dir, char names[][64], int max);
+
 // A file on the card written a piece at a time, for anything too big to
 // assemble in RAM first. Only valid while something already holds the bus;
 // the cover builder streams into this while a book is being opened.

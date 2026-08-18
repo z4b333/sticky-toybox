@@ -121,9 +121,23 @@ inline bool splitLine(const char* line, char* front, char* back) {
   return front[0] != 0 && back[0] != 0;
 }
 
+// A spreadsheet's column titles, which a file saved out of Excel, Numbers or
+// Sheets carries on its first line and which nobody wants to study. Only the
+// first line is ever tested, and only against these exact pairs -- a deck whose
+// real first card is "term / definition" is a deck about lexicography, and it
+// keeps that card the moment it is anywhere but line one.
+inline bool isHeaderRow(const char* front, const char* back) {
+  static const char* kPairs[] = {"front", "back",     "term",     "definition",
+                                 "word",  "meaning",  "question", "answer"};
+  for (size_t i = 0; i < sizeof(kPairs) / sizeof(kPairs[0]); i += 2)
+    if (strcasecmp(front, kPairs[i]) == 0 && strcasecmp(back, kPairs[i + 1]) == 0) return true;
+  return false;
+}
+
 // Parse a whole pasted/uploaded blob into cards. Returns the card count.
 inline int parseDeck(const char* text, Card* out, int maxCards) {
   int n = 0;
+  bool first = true;
   const char* p = text;
   char line[FRONT_LEN + BACK_LEN + 8];
   while (*p && n < maxCards) {
@@ -135,6 +149,11 @@ inline int parseDeck(const char* text, Card* out, int maxCards) {
     while (*p == '\n' || *p == '\r') p++;
 
     if (splitLine(line, out[n].front, out[n].back)) {
+      if (first && isHeaderRow(out[n].front, out[n].back)) {
+        first = false;
+        continue;
+      }
+      first = false;
       out[n].box = 0;
       n++;
     }

@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Toybox · Note and flashcard editor</title>
+<meta name="description" content="Write notes and flashcard decks for the Toybox firmware on the Seeed reTerminal Sticky, and download them straight onto the SD card. Nothing is uploaded.">
+<link rel="stylesheet" href="site.css">
+<style>
+  /* Page-local only; the frame, the type and the header live in site.css. */
+  .page { padding: 48px 24px 64px; max-width: 940px; }
+  h1 { font-size: clamp(30px, 3.4vw, 40px); }
+  .sub { color: var(--muted); margin: 12px 0 28px; max-width: 68ch; }
+
+  /* The two editors. Tabs rather than two pages: they are the same job (make a
+     file, put it on the card) and share every instruction below them. */
+  .tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--line); margin-bottom: 26px; }
+  .tabs button {
+    background: none; border: 0; border-bottom: 2px solid transparent;
+    padding: 10px 14px; font: 600 16px system-ui, sans-serif;
+    color: var(--muted); cursor: pointer; margin-bottom: -1px;
+  }
+  .tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--fg); }
+  /* site.css gives every <section> 64 px of air and a rule between siblings,
+     which is right for a landing page and wrong for two panes of one form. */
+  .pane { padding: 0; border-top: 0; }
+  .pane[hidden] { display: none; }
+  #onto { padding: 30px 0 0; margin-top: 40px; }
+
+  label.f { display: block; font-size: 14px; font-weight: 600; margin: 18px 0 6px; }
+  input[type=text], textarea {
+    width: 100%; padding: 10px 12px; border: 1px solid var(--line);
+    border-radius: 8px; font: inherit; background: #fff;
+  }
+  textarea { min-height: 300px; resize: vertical; font-size: 15px;
+             font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  .count { font-size: 13px; color: var(--muted); margin-top: 6px; }
+  .count.over { color: #b91c1c; font-weight: 600; }
+
+  .bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-top: 18px; }
+  .filename { font-size: 14px; color: var(--muted); }
+  .filename code { font-size: 13px; }
+
+  /* The deck table. Two columns and a delete key, because that is exactly what
+     one line of the file is -- a front, a back, and the choice to remove it. */
+  table.deck { width: 100%; border-collapse: collapse; margin-top: 8px; }
+  table.deck th {
+    text-align: left; font-size: 13px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--muted); padding: 0 8px 6px 0;
+  }
+  table.deck td { padding: 3px 8px 3px 0; vertical-align: top; }
+  table.deck td:last-child { padding-right: 0; width: 38px; }
+  table.deck input { font-size: 15px; padding: 8px 10px; }
+  table.deck input.long { border-color: #b91c1c; }
+  button.x {
+    width: 34px; height: 38px; border: 1px solid var(--line); background: #fff;
+    border-radius: 8px; cursor: pointer; color: var(--muted); font-size: 16px;
+  }
+  button.x:hover { color: var(--fg); border-color: var(--line-strong); }
+
+  .paste { margin-top: 26px; }
+  .paste textarea { min-height: 120px; }
+
+  .note { font-size: 15px; color: var(--muted); margin-top: 10px; }
+  .warn { color: #b91c1c; font-size: 14px; margin-top: 10px; min-height: 1.3em; }
+
+  .cheats { margin-top: 12px; }
+  .cheats table { border-collapse: collapse; font-size: 15px; }
+  .cheats td { padding: 3px 18px 3px 0; }
+  .cheats td:first-child { white-space: nowrap; }
+
+  .steps { max-width: 68ch; padding-left: 22px; }
+  .steps li { margin-top: 6px; }
+  #onto p.note { max-width: 68ch; }
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="mark" href="index.html" aria-label="Toybox">
+      <span>T</span><span>O</span><span>Y</span><span>B</span><span>O</span><span>X</span>
+    </a>
+    <nav class="site-nav">
+      <a href="index.html">Install</a>
+      <a href="editor.html" aria-current="page">Notes &amp; cards</a>
+      <a href="wallpaper.html">Wallpapers</a>
+      <a href="recipe.html">Recipes</a>
+      <a href="https://github.com/z4b333/Toybox-slicer">Slicer</a>
+      <a href="checklist.html">First-boot checklist</a>
+      <a href="https://github.com/z4b333/sticky-toybox">Source</a>
+    </nav>
+  </div>
+</header>
+
+<main class="wrap page">
+  <h1>Notes &amp; flashcards</h1>
+  <p class="sub">Write here on a proper keyboard, download the file, and drop it
+  on the SD card. The device reads it from <code>/notes</code> or
+  <code>/decks</code> — no wifi, no pairing. Nothing here is uploaded anywhere;
+  the file is built in this browser.</p>
+
+  <div class="tabs" role="tablist">
+    <button role="tab" id="tab-note" aria-selected="true" aria-controls="pane-note">Note</button>
+    <button role="tab" id="tab-deck" aria-selected="false" aria-controls="pane-deck">Flashcards</button>
+  </div>
+
+  <!-- ============================ NOTES ============================== -->
+  <section class="pane" id="pane-note" role="tabpanel" aria-labelledby="tab-note">
+    <label class="f" for="n-name">Note name</label>
+    <input type="text" id="n-name" value="shopping" maxlength="24" spellcheck="false">
+    <div class="count" id="n-namecount"></div>
+
+    <label class="f" for="n-body">The note</label>
+    <textarea id="n-body" spellcheck="true"># Shopping
+- [ ] milk, the **big** carton
+- [x] bread
+- [ ] eggs
+
+## Before Friday
+1. book the dentist
+2. return the library books
+
+---
+&gt; back Tuesday, feed the cat
+</textarea>
+    <div class="count" id="n-count"></div>
+
+    <div class="bar">
+      <button class="actbtn" id="n-dl">Download the note</button>
+      <span class="filename">saves as <code id="n-file">shopping.md</code></span>
+    </div>
+
+    <div class="cheats">
+      <h3>What the device draws</h3>
+      <p class="note">Plain Markdown, and only these. Anything else is drawn as
+      ordinary text rather than refused.</p>
+      <table>
+        <tr><td><code># Title</code></td><td>heading, three sizes with <code>##</code> and <code>###</code></td></tr>
+        <tr><td><code>- [ ] task</code></td><td>a checkbox — tap it on the glass to tick it</td></tr>
+        <tr><td><code>- item</code></td><td>bullet</td></tr>
+        <tr><td><code>1. item</code></td><td>numbered, and it counts for itself</td></tr>
+        <tr><td><code>&gt; line</code></td><td>quote</td></tr>
+        <tr><td><code>---</code></td><td>a rule across the page</td></tr>
+        <tr><td><code>**bold**</code></td><td>bold, anywhere in a line</td></tr>
+        <tr><td><code>~~struck~~</code></td><td>struck through — what tapping a plain line does</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <!-- ========================== FLASHCARDS =========================== -->
+  <section class="pane" id="pane-deck" role="tabpanel" aria-labelledby="tab-deck" hidden>
+    <label class="f" for="d-name">Deck name</label>
+    <input type="text" id="d-name" value="french starter" maxlength="24" spellcheck="false">
+    <div class="count" id="d-namecount"></div>
+
+    <label class="f">Cards</label>
+    <table class="deck">
+      <thead><tr><th>Front</th><th>Back</th><th></th></tr></thead>
+      <tbody id="d-rows"></tbody>
+    </table>
+    <div class="bar">
+      <button class="actbtn secondary" id="d-add">Add a card</button>
+      <span class="count" id="d-count"></span>
+    </div>
+    <div class="warn" id="d-warn"></div>
+
+    <div class="bar">
+      <button class="actbtn" id="d-dl">Download the deck</button>
+      <span class="filename">saves as <code id="d-file">french starter.tsv</code></span>
+    </div>
+
+    <div class="paste">
+      <h3>Already have a list?</h3>
+      <p class="note">Paste it here and it fills the table. One card a line, with
+      the front and the back separated by a tab, a <code>|</code>, a comma or
+      <code> - </code>. That covers an Anki export, a Quizlet export, and a
+      column pair copied out of a spreadsheet. A first line reading
+      <code>front,back</code> (or <code>term,definition</code>) is treated as
+      column titles and dropped, exactly as the device does.</p>
+      <textarea id="d-paste" spellcheck="false" placeholder="bonjour	hello
+merci	thank you"></textarea>
+      <div class="bar">
+        <button class="actbtn secondary" id="d-fill">Fill the table</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- =========================== ONTO THE CARD ======================= -->
+  <section id="onto">
+    <h2>Getting it onto the device</h2>
+    <ol class="note steps">
+      <li>Put the microSD card in a computer. It has to be FAT32 — the same card
+        the books and pictures live on.</li>
+      <li>Make a folder called <code>notes</code> or <code>decks</code> at the
+        top of the card if it is not there yet, and drop the file in it.</li>
+      <li>On the device, open NOTES or FLASHCARDS and press <strong>CARD</strong>.
+        Tap the file and it comes in.</li>
+    </ol>
+    <p class="note">Bringing in a note or a deck of a name the device already has
+    replaces it. For a deck, the cards you had already learned keep their place
+    in the spaced-repetition boxes, as long as the front text has not changed —
+    so a deck can be edited here and dropped back without losing progress.</p>
+    <p class="note">The device also takes both of these over its own wifi, from a
+    phone: WRITE in the notes app, IMPORT in the flashcards app. This page is for
+    when the card is easier than the phone, or when the note is long.</p>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    <span>Toybox for the Seeed reTerminal Sticky</span>
+    <a href="index.html">Web installer</a>
+    <a href="editor.html">Notes &amp; flashcards</a>
+    <a href="wallpaper.html">Wallpaper maker</a>
+    <a href="recipe.html">Recipe grabber</a>
+    <a href="https://github.com/z4b333/Toybox-slicer">Toybox Slicer</a>
+    <a href="checklist.html">First-boot checklist</a>
+    <a href="https://github.com/z4b333/sticky-toybox">Source on GitHub</a>
+  </div>
+</footer>
+
+<script>
+// The firmware's own limits, from toybox-core/src/tools/. They are counted in
+// BYTES on the device, not characters, so a Thai or Japanese note runs out
+// sooner than its character count suggests -- and a page that counted
+// characters would promise room that is not there.
+const NOTE_BYTES = 4000;   // note::MAX_BYTES
+const NAME_LEN   = 24;     // note::NAME_LEN and fcard::NAME_LEN, both 24
+const FRONT_LEN  = 64;     // fcard::FRONT_LEN
+const BACK_LEN   = 96;     // fcard::BACK_LEN
+const MAX_CARDS  = 200;    // fcard::MAX_CARDS
+
+const enc = new TextEncoder();
+const bytes = s => enc.encode(s).length;
+const $ = id => document.getElementById(id);
+
+// --- tabs -------------------------------------------------------------------
+for (const [tab, pane] of [['tab-note', 'pane-note'], ['tab-deck', 'pane-deck']]) {
+  $(tab).addEventListener('click', () => {
+    for (const [t, p] of [['tab-note', 'pane-note'], ['tab-deck', 'pane-deck']]) {
+      const on = t === tab;
+      $(t).setAttribute('aria-selected', on ? 'true' : 'false');
+      $(p).hidden = !on;
+    }
+  });
+}
+
+// --- names ------------------------------------------------------------------
+// The device's own sanitizeName, kept in step: anything non-ASCII passes
+// through whole (a Thai note keeps its Thai name), ASCII that is not a letter,
+// digit, dash, underscore or space becomes an underscore, and the cut falls on
+// a character boundary. The file name is what the note or deck ends up called,
+// so showing it here is showing the answer rather than describing it.
+function sanitize(input) {
+  let out = '';
+  for (const ch of input) {
+    const cp = ch.codePointAt(0);
+    if (bytes(out + ch) > NAME_LEN) break;
+    if (cp >= 0x80) { out += ch; continue; }
+    out += /[a-zA-Z0-9\-_ ]/.test(ch) ? ch : '_';
+  }
+  out = out.trim();
+  return out || 'note';
+}
+
+function download(name, text) {
+  // A plain text blob and an anchor: no server, and nothing leaves the browser.
+  const blob = new Blob([text], {type: 'text/plain;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// --- the note ---------------------------------------------------------------
+function noteRefresh() {
+  const name = sanitize($('n-name').value);
+  $('n-file').textContent = name + '.md';
+  $('n-namecount').textContent = name !== $('n-name').value.trim()
+    ? 'saved as "' + name + '" — the device keeps letters, digits, spaces and any non-Latin script'
+    : '';
+  const n = bytes($('n-body').value);
+  const c = $('n-count');
+  c.textContent = n + ' of ' + NOTE_BYTES + ' bytes';
+  c.className = n > NOTE_BYTES ? 'count over' : 'count';
+  if (n > NOTE_BYTES) c.textContent += ' — the device keeps the first ' + NOTE_BYTES;
+}
+$('n-name').addEventListener('input', noteRefresh);
+$('n-body').addEventListener('input', noteRefresh);
+$('n-dl').addEventListener('click', () => {
+  let body = $('n-body').value;
+  if (!body.endsWith('\n')) body += '\n';
+  download(sanitize($('n-name').value) + '.md', body);
+});
+
+// --- the deck ---------------------------------------------------------------
+const START_CARDS = [
+  ['bonjour', 'hello'],
+  ['merci', 'thank you'],
+  ["s'il vous plait", 'please'],
+];
+
+function deckRow(front = '', back = '') {
+  const tr = document.createElement('tr');
+  const f = document.createElement('input'), b = document.createElement('input');
+  f.type = b.type = 'text';
+  f.value = front; b.value = back;
+  f.placeholder = 'question'; b.placeholder = 'answer';
+  const del = document.createElement('button');
+  del.className = 'x';
+  del.textContent = '×';
+  del.title = 'remove this card';
+  del.addEventListener('click', () => { tr.remove(); deckRefresh(); });
+  for (const el of [f, b]) el.addEventListener('input', deckRefresh);
+  for (const el of [f, b]) { const td = document.createElement('td'); td.appendChild(el); tr.appendChild(td); }
+  const td = document.createElement('td'); td.appendChild(del); tr.appendChild(td);
+  return tr;
+}
+
+function deckCards() {
+  const out = [];
+  for (const tr of $('d-rows').children) {
+    const [f, b] = tr.querySelectorAll('input');
+    if (f.value.trim() && b.value.trim()) out.push([f.value.trim(), b.value.trim()]);
+  }
+  return out;
+}
+
+function deckRefresh() {
+  const name = sanitize($('d-name').value);
+  $('d-file').textContent = name + '.tsv';
+  $('d-namecount').textContent = name !== $('d-name').value.trim()
+    ? 'saved as "' + name + '"' : '';
+
+  // Over-long fields are marked as they are typed rather than silently cut at
+  // download: the device truncates a front at 64 bytes and a back at 96, and
+  // finding that out from a card that ends mid-word is a poor way to learn it.
+  let over = 0;
+  for (const tr of $('d-rows').children) {
+    const [f, b] = tr.querySelectorAll('input');
+    const fo = bytes(f.value) > FRONT_LEN, bo = bytes(b.value) > BACK_LEN;
+    f.className = fo ? 'long' : '';
+    b.className = bo ? 'long' : '';
+    if (fo || bo) over++;
+  }
+  const n = deckCards().length;
+  const c = $('d-count');
+  c.textContent = n + ' of ' + MAX_CARDS + ' cards';
+  c.className = n > MAX_CARDS ? 'count over' : 'count';
+
+  const w = [];
+  if (over) w.push(over + (over === 1 ? ' card is' : ' cards are') +
+    ' longer than the device keeps (' + FRONT_LEN + ' bytes front, ' + BACK_LEN + ' back)');
+  if (n > MAX_CARDS) w.push('only the first ' + MAX_CARDS + ' cards will be read');
+  $('d-warn').textContent = w.join('. ');
+}
+
+$('d-name').addEventListener('input', deckRefresh);
+$('d-add').addEventListener('click', () => {
+  $('d-rows').appendChild(deckRow());
+  $('d-rows').lastElementChild.querySelector('input').focus();
+  deckRefresh();
+});
+
+$('d-dl').addEventListener('click', () => {
+  // Tab-separated, which is the device's first choice of separator and the one
+  // that never has to be quoted: a tab inside a field would be a second column,
+  // so any that were pasted in become spaces.
+  const body = deckCards()
+    .map(([f, b]) => f.replace(/\t/g, ' ') + '\t' + b.replace(/\t/g, ' '))
+    .join('\n') + '\n';
+  download(sanitize($('d-name').value) + '.tsv', body);
+});
+
+// The same splitter the firmware uses (fcard::splitLine), in the same order:
+// tab, " | ", "|", a quote-aware comma, then " - ". Kept in step so that what
+// this page reads back from a pasted list is what the device would have read.
+function splitLine(line) {
+  let sep = -1, len = 0;
+  if ((sep = line.indexOf('\t')) >= 0) len = 1;
+  else if ((sep = line.indexOf(' | ')) >= 0) len = 3;
+  else if ((sep = line.indexOf('|')) >= 0) len = 1;
+  else {
+    let quoted = false;
+    sep = -1;
+    for (let i = 0; i < line.length; i++) {
+      if (line[i] === '"') quoted = !quoted;
+      else if (line[i] === ',' && !quoted) { sep = i; len = 1; break; }
+    }
+    if (sep < 0 && (sep = line.indexOf(' - ')) >= 0) len = 3;
+  }
+  if (sep < 0) return null;
+  const unquote = s => {
+    s = s.trim();
+    if (s.length > 1 && s[0] === '"' && s[s.length - 1] === '"') s = s.slice(1, -1);
+    return s.trim();
+  };
+  const front = unquote(line.slice(0, sep)), back = unquote(line.slice(sep + len));
+  return front && back ? [front, back] : null;
+}
+
+const HEADERS = [['front', 'back'], ['term', 'definition'],
+                 ['word', 'meaning'], ['question', 'answer']];
+
+$('d-fill').addEventListener('click', () => {
+  const rows = [];
+  let first = true;
+  for (const line of $('d-paste').value.split(/\r?\n/)) {
+    const card = splitLine(line);
+    if (!card) continue;
+    if (first) {
+      first = false;
+      const [f, b] = [card[0].toLowerCase(), card[1].toLowerCase()];
+      if (HEADERS.some(h => h[0] === f && h[1] === b)) continue;
+    }
+    rows.push(card);
+  }
+  if (!rows.length) {
+    $('d-warn').textContent = 'nothing there looked like a card — each line needs a front and a back';
+    return;
+  }
+  $('d-rows').replaceChildren(...rows.map(([f, b]) => deckRow(f, b)));
+  $('d-paste').value = '';
+  deckRefresh();
+});
+
+$('d-rows').replaceChildren(...START_CARDS.map(([f, b]) => deckRow(f, b)));
+noteRefresh();
+deckRefresh();
+</script>
+</body>
+</html>

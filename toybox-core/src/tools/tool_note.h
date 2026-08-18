@@ -3,6 +3,7 @@
 // Three screens — the note list, the rendered note (paged, with checkboxes you
 // can tap), and the pairing screen that puts the editor on your phone.
 #pragma once
+#include "card_text.h"
 #include "flash_qr.h"
 #include "lockscreen.h"
 #include "note_md.h"
@@ -15,7 +16,20 @@ namespace nui {
 inline constexpr int LIST_X = 20, LIST_Y = 56, LIST_W = 440, ROW_H = 46;
 inline constexpr int DEL_W = 34;
 inline constexpr int PANEL_X = 20, PANEL_W = 440;
-inline constexpr TRect WRITE_BTN{PANEL_X, 448, PANEL_W, 72};
+// Two ways in, side by side: the phone, and a file already on the card. WRITE
+// keeps the wider half because it is the one most people use and the one the
+// three steps below the rule are about.
+inline constexpr TRect WRITE_BTN{PANEL_X, 448, 268, 72};
+inline constexpr TRect CARD_BTN{PANEL_X + 280, 448, 160, 72};
+
+// the card list: the same rows as the note list, under a line saying where
+// they came from -- the folder is half the instruction, and a screen that just
+// lists two file names does not say which folder they were found in.
+inline constexpr int CARD_CAP_Y = 56, CARD_LIST_Y = 96;
+inline constexpr TRect CARD_DONE{PANEL_X, 700, PANEL_W, 72};
+inline TRect cardRow(int i) {
+  return TRect{LIST_X, CARD_LIST_Y + i * ROW_H, LIST_W, ROW_H - 6};
+}
 
 // view
 inline constexpr TRect BODY{20, 52, 440, 590};
@@ -180,6 +194,7 @@ class NoteTool : public ToolApp {
     switch (_screen) {
       case Screen::View: return _name;
       case Screen::Orient: return "WHICH WAY UP";
+      case Screen::Card: return "FROM THE CARD";
       case Screen::Pair: return "NOTES";
       default: return "NOTES";
     }
@@ -189,6 +204,10 @@ class NoteTool : public ToolApp {
     ToolApp::enter(h);
     tfs::begin();
     note::ensureSample();
+    // Leaving straight for the hub from the card screen skips closeCard().
+    free(_cardFiles);
+    _cardFiles = nullptr;
+    _cardCount = 0;
     _screen = Screen::List;
     refreshList();
   }
@@ -242,6 +261,7 @@ class NoteTool : public ToolApp {
     switch (_screen) {
       case Screen::List: renderList(c); break;
       case Screen::View: renderView(c); break;
+      case Screen::Card: renderCard(c); break;
       default: renderPair(c); break;
     }
   }
@@ -255,6 +275,8 @@ class NoteTool : public ToolApp {
         closeNote();
       } else if (_screen == Screen::Pair) {
         closePair();
+      } else if (_screen == Screen::Card) {
+        closeCard();
       } else {
         host().beep(1);
         host().goHub();
@@ -264,6 +286,7 @@ class NoteTool : public ToolApp {
     switch (_screen) {
       case Screen::List: tapList(x, y); break;
       case Screen::View: tapView(x, y); break;
+      case Screen::Card: tapCard(x, y); break;
       default: tapPair(x, y); break;
     }
   }
@@ -281,7 +304,7 @@ class NoteTool : public ToolApp {
 #endif
 
  private:
-  enum class Screen : uint8_t { List, View, Pair, Orient };
+  enum class Screen : uint8_t { List, View, Pair, Orient, Card };
 
   // --- list --------------------------------------------------------------
   void refreshList() { _count = note::list(_infos, note::MAX_NOTES); }
@@ -325,7 +348,9 @@ class NoteTool : public ToolApp {
     }
 
     c.button(WRITE_BTN.x, WRITE_BTN.y, WRITE_BTN.w, WRITE_BTN.h, "WRITE", true, TS_LARGE);
-    c.text(PANEL_X, WRITE_BTN.y + WRITE_BTN.h + 8, "type or talk on your phone", TS_MED, true);
+    c.button(CARD_BTN.x, CARD_BTN.y, CARD_BTN.w, CARD_BTN.h, "CARD", false, TS_LARGE);
+    c.text(PANEL_X, WRITE_BTN.y + WRITE_BTN.h + 8,
+           "your phone, or /notes on the card", TS_MED, true);
 
     // Body text is 24 px now, so the line pitch is 30 and the block below has
     // one line less to spend. The dictation step lost its turnover, and the note
@@ -359,6 +384,125 @@ class NoteTool : public ToolApp {
       if (rowRect(i).hit(x, y)) return openNote(i);
     }
     if (WRITE_BTN.hit(x, y)) return openPair();
+    if (CARD_BTN.hit(x, y)) return openCard();
+  }
+
+  // --- from the card -----------------------------------------------------
+  // A .md or .txt file in /notes on the card, brought in as a note. The phone
+  // flow needs the device's wifi up and a phone in your hand; this one needs
+  // neither, which is the whole point of it -- a note written on a laptop, or
+  // on the project's own web page, arrives by carrying the card.
+  void openCard() {
+    if (!_cardFiles)
+      _cardFiles = (char(*)[cardtext::NAME_LEN])malloc(cardtext::MAX_FILES *
+                                                       cardtext::NAME_LEN);
+    _cardCount = _cardFiles ? cardtext::list(host(), cardtext::NOTES_DIR, _cardFiles,
+                                             cardtext::MAX_FILES)
+                            : -1;
+    _cardMsg = nullptr;
+    _screen = Screen::Card;
+    host().beep(_cardCount > 0 ? 1 : 2);
+    // Listing borrows the SD bus, which resets the panel: the paint that
+    // follows has to be a full one.
+    host().refresh(true);
+  }
+
+  void closeCard() {
+    free(_cardFiles);
+    _cardFiles = nullptr;
+    _cardCount = 0;
+    _screen = Screen::List;
+    refreshList();
+    host().beep(1);
+    host().refresh(true);
+  }
+
+  void renderCard(ToolsCanvas& c) {
+    using namespace nui;
+    c.text(LIST_X, CARD_CAP_Y, "/notes on the card", TS_MED, true);
+    c.drawLine(LIST_X, CARD_LIST_Y - 12, LIST_X + LIST_W, CARD_LIST_Y - 12, 1, true);
+    if (_cardCount < 0) {
+      c.textInBox(LIST_X, CARD_LIST_Y, LIST_W, 200, "no card", TS_LARGE, true, true);
+      c.textInBox(LIST_X, CARD_LIST_Y + 120, LIST_W, 80, "put a FAT32 card in the slot",
+                  TS_MED, true);
+    } else if (_cardCount == 0) {
+      c.textInBox(LIST_X, CARD_LIST_Y, LIST_W, 200, "no files here", TS_LARGE, true, true);
+      c.textInBox(LIST_X, CARD_LIST_Y + 120, LIST_W, 80, "notes are .md or .txt files",
+                  TS_MED, true);
+    }
+    for (int i = 0; i < _cardCount; i++) {
+      const TRect r = cardRow(i);
+      if (i + 1 < _cardCount) c.fillRect(r.x, r.y + r.h + 2, r.w, 1, true);
+      const TSize nsz = scriptFloor(_cardFiles[i], TS_MED);
+      c.text(r.x + 10, r.y + (r.h - c.textHeight(nsz)) / 2, _cardFiles[i], nsz, true);
+    }
+
+    // What just happened, if anything did. It sits above the way out rather
+    // than over the list, because the list is what you tap next.
+    if (_cardMsg) c.textInBox(PANEL_X, CARD_DONE.y - 88, nui::PANEL_W, 40, _cardMsg, TS_MED, true);
+    c.text(PANEL_X, CARD_DONE.y - 40, "tap a file to bring it in", TS_MED, true);
+    c.button(CARD_DONE.x, CARD_DONE.y, CARD_DONE.w, CARD_DONE.h, "DONE", true, TS_LARGE);
+  }
+
+  void tapCard(int x, int y) {
+    using namespace nui;
+    if (CARD_DONE.hit(x, y)) return closeCard();
+    for (int i = 0; i < _cardCount; i++)
+      if (cardRow(i).hit(x, y)) return importFromCard(i);
+  }
+
+  void importFromCard(int idx) {
+    char name[note::NAME_LEN + 1];
+    char raw[cardtext::NAME_LEN];
+    cardtext::stem(_cardFiles[idx], raw, sizeof(raw));
+    note::sanitizeName(raw, name);
+
+    // Eight is the whole shelf. A ninth note would be written and then never
+    // listed, which looks exactly like the import having failed silently --
+    // so it is refused out loud instead. Overwriting a note of the same name
+    // is allowed: that is a person updating a note they already have.
+    if (!noteExists(name) && _count >= note::MAX_NOTES) {
+      _cardMsg = "no room -- delete a note first";
+      host().beep(2);
+      host().refreshUi();
+      return;
+    }
+
+    char* buf = (char*)malloc(note::MAX_BYTES + 1);
+    if (!buf) {
+      _cardMsg = "not enough memory";
+      host().beep(2);
+      host().refreshUi();
+      return;
+    }
+    const int n = cardtext::read(host(), cardtext::NOTES_DIR, _cardFiles[idx], buf,
+                                 note::MAX_BYTES);
+    if (n <= 0) {
+      free(buf);
+      _cardMsg = "could not read that file";
+      host().beep(2);
+      host().refresh(true);  // the read borrowed the bus even when it failed
+      return;
+    }
+    const bool ok = note::save(name, buf, (size_t)n);
+    free(buf);
+    if (!ok) {
+      _cardMsg = "could not save it";
+      host().beep(2);
+      host().refresh(true);
+      return;
+    }
+    refreshList();
+    snprintf(_cardMsgBuf, sizeof(_cardMsgBuf), "%s -- %d characters", name, n);
+    _cardMsg = _cardMsgBuf;
+    host().beep(3);
+    host().refresh(true);
+  }
+
+  static bool noteExists(const char* name) {
+    char p[64];
+    note::path(p, sizeof(p), name);
+    return tfs::exists(p);
   }
 
   // --- view --------------------------------------------------------------
@@ -727,6 +871,14 @@ class NoteTool : public ToolApp {
   Screen _screen = Screen::List;
   note::Info _infos[note::MAX_NOTES] = {};
   int _count = 0;
+
+  // The card's own /notes folder. A kilobyte of names, held only while that
+  // screen is open -- the same rule the open note and the WiFi stack follow,
+  // and the reason an idle Toybox costs the CrossPoint port almost nothing.
+  char (*_cardFiles)[cardtext::NAME_LEN] = nullptr;
+  int _cardCount = 0;
+  const char* _cardMsg = nullptr;
+  char _cardMsgBuf[64] = {};
 
   char _name[note::NAME_LEN + 1] = {};
   // Held only while a note is open, so the WiFi stack has the heap to itself.

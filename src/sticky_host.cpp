@@ -44,6 +44,11 @@ int StickyHost::sdRecipes(char names[][RECIPE_NAME_LEN], int max) {
   return sdcard::listJson(names, max);
 }
 
+int StickyHost::sdTextFiles(const char* dir, char names[][RECIPE_NAME_LEN], int max) {
+  static_assert(RECIPE_NAME_LEN == 64, "sdcard::listText fills 64-byte names");
+  return sdcard::listText(dir, names, max);
+}
+
 namespace {
 bool isBmpExt(const char* n) {
   const size_t len = strlen(n);

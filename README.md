@@ -59,9 +59,15 @@ and Vietnamese.
   device. Pairing is two QR codes and the device steps through them itself.
   Pin a note and it becomes the off-screen; the device asks which way up,
   following the accelerometer while you decide. Three text sizes. The phone
-  editor shows the 4,000-byte limit as you type.
-- **Flashcards** — spaced repetition, imported from your phone. The side
+  editor shows the 4,000-byte limit as you type. A note can also come off
+  the card: put a `.md` or `.txt` file in `/notes` and press CARD.
+- **Flashcards** — spaced repetition, imported from your phone or off the
+  card (`.tsv`, `.csv` or `.txt` in `/decks`, one card a line). Re-importing
+  a deck keeps the boxes of every card whose question is unchanged. The side
   buttons grade cards one-handed.
+- Both can be written on a keyboard first: the
+  [note and flashcard editor](https://z4b333.github.io/sticky-toybox/editor.html)
+  builds the file in the browser and downloads it for the card.
 - **List picker** — type a list or send it from your phone, tap to pick one.
 - **Coin flip, dice** (D4–D20 with modifiers), **random number, card draw**.
 - **Timer and stopwatch** — the countdown can be adjusted while running.

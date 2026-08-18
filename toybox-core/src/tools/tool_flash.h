@@ -7,6 +7,7 @@
 #pragma once
 #include <esp_random.h>
 
+#include "card_text.h"
 #include "decor.h"
 #include "flash_qr.h"
 #include "help.h"
@@ -19,7 +20,15 @@ namespace fcui {
 inline constexpr int LIST_X = 20, LIST_Y = 56, LIST_W = 440;
 inline constexpr int DEL_W = 34;
 inline constexpr int PANEL_X = 20, PANEL_W = 440;
-inline constexpr TRect IMPORT_BTN{PANEL_X, 480, PANEL_W, 68};
+// Two doors, as in the notes tool and for the same reason: a phone, or a file
+// already on the card. IMPORT keeps the wider half.
+inline constexpr TRect IMPORT_BTN{PANEL_X, 480, 268, 68};
+inline constexpr TRect CARD_BTN{PANEL_X + 280, 480, 160, 68};
+
+// the card list: rows under a line naming the folder they were read from.
+inline constexpr int CARD_CAP_Y = 56, CARD_Y = 96, CARD_ROW_H = 46;
+inline constexpr TRect CARD_DONE{PANEL_X, 700, PANEL_W, 72};
+inline TRect cardRow(int i) { return TRect{LIST_X, CARD_Y + i * CARD_ROW_H, LIST_W, CARD_ROW_H - 6}; }
 // Two buttons for two modes rather than one button that renames itself. The
 // timer and the randomiser already offer their modes this way, and a toggle
 // whose label is the state you are not in is a puzzle every time.
@@ -83,19 +92,28 @@ class FlashTool : public ToolApp {
     switch (_screen) {
       case Screen::Study: return _deckName;
       case Screen::Import: return "IMPORT";
+      case Screen::Card: return "FROM THE CARD";
       default: return "FLASHCARDS";
     }
   }
 
   // The access point must not outlive the screen that started it, however
   // the tool is left -- the hub button included.
-  ~FlashTool() override { _net.stop(); }
+  ~FlashTool() override {
+    _net.stop();
+    free(_cardFiles);
+  }
 
   void enter(ToolsHost& h) override {
     ToolApp::enter(h);
     fcard::fsBegin();
     fcard::ensureSampleDeck();
     _srs = prefs().getBool("fc_srs", true);
+    // Leaving straight for the hub from the card screen skips closeCard(); the
+    // names are of no use next time anyway, so entering starts clean.
+    free(_cardFiles);
+    _cardFiles = nullptr;
+    _fileCount = 0;
     _screen = Screen::Decks;
     _help = !help::suppressed(prefs(), "fc");
     refreshDeckList();
@@ -161,6 +179,7 @@ class FlashTool : public ToolApp {
     switch (_screen) {
       case Screen::Decks: renderDecks(c); break;
       case Screen::Study: renderStudy(c); break;
+      case Screen::Card: renderCard(c); break;
       default: renderImport(c); break;
     }
   }
@@ -177,6 +196,8 @@ class FlashTool : public ToolApp {
         host().refreshUi();
       } else if (_screen == Screen::Import) {
         closeImport();
+      } else if (_screen == Screen::Card) {
+        closeCard();
       } else {
         host().beep(1);
         host().goHub();
@@ -201,12 +222,13 @@ class FlashTool : public ToolApp {
     switch (_screen) {
       case Screen::Decks: tapDecks(x, y); break;
       case Screen::Study: tapStudy(x, y); break;
+      case Screen::Card: tapCard(x, y); break;
       default: tapImport(x, y); break;
     }
   }
 
  private:
-  enum class Screen : uint8_t { Decks, Study, Import };
+  enum class Screen : uint8_t { Decks, Study, Import, Card };
 
   // --- deck list ---------------------------------------------------------
   void refreshDeckList() { _deckCount = fcard::listDecks(_decks, fcard::MAX_DECKS); }
@@ -273,7 +295,8 @@ class FlashTool : public ToolApp {
     // it labels the import flow, and the gap that has to survive is the one
     // that would otherwise be an overlap when a taller face is used.
     c.button(IMPORT_BTN.x, IMPORT_BTN.y, IMPORT_BTN.w, IMPORT_BTN.h, "IMPORT", true, TS_LARGE);
-    c.text(PANEL_X, SRS_BTN.y - capH - 6, "scan a QR with your phone", TS_MED, true);
+    c.button(CARD_BTN.x, CARD_BTN.y, CARD_BTN.w, CARD_BTN.h, "CARD", false, TS_LARGE);
+    c.text(PANEL_X, SRS_BTN.y - capH - 6, "a QR, or /decks on the card", TS_MED, true);
 
     c.button(SRS_BTN.x, SRS_BTN.y, SRS_BTN.w, SRS_BTN.h, "SPACED REPEAT", _srs, TS_MED);
     c.button(FLIP_BTN.x, FLIP_BTN.y, FLIP_BTN.w, FLIP_BTN.h, "JUST FLIP", !_srs, TS_MED);
@@ -295,6 +318,7 @@ class FlashTool : public ToolApp {
       if (rowRect(i, _deckCount).hit(x, y)) return startStudy(i);
     }
     if (IMPORT_BTN.hit(x, y)) return openImport();
+    if (CARD_BTN.hit(x, y)) return openCard();
     if (SRS_BTN.hit(x, y) || FLIP_BTN.hit(x, y)) {
       const bool want = SRS_BTN.hit(x, y);
       if (want == _srs) return;
@@ -303,6 +327,117 @@ class FlashTool : public ToolApp {
       host().beep(1);
       host().refresh(false);
     }
+  }
+
+  // --- from the card -----------------------------------------------------
+  // A .tsv, .csv or .txt file in /decks on the card, brought in as a deck. The
+  // parser is the one the phone import already uses, so a file exported from
+  // Anki, Quizlet or a spreadsheet reads the same either way -- what changes is
+  // only that no wifi has to come up to receive it.
+  //
+  // Re-importing a deck of the same name keeps the Leitner box of every card
+  // whose front text is unchanged; that is importDeck's own promise and it
+  // holds here too. Editing a deck on a laptop and dropping it back does not
+  // cost you your progress.
+  void openCard() {
+    if (!_cardFiles)
+      _cardFiles = (char(*)[cardtext::NAME_LEN])malloc(cardtext::MAX_FILES *
+                                                       cardtext::NAME_LEN);
+    _fileCount = _cardFiles ? cardtext::list(host(), cardtext::DECKS_DIR, _cardFiles,
+                                             cardtext::MAX_FILES)
+                            : -1;
+    _cardMsg = nullptr;
+    _screen = Screen::Card;
+    host().beep(_fileCount > 0 ? 1 : 2);
+    // Listing borrows the SD bus, which resets the panel.
+    host().refresh(true);
+  }
+
+  void closeCard() {
+    free(_cardFiles);
+    _cardFiles = nullptr;
+    _fileCount = 0;
+    _screen = Screen::Decks;
+    refreshDeckList();
+    host().beep(1);
+    host().refresh(true);
+  }
+
+  void renderCard(ToolsCanvas& c) {
+    using namespace fcui;
+    c.text(LIST_X, CARD_CAP_Y, "/decks on the card", TS_MED, true);
+    c.drawLine(LIST_X, CARD_Y - 12, LIST_X + LIST_W, CARD_Y - 12, 1, true);
+    if (_fileCount < 0) {
+      c.textInBox(LIST_X, CARD_Y, LIST_W, 200, "no card", TS_LARGE, true, true);
+      c.textInBox(LIST_X, CARD_Y + 120, LIST_W, 80, "put a FAT32 card in the slot", TS_MED,
+                  true);
+    } else if (_fileCount == 0) {
+      c.textInBox(LIST_X, CARD_Y, LIST_W, 200, "no files here", TS_LARGE, true, true);
+      c.textInBox(LIST_X, CARD_Y + 120, LIST_W, 80, "decks are .tsv, .csv or .txt", TS_MED,
+                  true);
+    }
+    for (int i = 0; i < _fileCount; i++) {
+      const TRect r = cardRow(i);
+      if (i + 1 < _fileCount) c.drawLine(r.x, r.y + r.h + 2, r.x + r.w, r.y + r.h + 2, 1, true);
+      const TSize nsz = scriptFloor(_cardFiles[i], TS_MED);
+      c.text(r.x + 10, r.y + (r.h - c.textHeight(nsz)) / 2, _cardFiles[i], nsz, true);
+    }
+
+    if (_cardMsg) c.textInBox(PANEL_X, CARD_DONE.y - 88, fcui::PANEL_W, 40, _cardMsg, TS_MED, true);
+    c.text(PANEL_X, CARD_DONE.y - 40, "one card a line: front then back", TS_MED, true);
+    c.button(CARD_DONE.x, CARD_DONE.y, CARD_DONE.w, CARD_DONE.h, "DONE", true, TS_LARGE);
+  }
+
+  void tapCard(int x, int y) {
+    using namespace fcui;
+    if (CARD_DONE.hit(x, y)) return closeCard();
+    for (int i = 0; i < _fileCount; i++)
+      if (cardRow(i).hit(x, y)) return importFromCard(i);
+  }
+
+  void importFromCard(int idx) {
+    // Sixteen kilobytes takes 200 cards of ordinary length, which is the most
+    // a deck may hold anyway. Read on its own rather than into the study
+    // buffer: importDeck wants ~35 KB of its own while it runs, and the two
+    // are alive at the same moment.
+    static constexpr int kMaxText = 16 * 1024;
+    char* text = (char*)malloc(kMaxText + 1);
+    if (!text) {
+      _cardMsg = "not enough memory";
+      host().beep(2);
+      host().refreshUi();
+      return;
+    }
+    int n = cardtext::read(host(), cardtext::DECKS_DIR, _cardFiles[idx], text, kMaxText);
+    if (n <= 0) {
+      free(text);
+      _cardMsg = "could not read that file";
+      host().beep(2);
+      host().refresh(true);  // the read borrowed the bus even when it failed
+      return;
+    }
+    if (n == kMaxText) {  // truncated: end on the last whole line, not mid-card
+      while (n > 0 && text[n - 1] != '\n') n--;
+      text[n] = 0;
+    }
+
+    char raw[cardtext::NAME_LEN];
+    cardtext::stem(_cardFiles[idx], raw, sizeof(raw));
+    char saved[fcard::NAME_LEN + 1] = {};
+    const int cards = fcard::importDeck(raw, text, saved);
+    free(text);
+
+    if (cards <= 0) {
+      _cardMsg = "no cards found in that file";
+      host().beep(2);
+      host().refresh(true);
+      return;
+    }
+    snprintf(_cardMsgBuf, sizeof(_cardMsgBuf), "%s -- %d card%s", saved, cards,
+             cards == 1 ? "" : "s");
+    _cardMsg = _cardMsgBuf;
+    host().beep(3);
+    host().refresh(true);
   }
 
   // --- study -------------------------------------------------------------
@@ -667,6 +802,13 @@ class FlashTool : public ToolApp {
   fcard::DeckInfo _decks[fcard::MAX_DECKS] = {};
   bool _help = false;
   int _deckCount = 0;
+
+  // The card's own /decks folder. A kilobyte of names, held only while that
+  // screen is open -- the same rule the study buffer and the WiFi stack follow.
+  char (*_cardFiles)[cardtext::NAME_LEN] = nullptr;
+  int _fileCount = 0;
+  const char* _cardMsg = nullptr;
+  char _cardMsgBuf[64] = {};
 
   char _deckName[fcard::NAME_LEN + 1] = {};
   // Allocated on entering a deck and released on leaving it, so the ~33 KB it

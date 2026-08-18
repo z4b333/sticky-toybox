@@ -346,6 +346,22 @@ class ToolsHost {
     return -1;
   }
 
+  // Text files a person typed and dropped in a folder on the card: notes as
+  // .md or .txt in /notes, decks as .tsv, .csv or .txt in /decks. -1 when no
+  // card answered, 0 when the folder holds nothing of the kind. Read one back
+  // with sdReadWhole("<dir>/<name>").
+  //
+  // One call for both apps rather than two named ones, because the difference
+  // between a note and a deck is the folder it was put in, not anything this
+  // layer can see. A host without a card slot keeps the default and the two
+  // import screens say the card is not there.
+  virtual int sdTextFiles(const char* dir, char names[][RECIPE_NAME_LEN], int max) {
+    (void)dir;
+    (void)names;
+    (void)max;
+    return -1;
+  }
+
   // A cover the owner put beside the book as a plain .bmp --
   // "<stem>.cover.bmp" -- parsed and filed as this book's cover art. The
   // one-format story: everything a person makes for this device is a BMP.

@@ -174,18 +174,18 @@ inline constexpr Text SHIPS{{
                             7};
 
 inline constexpr Text FLASHCARDS{{
-    "Cards come from your phone.",
+    "Cards come from your phone,",
+    "or from the SD card.",
     "",
-    "Tap IMPORT, scan the QR to",
-    "join the device's wifi, and",
-    "paste or upload them there.",
+    "IMPORT: scan the QR, then",
+    "paste them on your phone.",
+    "CARD: a file in /decks, one",
+    "card a line, front then back.",
     "",
     "SPACED REPEAT brings hard",
     "cards back sooner. JUST FLIP",
     "shuffles and keeps nothing.",
-    "",
-    "The side buttons work too:",
-    "DOWN goes on, UP repeats.",
+    "Side buttons grade cards too.",
 },
                                  false,
                                  5};

@@ -58,6 +58,22 @@ bool parseTbkBytes(const uint8_t h[64], BookMeta& out) {
   return out.pages > 0;
 }
 
+// What counts as "text a person typed" on the card, for listText below. Four
+// extensions and no sniffing: .md and .txt are how a note arrives, .tsv and
+// .csv how a deck does, and the folder it sits in decides which of the two it
+// is meant to be. A .txt in /decks is a deck -- the deck parser already reads
+// tab, pipe, comma and " - " separated lines, so the extension a spreadsheet
+// or a phone chose to write is not worth arguing with.
+bool isTextExt(const char* name) {
+  const size_t len = strlen(name);
+  if (len > 3 && strcasecmp(name + len - 3, ".md") == 0) return true;
+  if (len > 4 && (strcasecmp(name + len - 4, ".txt") == 0 ||
+                  strcasecmp(name + len - 4, ".tsv") == 0 ||
+                  strcasecmp(name + len - 4, ".csv") == 0))
+    return true;
+  return false;
+}
+
 
 #ifdef TOYBOX_HOST
 
@@ -972,6 +988,22 @@ int listJson(char names[][64], int max) {
   return n;
 }
 
+int listText(const char* dir, char names[][64], int max) {
+  const std::string pre = std::string(dir) + "/";
+  int n = 0;
+  for (const auto& kv : fakeCard()) {
+    if (n >= max) break;
+    const std::string& p = kv.first;
+    if (p.size() <= pre.size() || p.compare(0, pre.size(), pre) != 0) continue;
+    if (p.find('/', pre.size()) != std::string::npos) continue;  // no subfolders
+    if (!isTextExt(p.c_str())) continue;
+    strncpy(names[n], p.c_str() + pre.size(), 63);
+    names[n][63] = 0;
+    n++;
+  }
+  return n;
+}
+
 bool sleepArtGray(uint8_t* gray) {
   if (findCardBlob("/sleep.bmp")) return readBmpGray("/sleep.bmp", gray);
   // "Random" on the host is the map's first match: guards plant one file.
@@ -1672,6 +1704,32 @@ int listJson(char names[][64], int max) {
       // A page's embedded JSON can be large, but a "recipe" past a quarter
       // megabyte is a saved homepage, not a recipe.
       if (f.size() < 20 || f.size() > (256u << 10)) continue;
+      const char* bare = strrchr(nm, '/');
+      strncpy(names[n], bare ? bare + 1 : nm, 63);
+      names[n][63] = 0;
+      n++;
+    }
+  }
+  busRelease();
+  return n;
+}
+
+int listText(const char* dir, char names[][64], int max) {
+  if (!busClaim()) {
+    busRelease();
+    return -1;
+  }
+  int n = 0;
+  File d = SD.open(dir);
+  if (d && d.isDirectory()) {
+    for (File f = d.openNextFile(); f && n < max; f = d.openNextFile()) {
+      if (f.isDirectory()) continue;
+      const char* nm = f.name();
+      if (!isTextExt(nm)) continue;
+      // An empty file has nothing to import, and something past a quarter
+      // megabyte is not a note or a deck -- a note is capped at 4000 bytes and
+      // 200 cards of the longest allowed length come to under 32 KB.
+      if (f.size() < 2 || f.size() > (256u << 10)) continue;
       const char* bare = strrchr(nm, '/');
       strncpy(names[n], bare ? bare + 1 : nm, 63);
       names[n][63] = 0;

@@ -175,8 +175,9 @@ def main():
                                 'service screen, which reports the buses and can correct '
                                 'the screen or touch orientation.'},
                 {'title': 'Storage',
-                 'description': 'Books go in /books, pictures in /wallpapers and recipes '
-                                'in /recipes on a FAT32 card.'},
+                 'description': 'On a FAT32 card: books in /books, pictures in '
+                                '/wallpapers, recipes in /recipes, and notes and '
+                                'flashcard decks in /notes and /decks.'},
             ],
         },
     }
@@ -220,7 +221,8 @@ from your phone and pin to the screen, six games, and the everyday tools.
   [Toybox Slicer](https://github.com/z4b333/Toybox-slicer), which re-cuts a
   webtoon strip at blank gutters so a page never breaks through a face.
 - **Notes.** The device serves a small editor to a phone over its own access
-  point. A pinned note stays on the panel with the power off.
+  point, or reads a Markdown file off the card. A pinned note stays on the panel
+  with the power off.
 - **Games.** Wordle, Sudoku, Nonogram, 2048, Ships and XO. Boards and streaks
   are saved as you play.
 - **Tools.** Coin, dice, timer and stopwatch, random number, card draw, a picker
@@ -252,9 +254,10 @@ is why this is a firmware-only contribution rather than a source build.
 
 ## Storage
 
-A FAT32 microSD card holds books (`/books`), pictures (`/wallpapers`) and
-recipes (`/recipes`). Notes, settings, saved games and reading positions live in
-the device's own flash and need no card.
+A FAT32 microSD card holds books (`/books`), pictures (`/wallpapers`), recipes
+(`/recipes`), and optionally notes (`/notes`, as `.md` or `.txt`) and flashcard
+decks (`/decks`, as `.tsv`, `.csv` or `.txt`) to import. Notes, settings, saved
+games and reading positions live in the device's own flash and need no card.
 
 ## Physical device test
 

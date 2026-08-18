@@ -37,8 +37,19 @@ class String {
  public:
   String() = default;
   String(const char* s) : _s(s ? s : "") {}
+  // Bytes, not a C string. A file read off the fake filesystem may hold NULs in
+  // the middle of it -- the flashcard box sidecar is one byte per card and box
+  // zero is a zero -- and assigning through c_str() silently cut every such
+  // file at its first unmastered card. The device's own String is built up byte
+  // by byte and keeps them, so the host has to as well or the harness is
+  // testing something the firmware does not do.
+  String(const std::string& s) : _s(s) {}
   String& operator=(const char* s) {
     _s = s ? s : "";
+    return *this;
+  }
+  String& operator=(const std::string& s) {
+    _s = s;
     return *this;
   }
   String& operator+=(const char* s) {
