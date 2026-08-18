@@ -361,7 +361,14 @@ function applyLineMark(kind) {
   if (to < 0) to = v.length;
   const lines = v.slice(from, to).split('\n');
   const m = LINE_MARKS[kind];
-  const allOn = lines.every(l => l.trim() === '' || m.re.test(l));
+  // Toggling off needs something to toggle. A blank line counts as "already
+  // marked" for the purpose of not fighting a mixed selection, but a selection
+  // that is ONLY blank lines has to take the mark -- otherwise pressing H1 on
+  // an empty note does nothing at all, and the button silently demands that
+  // you type the words first. Bold and Strike never had that problem, which is
+  // what made the two halves of the bar behave differently.
+  const allOn = lines.some(l => l.trim() !== '') &&
+                lines.every(l => l.trim() === '' || m.re.test(l));
   const out = lines.map((l, i) => {
     const bare = l.replace(ANY_PREFIX, '');
     return allOn ? bare : m.put(i) + bare;
