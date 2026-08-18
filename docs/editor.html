@@ -34,6 +34,24 @@
   }
   textarea { min-height: 300px; resize: vertical; font-size: 15px;
              font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  /* The formatting bar sits on top of the textarea and shares its border, so
+     the two read as one field rather than as a strip of buttons that happens
+     to be above a box. */
+  .mdbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 4px;
+    border: 1px solid var(--line); border-bottom: 0;
+    border-radius: 8px 8px 0 0; background: #fff; padding: 6px 8px;
+  }
+  .mdbar button {
+    border: 1px solid transparent; background: none; border-radius: 6px;
+    padding: 6px 10px; min-width: 38px; cursor: pointer;
+    font: 500 15px system-ui, sans-serif; color: var(--fg);
+  }
+  .mdbar button:hover { background: #f0f0f2; border-color: var(--line); }
+  .mdbar button:active { background: var(--line); }
+  .mdbar .sep { width: 1px; height: 22px; background: var(--line); margin: 0 4px; }
+  .mdbar + textarea { border-radius: 0 0 8px 8px; }
+
   .count { font-size: 13px; color: var(--muted); margin-top: 6px; }
   .count.over { color: #b91c1c; font-weight: 600; }
 
@@ -112,6 +130,25 @@
     <div class="count" id="n-namecount"></div>
 
     <label class="f" for="n-body">The note</label>
+    <!-- The marks the device understands, as buttons. Every one acts on the
+         line the cursor is in (or on every line of a selection), so the way to
+         make a shopping list is to type the lines and press the checkbox once
+         with all of them selected. The table below still says what each button
+         writes: someone typing the marks by hand is not doing it wrong. -->
+    <div class="mdbar" role="toolbar" aria-label="Formatting" id="n-bar">
+      <button type="button" data-md="h1" title="Heading">H1</button>
+      <button type="button" data-md="h2" title="Smaller heading">H2</button>
+      <button type="button" data-md="h3" title="Smallest heading">H3</button>
+      <span class="sep"></span>
+      <button type="button" data-md="task" title="Checkbox — tappable on the device">&#9744; Task</button>
+      <button type="button" data-md="bullet" title="Bullet">&bull; List</button>
+      <button type="button" data-md="number" title="Numbered list">1. List</button>
+      <button type="button" data-md="quote" title="Quote">Quote</button>
+      <span class="sep"></span>
+      <button type="button" data-md="bold" title="Bold"><b>B</b></button>
+      <button type="button" data-md="strike" title="Struck through"><s>S</s></button>
+      <button type="button" data-md="rule" title="A rule across the page">&mdash; Rule</button>
+    </div>
     <textarea id="n-body" spellcheck="true"># Shopping
 - [ ] milk, the **big** carton
 - [x] bread
@@ -289,6 +326,98 @@ function noteRefresh() {
   c.className = n > NOTE_BYTES ? 'count over' : 'count';
   if (n > NOTE_BYTES) c.textContent += ' — the device keeps the first ' + NOTE_BYTES;
 }
+// --- the formatting bar -----------------------------------------------------
+// Two kinds of mark, because the device has two kinds. A LINE mark is a prefix
+// -- heading, bullet, number, checkbox, quote -- and pressing its button puts
+// that prefix on every line the selection touches, or takes it off again if
+// they all already have it. A WRAP mark -- bold, struck -- goes around the
+// selected words, or opens an empty pair for the next thing typed.
+//
+// One prefix at a time: asking for a bullet on a line that is a heading should
+// make it a bullet, not "# - ". The old prefix is stripped first, which is also
+// what makes the buttons work as toggles.
+const LINE_MARKS = {
+  h1:     {re: /^#\s+/,            put: () => '# '},
+  h2:     {re: /^##\s+/,           put: () => '## '},
+  h3:     {re: /^###\s+/,          put: () => '### '},
+  task:   {re: /^[-*]\s+\[[ xX]\]\s+/, put: () => '- [ ] '},
+  bullet: {re: /^[-*]\s+(?!\[[ xX]\])/, put: () => '- '},
+  number: {re: /^\d+\.\s+/,        put: (i) => (i + 1) + '. '},
+  quote:  {re: /^>\s*/,            put: () => '> '},
+};
+// Every prefix the device recognises, longest first, so stripping "- [ ] " does
+// not leave "[ ] " behind from the bullet rule.
+const ANY_PREFIX = /^(#{1,3}\s+|[-*]\s+\[[ xX]\]\s+|[-*]\s+|\d+\.\s+|>\s*)/;
+
+const WRAP_MARKS = {bold: '**', strike: '~~'};
+
+function applyLineMark(kind) {
+  const ta = $('n-body');
+  const v = ta.value;
+  // Grow the selection out to whole lines: a mark applies to a line, so a
+  // cursor sitting in the middle of one still means that line.
+  let from = v.lastIndexOf('\n', ta.selectionStart - 1) + 1;
+  let to = v.indexOf('\n', ta.selectionEnd);
+  if (to < 0) to = v.length;
+  const lines = v.slice(from, to).split('\n');
+  const m = LINE_MARKS[kind];
+  const allOn = lines.every(l => l.trim() === '' || m.re.test(l));
+  const out = lines.map((l, i) => {
+    const bare = l.replace(ANY_PREFIX, '');
+    return allOn ? bare : m.put(i) + bare;
+  });
+  const text = out.join('\n');
+  ta.setRangeText(text, from, to, 'end');
+  ta.focus();
+  noteRefresh();
+}
+
+function applyWrap(kind) {
+  const ta = $('n-body');
+  const mark = WRAP_MARKS[kind];
+  const {selectionStart: a, selectionEnd: b, value: v} = ta;
+  const sel = v.slice(a, b);
+  // Pressing it again on text that is already wrapped takes the marks off,
+  // which is the only behaviour that does not slowly bury a word in asterisks.
+  if (sel.startsWith(mark) && sel.endsWith(mark) && sel.length >= mark.length * 2) {
+    ta.setRangeText(sel.slice(mark.length, -mark.length), a, b, 'select');
+  } else if (v.slice(a - mark.length, a) === mark && v.slice(b, b + mark.length) === mark) {
+    ta.setRangeText(sel, a - mark.length, b + mark.length, 'select');
+  } else {
+    ta.setRangeText(mark + sel + mark, a, b, 'end');
+    // Leave the words selected, not the marks: the cursor lands between the
+    // pair when there was no selection, and pressing the button a second time
+    // has to find the same words it just wrapped or it wraps them twice.
+    ta.selectionStart = a + mark.length;
+    ta.selectionEnd = a + mark.length + sel.length;
+  }
+  ta.focus();
+  noteRefresh();
+}
+
+function insertRule() {
+  const ta = $('n-body');
+  const v = ta.value;
+  let at = v.indexOf('\n', ta.selectionEnd);
+  if (at < 0) at = v.length;
+  // A rule is its own line and wants a blank one after it, the way the sample
+  // note has -- the device draws the line either way, but the note is read by
+  // people too.
+  const text = (v.slice(0, at).endsWith('\n') || at === 0 ? '' : '\n') + '---\n';
+  ta.setRangeText(text, at, at, 'end');
+  ta.focus();
+  noteRefresh();
+}
+
+$('n-bar').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-md]');
+  if (!btn) return;
+  const kind = btn.dataset.md;
+  if (kind === 'rule') return insertRule();
+  if (kind in WRAP_MARKS) return applyWrap(kind);
+  applyLineMark(kind);
+});
+
 $('n-name').addEventListener('input', noteRefresh);
 $('n-body').addEventListener('input', noteRefresh);
 $('n-dl').addEventListener('click', () => {
