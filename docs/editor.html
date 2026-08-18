@@ -384,6 +384,25 @@ function applyWrap(kind) {
   const mark = WRAP_MARKS[kind];
   const {selectionStart: a, selectionEnd: b, value: v} = ta;
   const sel = v.slice(a, b);
+
+  // Pressed B, then changed your mind and pressed S, with nothing typed in
+  // between: the cursor is sitting inside an empty **|** and asking for the
+  // other mark. Swapping the pair is what was meant; nesting one empty pair
+  // inside another gives **~~~~** and a deletion job. (With words selected
+  // both marks are wanted at once -- the device draws bold and struck
+  // together -- so only the empty case swaps.)
+  if (a === b) {
+    for (const other of Object.values(WRAP_MARKS)) {
+      if (other === mark) continue;
+      if (v.slice(a - other.length, a) === other && v.slice(b, b + other.length) === other) {
+        ta.setRangeText(mark + mark, a - other.length, b + other.length, 'end');
+        ta.selectionStart = ta.selectionEnd = a - other.length + mark.length;
+        ta.focus();
+        noteRefresh();
+        return;
+      }
+    }
+  }
   // Pressing it again on text that is already wrapped takes the marks off,
   // which is the only behaviour that does not slowly bury a word in asterisks.
   if (sel.startsWith(mark) && sel.endsWith(mark) && sel.length >= mark.length * 2) {

@@ -159,6 +159,17 @@ class FlashTool : public ToolApp {
   void tick() override {
     if (_screen != Screen::Import) return;
     _net.loop();
+    // The moment a phone is on the access point, the wifi code is a picture of
+    // a thing already done and the link is the useful one. The notes tool has
+    // moved itself on like this since the pairing screen was built; this one
+    // was left asking, so the deck import sat on step one with a joined phone
+    // in front of it and a button that had to be found.
+    if (!_altQr && !_net.received() && _net.hasClient()) {
+      _altQr = true;
+      host().beep(1);
+      host().refresh(true);
+      return;
+    }
     if (_net.received() && !_importShown) {
       _importShown = true;
       host().beep(3);
@@ -766,7 +777,7 @@ class FlashTool : public ToolApp {
 
     char buf[64];
     if (_altQr) {
-      c.textCentered(c.width() / 2, 60, "if it did not open by itself", TS_MED, true);
+      c.textCentered(c.width() / 2, 60, "phone joined", TS_MED, true);
       fqr::draw(c, QR_X, QR_Y, QR_SIZE, _net.url());
       c.textCentered(c.width() / 2, 390, "Open this in your browser", TS_MED, true, true);
       c.textCentered(c.width() / 2, 428, _net.url(), TS_MED, true);

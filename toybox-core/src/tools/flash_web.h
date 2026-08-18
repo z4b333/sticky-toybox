@@ -35,10 +35,16 @@ class ImportServer {
     return true;
   }
   void stop() { _running = false; }
-  // Preview scaffolding: pretend a phone posted a deck after a few polls, so the
-  // "received" screen can be rendered without a network.
+  // Preview scaffolding, in the order it happens on a real one: a phone joins
+  // the access point on the first poll and posts a deck a couple of polls
+  // later. The join has to be modelled, not skipped -- the screen is supposed
+  // to move itself on when it happens, and a stub that never has a client
+  // cannot tell whether it does.
   void loop() {
-    if (_running && ++_ticks == 3) fakeResult("chem exam", 42);
+    if (!_running) return;
+    _ticks++;
+    if (_ticks >= 1) _fakeClient = true;
+    if (_ticks == 3) fakeResult("chem exam", 42);
   }
   bool running() const { return _running; }
   bool received() const { return _received; }

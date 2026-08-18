@@ -4774,13 +4774,21 @@ int main() {
   g_dumpEnabled = true;
   tapRect(fcui::IMPORT_BTN);
 
+  // A phone joining the access point moves this screen on by itself, the way
+  // the notes tool's pairing screen has since it was built. It did not, and the
+  // difference was invisible to a screenshot: both screens are a QR code.
   setScreen("tool_flash_import_alt");
-  tapRect(fcui::ALT_BTN);  // "page didn't open?" -> link QR
+  {
+    const int before = g_paintCount;
+    toybox.tick();  // the stub's first poll: a phone is on the AP
+    if (g_paintCount <= before) {
+      printf("IMPORT FAIL: a phone joined and the screen did not move on\n");
+      abort();
+    }
+  }
 
   setScreen("tool_flash_import_done");
   g_dumpEnabled = false;
-  tapRect(fcui::ALT_BTN);  // back to the wifi QR
-  toybox.tick();
   toybox.tick();
   g_dumpEnabled = true;
   toybox.tick();  // stub reports the deck arrived
