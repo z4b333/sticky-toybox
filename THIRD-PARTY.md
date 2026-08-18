@@ -157,9 +157,5 @@ in tools/fonts/ — roman, bold and italic:
 - **Literata** — copyright TypeTogether, commissioned by Google for Play
   Books. https://github.com/googlefonts/literata
 
-Atkinson Hyperlegible (copyright Braille Institute of America) was carried
-here as a third reading face until the italics went in, and its 92 KB of
-tables paid for them. It is no longer vendored.
-
 The OFL permits embedding and redistribution; the font files themselves are
 carried unmodified in tools/fonts/ so the tables can be regenerated.
