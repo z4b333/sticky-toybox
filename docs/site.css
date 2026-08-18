@@ -53,6 +53,9 @@ body > main { flex: 1 0 auto; }
 }
 
 .prose { max-width: 68ch; }
+/* Global reset kills margins, which is right everywhere except running text:
+   two paragraphs with no space between them read as one long one. */
+.prose p + p, .prose ul, .prose ol { margin-top: 14px; }
 
 section { padding: 64px 0; }
 section + section { border-top: 1px solid var(--line); }

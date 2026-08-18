@@ -26,6 +26,25 @@
      thing. It is what the device refuses to do, which on an e-paper device is
      half of what it IS. */
   .triplet { margin-top: 20px; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+  .justyou { margin-top: 20px; font-size: 18px; color: var(--muted); }
+  .justyou b { color: var(--fg); }
+
+  /* Six names and six short answers. A definition list because that is what
+     it is, laid out as a grid so the names line up down the page. */
+  .explore { margin-top: 32px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px 40px; }
+  .explore > div { border-top: 1px solid var(--line); padding-top: 14px; }
+  .explore dt { font-weight: 650; font-size: 19px; letter-spacing: -0.01em; }
+  .explore dd { margin: 2px 0 0; color: var(--muted); }
+
+  /* The close echoes the hero, centred, with nothing new introduced. */
+  .closing { text-align: center; max-width: 640px; }
+  .closing .triplet { display: inline-block; text-align: left; }
+  .closing .lede { color: var(--fg); }
+  .closing-mark {
+    margin: 36px 0 24px; font-size: 13px; font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted);
+  }
+  .closing .actbtn { text-decoration: none; display: inline-block; }
 
   /* The installer: numbered steps on one side, the button that acts on them
      on the other, stacked on a phone. Steps rather than prose because that is
@@ -78,6 +97,7 @@
     .hero .inner { grid-template-columns: minmax(0, 1fr); gap: 32px; padding: 0 18px; }
     .hero .device { max-width: 280px; margin: 0 auto; }
     .installer { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+    .explore { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; }
   }
 </style>
 </head>
@@ -104,15 +124,14 @@
   <div class="hero">
     <div class="inner">
       <div>
-        <h1>A screen that remembers.</h1>
-        <p class="lede">Toybox is firmware for the Seeed reTerminal Sticky &mdash;
-        an e-paper device that reads your books, holds notes you write from your
-        phone, and keeps a drawer of small games.</p>
-        <p class="triplet">No backlight. No notifications. Nothing to charge
-        this week.</p>
+        <h1>Small screen.<br>Big playground.</h1>
+        <p class="lede">Games. Notes. Books. Tools.<br>
+        Little things, thoughtfully tucked away.</p>
+        <p class="triplet">No feeds.<br>No notifications.<br>No endless scrolling.</p>
+        <p class="justyou">Just <b>you and your Toybox</b>.</p>
         <div class="cta">
           <a class="actbtn" href="#install">Install it</a>
-          <a class="actbtn secondary" href="#what">See what it does</a>
+          <a class="actbtn secondary" href="#what">See what's inside</a>
         </div>
       </div>
       <figure class="device">
@@ -122,90 +141,128 @@
     </div>
   </div>
 
+  <section id="explore">
+    <div class="wrap">
+      <p class="eyebrow">Explore</p>
+      <h2>A little bit of everything.</h2>
+      <p class="lede prose">Everything you need, nothing you don't.</p>
+      <dl class="explore">
+        <div><dt>Games</dt><dd>Take a break.</dd></div>
+        <div><dt>Notes</dt><dd>Get it out of your head.</dd></div>
+        <div><dt>Books</dt><dd>Pick up where you left off.</dd></div>
+        <div><dt>Recipes</dt><dd>Keep your hands free.</dd></div>
+        <div><dt>Flashcards</dt><dd>Learn a little at a time.</dd></div>
+        <div><dt>Tools</dt><dd>Handy things, always nearby.</dd></div>
+      </dl>
+    </div>
+  </section>
+
   <section id="what">
     <div class="wrap">
-      <p class="eyebrow">Apps</p>
-      <h2>Apps for Sticky.</h2>
-      <p class="lede prose">Made to be used on the Sticky, and rendered by it.
+      <p class="eyebrow">Inside</p>
+      <h2>Pick something.</h2>
+      <p class="lede prose">Every screen here is drawn by the device itself.
       <a href="#what" id="reshuffle" hidden>Show me six others.</a></p>
 
       <div class="grid cols-3" id="gallery" style="margin-top:40px">
         <figure class="shot">
           <div class="device"><img src="shots/shelf.png" width="480" height="800"
             alt="The EPUB shelf listing a series folder and two books."></div>
-          <figcaption><h3>An EPUB reader</h3>
-          <p>Reads the books already on the card and keeps your place there &mdash; in CrossPoint's own format, so a card can move between the two firmwares.</p></figcaption>
+          <figcaption><h3>Read anywhere.</h3>
+          <p>Bring your EPUBs and comics. Pick a book, pick a page, keep reading &mdash; and your place is kept on the card, not in an account.</p></figcaption>
         </figure>
 
         <figure class="shot">
           <div class="device"><img src="shots/contents.png" width="480" height="800"
             alt="A book's contents list, each chapter with how long it takes to read."></div>
-          <figcaption><h3>The book's own contents</h3>
-          <p>Chapter names as the publisher wrote them, each with how long it runs &mdash; so you know whether there is time for another.</p></figcaption>
+          <figcaption><h3>The book&rsquo;s own contents.</h3>
+          <p>Chapters as the publisher named them, each with how long it runs. Time for another, or time for bed.</p></figcaption>
         </figure>
 
         <figure class="shot">
           <div class="device"><img src="shots/notes.png" width="480" height="800"
             alt="A pinned shopping list with two items ticked off."></div>
-          <figcaption><h3>Notes from your phone</h3>
-          <p>Scan the QR code, type or dictate, and it appears. Pin one and it survives the power going off. English, Thai, Chinese, Korean, Japanese and Vietnamese.</p></figcaption>
+          <figcaption><h3>Get it out of your head.</h3>
+          <p>Write something down. Pin it. Come back when you need it. <b>Nothing gets lost in a feed.</b></p></figcaption>
         </figure>
 
         <figure class="shot">
           <div class="device"><img src="shots/noteslist.png" width="480" height="800"
             alt="The notes list beside the panel explaining how to write from a phone."></div>
-          <figcaption><h3>Written from anywhere</h3>
-          <p>The device serves a little editor to your phone over its own network. Nothing to install at either end.</p></figcaption>
+          <figcaption><h3>Type on your phone.</h3>
+          <p>Your phone is the keyboard, Toybox is the display. Scan the code, type or dictate, and it lands on the glass.</p></figcaption>
         </figure>
 
         <figure class="shot">
           <div class="device"><img src="shots/wordle.png" width="480" height="800"
             alt="A game of Wordle in progress on the e-paper panel."></div>
-          <figcaption><h3>Games that suit e-paper</h3>
-          <p>Turn-based things, where a screen that redraws in a fifth of a second is plenty.</p></figcaption>
+          <figcaption><h3>Guess the word.</h3>
+          <p>Six tries. One word. Can you crack it? <b>A new one whenever you want one.</b></p></figcaption>
         </figure>
 
         <figure class="shot">
           <div class="device"><img src="shots/nonogram.png" width="480" height="800"
             alt="A ten by ten nonogram part-solved."></div>
-          <figcaption><h3>Nonogram</h3>
-          <p>Ten by ten with a hint budget, or five by five while you learn the trick.</p></figcaption>
+          <figcaption><h3>Pixel by pixel.</h3>
+          <p>Follow the numbers, reveal the picture. <b>Take your time.</b></p></figcaption>
         </figure>
 
         <figure class="shot">
           <div class="device"><img src="shots/g2048.png" width="480" height="800"
             alt="A game of 2048 resumed mid-board."></div>
-          <figcaption><h3>Picked up where you left it</h3>
-          <p>The board is written down as you play, so closing the lid is a pause rather than a loss.</p></figcaption>
+          <figcaption><h3>Keep merging.</h3>
+          <p>Combine matching tiles, chase the 2048. <b>One more move.</b></p></figcaption>
         </figure>
 
         <figure class="shot">
           <div class="device"><img src="shots/ships.png" width="480" height="800"
             alt="A game of battleships against the device."></div>
-          <figcaption><h3>Ships</h3>
-          <p>Against the device or against somebody holding the other end &mdash; the panel keeps both fleets honest.</p></figcaption>
+          <figcaption><h3>Find their fleet.</h3>
+          <p>Place your ships, take your shots, sink them all. <b>Fire when ready.</b></p></figcaption>
         </figure>
 
         <figure class="shot">
           <div class="device"><img src="shots/sudoku.png" width="480" height="800"
             alt="A Sudoku grid mid-solve with a number pad below it."></div>
-          <figcaption><h3>Sudoku</h3>
-          <p>Three difficulties, a number pad, and a record it keeps for you.</p></figcaption>
+          <figcaption><h3>Clear your head.</h3>
+          <p>Fill the grid. Find the pattern. Don&rsquo;t repeat a number. <b>Easy to learn, hard to put down.</b></p></figcaption>
         </figure>
 
         <figure class="shot">
           <div class="device"><img src="shots/flashcards.png" width="480" height="800"
             alt="A flashcard showing the word molarity."></div>
-          <figcaption><h3>Flashcards</h3>
-          <p>Decks imported from a phone or a card, one card at a time, marked off as they stick.</p></figcaption>
+          <figcaption><h3>Learn one card at a time.</h3>
+          <p>Make decks, review cards, watch them stick. <b>A few minutes goes a long way.</b></p></figcaption>
         </figure>
 
         <figure class="shot">
           <div class="device"><img src="shots/tools.png" width="480" height="800"
             alt="The Utility drawer: coin, dice, random number, name picker, timer and recipes."></div>
-          <figcaption><h3>Tools in a drawer</h3>
-          <p>Coin, dice, timer, random number, name picker, flashcards, recipe card. Any of them can be hidden if you never use it.</p></figcaption>
+          <figcaption><h3>Small tools. Handy moments.</h3>
+          <p>Coin flip. Dice. Cards. Random numbers. Timer. Stopwatch. And a list you can&rsquo;t decide from &mdash; give it the options, let it pick. <b>No searching required.</b></p></figcaption>
         </figure>
+      </div>
+    </div>
+  </section>
+
+  <section id="stays">
+    <div class="wrap grid cols-2">
+      <div>
+        <p class="eyebrow">E-paper</p>
+        <h2>Made for things that stay.</h2>
+        <p class="lede prose">Toybox keeps your last screen visible while the
+        device sleeps. Useful information doesn&rsquo;t need to disappear just
+        because the battery does.</p>
+        <p class="triplet" style="font-size:17px">See it. Leave it. Come back later.</p>
+      </div>
+      <div class="prose">
+        <p><b>Put it where you can see it.</b> Pin a note, a list, a reminder,
+        a recipe &mdash; anything you want close by. Tick a line as you go and
+        the tick is still there when you come back.</p>
+        <p><b>Make it yours.</b> Custom wallpapers, custom lock screens, your
+        own books and decks and recipes. Any app you never use can be hidden.</p>
+        <p><b>In your language.</b> English &middot; ไทย &middot; 中文 &middot;
+        日本語 &middot; 한국어 &middot; Tiếng Việt</p>
       </div>
     </div>
   </section>
@@ -213,24 +270,22 @@
   <section id="fill">
     <div class="wrap grid cols-2">
       <div>
-        <p class="eyebrow">Filling the card</p>
-        <h2>Comics and books, cut to fit.</h2>
-        <p class="lede prose">The reader opens EPUBs off the card as they are.
-        Comics are the harder case &mdash; a webtoon is one strip a mile long,
-        and a manga page is wider than the panel &mdash; so there is a desktop
-        tool for that.</p>
+        <p class="eyebrow">Filling it</p>
+        <h2>Bring your own.</h2>
+        <p class="lede prose">EPUBs go straight on the card and open as they
+        are. Comics are the harder case &mdash; a webtoon is one strip a mile
+        long, a manga page is wider than the panel &mdash; so there is a
+        desktop tool for those.</p>
       </div>
       <div class="prose">
-        <p><a href="https://github.com/z4b333/Toybox-slicer"><b>Toybox Slicer</b></a> takes
-        <code>.cbz</code> chapters, loose images or an EPUB and writes
-        <code>.tbk</code> pages at the panel's own 480&times;800. For a webtoon
-        it stitches the slices back into one strip and re-cuts it, snapping
-        every cut to a blank gutter so a page never lands through a face or a
-        speech bubble. It makes sleep art and wallpapers too, in batches, which
-        is the difference between it and the
-        <a href="wallpaper.html">one-picture converter</a> here.</p>
-        <p class="sub" style="font-size:15px">Python, with a window if you
-        double-click it and a command line if you would rather script it.</p>
+        <p><a href="https://github.com/z4b333/Toybox-slicer"><b>Toybox
+        Slicer</b></a> takes <code>.cbz</code> chapters, loose images or an
+        EPUB and writes pages at the panel&rsquo;s own 480&times;800. For a
+        webtoon it stitches the slices back into one strip and re-cuts it,
+        snapping every cut to a blank gutter &mdash; so a page never lands
+        through a face or a speech bubble.</p>
+        <p>It does sleep art and wallpapers in batches too. For one picture,
+        the <a href="wallpaper.html">wallpaper maker</a> here is quicker.</p>
       </div>
     </div>
   </section>
@@ -238,15 +293,16 @@
   <section id="install">
     <div class="wrap">
       <p class="eyebrow">Install</p>
-      <h2>Flash it from this page.</h2>
+      <h2>Get Toybox running.</h2>
+      <p class="lede prose">No complicated setup. No app on your computer.</p>
 
       <div class="card installer" style="margin-top:36px">
         <ol class="steps-num">
-          <li><b>Plug the Sticky in</b> with a USB-C cable that carries data.
-            A charging cable will not do, and it is the commonest reason nothing
-            appears. <a href="#help">Nothing showing up?</a></li>
-          <li><b>Tick any language packs you want.</b> The common characters are
-            already in the firmware; these add the rest.
+          <li><b>Connect your Sticky.</b> Use a USB-C cable that carries data
+            &mdash; a charging cable will not do, and that is the commonest
+            reason nothing appears. <a href="#help">Nothing showing up?</a></li>
+          <li><b>Add a language pack if you need one.</b> The common characters
+            are already in the firmware; these add the rest.
             <div class="variants">
               <label class="variant">
                 <input type="checkbox" name="pack" value="zh">
@@ -265,8 +321,8 @@
               </label>
             </div>
           </li>
-          <li id="step-flash"><b>Press UPDATE.</b> <span id="ver">Reading which
-            build is here&hellip;</span></li>
+          <li id="step-flash"><b>Let it install.</b> <span id="ver">Reading
+            which build is here&hellip;</span></li>
         </ol>
 
         <div class="doit">
@@ -305,25 +361,24 @@
   <section id="after">
     <div class="wrap grid cols-2">
       <div>
-        <p class="eyebrow">After installing</p>
-        <h2>Two minutes, once.</h2>
-        <p class="lede prose">The service screen is worth a visit before
-        anything else. It reports what the board answered on each bus, and can
-        correct the screen or touch orientation if your unit disagrees with
-        mine.</p>
+        <p class="eyebrow">Getting started</p>
+        <h2>Your first five minutes.</h2>
+        <p class="lede prose">Step two is the one worth doing before anything
+        else &mdash; it takes a minute and it saves the awkward ones.</p>
       </div>
       <div class="steps prose">
         <ol>
-          <li>The first boot takes a few extra seconds while it sets up storage.</li>
-          <li><strong>Hold either side button while it powers on</strong> the first
-            time. That reaches the service screen; there is a
-            <a href="checklist.html">tickable checklist</a> for a phone held next
-            to the device.</li>
-          <li>Tap any tile on the hub to play.</li>
-          <li>Open Notes &rarr; Write, scan the QR code with your phone, and type or
-            dictate a note.</li>
-          <li>Pin a note and it stays on the screen even with the power off. That
-            is the whole idea.</li>
+          <li><b>Let it settle.</b> The first boot takes a few extra seconds
+            while it sets up storage.</li>
+          <li><b>Hold either side button while it powers on.</b> That reaches
+            the service screen, which says what the board answered on each bus
+            and can straighten the screen or the touch if your unit disagrees
+            with mine. There is a <a href="checklist.html">tickable
+            checklist</a> for a phone held next to the device.</li>
+          <li><b>Pick a game.</b> Start with something familiar.</li>
+          <li><b>Pin a note.</b> Open Notes &rarr; Write, scan the code with
+            your phone, and type. Then pin it and pull the power.</li>
+          <li><b>Make it yours.</b> Change the wallpaper and settle in.</li>
         </ol>
       </div>
     </div>
@@ -336,21 +391,18 @@
         <h2>Why this exists.</h2>
       </div>
       <div class="prose">
-        <p>The Sticky is a lovely bit of hardware with an e-paper panel that
-        keeps its last picture when the power is gone. Most things built on
-        that treat the screen as a dashboard &mdash; something to glance at.
-        I wanted the opposite: a screen you put something on and then forget
-        about, because it will still be there in a month.</p>
-        <p>So the notes app is the point, and the reader is what I use it for
-        most, and the games are there because a screen that redraws in a fifth
-        of a second turns out to suit a crossword far better than it suits a
-        video. Everything here is written for this one device and its 480 by
-        800 pixels, which is a constraint I have enjoyed more than I expected
-        to.</p>
-        <p class="sub" style="font-size:15px">Built by KS. The firmware, the
-        converter and this page are all
-        <a href="https://github.com/z4b333/sticky-toybox">open source</a>;
-        if it does something you did not ask for, the code is there to
+        <p>The Sticky has an e-paper panel that keeps its last picture when the
+        power is gone. Most things built on that treat the screen as a
+        dashboard &mdash; something to glance at. I wanted the opposite: a
+        screen you put something on and then forget about, because it will
+        still be there in a month.</p>
+        <p>So the notes are the point, the reader is what I use most, and the
+        games are there because a screen that redraws in a fifth of a second
+        suits a crossword far better than it suits a video.</p>
+        <p class="sub" style="font-size:15px">Built by KS. Firmware, converter
+        and this page are all
+        <a href="https://github.com/z4b333/sticky-toybox">open source</a> — if
+        it does something you didn&rsquo;t ask for, the code is there to
         change.</p>
       </div>
     </div>
@@ -394,6 +446,16 @@
           worth reading that dialog rather than clicking through it.</p>
         </details>
       </div>
+    </div>
+  </section>
+
+  <section id="closing">
+    <div class="wrap closing">
+      <h2>There&rsquo;s always room for one more thing.</h2>
+      <p class="triplet" style="font-size:19px">A game.<br>A book.<br>A recipe.<br>A thought.</p>
+      <p class="lede" style="margin-top:20px">Put it in the Toybox. We&rsquo;ll keep it here.</p>
+      <p class="closing-mark">Small screen. Big playground.</p>
+      <a class="actbtn" href="#install">Install it</a>
     </div>
   </section>
 
