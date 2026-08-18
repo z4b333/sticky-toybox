@@ -51,4 +51,27 @@ void win() {
   tone_ms(1568, 90);
   tone_ms(2093, 160);
 }
+
+// The two boot sounds. A flash is done blind -- the panel is dark for several
+// seconds while the browser writes, and the first thing anyone does is stare at
+// it wondering whether the write took. These play the moment the welcome card
+// is on the glass, before it waits for a tap, so the answer arrives in the ear
+// as well as on the screen.
+//
+// They are deliberately different from each other, and from win(): a device
+// that has just been wiped clean should not sound like one that kept your
+// notes. hello() is a full rising arpeggio, unhurried, played once in a
+// device's life; updated() is the top two notes of it, quick, because it comes
+// back after every flash and a fanfare would wear out.
+void hello() {
+  tone_ms(523, 110);   // C5
+  tone_ms(659, 110);   // E5
+  tone_ms(784, 110);   // G5
+  tone_ms(1047, 240);  // C6
+}
+
+void updated() {
+  tone_ms(784, 80);   // G5
+  tone_ms(1047, 150); // C6
+}
 }  // namespace buzzer

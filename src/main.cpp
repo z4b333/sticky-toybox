@@ -553,7 +553,14 @@ void setup() {
     epd.clear();
     welcome::render(c, updated);
     epd.displayFull();
-    buzzer::confirm();
+    // Sound as well as picture, because a flash is watched with the panel dark
+    // and this is the moment it stops being dark. The two are different on
+    // purpose: the long one means this device has nothing stored yet, the
+    // short one means it kept everything and only the firmware changed.
+    if (updated)
+      buzzer::updated();
+    else
+      buzzer::hello();
     // Said out loud, because this is the one place in boot that stops and waits
     // for a person. Without it the serial log simply ends here, and the first
     // report back was somebody reasonably concluding the firmware had hung.

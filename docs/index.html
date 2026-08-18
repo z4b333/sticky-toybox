@@ -78,6 +78,20 @@
   .variant input { margin-top: 6px; accent-color: var(--fg); }
   .variant small { color: var(--muted); }
   .install { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+  /* The changelog. A definition list because that is what it is: a version,
+     and what that version did. The version column is fixed so the entries line
+     up as a list rather than as five paragraphs each starting differently. */
+  .changes { margin-top: 32px; }
+  .changes h3 { margin-bottom: 12px; }
+  .changes dl { display: grid; gap: 10px; }
+  .changes dl > div { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 16px; }
+  .changes dt { font-weight: 650; font-variant-numeric: tabular-nums; }
+  .changes dd { margin: 0; color: var(--muted); max-width: 68ch; }
+  .changes dd a { color: var(--fg); }
+  @media (max-width: 560px) {
+    .changes dl > div { grid-template-columns: minmax(0, 1fr); gap: 2px; }
+  }
+
   .hint { font-size: 15px; color: var(--muted); }
   .hint b { color: var(--fg); }
 
@@ -359,6 +373,37 @@
           table &mdash; needed once on a new device, or to rescue one that will
           not boot.</p>
         </div>
+      </div>
+
+      <!-- What each build changed. Short entries, newest first, five deep:
+           enough to answer "is it worth reflashing" without turning the
+           install page into a release-notes page. The full history is the
+           commit log, and it is linked rather than copied. -->
+      <div class="changes">
+        <h3>What changed</h3>
+        <dl>
+          <div><dt>beta.58</dt><dd>Flashcard bars show how far a deck has come
+            rather than how many cards are finished, so they move after every
+            session. The device plays a short phrase when it comes up on new
+            firmware &mdash; a longer one the very first time.</dd></div>
+          <div><dt>beta.57</dt><dd>Notes and flashcard decks can be read
+            straight off the SD card: <code>.md</code> or <code>.txt</code> in
+            <code>/notes</code>, <code>.tsv</code>, <code>.csv</code> or
+            <code>.txt</code> in <code>/decks</code>. The
+            <a href="editor.html">editor on this site</a> writes both.</dd></div>
+          <div><dt>beta.56</dt><dd>Recipes gained text size, line spacing and
+            screen rotation, using the same controls the readers do. Vulgar
+            fractions draw properly instead of as boxes.</dd></div>
+          <div><dt>beta.55</dt><dd>The smallest interface text went from 16 to
+            18 px.</dd></div>
+          <div><dt>beta.54</dt><dd>Real italics in both reading faces, and
+            italic text in an EPUB is drawn italic.</dd></div>
+        </dl>
+        <p class="sub" style="font-size:15px">Every build keeps your notes,
+        decks, settings, saved games and reading positions when it is installed
+        with UPDATE. The
+        <a href="https://github.com/z4b333/sticky-toybox/commits/master">full
+        history</a> is the commit log.</p>
       </div>
     </div>
   </section>

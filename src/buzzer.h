@@ -28,4 +28,9 @@ void tap();      // subtle key click
 void confirm();  // action accepted
 void error();    // invalid action
 void win();      // little jingle
+
+// Boot, once per flash: the first ever start of a device, and every start on a
+// firmware it has not run before. See buzzer.cpp for why they differ.
+void hello();
+void updated();
 }  // namespace buzzer
