@@ -95,9 +95,10 @@ inline constexpr TRect PINNED_UNPIN{144, 748, 120, 44};
 // Paints the pinned note edge to edge, with no app chrome — this is what stays
 // on the panel after the device powers down, and also what you see the moment
 // you wake it. `live` is the difference: awake, the footer says what the finger
-// and the button will do and offers a way into the hub; asleep, it just says
-// how to wake. Returns false when nothing is pinned (or the pinned note has
-// since been deleted), so the caller can fall back to its own goodbye screen.
+// and the button will do and offers a way into the hub; asleep, it carries only
+// what is still true an hour later. Returns false when nothing is pinned (or the
+// pinned note has since been deleted), so the caller can fall back to its own
+// goodbye screen.
 inline bool drawPinnedFullScreen(ToolsCanvas& c, bool live = false) {
   char name[note::NAME_LEN + 1];
   if (!note::getPinned(name)) return false;
@@ -129,19 +130,16 @@ inline bool drawPinnedFullScreen(ToolsCanvas& c, bool live = false) {
     c.text(c.width() - 34 - c.textWidth(lock, TS_SMALL), c.height() - 26, lock, TS_SMALL,
            true);
   } else {
-    // The name is in whatever language the note is; it floors at its script's
-    // readable size and hangs from the same bottom margin either way.
-    const TSize nsz = scriptFloor(name, TS_SMALL);
-    c.text(34, c.height() - 22 - c.textHeight(nsz), name, nsz, true);
-    // The sleeping panel is the one that stays in view for hours, so it is the
-    // one worth spending the footer on: the time it was last touched, and how
-    // warm the room is. Falls back to the wake hint when the device has no
-    // clock, or has one that has never been set.
+    // The sleeping panel carries only what is still true hours later: how warm
+    // the room is and how much charge is left. No clock -- see lock::footer --
+    // and no note name either, because the note is right there above it and
+    // almost every one opens with a heading that says the same thing. What is
+    // left is a note, and one quiet line under it.
     char status[48];
-    const int n = lock::footer(status, sizeof(status), lock::config(), lock::read());
-    const char* hint = n > 0 ? status : "press power to wake";
-    c.text(c.width() - 34 - c.textWidth(hint, TS_SMALL), c.height() - 34, hint, TS_SMALL,
-           true);
+    const int n = lock::footer(status, sizeof(status), lock::config(), lock::read(), false);
+    if (n > 0)
+      c.text(c.width() - 34 - c.textWidth(status, TS_SMALL), c.height() - 34, status,
+             TS_SMALL, true);
   }
   return true;
 }

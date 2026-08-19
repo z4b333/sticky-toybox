@@ -156,14 +156,24 @@ inline int roundedC(int deciC) { return (deciC + (deciC < 0 ? -5 : 5)) / 10; }
 
 // "12:34 · 21°C · 84%", with any part the settings or the hardware leave out
 // simply absent. Returns the length written, 0 for nothing at all.
-inline int footer(char* out, int cap, const Config& cfg, const Info& in) {
+//
+// `withTime` exists because e-paper keeps its last picture: on a panel that is
+// asleep, a clock is not a clock. It is the minute the device stopped, printed
+// in the present tense, and by morning it is wrong by hours -- a note on a
+// fridge saying 09:41 at bedtime. Temperature and battery go stale too, but
+// stale is not the same as false: a room is roughly the temperature it was an
+// hour ago, and a device in deep sleep is roughly as charged. So the sleeping
+// screen asks for everything except the time, and the awake ones ask for the
+// lot.
+inline int footer(char* out, int cap, const Config& cfg, const Info& in,
+                  bool withTime = true) {
   out[0] = 0;
   int n = 0;
   const auto add = [&](const char* fmt, int v) {
     if (n) n += snprintf(out + n, cap - n, "  ·  ");
     n += snprintf(out + n, cap - n, fmt, v);
   };
-  if (cfg.showTime && in.haveClock) {
+  if (withTime && cfg.showTime && in.haveClock) {
     if (n) n += snprintf(out + n, cap - n, "  ·  ");
     n += snprintf(out + n, cap - n, "%02d:%02d", in.hour, in.minute);
   }
