@@ -1374,6 +1374,26 @@ void makeParents(const char* path) {
 }
 }  // namespace
 
+namespace {
+// The progress file, decoded into the meta. Existence used to be the whole
+// question; the answer costs one open either way, and ten bytes is less than
+// the directory entry that SD.exists reads to say yes.
+bool readPlace(const char* path, EpubMeta& m) {
+  File f = SD.open(path, FILE_READ);
+  if (!f || f.isDirectory()) return false;
+  uint8_t buf[10] = {};
+  const int n = f.read(buf, sizeof(buf));
+  f.close();
+  if (n <= 0) return false;
+  epubc::Progress p;
+  if (!epubc::decodeProgress(buf, n, p)) return true;  // there, but unreadable
+  m.spine = p.spine;
+  m.page = p.page;
+  m.pageCount = p.pageCount;
+  return true;
+}
+}  // namespace
+
 int epubList(EpubMeta* out, int max, const char* dir) {
   // Borrowed when a browsing session (or a reader) already has the card: the
   // release is what costs a full refresh, so it must not happen mid-shelf.
@@ -1721,26 +1741,6 @@ int listJson(char names[][64], int max) {
   busRelease();
   return n;
 }
-
-namespace {
-// The progress file, decoded into the meta. Existence used to be the whole
-// question; the answer costs one open either way, and ten bytes is less than
-// the directory entry that SD.exists reads to say yes.
-bool readPlace(const char* path, EpubMeta& m) {
-  File f = SD.open(path, FILE_READ);
-  if (!f || f.isDirectory()) return false;
-  uint8_t buf[10] = {};
-  const int n = f.read(buf, sizeof(buf));
-  f.close();
-  if (n <= 0) return false;
-  epubc::Progress p;
-  if (!epubc::decodeProgress(buf, n, p)) return true;  // there, but unreadable
-  m.spine = p.spine;
-  m.page = p.page;
-  m.pageCount = p.pageCount;
-  return true;
-}
-}  // namespace
 
 int listText(const char* dir, char names[][64], int max) {
   if (!busClaim()) {
