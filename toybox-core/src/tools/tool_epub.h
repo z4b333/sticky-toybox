@@ -168,8 +168,8 @@ class EpubTool : public ToolApp {
         continue;
       }
       const int b = idx - _nf;
-      shelf::drawBookRow(c, k, _books[b].title,
-                         _books[b].cont ? "carries on where it stopped" : "from the start",
+      char sub[40];
+      shelf::drawBookRow(c, k, _books[b].title, placeLine(_books[b], sub, sizeof(sub)),
                          shelf::rowSep(k, idx, total));
     }
     shelf::drawPager(c, _lpage, total);
@@ -643,6 +643,26 @@ class EpubTool : public ToolApp {
     host().refresh(true);
   }
 
+  // The second line of a shelf row: where the reader stopped, or nothing at
+  // all. A book nobody has opened says nothing -- "from the start" was a label
+  // on every row of a new shelf, which is a lot of ink to tell you that a list
+  // of books is a list of books. What a started book says comes out of the
+  // ten-byte progress file the list already read: which chapter, which page of
+  // it, and how many that chapter holds when whatever wrote the file said so.
+  //
+  // Chapters are counted from the spine, the same way the reader's own footer
+  // and contents list count them, so the number here is the number there.
+  static const char* placeLine(const ToolsHost::EpubInfo& b, char* buf, int cap) {
+    if (!b.cont) return "";
+    if (b.pageCount > 0)
+      snprintf(buf, (size_t)cap, "chapter %u, page %u of %u", (unsigned)(b.spine + 1),
+               (unsigned)(b.page + 1), (unsigned)b.pageCount);
+    else
+      snprintf(buf, (size_t)cap, "chapter %u, page %u", (unsigned)(b.spine + 1),
+               (unsigned)(b.page + 1));
+    return buf;
+  }
+
   void closeBook(bool beep) {
     _menu = rmenu::Page::None;
     host().setCanvasRotation(0);  // the shelf, like everything else, is portrait
@@ -657,7 +677,12 @@ class EpubTool : public ToolApp {
       // the app opened -- "from the start", under a book that resumes perfectly
       // the moment you tap it. The list was right about the card and wrong
       // about the last thirty seconds.
-      if (placed) _books[_cur].cont = true;
+      if (placed) {
+        _books[_cur].cont = true;
+        _books[_cur].spine = (uint16_t)_spine;
+        _books[_cur].page = (uint16_t)_page;
+        _books[_cur].pageCount = (uint16_t)(_chapterPages > 0 ? _chapterPages : 0);
+      }
       _book.close();
       host().epubClose();  // powers the card down, re-initialises the panel
     }

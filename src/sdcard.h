@@ -101,7 +101,13 @@ struct EpubMeta {
   // truncated path fails to open with no visible reason.
   char file[128];
   char title[41];
-  bool cont = false;  // a CrossPoint progress file exists for it
+  bool cont = false;  // a progress file exists for it
+  // Read out of that progress file, which is ten bytes and already being
+  // opened to know whether it is there. The shelf spends them on saying WHERE
+  // the reader stopped rather than only that it did.
+  uint16_t spine = 0;      // 0-based chapter in the spine
+  uint16_t page = 0;       // 0-based page within that chapter
+  uint16_t pageCount = 0;  // pages in it, 0 when the writer did not say
 };
 int epubList(EpubMeta* out, int max, const char* dir);  // -1: no card
 

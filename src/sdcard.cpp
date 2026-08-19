@@ -549,7 +549,15 @@ int epubList(EpubMeta* out, int max, const char* dir) {
     strncat(cache, "/progress.bin", sizeof(cache) - strlen(cache) - 1);
     m.cont = false;
     for (const FakeSide& s : g_side)
-      if (s.n > 0 && strcmp(s.path, cache) == 0) m.cont = true;
+      if (s.n > 0 && strcmp(s.path, cache) == 0) {
+        m.cont = true;
+        epubc::Progress pr;
+        if (epubc::decodeProgress(s.data, s.n, pr)) {
+          m.spine = pr.spine;
+          m.page = pr.page;
+          m.pageCount = pr.pageCount;
+        }
+      }
     out[n++] = m;
   }
   return n;
@@ -1397,11 +1405,11 @@ int epubList(EpubMeta* out, int max, const char* dir) {
       char cache[96];
       epubc::cacheDir(m.file, cache, sizeof(cache));
       strncat(cache, "/progress.bin", sizeof(cache) - strlen(cache) - 1);
-      m.cont = SD.exists(cache);
+      m.cont = readPlace(cache, m);
       if (!m.cont) {
         epubc::cacheDirLegacy(m.file, cache, sizeof(cache));
         strncat(cache, "/progress.bin", sizeof(cache) - strlen(cache) - 1);
-        m.cont = SD.exists(cache);
+        m.cont = readPlace(cache, m);
       }
       out[n++] = m;
     }
@@ -1713,6 +1721,26 @@ int listJson(char names[][64], int max) {
   busRelease();
   return n;
 }
+
+namespace {
+// The progress file, decoded into the meta. Existence used to be the whole
+// question; the answer costs one open either way, and ten bytes is less than
+// the directory entry that SD.exists reads to say yes.
+bool readPlace(const char* path, EpubMeta& m) {
+  File f = SD.open(path, FILE_READ);
+  if (!f || f.isDirectory()) return false;
+  uint8_t buf[10] = {};
+  const int n = f.read(buf, sizeof(buf));
+  f.close();
+  if (n <= 0) return false;
+  epubc::Progress p;
+  if (!epubc::decodeProgress(buf, n, p)) return true;  // there, but unreadable
+  m.spine = p.spine;
+  m.page = p.page;
+  m.pageCount = p.pageCount;
+  return true;
+}
+}  // namespace
 
 int listText(const char* dir, char names[][64], int max) {
   if (!busClaim()) {

@@ -3792,7 +3792,10 @@ int main() {
         abort();
       }
       for (int k = 0; k < 4; k++) toybox.onButton(SideBtn::Down);
+      g_dumpEnabled = true;
+      setScreen("tool_epub_list_place");
       toybox.onTap(20, 20);  // back to the shelf, which saves the place
+      g_dumpEnabled = false;
       if (!es->hostCont(row)) {
         printf("SHELF FAIL: row %d still says \"from the start\" after reading it\n", row);
         abort();
