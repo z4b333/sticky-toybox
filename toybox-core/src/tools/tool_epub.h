@@ -707,6 +707,11 @@ class EpubTool : public ToolApp {
   // spine when a book has no contents at all -- which is what the contents
   // screen itself falls back to, so the two still say the same thing.
   void chapterName(int spine, char* out, int cap) {
+    // The open chapter already worked this out, whichever way it had to.
+    if (spine == _chapNameSpine && _chapName[0]) {
+      snprintf(out, (size_t)cap, "%s", _chapName);
+      return;
+    }
     tocCount();  // reads the contents once, while the card is still up
     const int row = epubui::tocRowForSpine(epubui::g_toc, _ntoc > 0 ? _ntoc : 0, spine);
     if (row >= 0) {
@@ -789,6 +794,17 @@ class EpubTool : public ToolApp {
   bool chapterStart(int spineIdx) {
     if (!_book.chapterOpen(spineIdx)) return false;
     _spine = spineIdx;
+    // What to call this chapter, for the footer and for the note the shelf
+    // reads. From the contents when the book has any; otherwise the first
+    // page's first line fills it in during layout, which costs nothing --
+    // opening the chapter again mid-read to fetch its first words would spend
+    // the stream the page is being laid out from.
+    _chapName[0] = 0;
+    _chapNameSpine = spineIdx;
+    if (_ntoc > 0) {
+      const int row = epubui::tocRowForSpine(epubui::g_toc, _ntoc, spineIdx);
+      if (row >= 0) snprintf(_chapName, sizeof(_chapName), "%s", epubui::g_toc[row].title);
+    }
     _lutN = 0;
     _chapterPages = -1;
     _pendValid = false;
@@ -1107,6 +1123,9 @@ class EpubTool : public ToolApp {
     }
 
     if (placed > 0) {
+      // Before the page is recorded: _lutN is still zero on a chapter's first
+      // page, which is the one whose first line is the heading.
+      noteChapterNameFromPage();
       if (_lutN < epubui::MAX_PAGES)
         _lut[_lutN++] = pageStart | (_pageImage[0] ? epubui::PAGE_IMG : 0u);
       if (_atEnd && !_pendValid) _chapterPages = _lutN;
@@ -1793,16 +1812,11 @@ class EpubTool : public ToolApp {
       // -- "chapter 4 of 57" over a page headed Chapter 1 -- which is the same
       // thing that made the shelf wrong; naming it is the honest fix, and the
       // count goes because a spine count is not a chapter count either.
-      if (_ntoc > 0) {
-        const int row = epubui::tocRowForSpine(epubui::g_toc, _ntoc, _spine);
-        if (row >= 0)
-          snprintf(_rootSub[0], sizeof(_rootSub[0]), "%s", epubui::g_toc[row].title);
-        else
-          snprintf(_rootSub[0], sizeof(_rootSub[0]), "chapter %d", _spine + 1);
-      } else {
+      if (_chapName[0] && _chapNameSpine == _spine)
+        snprintf(_rootSub[0], sizeof(_rootSub[0]), "%s", _chapName);
+      else
         snprintf(_rootSub[0], sizeof(_rootSub[0]), "chapter %d of %d", _spine + 1,
                  _book.spineCount());
-      }
       items[0].sub = _rootSub[0];
       items[1].label = "Bookmarks";
       if (_nmarks > 0)
@@ -2205,6 +2219,22 @@ class EpubTool : public ToolApp {
     renderFooter(c);
   }
 
+  // The first line of a chapter's first page is its heading, in every book
+  // that prints one -- which is why the contents list falls back to a chapter's
+  // first words and gets "Chapter 7: Friends" out of a book with no contents at
+  // all. Taken from the laid-out line rather than from a second pass over the
+  // text: it is already here, already trimmed, and already whole.
+  void noteChapterNameFromPage() {
+    if (_chapName[0] || _lutN != 0 || _lineN <= 0 || _spine != _chapNameSpine) return;
+    const char* first = _lines[0].t;
+    if (!first[0]) return;
+    int take = (int)strlen(first);
+    if (take > (int)sizeof(_chapName) - 1) take = (int)sizeof(_chapName) - 1;
+    while (take > 0 && ((uint8_t)first[take] & 0xC0) == 0x80) take--;
+    memcpy(_chapName, first, (size_t)take);
+    _chapName[take] = 0;
+  }
+
   void renderFooter(ToolsCanvas& c) {
     // The footer: where you are, on a plate the page shows through around.
     const int fy = c.height() - epubui::FOOT_H;
@@ -2213,14 +2243,19 @@ class EpubTool : public ToolApp {
     // Where you are is measured FIRST, because it is the part that must not be
     // covered: a title runs to whatever length a publisher felt like, and the
     // one on this card ran straight through the page number.
-    char pos[40];
+    char pos[24];
     if (_chapterPages > 0)
-      snprintf(pos, sizeof(pos), "ch %d/%d · p %d/%d", _spine + 1, _book.spineCount(), _page + 1,
-               _chapterPages);
+      snprintf(pos, sizeof(pos), "p %d/%d", _page + 1, _chapterPages);
     else
-      snprintf(pos, sizeof(pos), "ch %d/%d · p %d", _spine + 1, _book.spineCount(), _page + 1);
+      snprintf(pos, sizeof(pos), "p %d", _page + 1);
     const int pw = c.textWidth(pos, TS_MED);
-    c.textClipped(16, fy + 14, c.width() - 32 - pw - 12, _books[_cur].title, TS_MED, true, true);
+    // The chapter, by name. It used to be "ch 14/21" -- a SPINE index and a
+    // spine count, so a book open at Chapter 7 read "ch 14/21" while the panel
+    // beside it said "Chapter 7: Friends". The book's own title takes the space
+    // only when the chapter has no name to give, which is a book with neither
+    // contents nor a heading on its first page.
+    const char* left = _chapName[0] ? _chapName : _books[_cur].title;
+    c.textClipped(16, fy + 14, c.width() - 32 - pw - 12, left, TS_MED, true, true);
     c.text(c.width() - 16 - pw, fy + 14, pos, TS_MED, true);
   }
 
@@ -2242,6 +2277,11 @@ class EpubTool : public ToolApp {
   uint32_t _pendImageOff = 0;
   bool _pendImageValid = false;
   bool _streamLost = false;        // a picture was read out of the same zip
+  // The open chapter's name, and which spine item it belongs to. Filled when a
+  // chapter opens (from the contents) or when its first page lands (from the
+  // heading), and spent by the footer, the options panel and the shelf note.
+  char _chapName[41] = {};
+  int _chapNameSpine = -1;
   rmenu::Page _menu = rmenu::Page::None;
   // Picking a phrase to keep: -1 nowhere, then the first word, then the last.
   // Line and word indices into _lines, which is what the page IS -- so the
