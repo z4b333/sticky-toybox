@@ -3800,8 +3800,40 @@ int main() {
         printf("SHELF FAIL: row %d still says \"from the start\" after reading it\n", row);
         abort();
       }
+      {
+        char place[64];
+        es->hostPlace(row, place, sizeof(place));
+        if (!place[0]) {
+          printf("SHELF FAIL: row %d carries no chapter name\n", row);
+          abort();
+        }
+      }
       toybox.goHub();
       printf("shelf label ok (a book just read no longer claims to be unstarted)\n");
+
+      // The other half of the same line: a book whose contents could not be
+      // read at all. The reader falls back to the chapter's own first words in
+      // its contents list, and the shelf has to say the same thing rather than
+      // "chapter 14" beside a list reading "ch 14 - Chapter 7: Friends".
+      {
+        toybox.open(false, 10, false);
+        auto* eb = static_cast<EpubTool*>(toybox.hostActive());
+        eb->hostSetCont(0, false);
+        char file[128];
+        eb->hostFile(0, file, sizeof(file));
+        eb->openDirect(file);
+        eb->hostForgetToc();  // as if the NCX had resolved to nothing
+        for (int k = 0; k < 3; k++) toybox.onButton(SideBtn::Down);
+        toybox.onTap(20, 20);  // back to the shelf: the note is written here
+        char place[64];
+        eb->hostPlace(0, place, sizeof(place));
+        if (!place[0] || strncmp(place, "chapter ", 8) == 0) {
+          printf("SHELF FAIL: no-contents book fell back to \"%s\"\n", place);
+          abort();
+        }
+        toybox.goHub();
+        printf("shelf fallback ok (a book with no contents still names its chapter)\n");
+      }
 
       // The mapping the shelf line depends on, against a contents table shaped
       // like the ones that broke it on hardware: chapters in spine order, and

@@ -335,6 +335,12 @@ class EpubTool : public ToolApp {
   void hostSetCont(int i, bool on) {
     if (i >= 0 && i < (_n < 0 ? 0 : _n)) _books[i].cont = on;
   }
+  // Pretends the contents could not be read, so a guard can walk the path
+  // books with a broken NCX actually take.
+  void hostForgetToc() { _ntoc = 0; }
+  void hostPlace(int i, char* out, int cap) const {
+    snprintf(out, (size_t)cap, "%s", (i >= 0 && i < (_n < 0 ? 0 : _n)) ? _books[i].place : "");
+  }
   bool hostCont(int i) const { return i >= 0 && i < (_n < 0 ? 0 : _n) && _books[i].cont; }
   void hostFile(int i, char* out, int cap) const {
     snprintf(out, (size_t)cap, "%s", (i >= 0 && i < (_n < 0 ? 0 : _n)) ? _books[i].file : "");
@@ -703,8 +709,18 @@ class EpubTool : public ToolApp {
   void chapterName(int spine, char* out, int cap) {
     tocCount();  // reads the contents once, while the card is still up
     const int row = epubui::tocRowForSpine(epubui::g_toc, _ntoc > 0 ? _ntoc : 0, spine);
-    if (row >= 0)
+    if (row >= 0) {
       snprintf(out, (size_t)cap, "%s", epubui::g_toc[row].title);
+      return;
+    }
+    // No contents: the same first words the contents list is showing for this
+    // chapter, so the shelf and the list say the same thing about the same
+    // book. Without this the shelf fell back to "chapter 14" while the list
+    // beside it read "ch 14 - Chapter 7: Friends" -- and the book itself calls
+    // that Chapter 7.
+    char taste[64] = "";
+    if (spineTaste(spine, taste, sizeof(taste)))
+      snprintf(out, (size_t)cap, "%s", taste);
     else
       snprintf(out, (size_t)cap, "chapter %d", spine + 1);
   }
@@ -1521,6 +1537,31 @@ class EpubTool : public ToolApp {
   }
 
   // What to call row `i` of the contents list, and where it goes.
+  // A chapter's own first words, for books whose contents could not be read --
+  // and there are plenty: an NCX whose hrefs resolve to nothing leaves the
+  // reader with a spine and no names at all. Six words is enough to carry a
+  // heading, because a heading is what the first words of a chapter usually
+  // are: this is what turns "chapter 14" into "Chapter 7: Friends".
+  //
+  // Costs one chapter open, so it is called for rows on screen and once on the
+  // way out of a book, never for a whole shelf.
+  bool spineTaste(int spine, char* out, int cap) {
+    out[0] = 0;
+    if (!_book.chapterOpen(spine)) return false;
+    int used = 0;
+    char w[epubc::WORD_CAP];
+    uint32_t off = 0;
+    for (int k = 0; k < 6 && used < cap - 2; k++) {
+      const int t = _book.next(w, off);
+      if (t == epubc::TOK_END || t == epubc::TOK_ERR) break;
+      if (t != epubc::TOK_WORD) continue;
+      if (used) out[used++] = ' ';
+      used += snprintf(out + used, (size_t)(cap - used), "%s", w);
+    }
+    _streamLost = true;
+    return out[0] != 0;
+  }
+
   void tocRow(int i, char* label, int cap, int& spine) {
     if (_ntoc > 0) {
       spine = epubui::g_toc[i].spine;
@@ -1528,24 +1569,8 @@ class EpubTool : public ToolApp {
       return;
     }
     spine = i;
-    // No contents in the book: the chapter says its own name, in its own first
-    // words. Only the visible rows are opened, and only far enough to pull a
-    // few words out of the first block.
     char taste[64] = "";
-    int used = 0;
-    if (_book.chapterOpen(i)) {
-      char w[epubc::WORD_CAP];
-      uint32_t off = 0;
-      for (int k = 0; k < 6 && used < (int)sizeof(taste) - 2; k++) {
-        const int t = _book.next(w, off);
-        if (t == epubc::TOK_END || t == epubc::TOK_ERR) break;
-        if (t != epubc::TOK_WORD) continue;
-        if (used) taste[used++] = ' ';
-        used += snprintf(taste + used, sizeof(taste) - used, "%s", w);
-      }
-      _streamLost = true;
-    }
-    if (taste[0])
+    if (spineTaste(i, taste, sizeof(taste)))
       snprintf(label, (size_t)cap, "ch %d - %s", i + 1, taste);
     else
       snprintf(label, (size_t)cap, "chapter %d", i + 1);
