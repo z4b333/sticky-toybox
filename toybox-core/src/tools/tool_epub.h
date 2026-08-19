@@ -84,6 +84,23 @@ inline uint8_t g_imgBand[IMG_BAND_ROWS * (480 / 8)];
 // a reference work's is truncated rather than refused.
 inline constexpr int MAX_TOC = 64;
 inline epubc::Book::TocEntry g_toc[MAX_TOC];
+
+// Which chapter of the contents a spine item belongs to, 1-based: the last
+// entry that begins at or before it.
+//
+// This is the whole difference between a shelf that says "chapter 4" and one
+// that says "chapter 2". A spine lists every document in the book -- cover,
+// title page, copyright, dedication -- and the contents list only the ones
+// worth naming, so the two run several apart in an ordinary release EPUB.
+// Anything before the first named chapter belongs to that chapter: front
+// matter is where a book starts, and "chapter 0" is not a thing to print.
+inline int chapterOfSpine(const epubc::Book::TocEntry* toc, int n, int spine) {
+  if (n <= 0) return spine + 1;  // no contents: a chapter IS a spine item
+  int best = 0;
+  for (int i = 0; i < n; i++)
+    if (toc[i].spine <= spine) best = i;
+  return best + 1;
+}
 }  // namespace epubui
 
 class EpubTool : public ToolApp {
@@ -653,14 +670,48 @@ class EpubTool : public ToolApp {
   // Chapters are counted from the spine, the same way the reader's own footer
   // and contents list count them, so the number here is the number there.
   static const char* placeLine(const ToolsHost::EpubInfo& b, char* buf, int cap) {
-    if (!b.cont) return "";
+    // No sidecar, no line. The book may well have a position -- left by
+    // CrossPoint, or by a Toybox from before this file existed -- but the only
+    // thing that could be said from the position alone is a spine index, and a
+    // spine counts the cover and the title page as items. "Chapter 4" under a
+    // book open at chapter 2 is worse than saying nothing.
+    if (!b.cont || b.chapter == 0) return "";
     if (b.pageCount > 0)
-      snprintf(buf, (size_t)cap, "chapter %u, page %u of %u", (unsigned)(b.spine + 1),
-               (unsigned)(b.page + 1), (unsigned)b.pageCount);
+      snprintf(buf, (size_t)cap, "chapter %u, page %u of %u", (unsigned)b.chapter,
+               (unsigned)b.page, (unsigned)b.pageCount);
     else
-      snprintf(buf, (size_t)cap, "chapter %u, page %u", (unsigned)(b.spine + 1),
-               (unsigned)(b.page + 1));
+      snprintf(buf, (size_t)cap, "chapter %u, page %u", (unsigned)b.chapter,
+               (unsigned)b.page);
     return buf;
+  }
+
+  // Which chapter of the CONTENTS a spine item belongs to, 1-based: the last
+  // entry that starts at or before it. Books whose contents could not be read
+  // fall back to the spine, which is also what the contents list itself falls
+  // back to -- there, a chapter really is a spine item.
+  int chapterForSpine(int spine) {
+    tocCount();  // reads the contents once, while the card is still up
+    return epubui::chapterOfSpine(epubui::g_toc, _ntoc > 0 ? _ntoc : 0, spine);
+  }
+
+  // The note the shelf reads: chapter, page, and how many pages that chapter
+  // holds, in the book's own numbering. Written on the way out, once, while
+  // the contents are still in hand and the card is still awake.
+  void savePlaceNote() {
+    if (_cur < 0 || _page >= _lutN) return;
+    const int chapter = chapterForSpine(_spine);
+    char body[24];
+    const int n = snprintf(body, sizeof(body), "%d %d %d\n", chapter, _page + 1,
+                           _chapterPages > 0 ? _chapterPages : 0);
+    char dir[96], path[128];
+    epubc::cacheDir(_books[_cur].file, dir, sizeof(dir));
+    snprintf(path, sizeof(path), "%s/toybox.pos", dir);
+    host().sdWriteFileAtomic(path, body, n);
+    // ...and the row this book came from, so the shelf is right the moment it
+    // is drawn rather than the next time the app is entered.
+    _books[_cur].chapter = (uint16_t)chapter;
+    _books[_cur].page = (uint16_t)(_page + 1);
+    _books[_cur].pageCount = (uint16_t)(_chapterPages > 0 ? _chapterPages : 0);
   }
 
   void closeBook(bool beep) {
@@ -679,9 +730,7 @@ class EpubTool : public ToolApp {
       // about the last thirty seconds.
       if (placed) {
         _books[_cur].cont = true;
-        _books[_cur].spine = (uint16_t)_spine;
-        _books[_cur].page = (uint16_t)_page;
-        _books[_cur].pageCount = (uint16_t)(_chapterPages > 0 ? _chapterPages : 0);
+        savePlaceNote();
       }
       _book.close();
       host().epubClose();  // powers the card down, re-initialises the panel

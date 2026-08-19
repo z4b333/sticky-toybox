@@ -102,12 +102,20 @@ struct EpubMeta {
   char file[128];
   char title[41];
   bool cont = false;  // a progress file exists for it
-  // Read out of that progress file, which is ten bytes and already being
-  // opened to know whether it is there. The shelf spends them on saying WHERE
-  // the reader stopped rather than only that it did.
-  uint16_t spine = 0;      // 0-based chapter in the spine
-  uint16_t page = 0;       // 0-based page within that chapter
-  uint16_t pageCount = 0;  // pages in it, 0 when the writer did not say
+  // Where the reader stopped, in the book's own terms -- read from the small
+  // sidecar Toybox writes beside the position when it closes a book. It is
+  // written rather than derived because neither number can be worked out
+  // here: the progress file holds a SPINE index, and a spine counts the
+  // cover, the title page and the copyright page as items, so spine 4 is
+  // chapter 2 of the actual book. Only something holding the table of
+  // contents can say which chapter that is, and the reader is holding it at
+  // exactly the moment it closes.
+  //
+  // chapter == 0 means no sidecar: a position left by CrossPoint, or by a
+  // Toybox older than this. The shelf says nothing rather than guessing.
+  uint16_t chapter = 0;    // 1-based, counted as the contents list counts
+  uint16_t page = 0;       // 1-based page within that chapter
+  uint16_t pageCount = 0;  // pages in it, 0 when unknown
 };
 int epubList(EpubMeta* out, int max, const char* dir);  // -1: no card
 

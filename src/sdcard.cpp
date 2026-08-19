@@ -58,6 +58,36 @@ bool parseTbkBytes(const uint8_t h[64], BookMeta& out) {
   return out.pages > 0;
 }
 
+// The reader's own note of where it stopped, in the book's numbering. Three
+// decimal numbers and a newline -- "2 1 8" is chapter 2, page 1 of 8 -- kept
+// as text because it is the kind of file somebody will open on a laptop while
+// wondering why a shelf says what it says.
+//
+// It lives beside the position, in the FNV directory (Toybox's own, and what
+// current CrossPoint builds also use). CrossPoint ignores files it does not
+// know, and this one is 12 bytes.
+const char* const kPlaceFile = "/toybox.pos";
+
+bool parsePlace(const char* text, int n, EpubMeta& m) {
+  int v[3] = {0, 0, 0}, got = 0, cur = -1;
+  for (int i = 0; i < n && got < 3; i++) {
+    const char c = text[i];
+    if (c >= '0' && c <= '9') {
+      cur = (cur < 0 ? 0 : cur) * 10 + (c - '0');
+      if (cur > 65535) cur = 65535;
+    } else if (cur >= 0) {
+      v[got++] = cur;
+      cur = -1;
+    }
+  }
+  if (cur >= 0 && got < 3) v[got++] = cur;
+  if (got < 2 || v[0] <= 0) return false;  // chapter and page at the least
+  m.chapter = (uint16_t)v[0];
+  m.page = (uint16_t)v[1];
+  m.pageCount = (uint16_t)(got > 2 ? v[2] : 0);
+  return true;
+}
+
 // What counts as "text a person typed" on the card, for listText below. Four
 // extensions and no sniffing: .md and .txt are how a note arrives, .tsv and
 // .csv how a deck does, and the folder it sits in decides which of the two it
@@ -512,7 +542,10 @@ struct FakeSide {
 };
 // Ten, not six: a book now carries a CrossPoint position, a KOReader sidecar
 // and a bookmarks file, and the harness opens more than one book.
-FakeSide g_side[16];  // grew with the guards: each book leaves progress + sdr + marks
+// Grew with the guards: each book leaves progress.bin twice (both hashes), a
+// KOReader sidecar, a bookmarks file and now the chapter note -- five slots per
+// book that gets read, and the walk reads four.
+FakeSide g_side[24];
 }  // namespace
 
 // The second invented book exists to exercise long paths: real release
@@ -549,15 +582,16 @@ int epubList(EpubMeta* out, int max, const char* dir) {
     strncat(cache, "/progress.bin", sizeof(cache) - strlen(cache) - 1);
     m.cont = false;
     for (const FakeSide& s : g_side)
-      if (s.n > 0 && strcmp(s.path, cache) == 0) {
-        m.cont = true;
-        epubc::Progress pr;
-        if (epubc::decodeProgress(s.data, s.n, pr)) {
-          m.spine = pr.spine;
-          m.page = pr.page;
-          m.pageCount = pr.pageCount;
-        }
-      }
+      if (s.n > 0 && strcmp(s.path, cache) == 0) m.cont = true;
+    if (m.cont) {
+      char place[128];
+      char dir[96];
+      epubc::cacheDir(m.file, dir, sizeof(dir));
+      snprintf(place, sizeof(place), "%s%s", dir, kPlaceFile);
+      for (const FakeSide& s : g_side)
+        if (s.n > 0 && strcmp(s.path, place) == 0)
+          parsePlace((const char*)s.data, s.n, m);
+    }
     out[n++] = m;
   }
   return n;
@@ -1378,19 +1412,25 @@ namespace {
 // The progress file, decoded into the meta. Existence used to be the whole
 // question; the answer costs one open either way, and ten bytes is less than
 // the directory entry that SD.exists reads to say yes.
-bool readPlace(const char* path, EpubMeta& m) {
+// Does a position exist at this path? Only that: what it SAYS is in the
+// sidecar, because a spine index is not a chapter number.
+bool haveProgress(const char* path) {
   File f = SD.open(path, FILE_READ);
   if (!f || f.isDirectory()) return false;
-  uint8_t buf[10] = {};
-  const int n = f.read(buf, sizeof(buf));
+  const bool any = f.size() > 0;
   f.close();
-  if (n <= 0) return false;
-  epubc::Progress p;
-  if (!epubc::decodeProgress(buf, n, p)) return true;  // there, but unreadable
-  m.spine = p.spine;
-  m.page = p.page;
-  m.pageCount = p.pageCount;
-  return true;
+  return any;
+}
+
+void readPlaceFile(const char* dir, EpubMeta& m) {
+  char p[128];
+  snprintf(p, sizeof(p), "%s%s", dir, kPlaceFile);
+  File f = SD.open(p, FILE_READ);
+  if (!f || f.isDirectory()) return;
+  char buf[24] = {};
+  const int n = f.read((uint8_t*)buf, sizeof(buf) - 1);
+  f.close();
+  if (n > 0) parsePlace(buf, n, m);
 }
 }  // namespace
 
@@ -1425,12 +1465,18 @@ int epubList(EpubMeta* out, int max, const char* dir) {
       char cache[96];
       epubc::cacheDir(m.file, cache, sizeof(cache));
       strncat(cache, "/progress.bin", sizeof(cache) - strlen(cache) - 1);
-      m.cont = readPlace(cache, m);
+      char dir[96];
+      epubc::cacheDir(m.file, dir, sizeof(dir));
+      m.cont = haveProgress(cache);
       if (!m.cont) {
         epubc::cacheDirLegacy(m.file, cache, sizeof(cache));
         strncat(cache, "/progress.bin", sizeof(cache) - strlen(cache) - 1);
-        m.cont = readPlace(cache, m);
+        m.cont = haveProgress(cache);
       }
+      // The sidecar always lives in OUR directory, whichever one the position
+      // came from -- a card read on CrossPoint and then here has its position
+      // in one and its chapter note in the other.
+      if (m.cont) readPlaceFile(dir, m);
       out[n++] = m;
     }
   }

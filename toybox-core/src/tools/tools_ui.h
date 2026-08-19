@@ -492,12 +492,12 @@ class ToolsHost {
     char file[128];  // absolute card path; real release filenames run long
     char title[41];
     bool cont = false;  // a reading position already exists on the card
-    // Where that position is, straight out of the ten-byte progress file. The
-    // shelf shows them; nothing else needs them, and a book with no position
-    // leaves them zero.
-    uint16_t spine = 0;      // 0-based chapter in the spine
-    uint16_t page = 0;       // 0-based page within it
-    uint16_t pageCount = 0;  // 0 when whatever wrote the file did not say
+    // Where that position is, in the book's own chapter numbering, out of the
+    // sidecar the reader writes when it closes a book. Zero means there is
+    // no sidecar and the shelf should say nothing -- see sdcard.h.
+    uint16_t chapter = 0;    // 1-based, as the contents list counts
+    uint16_t page = 0;       // 1-based page within that chapter
+    uint16_t pageCount = 0;  // 0 when unknown
   };
   virtual int epubList(EpubInfo* out, int max, const char* dir) {
     (void)out;

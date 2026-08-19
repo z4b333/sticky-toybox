@@ -3802,6 +3802,43 @@ int main() {
       }
       toybox.goHub();
       printf("shelf label ok (a book just read no longer claims to be unstarted)\n");
+
+      // The mapping the shelf line depends on, against a contents table shaped
+      // like a real release EPUB: cover, title page and copyright occupy spine
+      // 0..2, and the book's own chapter one starts at spine 3. Reading spine 4
+      // is chapter 2, and saying "chapter 5" there -- which is what the spine
+      // index alone gives -- is the bug this exists to keep fixed.
+      {
+        epubc::Book::TocEntry toc[4] = {};
+        toc[0].spine = 3;
+        toc[1].spine = 4;
+        toc[2].spine = 5;
+        toc[3].spine = 9;
+        struct { int spine, want; } cases[] = {
+            {0, 1},   // the cover: front matter belongs to chapter one
+            {2, 1},   // still front matter
+            {3, 1},   // chapter one itself
+            {4, 2},   // the one that used to read "chapter 5"
+            {6, 3},   // inside chapter three, which spans spines 5..8
+            {9, 4},   // the last entry
+            {12, 4},  // past it: an end-matter document is still chapter four
+        };
+        for (const auto& c : cases) {
+          const int got = epubui::chapterOfSpine(toc, 4, c.spine);
+          if (got != c.want) {
+            printf("CHAPTER FAIL: spine %d mapped to chapter %d, wanted %d\n", c.spine, got,
+                   c.want);
+            abort();
+          }
+        }
+        // A book whose contents could not be read at all: there, a chapter
+        // really is a spine item, which is what the contents list falls back to.
+        if (epubui::chapterOfSpine(toc, 0, 4) != 5) {
+          printf("CHAPTER FAIL: no contents should count spine items\n");
+          abort();
+        }
+        printf("chapter numbers ok (front matter does not become chapters)\n");
+      }
     }
 
     // The same row in the .tbk reader, where a position is a setting rather
