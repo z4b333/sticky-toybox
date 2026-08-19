@@ -69,6 +69,14 @@ def main():
     ap.add_argument('--preview', help='a photograph of the firmware running on a Sticky')
     args = ap.parse_args()
 
+    # The extension follows the source. A photograph is a JPEG and weighs a
+    # third of a megabyte; the same picture forced into a PNG is seven times
+    # that, in a pull request somebody has to review.
+    ext = os.path.splitext(args.preview)[1].lower() if args.preview else '.png'
+    if ext not in ('.png', '.jpg', '.jpeg'):
+        sys.exit('preview must be .png, .jpg or .jpeg, not %s' % ext)
+
+
     vpath = os.path.join(ROOT, 'docs/firmware/version.json')
     if not os.path.exists(vpath):
         sys.exit('no docs/firmware/version.json -- run tools/make_image.sh first')
@@ -151,8 +159,9 @@ def main():
                       'reading positions work without one.'),
         },
         'assets': {
-            'preview': 'assets/preview.png',
-            'previewAlt': 'Toybox on a reTerminal Sticky, showing the games drawer',
+            'preview': 'assets/preview' + ext,
+            'previewAlt': 'Toybox running on a reTerminal Sticky, showing the Utility '
+                          'drawer: coin, dice, random, picker, timer and recipes',
         },
         'tags': ['ereader', 'notes', 'games', 'epaper', 'offline'],
         'flash': {
@@ -183,14 +192,14 @@ def main():
     }
     json.dump(integration, open(os.path.join(OUT, 'integration.json'), 'w'), indent=2)
 
-    preview = os.path.join(OUT, 'assets', 'preview.png')
+    preview = os.path.join(OUT, 'assets', 'preview' + ext)
     if args.preview:
         shutil.copy(args.preview, preview)
         note = 'a photograph of the device'
     else:
         shutil.copy(os.path.join(ROOT, 'docs/shots/hub.png'), preview)
         note = 'A HARNESS RENDER, not a photograph -- replace before submitting'
-        print('warning: no --preview given, so assets/preview.png is a harness render.\n'
+        print('warning: no --preview given, so the preview is a harness render.\n'
               '         Seeed asks a community entry for a real screenshot or photo.',
               file=sys.stderr)
 
