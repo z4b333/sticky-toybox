@@ -85,21 +85,26 @@ inline uint8_t g_imgBand[IMG_BAND_ROWS * (480 / 8)];
 inline constexpr int MAX_TOC = 64;
 inline epubc::Book::TocEntry g_toc[MAX_TOC];
 
-// Which chapter of the contents a spine item belongs to, 1-based: the last
-// entry that begins at or before it.
+// Which row of the contents a spine item sits in, or -1 when there are none.
 //
-// This is the whole difference between a shelf that says "chapter 4" and one
-// that says "chapter 2". A spine lists every document in the book -- cover,
-// title page, copyright, dedication -- and the contents list only the ones
-// worth naming, so the two run several apart in an ordinary release EPUB.
-// Anything before the first named chapter belongs to that chapter: front
-// matter is where a book starts, and "chapter 0" is not a thing to print.
-inline int chapterOfSpine(const epubc::Book::TocEntry* toc, int n, int spine) {
-  if (n <= 0) return spine + 1;  // no contents: a chapter IS a spine item
-  int best = 0;
-  for (int i = 0; i < n; i++)
-    if (toc[i].spine <= spine) best = i;
-  return best + 1;
+// The rule is "the row with the LARGEST start at or before this spine", not
+// "the last row at or before it", and the difference is the whole bug. A
+// contents list is not in spine order: these releases put the colour inserts
+// and the illustration gallery at the END of the list, pointing back at files
+// near the front of the book. Scanning for the last match therefore walked
+// past every real chapter and landed on entry 36 -- "chapter 37" under a book
+// open at chapter one.
+//
+// Anything before the first named row belongs to that row: front matter is
+// where a book starts.
+inline int tocRowForSpine(const epubc::Book::TocEntry* toc, int n, int spine) {
+  int best = -1;
+  for (int i = 0; i < n; i++) {
+    if (toc[i].spine > spine) continue;
+    if (best < 0 || toc[i].spine > toc[best].spine) best = i;
+  }
+  if (best < 0 && n > 0) best = 0;  // ahead of the first row: it is still row one
+  return best;
 }
 }  // namespace epubui
 
@@ -185,7 +190,7 @@ class EpubTool : public ToolApp {
         continue;
       }
       const int b = idx - _nf;
-      char sub[40];
+      char sub[ToolsHost::PLACE_LEN + 24];
       shelf::drawBookRow(c, k, _books[b].title, placeLine(_books[b], sub, sizeof(sub)),
                          shelf::rowSep(k, idx, total));
     }
@@ -670,18 +675,21 @@ class EpubTool : public ToolApp {
   // Chapters are counted from the spine, the same way the reader's own footer
   // and contents list count them, so the number here is the number there.
   static const char* placeLine(const ToolsHost::EpubInfo& b, char* buf, int cap) {
-    // No sidecar, no line. The book may well have a position -- left by
-    // CrossPoint, or by a Toybox from before this file existed -- but the only
-    // thing that could be said from the position alone is a spine index, and a
-    // spine counts the cover and the title page as items. "Chapter 4" under a
-    // book open at chapter 2 is worse than saying nothing.
-    if (!b.cont || b.chapter == 0) return "";
+    // The chapter's OWN NAME, as its contents row spells it -- not a number.
+    // A number cannot be right here: the contents list of a real release opens
+    // with "Cover", so its second row is the book's Chapter 1, and counting
+    // rows would print "chapter 2" over a page headed Chapter 1. The name is
+    // the one thing that is true by construction, because it is the same
+    // string the contents screen shows.
+    //
+    // No sidecar, no line: a position left by CrossPoint says nothing until
+    // the book has been closed here once.
+    if (!b.cont || !b.place[0]) return "";
     if (b.pageCount > 0)
-      snprintf(buf, (size_t)cap, "chapter %u, page %u of %u", (unsigned)b.chapter,
-               (unsigned)b.page, (unsigned)b.pageCount);
+      snprintf(buf, (size_t)cap, "%s - page %u of %u", b.place, (unsigned)b.page,
+               (unsigned)b.pageCount);
     else
-      snprintf(buf, (size_t)cap, "chapter %u, page %u", (unsigned)b.chapter,
-               (unsigned)b.page);
+      snprintf(buf, (size_t)cap, "%s - page %u", b.place, (unsigned)b.page);
     return buf;
   }
 
@@ -689,9 +697,16 @@ class EpubTool : public ToolApp {
   // entry that starts at or before it. Books whose contents could not be read
   // fall back to the spine, which is also what the contents list itself falls
   // back to -- there, a chapter really is a spine item.
-  int chapterForSpine(int spine) {
+  // What this position is called, in the book's own words. Falls back to the
+  // spine when a book has no contents at all -- which is what the contents
+  // screen itself falls back to, so the two still say the same thing.
+  void chapterName(int spine, char* out, int cap) {
     tocCount();  // reads the contents once, while the card is still up
-    return epubui::chapterOfSpine(epubui::g_toc, _ntoc > 0 ? _ntoc : 0, spine);
+    const int row = epubui::tocRowForSpine(epubui::g_toc, _ntoc > 0 ? _ntoc : 0, spine);
+    if (row >= 0)
+      snprintf(out, (size_t)cap, "%s", epubui::g_toc[row].title);
+    else
+      snprintf(out, (size_t)cap, "chapter %d", spine + 1);
   }
 
   // The note the shelf reads: chapter, page, and how many pages that chapter
@@ -699,17 +714,23 @@ class EpubTool : public ToolApp {
   // the contents are still in hand and the card is still awake.
   void savePlaceNote() {
     if (_cur < 0 || _page >= _lutN) return;
-    const int chapter = chapterForSpine(_spine);
-    char body[24];
-    const int n = snprintf(body, sizeof(body), "%d %d %d\n", chapter, _page + 1,
-                           _chapterPages > 0 ? _chapterPages : 0);
+    char name[ToolsHost::PLACE_LEN + 1];
+    chapterName(_spine, name, sizeof(name));
+    // Tab-separated and versioned, because the first shape of this file held a
+    // chapter NUMBER and a device may still be carrying one: a reader that
+    // cannot say what version it is looking at has to either guess or lie.
+    // Anything that is not a 3 is ignored and the row stays blank until the
+    // book is closed here again.
+    char body[16 + ToolsHost::PLACE_LEN];
+    const int n = snprintf(body, sizeof(body), "3\t%d\t%d\t%s\n", _page + 1,
+                           _chapterPages > 0 ? _chapterPages : 0, name);
     char dir[96], path[128];
     epubc::cacheDir(_books[_cur].file, dir, sizeof(dir));
     snprintf(path, sizeof(path), "%s/toybox.pos", dir);
     host().sdWriteFileAtomic(path, body, n);
     // ...and the row this book came from, so the shelf is right the moment it
     // is drawn rather than the next time the app is entered.
-    _books[_cur].chapter = (uint16_t)chapter;
+    snprintf(_books[_cur].place, sizeof(_books[_cur].place), "%s", name);
     _books[_cur].page = (uint16_t)(_page + 1);
     _books[_cur].pageCount = (uint16_t)(_chapterPages > 0 ? _chapterPages : 0);
   }
@@ -1740,8 +1761,23 @@ class EpubTool : public ToolApp {
     if (_menu == rmenu::Page::Root) {
       rmenu::Item items[7];
       items[0].label = "Contents";
-      snprintf(_rootSub[0], sizeof(_rootSub[0]), "chapter %d of %d", _spine + 1,
-               _book.spineCount());
+      // The chapter's name when the contents have already been read, and the
+      // spine numbers when they have not: this line is drawn on the way INTO
+      // the panel, and reading a book's contents to label a row is a cost the
+      // person has not asked for yet. The numbers here were always the spine's
+      // -- "chapter 4 of 57" over a page headed Chapter 1 -- which is the same
+      // thing that made the shelf wrong; naming it is the honest fix, and the
+      // count goes because a spine count is not a chapter count either.
+      if (_ntoc > 0) {
+        const int row = epubui::tocRowForSpine(epubui::g_toc, _ntoc, _spine);
+        if (row >= 0)
+          snprintf(_rootSub[0], sizeof(_rootSub[0]), "%s", epubui::g_toc[row].title);
+        else
+          snprintf(_rootSub[0], sizeof(_rootSub[0]), "chapter %d", _spine + 1);
+      } else {
+        snprintf(_rootSub[0], sizeof(_rootSub[0]), "chapter %d of %d", _spine + 1,
+                 _book.spineCount());
+      }
       items[0].sub = _rootSub[0];
       items[1].label = "Bookmarks";
       if (_nmarks > 0)

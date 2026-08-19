@@ -3804,40 +3804,52 @@ int main() {
       printf("shelf label ok (a book just read no longer claims to be unstarted)\n");
 
       // The mapping the shelf line depends on, against a contents table shaped
-      // like a real release EPUB: cover, title page and copyright occupy spine
-      // 0..2, and the book's own chapter one starts at spine 3. Reading spine 4
-      // is chapter 2, and saying "chapter 5" there -- which is what the spine
-      // index alone gives -- is the bug this exists to keep fixed.
+      // like the ones that broke it on hardware: chapters in spine order, and
+      // then -- at the END of the list, where these releases put them -- the
+      // colour inserts and the illustration gallery, pointing back at files
+      // near the front of the book.
+      //
+      // Scanning for the LAST row at or before the position walks past every
+      // chapter and lands on one of those, which is how a book open at chapter
+      // one came to be labelled "chapter 37".
       {
-        epubc::Book::TocEntry toc[4] = {};
-        toc[0].spine = 3;
-        toc[1].spine = 4;
+        epubc::Book::TocEntry toc[6] = {};
+        snprintf(toc[0].title, sizeof(toc[0].title), "Cover");
+        toc[0].spine = 0;
+        snprintf(toc[1].title, sizeof(toc[1].title), "Chapter 1: Maomao");
+        toc[1].spine = 3;
+        snprintf(toc[2].title, sizeof(toc[2].title), "Chapter 2: The Two Consorts");
         toc[2].spine = 5;
+        snprintf(toc[3].title, sizeof(toc[3].title), "Chapter 3: Jinshi");
         toc[3].spine = 9;
-        struct { int spine, want; } cases[] = {
-            {0, 1},   // the cover: front matter belongs to chapter one
-            {2, 1},   // still front matter
-            {3, 1},   // chapter one itself
-            {4, 2},   // the one that used to read "chapter 5"
-            {6, 3},   // inside chapter three, which spans spines 5..8
-            {9, 4},   // the last entry
-            {12, 4},  // past it: an end-matter document is still chapter four
+        snprintf(toc[4].title, sizeof(toc[4].title), "Colour inserts");
+        toc[4].spine = 1;  // back-pointing, and listed last
+        snprintf(toc[5].title, sizeof(toc[5].title), "Afterword");
+        toc[5].spine = 20;
+        struct { int spine; const char* want; } cases[] = {
+            {0, "Cover"},
+            {2, "Colour inserts"},           // genuinely the nearest row before it
+            {3, "Chapter 1: Maomao"},        // the one that read "chapter 37"
+            {4, "Chapter 1: Maomao"},        // still inside chapter one
+            {5, "Chapter 2: The Two Consorts"},
+            {12, "Chapter 3: Jinshi"},
+            {25, "Afterword"},
         };
         for (const auto& c : cases) {
-          const int got = epubui::chapterOfSpine(toc, 4, c.spine);
-          if (got != c.want) {
-            printf("CHAPTER FAIL: spine %d mapped to chapter %d, wanted %d\n", c.spine, got,
-                   c.want);
+          const int row = epubui::tocRowForSpine(toc, 6, c.spine);
+          if (row < 0 || strcmp(toc[row].title, c.want) != 0) {
+            printf("CHAPTER FAIL: spine %d gave \"%s\", wanted \"%s\"\n", c.spine,
+                   row < 0 ? "(none)" : toc[row].title, c.want);
             abort();
           }
         }
-        // A book whose contents could not be read at all: there, a chapter
-        // really is a spine item, which is what the contents list falls back to.
-        if (epubui::chapterOfSpine(toc, 0, 4) != 5) {
-          printf("CHAPTER FAIL: no contents should count spine items\n");
+        // A book with no contents at all: nothing to point at, and the caller
+        // falls back to the spine number.
+        if (epubui::tocRowForSpine(toc, 0, 4) != -1) {
+          printf("CHAPTER FAIL: an empty contents list should offer no row\n");
           abort();
         }
-        printf("chapter numbers ok (front matter does not become chapters)\n");
+        printf("chapter names ok (a back-pointing insert does not become the chapter)\n");
       }
     }
 

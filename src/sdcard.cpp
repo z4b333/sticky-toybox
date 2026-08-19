@@ -58,33 +58,60 @@ bool parseTbkBytes(const uint8_t h[64], BookMeta& out) {
   return out.pages > 0;
 }
 
-// The reader's own note of where it stopped, in the book's numbering. Three
-// decimal numbers and a newline -- "2 1 8" is chapter 2, page 1 of 8 -- kept
-// as text because it is the kind of file somebody will open on a laptop while
-// wondering why a shelf says what it says.
+// The reader's own note of where it stopped, written when it closes a book:
 //
-// It lives beside the position, in the FNV directory (Toybox's own, and what
-// current CrossPoint builds also use). CrossPoint ignores files it does not
-// know, and this one is 12 bytes.
+//     3<TAB>page<TAB>pageCount<TAB>chapter name<NEWLINE>
+//
+// Text, tab-separated, because it is the kind of file somebody will open on a
+// laptop while wondering why a shelf says what it says. It lives beside the
+// position, in the FNV directory (Toybox's own, and what current CrossPoint
+// builds also use); CrossPoint ignores files it does not know.
+//
+// The leading 3 is a version. The first shape of this file held a chapter
+// NUMBER, which turned out to be unfixable -- a contents list that opens with
+// "Cover" numbers the book's Chapter 1 as row two -- and devices are carrying
+// those files right now. A reader that cannot tell which shape it is looking
+// at has to either guess or lie, so anything that is not a 3 is ignored and
+// the row stays blank until the book is closed here again.
 const char* const kPlaceFile = "/toybox.pos";
 
 bool parsePlace(const char* text, int n, EpubMeta& m) {
-  int v[3] = {0, 0, 0}, got = 0, cur = -1;
-  for (int i = 0; i < n && got < 3; i++) {
-    const char c = text[i];
-    if (c >= '0' && c <= '9') {
-      cur = (cur < 0 ? 0 : cur) * 10 + (c - '0');
-      if (cur > 65535) cur = 65535;
-    } else if (cur >= 0) {
-      v[got++] = cur;
-      cur = -1;
+  int f = 0, start = 0, page = 0, pages = 0;
+  for (int i = 0; i <= n; i++) {
+    const bool end = i == n || text[i] == '\t' || text[i] == '\n' || text[i] == '\r';
+    if (!end) continue;
+    const char* fld = text + start;
+    const int len = i - start;
+    if (f == 0) {
+      if (len != 1 || fld[0] != '3') return false;  // not a version we speak
+    } else if (f == 1 || f == 2) {
+      int v = 0;
+      for (int k = 0; k < len; k++) {
+        if (fld[k] < '0' || fld[k] > '9') return false;
+        v = v * 10 + (fld[k] - '0');
+        if (v > 65535) v = 65535;
+      }
+      (f == 1 ? page : pages) = v;
+    } else if (f == 3) {
+      int take = len;
+      if (take > (int)sizeof(m.place) - 1) take = (int)sizeof(m.place) - 1;
+      // Never cut inside a UTF-8 sequence: a Japanese chapter name ending in
+      // half a character draws as a box the publisher never wrote.
+      while (take > 0 && ((uint8_t)fld[take] & 0xC0) == 0x80) take--;
+      memcpy(m.place, fld, (size_t)take);
+      m.place[take] = 0;
+      break;
     }
+    f++;
+    start = i + 1;
+    if (i == n) break;
   }
-  if (cur >= 0 && got < 3) v[got++] = cur;
-  if (got < 2 || v[0] <= 0) return false;  // chapter and page at the least
-  m.chapter = (uint16_t)v[0];
-  m.page = (uint16_t)v[1];
-  m.pageCount = (uint16_t)(got > 2 ? v[2] : 0);
+  if (page <= 0 || !m.place[0]) {
+    m.place[0] = 0;
+    return false;
+  }
+  m.page = (uint16_t)page;
+  m.pageCount = (uint16_t)pages;
   return true;
 }
 

@@ -488,14 +488,20 @@ class ToolsHost {
   // only moves bytes; the parsing lives in epubc (tools/epub/epubcore.h).
   // file is the ABSOLUTE card path, because CrossPoint hashes that exact
   // string to find its progress directory.
+  // A chapter name, cut to something a shelf row can hold: at 18 px the row
+  // has about 40 characters before it needs clipping anyway, and 32 books of
+  // this field is a kilobyte of RAM that has to come from somewhere.
+  static constexpr int PLACE_LEN = 40;
+
   struct EpubInfo {
     char file[128];  // absolute card path; real release filenames run long
     char title[41];
     bool cont = false;  // a reading position already exists on the card
-    // Where that position is, in the book's own chapter numbering, out of the
-    // sidecar the reader writes when it closes a book. Zero means there is
-    // no sidecar and the shelf should say nothing -- see sdcard.h.
-    uint16_t chapter = 0;    // 1-based, as the contents list counts
+    // Where that position is, in the book's own words: the name of the chapter
+    // as its contents row spells it, out of the sidecar the reader writes when
+    // it closes a book. Empty means no sidecar, and the shelf says nothing --
+    // see sdcard.h for why a number could not be used instead.
+    char place[PLACE_LEN + 1] = {};
     uint16_t page = 0;       // 1-based page within that chapter
     uint16_t pageCount = 0;  // 0 when unknown
   };

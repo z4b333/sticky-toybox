@@ -111,9 +111,14 @@ struct EpubMeta {
   // contents can say which chapter that is, and the reader is holding it at
   // exactly the moment it closes.
   //
-  // chapter == 0 means no sidecar: a position left by CrossPoint, or by a
-  // Toybox older than this. The shelf says nothing rather than guessing.
-  uint16_t chapter = 0;    // 1-based, counted as the contents list counts
+  // An empty name means no usable sidecar: a position left by CrossPoint, or
+  // by a Toybox older than this. The shelf says nothing rather than guessing.
+  //
+  // A NAME and not a number, because the number cannot be made true: the
+  // contents list of a real release opens with "Cover", so its second row is
+  // the book's Chapter 1, and there is no arithmetic that turns a row index
+  // into what the publisher printed at the top of the page.
+  char place[41] = {};     // the chapter's own name, as its contents row spells it
   uint16_t page = 0;       // 1-based page within that chapter
   uint16_t pageCount = 0;  // pages in it, 0 when unknown
 };

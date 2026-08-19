@@ -292,7 +292,8 @@ int StickyHost::epubList(EpubInfo* out, int max, const char* dir) {
     strncpy(out[i].title, metas[i].title, sizeof(out[i].title) - 1);
     out[i].title[sizeof(out[i].title) - 1] = 0;
     out[i].cont = metas[i].cont;
-    out[i].chapter = metas[i].chapter;
+    strncpy(out[i].place, metas[i].place, sizeof(out[i].place) - 1);
+    out[i].place[sizeof(out[i].place) - 1] = 0;
     out[i].page = metas[i].page;
     out[i].pageCount = metas[i].pageCount;
   }

@@ -96,7 +96,9 @@ inline void drawBookRow(ToolsCanvas& c, int rowOnPage, const char* title, const 
   const int maxW = SCREEN_W - 48;
   if (c.textWidth(title, TS_MED, true) <= maxW) {
     c.text(24, y + 10, title, TS_MED, true, true);
-    c.text(24, y + 44, sub, TS_SMALL, true);
+    // Clipped, not drawn straight: the second line carries a chapter's own
+    // name now, and publishers write chapter names as long as they like.
+    c.textClipped(24, y + 44, maxW, sub, TS_SMALL, true);
   } else {
     // The longest run of whole words that fits, measured forward.
     char buf[48];
@@ -115,7 +117,7 @@ inline void drawBookRow(ToolsCanvas& c, int rowOnPage, const char* title, const 
     while (*rest == ' ') rest++;
     c.text(24, y + 4, buf, TS_MED, true, true);
     c.textClipped(24, y + 32, maxW, rest, TS_MED, true, true);
-    c.text(24, y + 62, sub, TS_SMALL, true);
+    c.textClipped(24, y + 62, maxW, sub, TS_SMALL, true);
   }
   if (sep) c.fillRect(16, y + ROW_H - 6, SCREEN_W - 32, 1, true);
 }
