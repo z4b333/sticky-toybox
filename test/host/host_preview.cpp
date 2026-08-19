@@ -3768,6 +3768,39 @@ int main() {
     toybox.goHub();
     printf("epub start again ok (asks first, forgets the place, keeps the marks)\n");
 
+    // The shelf row has to say what the card says. It is listed once, on the
+    // way into the app -- the "carries on" check is an SD.exists per book --
+    // so a book read and backed out of used to keep the label it was listed
+    // with. The row said "from the start" under a book that resumed perfectly
+    // when tapped, which is the shelf disagreeing with itself.
+    {
+      toybox.open(false, 10, false);
+      auto* es = static_cast<EpubTool*>(toybox.hostActive());
+      if (es->hostBookCount() < 1) {
+        printf("SHELF FAIL: the shelf listed nothing\n");
+        abort();
+      }
+      // Both books on this card have been read by the guards above, so the
+      // row is forced back to what a never-opened book shows. That is the
+      // state the bug lived in: listed once on entry, never updated after.
+      const int row = 0;
+      es->hostSetCont(row, false);
+      char file[128];
+      es->hostFile(row, file, sizeof(file));
+      if (!es->openDirect(file)) {
+        printf("SHELF FAIL: could not open \"%s\" from row %d\n", file, row);
+        abort();
+      }
+      for (int k = 0; k < 4; k++) toybox.onButton(SideBtn::Down);
+      toybox.onTap(20, 20);  // back to the shelf, which saves the place
+      if (!es->hostCont(row)) {
+        printf("SHELF FAIL: row %d still says \"from the start\" after reading it\n", row);
+        abort();
+      }
+      toybox.goHub();
+      printf("shelf label ok (a book just read no longer claims to be unstarted)\n");
+    }
+
     // The same row in the .tbk reader, where a position is a setting rather
     // than a file on the card. Row 3 there: Go to page, Bookmarks, Page
     // turns, Start again, Close.

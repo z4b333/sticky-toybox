@@ -305,6 +305,18 @@ class EpubTool : public ToolApp {
 
 #ifdef TOYBOX_HOST
   int hostScreen() const { return _screen == Screen::Page ? 1 : 0; }
+  // What the shelf row for book i currently claims: true means it draws
+  // "carries on where it stopped".
+  int hostBookCount() const { return _n < 0 ? 0 : _n; }
+  // Forces a row back to "from the start", so a guard can stand where a
+  // freshly-listed shelf stands without deleting anything off the card.
+  void hostSetCont(int i, bool on) {
+    if (i >= 0 && i < (_n < 0 ? 0 : _n)) _books[i].cont = on;
+  }
+  bool hostCont(int i) const { return i >= 0 && i < (_n < 0 ? 0 : _n) && _books[i].cont; }
+  void hostFile(int i, char* out, int cap) const {
+    snprintf(out, (size_t)cap, "%s", (i >= 0 && i < (_n < 0 ? 0 : _n)) ? _books[i].file : "");
+  }
   // The page's words, joined -- so a guard can prove that no word vanishes at
   // a page boundary by reading the same chapter under two layouts.
   int hostPageJoin(char* out, int cap) const {
@@ -635,7 +647,17 @@ class EpubTool : public ToolApp {
     _menu = rmenu::Page::None;
     host().setCanvasRotation(0);  // the shelf, like everything else, is portrait
     if (_open) {
+      // Did this session actually leave a position on the card? Same condition
+      // saveProgress uses to decide whether there is anything to write.
+      const bool placed = _cur >= 0 && _page < _lutN;
       saveProgress();
+      // ...and if it did, the row this book came from now says so. The shelf is
+      // listed once, on the way into the app, because the check is an SD.exists
+      // per book; so a book read and backed out of kept the label it had when
+      // the app opened -- "from the start", under a book that resumes perfectly
+      // the moment you tap it. The list was right about the card and wrong
+      // about the last thirty seconds.
+      if (placed) _books[_cur].cont = true;
       _book.close();
       host().epubClose();  // powers the card down, re-initialises the panel
     }
