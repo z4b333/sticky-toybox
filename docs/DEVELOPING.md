@@ -106,6 +106,34 @@ g++ -std=gnu++17 -O2 -w -DTOYBOX_HOST -I . -I mock -I ../../src \
 ./preview
 ```
 
+## Releasing
+
+The version string comes from `git describe --tags`, and three places show it:
+`docs/firmware/version.json` (which the installer page prints), the service
+screen, and a Seeed registry entry. They agree because they all come from the
+one tag.
+
+**Tag only what you publish.** From v1.0.0 the numbering is ordinary semver --
+1.0.1 for fixes, 1.1.0 for features -- and a tag means "this went out", not "a
+build happened". Everything up to `v1.0.0-beta.64` was tagged per build, which
+is why those tags are dense and mean less; they are left alone because they are
+what the installer served on those days.
+
+A build from an untagged commit names itself, which is the point of not tagging
+them: `1.0.0-3-gabc1234` is the third commit past 1.0.0, and the hash says
+exactly which. That is more useful on a service screen than another beta
+number.
+
+```
+git tag -f v1.1.0          # only when it is going out
+sh tools/make_image.sh     # writes docs/firmware/ and prebuilt/
+git add -A && git commit -m "build: v1.1.0"
+git tag -f v1.1.0          # onto the build commit, so describe is exact
+```
+
+The second `git tag -f` matters: the image records the version it was built
+with, so the tag has to end up on the commit that carries the image.
+
 ## The Seeed Playground registry
 
 Seeed keeps a public contribution repo for firmware that appears in the
