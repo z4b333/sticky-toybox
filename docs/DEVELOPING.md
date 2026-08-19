@@ -147,10 +147,12 @@ whole four-part package (there is no app-only UPDATE), and it cannot offer the
 optional CJK font packs, which stay a `/fonts` install from this project's own
 page.
 
-Build with `-DTOYBOX_CP_FONTS` to render every screen with the CrossPoint
-Reader's fonts instead. This checks that the shared code still lays out
-correctly under a different host's font metrics. Sample renders are in
-`docs/screens/`.
+Build with `-DTOYBOX_CP_FONTS` to render every screen with a much taller set of
+faces instead. It was written to check the shared code under a second host's
+font metrics; that host is gone, but the pass stays as a stress test -- those
+faces run half again to twice the height of the Sticky's, and several layout
+bugs this month were invisible at the device's own size and obvious under
+these. Sample renders are in `docs/screens/`.
 
 A guard worth understanding before you add one: several of the bugs that
 reached hardware were invisible to a screenshot. A QR code that encodes

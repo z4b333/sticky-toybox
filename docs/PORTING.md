@@ -1,11 +1,20 @@
 # Porting Toybox to another firmware
 
+> **Not a goal any more.** Toybox is developed for the reTerminal Sticky and
+> nothing else (decided 19 August 2026); the CrossPoint Reader port is not
+> maintained. This page stays because the seam it describes is real and still
+> used -- the preview harness implements the same two interfaces to render
+> every screen on a PC -- and because somebody may want to embed the apps
+> elsewhere. Nothing here is kept working on their behalf.
+>
+> Reading CrossPoint's cards is a *card format* promise and is unaffected: see
+> the note at the end of this file.
+
 All apps and screens live in `toybox-core/`, which has no display, touch or
-board code. It draws through two small interfaces. To embed Toybox in
-another firmware you implement those interfaces and forward input to it.
-There are two working examples: the standalone firmware in this repository
-(`src/sticky_host.*`) and the CrossPoint Reader port, which is about 110
-lines.
+board code. It draws through two small interfaces. To embed Toybox in another
+firmware you implement those interfaces and forward input to it. There are two
+working examples: the standalone firmware in this repository
+(`src/sticky_host.*`) and the preview harness (`test/host/`).
 
 ## The two interfaces
 
@@ -77,3 +86,11 @@ without hardware. It can also be built with a different font set
 If your host's fonts differ a lot, bake them into the harness format
 (`tools/make_fonts_cp.py` shows how) and review the rendered screens before
 flashing.
+
+## Card compatibility with CrossPoint is separate, and stays
+
+Nothing above affects it. Toybox reads and writes reading positions in
+CrossPoint's own format, in CrossPoint's own directory, and shares covers with
+it -- so one microSD card can move between the two firmwares and a book opens
+where it was left. That is a promise about bytes on a card, not about shared
+code, and it is unaffected by this page.

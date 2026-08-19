@@ -1,11 +1,17 @@
 // Shared UI seam for the utility apps (coin / dice / timer / random / picker).
 //
-// The tool apps below are compiled UNCHANGED into two different firmwares:
-//   * the standalone Toybox firmware (draws through Epd + gfx)
-//   * the CrossPoint Reader port    (draws through GfxRenderer)
 // Everything device-specific lives behind ToolsCanvas / ToolsHost, so a tool
-// app never includes a display header. Both hosts are ESP32-Arduino, so
+// app never includes a display header. The host is ESP32-Arduino, so
 // Preferences, millis() and esp_random() are used directly.
+//
+// This seam was built so the apps could also compile into the CrossPoint
+// Reader. That is no longer a goal (owner's decision, 19 August 2026) and no
+// second firmware is being maintained -- but the seam stays, because the
+// preview harness is the other host: every screen in this file is rendered on
+// a PC through a ToolsCanvas that writes .pgm files, which is how a layout bug
+// is caught before it reaches glass. Card compatibility with CrossPoint is a
+// separate thing entirely and still holds -- see claude/crosspoint-compatibility
+// or docs/PORTING.md's note.
 #pragma once
 #include <Arduino.h>
 #include <Preferences.h>
