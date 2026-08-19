@@ -351,8 +351,27 @@ const ANY_PREFIX = /^(#{1,3}\s+|[-*]\s+\[[ xX]\]\s+|[-*]\s+|\d+\.\s+|>\s*)/;
 
 const WRAP_MARKS = {bold: '**', strike: '~~'};
 
+// Pressing Bold or Strike with nothing selected opens an empty pair and parks
+// the cursor inside it, ready to type. Changing your mind at that moment used to
+// leave the pair behind -- press Bold, then H1, and the line reads "# ****"
+// with the cursor after four asterisks nobody asked for, which had to be
+// deleted by hand. An empty pair with the cursor in it is not a decision yet, so
+// any other button clears it first.
+function dropEmptyPairAtCursor() {
+  const ta = $('n-body');
+  const {selectionStart: a, selectionEnd: b, value: v} = ta;
+  if (a !== b) return;
+  for (const mark of Object.values(WRAP_MARKS)) {
+    if (v.slice(a - mark.length, a) === mark && v.slice(a, a + mark.length) === mark) {
+      ta.setRangeText('', a - mark.length, a + mark.length, 'end');
+      return;
+    }
+  }
+}
+
 function applyLineMark(kind) {
   const ta = $('n-body');
+  dropEmptyPairAtCursor();
   const v = ta.value;
   // Grow the selection out to whole lines: a mark applies to a line, so a
   // cursor sitting in the middle of one still means that line.
@@ -382,6 +401,14 @@ function applyLineMark(kind) {
 function applyWrap(kind) {
   const ta = $('n-body');
   const mark = WRAP_MARKS[kind];
+  // Bold then Strike, with nothing typed between them, means Strike -- not
+  // both. The same rule as the line buttons: an empty pair is not a decision.
+  if (ta.selectionStart === ta.selectionEnd) {
+    const at = ta.selectionStart;
+    if (!(ta.value.slice(at - mark.length, at) === mark &&
+          ta.value.slice(at, at + mark.length) === mark))
+      dropEmptyPairAtCursor();
+  }
   const {selectionStart: a, selectionEnd: b, value: v} = ta;
   const sel = v.slice(a, b);
 
@@ -423,6 +450,7 @@ function applyWrap(kind) {
 
 function insertRule() {
   const ta = $('n-body');
+  dropEmptyPairAtCursor();
   const v = ta.value;
   let at = v.indexOf('\n', ta.selectionEnd);
   if (at < 0) at = v.length;
