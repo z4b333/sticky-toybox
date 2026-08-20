@@ -110,9 +110,24 @@ inline TRect plusRect(int i, int w) {
 // `back` names what the panel is over. The readers are over a book, so it
 // says READ; the recipe app is over a recipe, and telling a cook to go back to
 // "READ" is a word from another screen.
+// The time for an options panel's corner, or nullptr when no clock has been
+// set -- an invented time is worse than no time, so nothing is drawn.
+//
+// It belongs on a panel rather than on the page behind it. E-paper holds its
+// last picture, so a clock drawn on a page turn is wrong by the next page and
+// stays wrong for as long as the reading lasts; a panel is drawn fresh every
+// time it is opened, so the time on it is the time it was asked for. Same
+// corner and same size as the hub's, which is where people already look.
+inline const char* clockCorner(ToolsHost& h, char* out, int cap) {
+  int hh = 0, mm = 0;
+  if (!h.clockHHMM(hh, mm)) return nullptr;
+  snprintf(out, cap, "%02d:%02d", hh, mm);
+  return out;
+}
+
 inline void drawRoot(ToolsHost& h, ToolsCanvas& c, const char* title, const Item* items, int n,
-                     const char* back = "READ") {
-  h.topBar(title, false, back);
+                     const char* back = "READ", const char* corner = nullptr) {
+  h.topBar(title, false, back, corner);
   for (int i = 0; i < n; i++) {
     const TRect r = rootRect(i, c.width());
     if (i > 0) c.fillRect(r.x, r.y, r.w, 1, true);  // hairlines between, none around

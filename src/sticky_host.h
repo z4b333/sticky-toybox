@@ -124,8 +124,8 @@ class StickyHost : public ToolsHost {
   int deviceOrientation() override {
     return sensors::imuPresent() ? sensors::orientation() : -1;
   }
-  void topBar(const char* t, bool withHelp, const char* backLabel) override {
-    drawTopBar(_canvas, t, withHelp, backLabel);
+  void topBar(const char* t, bool withHelp, const char* backLabel, const char* corner) override {
+    drawTopBar(_canvas, t, withHelp, backLabel, corner);
   }
   bool isHelpTap(int x, int y) const override { return tappedHelp(x, y, EPD_W); }
   bool isBackTap(int x, int y) const override { return tappedBack(x, y); }

@@ -1853,7 +1853,9 @@ class EpubTool : public ToolApp {
       n++;
       items[n].label = "Close the book";
       items[n].sub = _books[_cur].title;
-      rmenu::drawRoot(host(), c, "Options", items, n + 1);
+      char clk[8];
+      rmenu::drawRoot(host(), c, "Options", items, n + 1, "READ",
+                      rmenu::clockCorner(host(), clk, sizeof(clk)));
       if (_resetArmed) {  // the armed row inverts, as the reset in settings does
         const TRect r = rmenu::rootRect(rowReset, c.width());
         c.fillRect(r.x, r.y + 1, r.w, r.h - 2, true);

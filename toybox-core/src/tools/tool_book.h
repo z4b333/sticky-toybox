@@ -698,7 +698,9 @@ class BookTool : public ToolApp {
                                  : (_pageNo > 0 ? "back to the first page" : "already at the start");
       items[4].label = "Close the book";
       items[4].sub = _books[_cur].title;
-      rmenu::drawRoot(host(), c, "Options", items, ROOT_N);
+      char clk[8];
+      rmenu::drawRoot(host(), c, "Options", items, ROOT_N, "READ",
+                      rmenu::clockCorner(host(), clk, sizeof(clk)));
       if (_resetArmed) {
         const TRect r = rmenu::rootRect(3, c.width());
         c.fillRect(r.x, r.y + 1, r.w, r.h - 2, true);

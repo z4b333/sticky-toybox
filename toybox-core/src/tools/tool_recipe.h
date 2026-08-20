@@ -398,7 +398,9 @@ class RecipeTool : public ToolApp {
   int rotY() { return stepperY(2) - 10; }
 
   void renderMenu(ToolsCanvas& c) {
-    host().topBar("OPTIONS", false, _screen == Screen::Cook ? "STEP" : "RECIPE");
+    char clk[8];
+    host().topBar("OPTIONS", false, _screen == Screen::Cook ? "STEP" : "RECIPE",
+                  rmenu::clockCorner(host(), clk, sizeof(clk)));
     rmenu::drawStepper(c, stepperY(0), "Text size", rcpui::sizeName(_size));
     rmenu::drawStepper(c, stepperY(1), "Line spacing", rmenu::leadName(_lead));
     c.fillRect(24, rotY() - 8, c.width() - 48, 1, true);

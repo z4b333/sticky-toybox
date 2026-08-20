@@ -28,7 +28,7 @@ constexpr int BAR_TOUCH_H = 50;
 // the shelf name when a reader is standing inside a series folder -- one
 // arrow that always climbs exactly one level, saying which level that is.
 inline void drawTopBar(ToolsCanvas& c, const char* title, bool withHelp = false,
-                       const char* backLabel = "HUB") {
+                       const char* backLabel = "HUB", const char* corner = nullptr) {
   const int w = c.width();
   c.fillRect(0, 0, w, TOPBAR_H, false);
   c.fillRect(0, TOPBAR_H - 2, w, 2, true);
@@ -46,6 +46,17 @@ inline void drawTopBar(ToolsCanvas& c, const char* title, bool withHelp = false,
   // "there are rules here" rather than sometimes doing nothing.
   if (withHelp)
     c.textCentered(w - HELP_W / 2, (TOPBAR_H - c.textHeight(TS_MED)) / 2, "?", TS_MED, true);
+
+  // The far corner, for a screen that has something short and true to say
+  // there -- the clock, so far. Never beside a "?": that corner already means
+  // "there are rules here", and two marks in one corner make both of them
+  // slower to read. It also stops short of the title's room, so a long title
+  // and a clock cannot collide.
+  else if (corner && corner[0]) {
+    const int cw = c.textWidth(corner, TS_MED);
+    if (cw <= BACK_W - 16)
+      c.text(w - 16 - cw, (TOPBAR_H - c.textHeight(TS_MED)) / 2, corner, TS_MED, true);
+  }
 
   // Keep the centred title clear of the back button on the narrow portrait bar.
   // A Thai title cannot take the shrink-to-small escape -- below TS_LARGE it is

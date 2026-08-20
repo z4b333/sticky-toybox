@@ -283,7 +283,12 @@ class ToolsHost {
   // on the board, or a host with no board at all -- and callers fall back to
   // asking with a button.
   virtual int deviceOrientation() { return -1; }
-  virtual void topBar(const char* title, bool withHelp = false, const char* backLabel = "HUB") = 0;
+  // `corner` is a short string for the bar's right end -- the clock, so far,
+  // and only on screens that are redrawn often enough for one to be true. It
+  // shares the corner with the "?", which wins: a screen with rules keeps its
+  // mark, because that corner is where people have learned to look for it.
+  virtual void topBar(const char* title, bool withHelp = false, const char* backLabel = "HUB",
+                      const char* corner = nullptr) = 0;
   // A tool with no rules card leaves this false and no "?" is drawn.
   virtual bool isHelpTap(int x, int y) const { return false; }
   virtual bool isBackTap(int x, int y) const = 0;

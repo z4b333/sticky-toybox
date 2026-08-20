@@ -409,6 +409,40 @@ static_assert(randui::MODE_NUM.y >= BAR_TOUCH_H, "random mode row is inside the 
 static_assert(timerui::MODE_CD.y >= BAR_TOUCH_H, "timer mode row is inside the back button");
 static_assert(nui::BODY.y >= BAR_TOUCH_H, "the note body is inside the back button");
 
+// The clock every options panel carries in the bar's far corner. It is drawn
+// there rather than on the page behind it because a page is not redrawn often
+// enough to hold a true time, and both halves of that promise have to be kept:
+// it appears when a clock has been set, and NOTHING appears when one has not,
+// because an invented time is worse than no time. Measured as ink in the
+// corner the "?" would otherwise use, so a string drawn off the end of the bar
+// fails here too. Call it with the panel on screen.
+static void checkCornerClock(const char* what) {
+  const bool wasDumping = g_dumpEnabled;
+  g_dumpEnabled = false;
+  auto cornerInk = [] {
+    int n = 0;
+    for (int y = 0; y < TOPBAR_H - 2; y++)
+      for (int x = SCREEN_W - BACK_W; x < SCREEN_W; x++) {
+        int px, py;
+        epdMapPixel(epd.rotation(), epd.panelFlipX(), epd.panelFlipY(), x, y, px, py);
+        if ((epd.fb()[(uint32_t)py * EPD_WB + (px >> 3)] & (0x80 >> (px & 7))) == 0) n++;
+      }
+    return n;
+  };
+  const int lit = cornerInk();
+  sensors::hostSetClock(false);
+  stickyHost.refresh(true);
+  const int dark = cornerInk();
+  sensors::hostSetClock(true);  // back to 09:41 for every shot after this
+  stickyHost.refresh(true);
+  if (lit < 20 || dark != 0) {
+    printf("OPTIONS CLOCK FAIL: %s drew %d px with a clock, %d px without\n", what, lit, dark);
+    abort();
+  }
+  g_dumpEnabled = wasDumping;
+  printf("options clock ok (%s: %d px set, none unset)\n", what, lit);
+}
+
 // Tap a tool without emitting a frame for every intermediate state.
 static void quietTap(int x, int y) {
   g_dumpEnabled = false;
@@ -1164,6 +1198,7 @@ int main() {
     }
     setScreen("tool_books_options");
     stickyHost.refresh(true);
+    checkCornerClock("tbk");
 
     // Keep this page, from the + on the bookmarks row, and prove it reached
     // the card rather than a variable.
@@ -2120,6 +2155,8 @@ int main() {
     }
     setScreen("tool_epub_options");
     stickyHost.refresh(true);
+
+    checkCornerClock("epub");
 
     // Contents: the book's own nav document, and a jump that lands where the
     // row says -- including the chapter that is nothing but a picture.
@@ -4311,6 +4348,7 @@ int main() {
       g_dumpEnabled = true;
       setScreen("tool_recipe_options");
       stickyHost.refresh(true);
+      checkCornerClock("recipe");
       g_dumpEnabled = false;
 
       // Bigger type, taller rows, and never more of them. The height is the
