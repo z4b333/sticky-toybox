@@ -3835,6 +3835,39 @@ int main() {
         printf("shelf fallback ok (a book with no contents still names its chapter)\n");
       }
 
+      // ...and the same line after the app has been left and re-entered, which
+      // is the path that reads the note back off the CARD rather than off the
+      // row it was just written to. A chapter name as long as the field allows,
+      // planted directly, because the harness's own books are called things
+      // like "The long one" and would have fitted inside a buffer half the
+      // size -- which is how "Chapter 7: Friends" reached hardware as
+      // "Chapter 7: Frie".
+      {
+        toybox.open(false, 10, false);
+        auto* ec = static_cast<EpubTool*>(toybox.hostActive());
+        char file[128];
+        ec->hostFile(0, file, sizeof(file));
+        char dir[96], path[128];
+        epubc::cacheDir(file, dir, sizeof(dir));
+        snprintf(path, sizeof(path), "%s/toybox.pos", dir);
+        // 40 bytes, the longest a chapter name may be.
+        const char* kLong = "Chapter 12: The Longest Name In This Boo";
+        char note[96];
+        const int nn = snprintf(note, sizeof(note), "3\t7\t19\t%s\n", kLong);
+        sdcard::hostPlantSide(path, note, nn);
+        toybox.goHub();
+        toybox.open(false, 10, false);  // lists the shelf again, from the card
+        auto* ec2 = static_cast<EpubTool*>(toybox.hostActive());
+        char got[64];
+        ec2->hostPlace(0, got, sizeof(got));
+        if (strcmp(got, kLong) != 0) {
+          printf("SHELF FAIL: read back \"%s\", planted \"%s\"\n", got, kLong);
+          abort();
+        }
+        toybox.goHub();
+        printf("shelf note ok (a full-length chapter name survives the card)\n");
+      }
+
       // The mapping the shelf line depends on, against a contents table shaped
       // like the ones that broke it on hardware: chapters in spine order, and
       // then -- at the END of the list, where these releases put them -- the

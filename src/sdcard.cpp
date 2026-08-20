@@ -75,6 +75,13 @@ bool parseTbkBytes(const uint8_t h[64], BookMeta& out) {
 // the row stays blank until the book is closed here again.
 const char* const kPlaceFile = "/toybox.pos";
 
+// How much of that file is worth reading: a version, two numbers, three tabs,
+// the name, a newline, and the NUL. Tied to the field it fills rather than
+// guessed -- the first version of this read 24 bytes, which was exactly right
+// for the numbers-only format it was written for, and cut every chapter name
+// at fifteen characters the day names arrived. "Chapter 7: Frie".
+constexpr int PLACE_FILE_MAX = 16 + (int)sizeof(EpubMeta::place);
+
 bool parsePlace(const char* text, int n, EpubMeta& m) {
   int f = 0, start = 0, page = 0, pages = 0;
   for (int i = 0; i <= n; i++) {
@@ -616,8 +623,15 @@ int epubList(EpubMeta* out, int max, const char* dir) {
       epubc::cacheDir(m.file, dir, sizeof(dir));
       snprintf(place, sizeof(place), "%s%s", dir, kPlaceFile);
       for (const FakeSide& s : g_side)
-        if (s.n > 0 && strcmp(s.path, place) == 0)
-          parsePlace((const char*)s.data, s.n, m);
+        if (s.n > 0 && strcmp(s.path, place) == 0) {
+          // Through the same ceiling the card read uses. The device reads this
+          // file into a fixed buffer; a harness that read the whole thing
+          // could not have caught the buffer being too small, and did not.
+          char buf[PLACE_FILE_MAX] = {};
+          int n = s.n < (int)sizeof(buf) - 1 ? s.n : (int)sizeof(buf) - 1;
+          memcpy(buf, s.data, (size_t)n);
+          parsePlace(buf, n, m);
+        }
     }
     out[n++] = m;
   }
@@ -1454,7 +1468,7 @@ void readPlaceFile(const char* dir, EpubMeta& m) {
   snprintf(p, sizeof(p), "%s%s", dir, kPlaceFile);
   File f = SD.open(p, FILE_READ);
   if (!f || f.isDirectory()) return;
-  char buf[24] = {};
+  char buf[PLACE_FILE_MAX] = {};
   const int n = f.read((uint8_t*)buf, sizeof(buf) - 1);
   f.close();
   if (n > 0) parsePlace(buf, n, m);
