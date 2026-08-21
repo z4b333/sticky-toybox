@@ -443,6 +443,16 @@ static void checkCornerClock(const char* what) {
   printf("options clock ok (%s: %d px set, none unset)\n", what, lit);
 }
 
+// The firmware's end of the clock hook, which on the device writes the RTC.
+// Here it records what arrived, so a guard can check the NUMBER rather than
+// the screen that follows it: a page that says "the clock is set" while the
+// hook never fired is exactly the bug worth catching.
+static int64_t g_clockSetMs = 0;
+static void hostSetClockFromPhone(int64_t localEpochMs) {
+  g_clockSetMs = localEpochMs;
+  sensors::hostSetClock(true);
+}
+
 // Tap a tool without emitting a frame for every intermediate state.
 static void quietTap(int x, int y) {
   g_dumpEnabled = false;
@@ -456,6 +466,7 @@ int main() {
   toybox.begin(stickyHost);
   lock::apply(prefs);
   lock::setInfoHook(hostLockInfo);
+  clockset::hook(hostSetClockFromPhone);
   prefs.putInt("w_games", 12);
   prefs.putInt("w_wins", 10);
   prefs.putInt("w_streak", 4);
@@ -959,6 +970,94 @@ int main() {
     toybox.hostHub().goHome();
     g_dumpEnabled = true;
     printf("files over wifi ok (one claim per burst, handed back, paths refused)\n");
+  }
+
+  // --- setting the clock from a phone ---------------------------------------
+  // The device has no network time. Until now the only way to set its clock
+  // was to send it a NOTE -- the notes page posts the phone's local time
+  // alongside the text -- which nobody could be expected to guess. This is the
+  // same handover as a page of its own, so the guard is that the row exists,
+  // says what the device believes before it is tapped, and that the number
+  // reaches the firmware's hook rather than merely lighting up a screen.
+  {
+    g_dumpEnabled = false;
+    toybox.goHub();
+    toybox.hostHub().goHome();
+
+    // A device that has never been told the time says so, in the row.
+    sensors::hostSetClock(false);
+    g_clockSetMs = 0;
+    toybox.openSettings();
+    g_dumpEnabled = true;
+    setScreen("settings_clock_unset");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+
+    tapRect(setui::actionRect(setui::ACT_CLOCK));
+    if (toybox.hostSettings().hostPage() != 6) {
+      printf("CLOCK FAIL: the row did not open the clock page\n");
+      abort();
+    }
+    auto& cs = toybox.hostSettings().hostClock();
+    g_dumpEnabled = true;
+    setScreen("settings_clock");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+
+    if (!toybox.wantsTick()) {
+      printf("CLOCK FAIL: settings did not ask for ticks while serving\n");
+      abort();
+    }
+    toybox.tick();  // a phone joins: step one becomes step two
+    if (!cs.hasClient()) {
+      printf("CLOCK FAIL: no phone joined\n");
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("settings_clock_joined");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+
+    // The phone's page sends by itself. Nothing is pressed here on purpose:
+    // if this ever needs a tap, this guard stops passing.
+    for (int i = 0; i < 4 && !cs.wasSet(); i++) toybox.tick();
+    if (!cs.wasSet() || g_clockSetMs == 0) {
+      printf("CLOCK FAIL: the page reached %s, the hook got %lld\n",
+             cs.wasSet() ? "set" : "unset", (long long)g_clockSetMs);
+      abort();
+    }
+    // The number is a local wall-clock in milliseconds, not seconds and not
+    // UTC-with-an-offset-still-to-apply: 09:41 on the phone must arrive as
+    // 09:41. Checked against the epoch rather than the RTC, because the host
+    // has no RTC to read it back from.
+    const int64_t mins = (g_clockSetMs / 60000) % (24 * 60);
+    if (mins != 9 * 60 + 41) {
+      printf("CLOCK FAIL: the phone's 09:41 arrived as %02d:%02d\n", (int)(mins / 60),
+             (int)(mins % 60));
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("settings_clock_set");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+
+    // DONE leaves, and the access point must not outlive the screen -- the
+    // same rule the files page has, and the same way of getting it wrong.
+    tapRect(setui::clockDoneRect());
+    if (toybox.hostSettings().hostPage() != 0 || cs.hasClient()) {
+      printf("CLOCK FAIL: DONE did not close the session\n");
+      abort();
+    }
+    tapRect(setui::actionRect(setui::ACT_CLOCK));
+    toybox.goHub();
+    if (toybox.hostSettings().hostClock().hasClient()) {
+      printf("CLOCK FAIL: the access point outlived settings\n");
+      abort();
+    }
+    toybox.hostHub().goHome();
+    sensors::hostSetClock(true);  // back to 09:41 for every shot after this
+    g_dumpEnabled = true;
+    printf("clock from phone ok (row reads it, page sets it, ap closes)\n");
   }
 
   // --- the book reader ------------------------------------------------------

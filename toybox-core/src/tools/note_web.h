@@ -7,16 +7,11 @@
 // it runs on-device, which matters because this access point has no internet.
 #pragma once
 #include "lock_image.h"
+#include "clock_set.h"
 #include "note_store.h"
 #include "portal.h"
 
 namespace nweb {
-
-// Set by the firmware if it has a real-time clock. Takes milliseconds since the
-// Unix epoch, already shifted to the phone's local time.
-using SetClockFn = void (*)(int64_t localEpochMs);
-inline SetClockFn g_setClock = nullptr;
-inline void setClockHook(SetClockFn fn) { g_setClock = fn; }
 
 #ifdef TOYBOX_HOST
 
@@ -175,7 +170,7 @@ class NoteServer {
     // The phone posts its local clock alongside the note. The device has no
     // network time and no way to ask the user, so this is the one moment it can
     // learn what time it is -- free, and exactly when someone is already here.
-    if (s.hasArg("t") && nweb::g_setClock) nweb::g_setClock(atoll(s.arg("t").c_str()));
+    if (s.hasArg("t")) clockset::apply(atoll(s.arg("t").c_str()));
     char clean[note::NAME_LEN + 1];
     note::sanitizeName(name.c_str(), clean);
     note::save(clean, data.c_str(), data.length());

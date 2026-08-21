@@ -114,6 +114,11 @@ inline void draw(ToolsCanvas& c, int act, int cx, int cy, bool dark) {
       c.fillRect(cx + 5, cy - 4, 2, 8, dark);
       c.fillRect(cx + 10, cy - 8, 2, 16, dark);
       break;
+    case ACT_CLOCK:  // a clock face, hands at ten past ten
+      c.drawCircle(cx, cy, 14, 2, dark);
+      c.drawLine(cx, cy, cx, cy - 8, 2, dark);
+      c.drawLine(cx, cy, cx + 6, cy + 3, 2, dark);
+      break;
     case ACT_CARDS:  // the "?" the how-to cards wear
       c.drawCircle(cx, cy, 14, 2, dark);
       c.textInBox(cx - 10, cy - 11, 20, 22, "?", TS_SMALL, dark, true);
@@ -144,6 +149,7 @@ void SettingsScreen::enter() {
 bool SettingsScreen::back() {
   if (_page == 0) return false;
   leaveFiles();  // no-op unless the files page was the one being left
+  leaveClock();  // ditto for the clock page's access point
   // The picture list was opened from the lock screen page, so it goes back
   // there rather than all the way out; every other page came from the top.
   _page = _page == 5 ? 1 : 0;
@@ -160,9 +166,27 @@ void SettingsScreen::leaveFiles() {
   _filesSawClient = false;
 }
 
-void SettingsScreen::leave() { leaveFiles(); }
+void SettingsScreen::leave() {
+  leaveFiles();
+  leaveClock();
+}
 
 bool SettingsScreen::tick(ToolsHost& host) {
+  if (_page == 6) {
+    if (!_clockOk) return false;
+    _clock.loop();
+    // Two repaints, both of which the screen learns about rather than causes:
+    // a phone joining (step one becomes step two), and the time arriving.
+    if (!_clockSawSet && _clock.wasSet()) {
+      _clockSawSet = true;
+      return true;
+    }
+    if (!_clockSawClient && _clock.hasClient()) {
+      _clockSawClient = true;
+      return true;
+    }
+    return false;
+  }
   if (_page != 4 || !_filesOk) return false;
   _files.loop();
   // Two things ask for a repaint: the first phone joining (step one becomes
@@ -509,6 +533,82 @@ void SettingsScreen::renderFiles(ToolsHost& host, ToolsCanvas& c) {
   c.button(d.x, d.y, d.w, d.h, "DONE", false, TS_LARGE);
 }
 
+// --- the clock page -----------------------------------------------------------
+// The same two pairing steps as the files page, because it is the same act,
+// and then a third state the files page has no equivalent of: the phone's page
+// sends the time by itself on load, so the device can say what it now believes
+// without anybody pressing anything.
+void SettingsScreen::renderClock(ToolsHost& host, ToolsCanvas& c) {
+  using namespace setui;
+  drawTopBar(c, "CLOCK");
+  char buf[72];
+
+  if (!_clockOk) {
+    c.textCentered(SCREEN_W / 2, 320, "could not start wifi", TS_LARGE, true, true);
+    const TRect d = clockDoneRect();
+    c.button(d.x, d.y, d.w, d.h, "BACK", true, TS_LARGE);
+    return;
+  }
+
+  if (_clock.wasSet()) {
+    c.textCentered(SCREEN_W / 2, 120, "THE CLOCK IS SET", TS_MED, true, true);
+    int hh = 0, mm = 0;
+    if (host.clockHHMM(hh, mm)) {
+      snprintf(buf, sizeof(buf), "%02d:%02d", hh, mm);
+      c.textCentered(SCREEN_W / 2, 220, buf, TS_HUGE, true, true);
+    }
+    c.textCentered(SCREEN_W / 2, 340, "from the phone that just joined", TS_MED, true);
+    c.fillRect(48, 400, SCREEN_W - 96, 1, true);
+    c.textCentered(SCREEN_W / 2, 430, "The device keeps the digits, not the", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, 458, "timezone. Somewhere else one day?", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, 486, "Come back here and send again.", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, CLOCK_BIG_Y, "it keeps time on its own from now on,", TS_SMALL,
+                   true);
+    c.textCentered(SCREEN_W / 2, CLOCK_BIG_Y + 28, "through reboots and reflashes", TS_SMALL, true);
+  } else if (!_clock.hasClient()) {
+    c.textCentered(SCREEN_W / 2, 64, "STEP 1 OF 2", TS_MED, true, true);
+    c.textCentered(SCREEN_W / 2, 96, "join the device's wifi", TS_MED, true);
+    const String wifi = _clock.wifiPayload();
+    fqr::draw(c, FILES_QR_X, FILES_QR_Y, FILES_QR, wifi.c_str());
+    c.textCentered(SCREEN_W / 2, 420, "Scan with your phone camera", TS_MED, true, true);
+    snprintf(buf, sizeof(buf), "%s   key %s", _clock.ssid(), _clock.password());
+    c.textCentered(SCREEN_W / 2, 456, buf, TS_MED, true);
+    c.textCentered(SCREEN_W / 2, 492, "this code joins the wifi, nothing more", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, CLOCK_BIG_Y, "the phone sends the time by itself", TS_SMALL, true);
+  } else {
+    c.textCentered(SCREEN_W / 2, 64, "STEP 2 OF 2", TS_MED, true, true);
+    c.textCentered(SCREEN_W / 2, 96, "phone joined", TS_MED, true);
+    fqr::draw(c, FILES_QR_X, FILES_QR_Y, FILES_QR, _clock.url());
+    c.textCentered(SCREEN_W / 2, 420, "The page should have opened by itself", TS_MED, true);
+    c.textCentered(SCREEN_W / 2, 448, "and sent the time. If not, scan this:", TS_MED, true);
+    c.textCentered(SCREEN_W / 2, 484, _clock.url(), TS_MED, true, true);
+  }
+
+  const TRect d = clockDoneRect();
+  c.button(d.x, d.y, d.w, d.h, "DONE", false, TS_LARGE);
+}
+
+bool SettingsScreen::tapClock(ToolsHost& host, int x, int y) {
+  if (setui::clockDoneRect().hit(x, y)) {
+    leaveClock();
+    _page = 0;
+    host.beep(1);
+    host.refresh(true);  // the page was mostly QR; a difference of one is worse
+    return false;
+  }
+  return false;
+}
+
+// Both ways out of the clock page go through here: the access point comes down
+// with the screen that raised it, never after.
+void SettingsScreen::leaveClock() {
+  if (!_clockOk) return;
+  _clock.stop();
+  _clockOk = false;
+  _clockSawClient = false;
+  _clockSawSet = false;
+}
+
 bool SettingsScreen::tapFiles(ToolsHost& host, int x, int y) {
   if (setui::filesDoneRect().hit(x, y)) {
     leaveFiles();
@@ -539,6 +639,10 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
     renderFiles(host, c);
     return;
   }
+  if (_page == 6) {
+    renderClock(host, c);
+    return;
+  }
   if (_page == 3) {
     renderApps(host, c);
     return;
@@ -550,7 +654,7 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
   // rects come from -- so a row cannot move without its heading following.
   {
     static const char* kHeads[5] = {"LOOK", "APPS", "PHONE", "DEVICE", "EXTRAS"};
-    static const int kFirstRow[5] = {0, 2, 3, 4, 5};
+    static const int kFirstRow[5] = {0, 2, 3, 5, 6};
     for (int k = 0; k < 5; k++) {
       const int y = ROOT_Y0 + kFirstRow[k] * BTN_STEP + (k + 1) * ROOT_HEAD - 28;
       c.textTracked(BTN_X, y, kHeads[k], TS_SMALL, true, false, 1);
@@ -562,6 +666,16 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
   // answers before it is asked. A chevron on the rows that open pages.
   char apps[16];
   snprintf(apps, sizeof(apps), "%d shown", appvis::shown());
+  // The clock row answers the question it exists for before it is tapped: the
+  // time the device believes, or that it has never been told one.
+  char clockV[12];
+  {
+    int hh = 0, mm = 0;
+    if (host.clockHHMM(hh, mm))
+      snprintf(clockV, sizeof(clockV), "%02d:%02d", hh, mm);
+    else
+      snprintf(clockV, sizeof(clockV), "not set");
+  }
   const char* sound = soundLabel(host);
   const char* soundV = strchr(sound, ' ') ? strchr(sound, ' ') + 1 : sound;
   struct Row {
@@ -575,6 +689,7 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
       {ACT_LOCK, "Lock screen", emptyLabelSmall(lock::config().empty), true},
       {ACT_APPS, "Apps on the hub", apps, true},
       {ACT_FILES, "Files over WiFi", "", true},
+      {ACT_CLOCK, "Clock", clockV, true},
       {ACT_SOUND, "Sound", soundV, false},
       {ACT_CARDS, "Show the how-to cards again", "", false},
       {ACT_RESET, _armed ? "Tap again to erase scores" : "Reset stats and tallies", "", false},
@@ -846,6 +961,7 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
   if (_page == 5) return tapLockPic(host, x, y);
   if (_page == 3) return tapApps(host, x, y);
   if (_page == 4) return tapFiles(host, x, y);
+  if (_page == 6) return tapClock(host, x, y);
 
   // Any tap that is not the reset takes the confirm back down, so an armed
   // button never survives long enough to be pressed by accident later.
@@ -885,6 +1001,18 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
     _page = 4;
     // Full, not differential: a QR code with the last screen ghosted through
     // it is a QR code a camera may refuse, and this page is mostly QR.
+    host.refresh(true);
+    return false;
+  }
+
+  if (actionRect(ACT_CLOCK).hit(x, y)) {
+    host.beep(1);
+    _clockOk = _clock.start();
+    _clockSawClient = false;
+    _clockSawSet = false;
+    _page = 6;
+    // Full, for the same reason the files page is: a QR code with the last
+    // screen ghosted through it is one a camera may refuse.
     host.refresh(true);
     return false;
   }

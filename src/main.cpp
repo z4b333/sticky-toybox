@@ -511,7 +511,7 @@ void setup() {
   // them the two functions that do.
   lock::apply(prefs);
   lock::setInfoHook(fillLockInfo);
-  nweb::setClockHook(setClockFromPhone);
+  clockset::hook(setClockFromPhone);
   TB_LOG("storage: %s\n", tfs::begin() ? "mounted" : "MOUNT FAILED");
 
   toybox.begin(stickyHost);

@@ -2,6 +2,7 @@
 // back the way they were.
 #pragma once
 #include "chrome.h"
+#include "tools/clock_web.h"
 #include "tools/files_web.h"
 #include "tools/lockscreen.h"
 
@@ -13,8 +14,12 @@ namespace setui {
 // glance instead of hiding every state behind a tap. Rows that open a page
 // carry a chevron; rows that act in place do not. 60 px rows at a 68 px
 // step, over the 7 mm a fingertip wants.
+// ROOT_HEAD was 36 while there were seven rows. The eighth (the clock) needs
+// the height back, and a heading's own ink is 28 px, so the four that came out
+// of the four gaps are four the page was not using. The rows themselves keep
+// their 60 over a 68 step -- the thing a thumb actually aims at is untouched.
 inline constexpr int BTN_X = 16, BTN_W = SCREEN_W - 32, BTN_H = 60, BTN_STEP = 68;
-inline constexpr int ROOT_Y0 = 64, ROOT_HEAD = 36;
+inline constexpr int ROOT_Y0 = 64, ROOT_HEAD = 32;
 enum Action : int {
   ACT_APPS,
   ACT_WALL,
@@ -23,14 +28,17 @@ enum Action : int {
   ACT_SOUND,
   ACT_CARDS,
   ACT_RESET,
+  ACT_CLOCK,
   ACT_COUNT
 };
 // Visual order groups the rows by what they are about (LOOK first -- the
 // rows people come for); the enum order stays put so nothing that aims at a
-// row by name has to care where it sits.
-inline constexpr int ROOT_POS[ACT_COUNT] = {2, 0, 1, 3, 4, 5, 6};
+// row by name has to care where it sits. The clock sits under Files over
+// WiFi, because both are the same sentence to the person doing them: get the
+// phone out. It is last in the enum and fourth on the screen.
+inline constexpr int ROOT_POS[ACT_COUNT] = {2, 0, 1, 3, 5, 6, 7, 4};
 // How many group headings sit above each visual row.
-inline constexpr int ROOT_HEADS[ACT_COUNT] = {1, 1, 2, 3, 4, 5, 5};
+inline constexpr int ROOT_HEADS[ACT_COUNT] = {1, 1, 2, 3, 3, 4, 5, 5};
 inline TRect actionRect(int i) {
   const int r = ROOT_POS[i];
   return TRect{BTN_X, ROOT_Y0 + r * BTN_STEP + ROOT_HEADS[r] * ROOT_HEAD, BTN_W, BTN_H};
@@ -42,6 +50,13 @@ inline TRect actionRect(int i) {
 // holds the display's bus.
 inline constexpr int FILES_QR = 240, FILES_QR_X = (SCREEN_W - FILES_QR) / 2, FILES_QR_Y = 150;
 inline TRect filesDoneRect() { return TRect{16, 700, SCREEN_W - 32, 60}; }
+
+// The clock page: the same two pairing steps as the files page, at the same
+// coordinates, because it is the same act. What differs is the end -- the
+// phone sends one number by itself, and the device answers with the time it
+// now believes, in digits big enough to check from arm's length.
+inline constexpr int CLOCK_BIG_Y = 560;
+inline TRect clockDoneRect() { return filesDoneRect(); }
 
 // The wallpaper and lock-picture pages: what is on the device now -- shown
 // as the picture itself, a 1:5 miniature, beside its name and its REMOVE --
@@ -150,7 +165,7 @@ class SettingsScreen {
   // The files page runs a web server, so settings needs loop time -- the only
   // page here that does. Returns true when the screen wants repainting after
   // the tick (the card was let go and the summary has changed).
-  bool wantsTick() const { return _page == 4; }
+  bool wantsTick() const { return _page == 4 || _page == 6; }
   bool tick(ToolsHost& host);
 
 #ifdef TOYBOX_HOST
@@ -161,6 +176,7 @@ class SettingsScreen {
   }
   int hostPage() const { return _page; }
   fweb::FilesServer& hostFiles() { return _files; }
+  cweb::ClockServer& hostClock() { return _clock; }
 #endif
 
  private:
@@ -176,6 +192,9 @@ class SettingsScreen {
   void renderFiles(ToolsHost& host, ToolsCanvas& c);
   bool tapFiles(ToolsHost& host, int x, int y);
   void leaveFiles();
+  void renderClock(ToolsHost& host, ToolsCanvas& c);
+  bool tapClock(ToolsHost& host, int x, int y);
+  void leaveClock();
 
   // Erasing every score on the device deserves a second tap, not a second
   // screen: the button asks, and any other tap takes the question away.
@@ -183,7 +202,7 @@ class SettingsScreen {
   const char* _note = nullptr;
   char _coverNote[96] = {};
   // 0 = settings, 1 = lock, 2 = wallpaper, 3 = apps, 4 = files,
-  // 5 = the lock screen's picture, off the card
+  // 5 = the lock screen's picture, off the card, 6 = the clock
   uint8_t _page = 0;
   lock::Config _lock;
   // The card's offerings, read once on entering the page: the card is powered
@@ -197,4 +216,11 @@ class SettingsScreen {
   fweb::FilesServer _files;
   bool _filesOk = false;
   bool _filesSawClient = false;
+  // The clock page's access point, on the same terms. Two access points are
+  // never up at once: both pages are reached from the root and every way out
+  // of one goes through its own stop().
+  cweb::ClockServer _clock;
+  bool _clockOk = false;
+  bool _clockSawClient = false;
+  bool _clockSawSet = false;
 };
