@@ -250,13 +250,27 @@ void blitIntl(const IntlFace* f, const IntlGlyph* g, int x, int y, uint8_t color
 // Latin-only font.
 struct CardFace {
   cpfont::Font font;
-  uint8_t* blob = nullptr;  // owned; freed when the face is replaced
+  uint8_t* blob = nullptr;  // freed when the face is replaced, if owned
+  bool owns = false;        // false when a neighbouring box shares these bytes
   int box = 0;              // the Toybox line box this file serves
   bool live = false;
 };
 constexpr int CARD_BOXES = 4;
 constexpr int CARD_BOX_PX[CARD_BOXES] = {18, 24, 32, 44};
-CardFace g_card[CARD_BOXES];
+
+// Two sets, because the device has two kinds of text. The UNIVERSAL face is
+// the firmware's own -- menus, labels, the hub, every screen that is Toybox
+// talking. The CONTENT face belongs to whatever app is open and covers what
+// the owner put there: the book, the note, the card, the recipe.
+//
+// Keeping them apart is what lets somebody read a novel in a serif without
+// their settings page changing clothes, and it is why an app can be given a
+// face of its own at all. Content wins while an app has it turned on; the
+// moment it is off -- which is every screen the firmware draws for itself --
+// the universal face answers.
+CardFace g_ui[CARD_BOXES];
+CardFace g_content[CARD_BOXES];
+bool g_contentOn = false;
 
 int cardSlot(int px) {
   for (int i = 0; i < CARD_BOXES; i++)
@@ -329,7 +343,8 @@ struct CardHit {
 };
 
 bool cardFind(int px, bool bold, bool italic, uint32_t cp, CardHit& out) {
-  const CardFace& c = g_card[cardSlot(px)];
+  const int slot = cardSlot(px);
+  const CardFace& c = (g_contentOn && g_content[slot].live) ? g_content[slot] : g_ui[slot];
   if (!c.live) return false;
   const int idx = cardCut(c.font, bold, italic);
   if (idx < 0) return false;
@@ -362,13 +377,14 @@ int intlAdvance(int px, uint32_t cp) {
 // layer that owns them (cardfonts.h), which reads a file whole and hands the
 // bytes over. Ownership passes here -- the bytes must outlive every glyph
 // drawn from them, and a face replaced frees the one it replaced.
-bool cardFaceSet(int px, uint8_t* blob, uint32_t len) {
+bool cardFaceSet(int px, uint8_t* blob, uint32_t len, bool content, bool owns) {
   const int slot = cardSlot(px);
-  CardFace& c = g_card[slot];
+  CardFace& c = (content ? g_content : g_ui)[slot];
   cpfont::Font parsed;
   if (blob && !parsed.open(blob, len)) return false;  // the old face stays put
-  if (c.blob) free(c.blob);
+  if (c.blob && c.owns) free(c.blob);
   c.blob = blob;
+  c.owns = owns;
   c.box = CARD_BOX_PX[slot];
   if (!blob) {
     c.live = false;
@@ -380,20 +396,23 @@ bool cardFaceSet(int px, uint8_t* blob, uint32_t len) {
   return true;
 }
 
-void cardFaceClear() {
-  for (int i = 0; i < CARD_BOXES; i++) cardFaceSet(CARD_BOX_PX[i], nullptr, 0);
+void cardFaceClear(bool content) {
+  for (int i = 0; i < CARD_BOXES; i++) cardFaceSet(CARD_BOX_PX[i], nullptr, 0, content, false);
 }
 
-bool cardFaceLive() {
-  for (const CardFace& c : g_card)
+bool cardFaceLive(bool content) {
+  for (const CardFace& c : (content ? g_content : g_ui))
     if (c.live) return true;
   return false;
 }
 
-int cardFaceLine(int px) {
-  const CardFace& c = g_card[cardSlot(px)];
+int cardFaceLine(int px, bool content) {
+  const CardFace& c = (content ? g_content : g_ui)[cardSlot(px)];
   return c.live ? c.font.style(0).advanceY : 0;
 }
+
+void contentFace(bool on) { g_contentOn = on; }
+bool contentFaceOn() { return g_contentOn; }
 
 void setTypeface(int n) { g_typeface = (n < 0 || n > 1) ? 0 : n; }
 int typeface() { return g_typeface; }
@@ -511,7 +530,10 @@ void textInk(const char* s, int scale, bool bold, int spacing, int& left, int& r
   // into a box, so the box-relative measurement below does not describe them.
   // Reporting no slack is the honest answer: centring falls back to the box,
   // which is where it started before this refinement existed.
-  if (g_card[cardSlot(scale)].live) return;
+  {
+    const int slot = cardSlot(scale);
+    if ((g_contentOn && g_content[slot].live) || g_ui[slot].live) return;
+  }
   const UiFont* f = faceFor(scale, bold);
   const int h = f->height;
 

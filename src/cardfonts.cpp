@@ -15,7 +15,8 @@
 namespace cardfonts {
 namespace {
 
-char g_family[32] = "";
+char g_universal[32] = "";
+char g_content[32] = "";
 
 // The boxes Toybox draws in, and the order they are filled. Every one that
 // finds no reasonable file is simply left baked, which is why a family that
@@ -88,7 +89,8 @@ int families(char names[][32], int max) {
   return n;
 }
 
-bool use(const char* family) {
+namespace {
+bool load(const char* family, bool content) {
   if (!family || !family[0]) return false;
   if (!sdcard::browseOpen()) return false;
 
@@ -111,17 +113,19 @@ bool use(const char* family) {
   // it happens is a card pulled out halfway through.
   uint8_t* blobs[4] = {};
   uint32_t sizes[4] = {};
+  bool ownsBlob[4] = {};
   bool any = false;
   int loadedFrom[4] = {-1, -1, -1, -1};
   for (int b = 0; b < 4; b++) {
     const int pick = pickFor(BOXES[b], files, n, lines);
     if (pick < 0) continue;
-    // The same file often wins two neighbouring boxes; read it once.
+    // The same file often wins two neighbouring boxes -- 8 pt suits both the
+    // 18 and the 24 px box on most faces. Read once, shared, freed once.
     for (int prev = 0; prev < b; prev++) {
       if (loadedFrom[prev] == pick && blobs[prev]) {
+        blobs[b] = blobs[prev];
         sizes[b] = sizes[prev];
-        blobs[b] = bigAlloc(sizes[b]);
-        if (blobs[b]) memcpy(blobs[b], blobs[prev], sizes[b]);
+        ownsBlob[b] = false;
         loadedFrom[b] = pick;
         break;
       }
@@ -141,33 +145,49 @@ bool use(const char* family) {
     }
     blobs[b] = blob;
     sizes[b] = (uint32_t)size;
+    ownsBlob[b] = true;
     loadedFrom[b] = pick;
     any = true;
   }
   sdcard::browseClose();
 
   if (!any) {
-    for (uint8_t* b : blobs) free(b);
+    for (int b = 0; b < 4; b++)
+      if (ownsBlob[b]) free(blobs[b]);
     return false;
   }
 
   // Install, and let gfx refuse anything that is not a font it can read. Only
   // now is the old family let go.
-  none();
+  gfx::cardFaceClear(content);
   for (int b = 0; b < 4; b++) {
     if (!blobs[b]) continue;
-    if (!gfx::cardFaceSet(BOXES[b], blobs[b], sizes[b])) free(blobs[b]);
+    // Whoever read the file owns the bytes; a box that shares them does not
+    // free them. One file often wins two neighbouring boxes, and freeing it
+    // twice is the kind of crash that only happens on somebody else's card.
+    const bool owns = ownsBlob[b];
+    if (!gfx::cardFaceSet(BOXES[b], blobs[b], sizes[b], content, owns) && owns) free(blobs[b]);
   }
-  if (!gfx::cardFaceLive()) return false;
-  snprintf(g_family, sizeof(g_family), "%s", family);
+  if (!gfx::cardFaceLive(content)) return false;
+  snprintf(content ? g_content : g_universal, 32, "%s", family);
   return true;
 }
+}  // namespace
 
-void none() {
-  gfx::cardFaceClear();
-  g_family[0] = 0;
+bool useUniversal(const char* family) { return load(family, false); }
+bool useContent(const char* family) { return load(family, true); }
+
+void noneUniversal() {
+  gfx::cardFaceClear(false);
+  g_universal[0] = 0;
 }
 
-const char* chosen() { return g_family; }
+void noneContent() {
+  gfx::cardFaceClear(true);
+  g_content[0] = 0;
+}
+
+const char* universal() { return g_universal; }
+const char* content() { return g_content; }
 
 }  // namespace cardfonts

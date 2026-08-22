@@ -48,12 +48,25 @@ void drawButton(int x, int y, int w, int h, const char* label, int scale, bool f
 // A card face answers before the baked tables for every codepoint it carries,
 // and falls through for the ones it does not -- which is what keeps Thai
 // drawing under a Latin-only font.
-bool cardFaceSet(int px, uint8_t* blob, uint32_t len);
-void cardFaceClear();
-bool cardFaceLive();
+// There are two sets. The UNIVERSAL face is the firmware's own -- menus,
+// labels, the hub, every screen that is Toybox talking. The CONTENT face
+// belongs to whatever app is open and covers what the owner put there: the
+// book, the note, the card, the recipe. `content` picks which set is meant.
+//
+// `owns` is false when a neighbouring box shares the same bytes, which happens
+// whenever one file is the best answer for two boxes. Exactly one box frees
+// them.
+bool cardFaceSet(int px, uint8_t* blob, uint32_t len, bool content, bool owns);
+void cardFaceClear(bool content);
+bool cardFaceLive(bool content);
 // The line box the loaded file was cut for, or 0. The chooser uses it to pick
 // which of a family's sizes belongs in which box.
-int cardFaceLine(int px);
+int cardFaceLine(int px, bool content);
+
+// An app turns the content face on around the owner's words and off again.
+// Off is the default and the state every firmware screen draws in.
+void contentFace(bool on);
+bool contentFaceOn();
 
 // Loads every *.tfp font pack under /fonts into PSRAM and registers its faces
 // behind the baked tables (full Chinese / Korean / Japanese coverage; see

@@ -562,7 +562,7 @@ static void checkCardFace() {
 
   uint8_t* owned = (uint8_t*)malloc(blob.size());
   memcpy(owned, blob.data(), blob.size());
-  if (!gfx::cardFaceSet(18, owned, (uint32_t)blob.size()) || !gfx::cardFaceLive()) {
+  if (!gfx::cardFaceSet(18, owned, (uint32_t)blob.size(), false, true) || !gfx::cardFaceLive(false)) {
     printf("CARD FONT FAIL: the fixture would not install\n");
     abort();
   }
@@ -611,13 +611,13 @@ static void checkCardFace() {
   // not the same as "it looks like a font".
   {
     epd.clear(true);
-    gfx::cardFaceClear();
+    gfx::cardFaceClear(false);
     gfx::drawText(20, 40, "The baked face, DejaVu Sans", 18, 0);
     gfx::drawText(20, 70, kLine, 18, 0);
     gfx::drawText(20, 100, kThai, 18, 0);
     uint8_t* again = (uint8_t*)malloc(blob.size());
     memcpy(again, blob.data(), blob.size());
-    gfx::cardFaceSet(18, again, (uint32_t)blob.size());
+    gfx::cardFaceSet(18, again, (uint32_t)blob.size(), false, true);
     gfx::drawText(20, 160, "The card face, off a .cpfont", 18, 0);
     gfx::drawText(20, 190, kLine, 18, 0);
     gfx::drawText(20, 220, kThai, 18, 0);
@@ -626,8 +626,8 @@ static void checkCardFace() {
     epd.displayFull();
   }
 
-  gfx::cardFaceClear();
-  if (gfx::cardFaceLive() || gfx::textWidth(kLine, 18, false, 0) != bakedWidth) {
+  gfx::cardFaceClear(false);
+  if (gfx::cardFaceLive(false) || gfx::textWidth(kLine, 18, false, 0) != bakedWidth) {
     printf("CARD FONT FAIL: clearing the face did not put the baked one back\n");
     abort();
   }
@@ -684,7 +684,7 @@ static void checkCardFamily() {
     abort();
   }
 
-  if (!cardfonts::use("DejaVuSerif") || strcmp(cardfonts::chosen(), "DejaVuSerif") != 0) {
+  if (!cardfonts::useUniversal("DejaVuSerif") || strcmp(cardfonts::universal(), "DejaVuSerif") != 0) {
     printf("CARD FAMILY FAIL: the family would not load\n");
     abort();
   }
@@ -693,7 +693,7 @@ static void checkCardFamily() {
   // colliding; 32 takes the 29 and 44 takes the 44.
   struct { int box, want; } expect[] = {{18, 19}, {24, 19}, {32, 29}, {44, 44}};
   for (auto& e : expect) {
-    const int got = gfx::cardFaceLine(e.box);
+    const int got = gfx::cardFaceLine(e.box, false);
     if (got != e.want) {
       printf("CARD FAMILY FAIL: the %d px box got a %d px line, wanted %d\n", e.box, got, e.want);
       abort();
@@ -702,17 +702,55 @@ static void checkCardFamily() {
 
   // A family that is not there changes nothing -- the face that was working a
   // moment ago is still the face.
-  if (cardfonts::use("NoSuchFamily") || strcmp(cardfonts::chosen(), "DejaVuSerif") != 0) {
+  if (cardfonts::useUniversal("NoSuchFamily") || strcmp(cardfonts::universal(), "DejaVuSerif") != 0) {
     printf("CARD FAMILY FAIL: a missing family disturbed the loaded one\n");
     abort();
   }
 
-  cardfonts::none();
-  if (gfx::cardFaceLive() || cardfonts::chosen()[0]) {
+  // Two faces at once: the firmware's own, and one app's. The whole point is
+  // that they do not leak into each other -- a novel in a serif must not put
+  // the settings page in a serif too, and the app's face must vanish the
+  // moment the app stops asking for it.
+  {
+    std::vector<uint8_t> sans;
+    if (!readFixture(sans)) abort();
+    sdcard::hostPutCardFile("/.fonts/DejaVuSans/DejaVuSans_8.cpfont", sans.data(),
+                            (int)sans.size());
+    if (!cardfonts::useContent("DejaVuSans") ||
+        strcmp(cardfonts::content(), "DejaVuSans") != 0) {
+      printf("CARD FAMILY FAIL: the content family would not load\n");
+      abort();
+    }
+    const char* kLine = "Hamburgefonstiv";
+    gfx::contentFace(false);
+    const int uiWidth = gfx::textWidth(kLine, 18, false, 0);
+    gfx::contentFace(true);
+    const int appWidth = gfx::textWidth(kLine, 18, false, 0);
+    gfx::contentFace(false);
+    const int backAgain = gfx::textWidth(kLine, 18, false, 0);
+    if (uiWidth == appWidth || backAgain != uiWidth) {
+      printf("CARD FAMILY FAIL: ui %d, content %d, back to %d\n", uiWidth, appWidth, backAgain);
+      abort();
+    }
+    // Dropping the app's face leaves the firmware's alone. The other order --
+    // leaving an app and finding the menus in the book's font -- is the bug
+    // this separation exists to prevent.
+    cardfonts::noneContent();
+    gfx::contentFace(true);
+    const int afterDrop = gfx::textWidth(kLine, 18, false, 0);
+    gfx::contentFace(false);
+    if (afterDrop != uiWidth || cardfonts::content()[0] || !cardfonts::universal()[0]) {
+      printf("CARD FAMILY FAIL: dropping the app face disturbed the firmware's\n");
+      abort();
+    }
+  }
+
+  cardfonts::noneUniversal();
+  if (gfx::cardFaceLive(false) || cardfonts::universal()[0]) {
     printf("CARD FAMILY FAIL: the baked faces did not come back\n");
     abort();
   }
-  printf("card family ok (three sizes sorted into four boxes, empty folder ignored)\n");
+  printf("card family ok (three sizes into four boxes, and an app face that stays in its app)\n");
 }
 
 // The clock every options panel carries in the bar's far corner. It is drawn

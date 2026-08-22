@@ -31,12 +31,23 @@ int families(char names[][32], int max);
 // Load a family: read every size's header, pick one per box, read those whole
 // into PSRAM and install them. False leaves whatever was loaded before alone,
 // so a bad card cannot take away the face that was working a moment ago.
-bool use(const char* family);
+//
+// Two sets, for the device's two kinds of text. UNIVERSAL is the firmware's
+// own face -- menus, labels, the hub. CONTENT belongs to one app and covers
+// what the owner put there, so a novel can be read in a serif without the
+// settings page changing clothes.
+//
+// Only one content family is resident at a time: they are megabytes, and the
+// app that opens next wants its own. Leaving an app drops it.
+bool useUniversal(const char* family);
+bool useContent(const char* family);
 
 // Put the baked faces back and free the card's.
-void none();
+void noneUniversal();
+void noneContent();
 
 // The family currently drawn from, or "" for the baked faces.
-const char* chosen();
+const char* universal();
+const char* content();
 
 }  // namespace cardfonts
