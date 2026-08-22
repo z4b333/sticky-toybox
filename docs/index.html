@@ -382,6 +382,15 @@
       <div class="changes">
         <h3>What changed</h3>
         <dl>
+          <div><dt>1.0.5</dt><dd>The time now appears as soon as it is sent,
+            without the restart this device has always needed after an update
+            or a fresh install. Its clock chip refuses to be read until its
+            oscillator is genuinely running, which takes a moment after a
+            flash; the firmware used to ask once, get refused and show
+            nothing, and the time only surfaced on the next boot. It now waits
+            for the chip, says so honestly if the chip never starts, and the
+            service screen reports whether the clock is running rather than
+            only whether it answers.</dd></div>
           <div><dt>1.0.4</dt><dd>Settings has a <b>Clock</b> row, under PHONE.
             The device has no internet and takes the time from a phone; until
             now that only happened as a side effect of sending it a note, which
