@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Toybox · EPUB Slicer</title>
+<meta name="description" content="Prepare an EPUB's artwork for Toybox on the Seeed reTerminal Sticky: every illustration fitted, dithered and packed to 480x800 one-bit, entirely in your browser. The book is never uploaded.">
+<link rel="stylesheet" href="site.css">
+<style>
+  /* Page-local only; the frame, the type and the header live in site.css. */
+  .page { padding: 48px 24px 64px; max-width: 900px; }
+  h1 { font-size: clamp(30px, 3.4vw, 40px); }
+  .sub { margin: 12px 0 32px; max-width: 68ch; }
+
+  .drop {
+    border: 1.5px dashed var(--line-strong); border-radius: var(--radius);
+    background: var(--panel); padding: 44px 24px; text-align: center;
+    cursor: pointer; transition: border-color .15s, color .15s;
+  }
+  .drop:hover, .drop.hot { border-color: var(--fg); }
+  .drop b { display: block; font-size: 18px; font-weight: 640; letter-spacing: -0.01em; }
+  .drop span { color: var(--muted); font-size: 15px; }
+  .drop.busy { cursor: progress; }
+  input[type=file] { display: none; }
+
+  .opts {
+    display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center;
+    margin-top: 20px; padding: 16px 20px; font-size: 15px;
+    background: var(--panel); border: 1px solid var(--line);
+    border-radius: var(--radius);
+  }
+  .opts label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+  .opts select {
+    font: inherit; font-size: 15px; padding: 4px 8px; color: var(--fg);
+    background: var(--panel); border: 1px solid var(--line-strong); border-radius: 8px;
+  }
+
+  .bar {
+    height: 4px; background: var(--line); border-radius: 2px;
+    overflow: hidden; margin-top: 20px; display: none;
+  }
+  .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .12s; }
+
+  .log {
+    margin-top: 18px;
+    font: 13px/1.7 ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+    color: var(--muted); max-height: 320px; overflow: auto;
+  }
+  .log .bad { color: #b91c1c; }
+  .log .good { color: var(--fg); font-weight: 600; }
+
+  .done { margin-top: 22px; display: none; }
+  a.actbtn { display: inline-block; text-decoration: none; }
+
+  .after { margin-top: 56px; }
+  .after h2 { margin-bottom: 8px; }
+  .after > p { color: var(--muted); margin-bottom: 20px; }
+  .stamp { margin-top: 40px; font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+
+<header class="site-header">
+  <div class="inner">
+    <a class="mark" href="index.html" aria-label="Toybox">
+      <span>T</span><span>O</span><span>Y</span><span>B</span><span>O</span><span>X</span>
+    </a>
+    <nav class="site-nav">
+      <a href="index.html">Install</a>
+      <a href="wallpaper.html">Wallpapers</a>
+      <a href="editor.html">Notes &amp; cards</a>
+      <a href="recipe.html">Recipes</a>
+      <a href="slicer.html" aria-current="page">Slicer</a>
+      <a href="checklist.html">First-boot checklist</a>
+      <a href="https://github.com/z4b333/sticky-toybox">Source</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap page">
+
+    <p class="eyebrow">EPUB slicer</p>
+    <h1>Give your books their pictures back.</h1>
+    <p class="sub lede">Toybox reads EPUBs, but a novel's plates and chapter
+    headers arrive as a filename on an empty page — the device has a band of
+    RAM, not room to scale a 1200&times;1800 JPEG. Drop a book here and every
+    picture in it comes back fitted, dithered and packed for the panel. The
+    book never leaves this tab.</p>
+
+    <div class="drop" id="drop">
+      <b>Drop an EPUB here</b>
+      <span>or click to choose one</span>
+      <input type="file" id="file" accept=".epub,application/epub+zip">
+    </div>
+
+    <div class="opts">
+      <label><input type="checkbox" id="trim" checked> Trim borders</label>
+      <label><input type="checkbox" id="turn" checked> Turn wide plates</label>
+      <label>Dither
+        <select id="dither">
+          <option value="fs" selected>Floyd&ndash;Steinberg</option>
+          <option value="serpentine">Serpentine</option>
+          <option value="none">Threshold</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="bar" id="bar"><i id="fill"></i></div>
+    <div class="log" id="log"></div>
+    <div class="done" id="done"></div>
+
+    <div class="after">
+      <h2>What it does to the book</h2>
+      <p>Four steps per picture, in this order.</p>
+
+      <details>
+        <summary>1 &middot; Trims the border</summary>
+        <p>Plates ship with dead space: a scan margin, or a drawing centred on
+        a coloured field. The border colour is read off the outermost ring
+        rather than assumed to be white, so a plate bled to black is trimmed
+        too. It happens <em>before</em> fitting, so the scale is computed from
+        the art instead of the frame.</p>
+        <p><b>Except the cover.</b> The first picture in reading order is left
+        whole, because there the flat band is not dead space — it is the design
+        the title sits in. It is fitted, not cropped to fill: filling the panel
+        from a 2:3 cover cuts 5% off each side, which was enough to take the
+        end off the title and the whole illustrator credit on the book this was
+        measured against.</p>
+      </details>
+
+      <details>
+        <summary>2 &middot; Turns a wide plate sideways</summary>
+        <p>A 2.2:1 picture fitted upright into a 480&times;800 panel covers 27%
+        of the glass. Turned anticlockwise it covers 75%. Anything wider than
+        1.15:1 gets turned — the same direction a manga spread comes upright,
+        so everything you tilt the device for is tilted the same way.</p>
+      </details>
+
+      <details>
+        <summary>3 &middot; Fits it whole, never crops</summary>
+        <p>Lanczos down to fit inside 480&times;800, centred on white. A
+        wallpaper is cropped to fill because a letterboxed photo reads as a
+        mistake; a plate is not, because cropping one cuts the edges off the
+        drawing.</p>
+      </details>
+
+      <details>
+        <summary>4 &middot; Dithers to one bit</summary>
+        <p>Floyd&ndash;Steinberg by default. <b>Serpentine</b> reverses the
+        scan direction on every other row, which cancels the faint diagonal
+        worms raster order leaves in flat greys — measured on real pages, tone
+        error unchanged, directional bias down 29&times;. <b>Threshold</b> does
+        no diffusion at all, which is what you want for a page that is really
+        text: a scanned map, a table, a title plate.</p>
+      </details>
+
+      <details>
+        <summary>What comes out, and what it does not touch</summary>
+        <p>Each picture becomes a <code>toybox/&lt;path&gt;.tbi</code> entry:
+        480&times;800, one bit, 48,008 bytes, which the reader blits straight
+        to the panel. Your book's own text, pictures, order and metadata are
+        copied through byte for byte — the original compressed streams are
+        moved across without being unpacked — so the file still opens in any
+        other reader exactly as it did before.</p>
+        <p>SVG is skipped and says so: the device cannot draw one either.</p>
+      </details>
+
+      <details>
+        <summary>Is this the same as the desktop app?</summary>
+        <p>Byte for byte, yes, and that is tested rather than hoped for.
+        <a href="https://github.com/z4b333/Toybox-slicer">TOYBOX Slicer</a> is
+        the desktop version — it also does CBZ manga, wallpapers and cover
+        sidecars, which this page does not. Its test suite converts a book both
+        ways and compares every entry; the arithmetic here is a transcription
+        of Pillow's, down to the integer truncation, because a dither turns a
+        one-level difference into a flipped bit.</p>
+      </details>
+    </div>
+
+    <p class="stamp">Built from Toybox Slicer <code>v1.2.1</code>.</p>
+
+  </div>
+</main>
+
+<footer class="site-footer">
+  <div class="inner">
+    <span>Toybox for the Seeed reTerminal Sticky</span>
+    <a href="index.html">Web installer</a>
+    <a href="wallpaper.html">Wallpaper maker</a>
+    <a href="editor.html">Notes &amp; flashcards</a>
+    <a href="recipe.html">Recipe grabber</a>
+    <a href="slicer.html">EPUB slicer</a>
+    <a href="checklist.html">First-boot checklist</a>
+    <a href="https://github.com/z4b333/sticky-toybox">Source on GitHub</a>
+  </div>
+</footer>
+
+<script type="module">
+import { convertEpub } from "./slicer/convert.js";
+
+const $ = (id) => document.getElementById(id);
+const drop = $("drop"), file = $("file"), log = $("log"), done = $("done");
+const bar = $("bar"), fill = $("fill");
+let busy = false;
+
+function say(text, cls) {
+  const d = document.createElement("div");
+  if (cls) d.className = cls;
+  d.textContent = text;
+  log.appendChild(d);
+  log.scrollTop = log.scrollHeight;
+}
+
+drop.onclick = () => { if (!busy) file.click(); };
+file.onchange = () => { if (file.files[0]) go(file.files[0]); };
+for (const e of ["dragenter", "dragover"]) {
+  drop.addEventListener(e, (ev) => { ev.preventDefault(); drop.classList.add("hot"); });
+}
+for (const e of ["dragleave", "drop"]) {
+  drop.addEventListener(e, () => drop.classList.remove("hot"));
+}
+drop.addEventListener("drop", (ev) => {
+  ev.preventDefault();
+  const f = ev.dataTransfer.files[0];
+  if (f) go(f);
+});
+
+async function go(f) {
+  if (busy) return;
+  busy = true;
+  drop.classList.add("busy");
+  log.textContent = "";
+  done.textContent = "";
+  done.style.display = "none";
+  bar.style.display = "block";
+  fill.style.width = "0";
+
+  const size = f.size >= 1048576
+    ? (f.size / 1048576).toFixed(1) + " MB"
+    : Math.round(f.size / 1024) + " KB";
+  say(`${f.name} — ${size}`);
+
+  const t0 = performance.now();
+  try {
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    const opts = {
+      trim: $("trim").checked,
+      turn: $("turn").checked,
+      dither: $("dither").value,
+    };
+    const r = await convertEpub(bytes, opts, ({ done: n, total, name }) => {
+      fill.style.width = (100 * n / total) + "%";
+      if (n === 1 || n % 5 === 0 || n === total) say(`  ${n}/${total}  ${name}`);
+    });
+    const secs = ((performance.now() - t0) / 1000).toFixed(1);
+    for (const p of r.problems) say("  " + p, "bad");
+    if (r.cover) say(`  cover (first page, kept whole and untrimmed) — ${r.cover}`);
+    if (r.trimmed || r.turned) {
+      const bits = [];
+      if (r.trimmed) bits.push(`trimmed a border off ${r.trimmed}`);
+      if (r.turned) bits.push(`turned ${r.turned} wide picture(s) sideways`);
+      say(`  ${bits.join(", ")} of ${r.prepared}`);
+    }
+    const tail = r.skipped ? `, ${r.skipped} SVG skipped` : "";
+    say(`prepared ${r.prepared} of ${r.total} picture(s) in ${secs}s${tail}`,
+        r.failed ? "bad" : "good");
+
+    const a = document.createElement("a");
+    a.className = "actbtn";
+    a.href = URL.createObjectURL(r.blob);
+    a.download = f.name.replace(/\.epub$/i, "") + ".epub";
+    a.textContent = "Save the book";
+    done.appendChild(a);
+    const note = document.createElement("p");
+    note.className = "sub";
+    note.style.marginTop = "10px";
+    note.style.fontSize = "15px";
+    note.textContent = "Copy it to the card's books folder, the same as any other EPUB.";
+    done.appendChild(note);
+    done.style.display = "block";
+  } catch (e) {
+    say("failed: " + (e && e.message || e), "bad");
+  } finally {
+    busy = false;
+    drop.classList.remove("busy");
+  }
+}
+</script>
+</body>
+</html>

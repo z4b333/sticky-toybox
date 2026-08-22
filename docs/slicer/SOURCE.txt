@@ -1,0 +1,7 @@
+Toybox Slicer web build
+version: v1.2.1
+commit:  0e4c9795ed8b4b6199c540b06ff96af3b00f5576
+repo:    https://github.com/z4b333/Toybox-slicer
+
+Do not edit these files here. They are copied from web/ in that repo,
+where the test that proves they match the desktop app also lives.
