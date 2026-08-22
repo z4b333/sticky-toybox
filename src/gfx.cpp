@@ -47,6 +47,7 @@ void noteOverflow(int x, int w, int scale, const char* s) {
 #endif
 
 #include "fonts_intl.h"
+#include "tools/cpfont.h"
 #include "tools/unicode.h"
 
 namespace gfx {
@@ -236,6 +237,132 @@ void blitIntl(const IntlFace* f, const IntlGlyph* g, int x, int y, uint8_t color
   }
 }
 
+// --- a face off the card ------------------------------------------------------
+// CrossInk's .cpfont families, chosen by the owner and read straight from the
+// SD card (see cardfonts.h). One file per line box: their sizes are points at
+// 150 DPI, ours are pixel boxes, so the loader picks whichever of a family's
+// files lands closest to each of 18 / 24 / 32 / 44 and hands the bytes here.
+//
+// A card face answers FIRST, for every codepoint it carries -- it is the face
+// the owner asked for, and a face that only got the letters the baked tables
+// happened to miss would be no face at all. What it does not carry falls
+// through unchanged, which is the whole reason Thai still draws under a
+// Latin-only font.
+struct CardFace {
+  cpfont::Font font;
+  uint8_t* blob = nullptr;  // freed when the face is replaced, if owned
+  bool owns = false;        // false when a neighbouring box shares these bytes
+  int box = 0;              // the Toybox line box this file serves
+  bool live = false;
+};
+constexpr int CARD_BOXES = 4;
+constexpr int CARD_BOX_PX[CARD_BOXES] = {18, 24, 32, 44};
+
+// Two sets, because the device has two kinds of text. The UNIVERSAL face is
+// the firmware's own -- menus, labels, the hub, every screen that is Toybox
+// talking. The CONTENT face belongs to whatever app is open and covers what
+// the owner put there: the book, the note, the card, the recipe.
+//
+// Keeping them apart is what lets somebody read a novel in a serif without
+// their settings page changing clothes, and it is why an app can be given a
+// face of its own at all. Content wins while an app has it turned on; the
+// moment it is off -- which is every screen the firmware draws for itself --
+// the universal face answers.
+CardFace g_ui[CARD_BOXES];
+CardFace g_content[CARD_BOXES];
+bool g_contentOn = false;
+
+int cardSlot(int px) {
+  for (int i = 0; i < CARD_BOXES; i++)
+    if (CARD_BOX_PX[i] == px) return i;
+  // Anything between the named sizes takes the largest box that still fits, so
+  // an odd request never silently jumps a size.
+  int best = 0;
+  for (int i = 0; i < CARD_BOXES; i++)
+    if (CARD_BOX_PX[i] <= px) best = i;
+  return best;
+}
+
+// Where the baked faces put their baseline, measured from their own glyphs
+// rather than declared. Mixed lines are the point: a card font with no Thai
+// draws its Latin and the baked tables draw the Thai, and the two have to sit
+// on one baseline or the line visibly staggers. Measured once per face.
+struct BaselineCache {
+  const UiFont* f = nullptr;
+  int baseline = 0;
+};
+BaselineCache g_baselines[8];
+
+int bakedBaseline(const UiFont* f) {
+  for (auto& c : g_baselines)
+    if (c.f == f) return c.baseline;
+  // The bottom row of ink in a capital H IS the baseline, for every Latin face
+  // ever cut: no overshoot, no descender.
+  const FontGlyph g = glyphOf(f, 'H');
+  const int stride = (g.width + 7) / 8;
+  int bottom = -1;
+  for (int row = 0; row < f->height; row++) {
+    const uint8_t* line = &f->bits[g.offset + row * stride];
+    for (int col = 0; col < g.width; col++)
+      if (pgm_read_byte(&line[col >> 3]) & (0x80 >> (col & 7))) {
+        bottom = row;
+        break;
+      }
+  }
+  const int baseline = bottom >= 0 ? bottom + 1 : (f->height * 3) / 4;
+  for (auto& c : g_baselines)
+    if (!c.f) {
+      c.f = f;
+      c.baseline = baseline;
+      break;
+    }
+  return baseline;
+}
+
+// The cut a run wants, and what to do when the file has not got it. Bold and
+// italic both fall back to regular rather than to nothing; bold then gets the
+// same double-strike the intl tables get, and italic simply reads upright,
+// which is what every e-reader does with a single-cut font.
+int cardCut(const cpfont::Font& f, bool bold, bool italic) {
+  const uint8_t want = bold ? (italic ? cpfont::BOLD_ITALIC : cpfont::BOLD)
+                            : (italic ? cpfont::ITALIC : cpfont::REGULAR);
+  int i = f.find(want);
+  if (i >= 0) return i;
+  if (bold && italic) {
+    i = f.find(cpfont::BOLD);
+    if (i < 0) i = f.find(cpfont::ITALIC);
+    if (i >= 0) return i;
+  }
+  return f.find(cpfont::REGULAR);
+}
+
+struct CardHit {
+  const CardFace* face = nullptr;
+  const cpfont::Style* style = nullptr;
+  cpfont::Glyph glyph;
+};
+
+bool cardFind(int px, bool bold, bool italic, uint32_t cp, CardHit& out) {
+  const int slot = cardSlot(px);
+  const CardFace& c = (g_contentOn && g_content[slot].live) ? g_content[slot] : g_ui[slot];
+  if (!c.live) return false;
+  const int idx = cardCut(c.font, bold, italic);
+  if (idx < 0) return false;
+  const cpfont::Style& st = c.font.style(idx);
+  if (!c.font.glyph(st, cp, out.glyph)) return false;
+  out.face = &c;
+  out.style = &st;
+  return true;
+}
+
+void blitCard(const CardHit& h, int x, int baselineY, uint8_t color) {
+  const cpfont::Glyph& g = h.glyph;
+  for (int row = 0; row < g.h; row++)
+    for (int col = 0; col < g.w; col++)
+      if (h.face->font.on(*h.style, g, col, row))
+        epd.drawPixel(x + g.left + col, baselineY - g.top + row, color);
+}
+
 // Advance of one codepoint past ASCII, packs included.
 int intlAdvance(int px, uint32_t cp) {
   int yAdj;
@@ -244,6 +371,48 @@ int intlAdvance(int px, uint32_t cp) {
   return (h.f->box * 3) / 5 + 4;  // the missing-glyph box
 }
 }  // namespace
+
+// --- the card face, from outside ----------------------------------------------
+// gfx does no file work: the card, its directories and its bus belong to the
+// layer that owns them (cardfonts.h), which reads a file whole and hands the
+// bytes over. Ownership passes here -- the bytes must outlive every glyph
+// drawn from them, and a face replaced frees the one it replaced.
+bool cardFaceSet(int px, uint8_t* blob, uint32_t len, bool content, bool owns) {
+  const int slot = cardSlot(px);
+  CardFace& c = (content ? g_content : g_ui)[slot];
+  cpfont::Font parsed;
+  if (blob && !parsed.open(blob, len)) return false;  // the old face stays put
+  if (c.blob && c.owns) free(c.blob);
+  c.blob = blob;
+  c.owns = owns;
+  c.box = CARD_BOX_PX[slot];
+  if (!blob) {
+    c.live = false;
+    c.font = cpfont::Font();
+    return true;
+  }
+  c.font = parsed;
+  c.live = true;
+  return true;
+}
+
+void cardFaceClear(bool content) {
+  for (int i = 0; i < CARD_BOXES; i++) cardFaceSet(CARD_BOX_PX[i], nullptr, 0, content, false);
+}
+
+bool cardFaceLive(bool content) {
+  for (const CardFace& c : (content ? g_content : g_ui))
+    if (c.live) return true;
+  return false;
+}
+
+int cardFaceLine(int px, bool content) {
+  const CardFace& c = (content ? g_content : g_ui)[cardSlot(px)];
+  return c.live ? c.font.style(0).advanceY : 0;
+}
+
+void contentFace(bool on) { g_contentOn = on; }
+bool contentFaceOn() { return g_contentOn; }
 
 void setTypeface(int n) { g_typeface = (n < 0 || n > 1) ? 0 : n; }
 int typeface() { return g_typeface; }
@@ -265,10 +434,22 @@ int drawText(int x, int y, const char* s, int scale, uint8_t color, bool bold, i
   }
 #endif
   const UiFont* f = faceFor(scale, bold);
+  const int baseline = y + bakedBaseline(f);
   int cx = x;
   uint32_t prev = 0;
   for (const char* p = s; *p;) {
     const uint32_t cp = uni::next(p);
+    CardHit card;
+    if (cardFind(scale, bold, g_italic, cp, card)) {
+      blitCard(card, cx, baseline, color);
+      // Bold with no bold cut: the same double-strike the intl tables use.
+      if (bold && card.style->cut != cpfont::BOLD && card.style->cut != cpfont::BOLD_ITALIC)
+        blitCard(card, cx + 1, baseline, color);
+      const int adv = card.glyph.advance();
+      cx += adv + (adv > 0 ? spacing : 0);
+      prev = cp;
+      continue;
+    }
     if (glyphIndex(cp) >= 0) {
       const FontGlyph g = glyphOf(f, cp);
       blit(f, g, cx, y, color);
@@ -311,6 +492,15 @@ int textWidth(const char* s, int scale, bool bold, int spacing) {
   int w = 0;
   for (const char* p = s; *p;) {
     const uint32_t cp = uni::next(p);
+    // Measured through the same door it will be drawn through. A width that
+    // consults the baked tables while the drawing consults the card font is
+    // how centred text drifts and how a page turn loses its last word.
+    CardHit card;
+    if (cardFind(scale, bold, g_italic, cp, card)) {
+      const int adv = card.glyph.advance();
+      w += adv + (adv > 0 ? spacing : 0);
+      continue;
+    }
     if (glyphIndex(cp) >= 0) {
       w += glyphOf(f, cp).width + spacing;
       continue;
@@ -336,6 +526,14 @@ void textInk(const char* s, int scale, bool bold, int spacing, int& left, int& r
   // here would cost more than the pixel it would move anything.
   for (const char* p = s; *p; p++)
     if ((uint8_t)*p >= 0x80) return;
+  // A card face's glyphs are positioned from a baseline rather than packed
+  // into a box, so the box-relative measurement below does not describe them.
+  // Reporting no slack is the honest answer: centring falls back to the box,
+  // which is where it started before this refinement existed.
+  {
+    const int slot = cardSlot(scale);
+    if ((g_contentOn && g_content[slot].live) || g_ui[slot].live) return;
+  }
   const UiFont* f = faceFor(scale, bold);
   const int h = f->height;
 

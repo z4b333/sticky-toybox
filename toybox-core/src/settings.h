@@ -26,19 +26,25 @@ enum Action : int {
   ACT_LOCK,
   ACT_FILES,
   ACT_SOUND,
-  ACT_CARDS,
   ACT_RESET,
   ACT_CLOCK,
+  ACT_FONT,
   ACT_COUNT
 };
 // Visual order groups the rows by what they are about (LOOK first -- the
 // rows people come for); the enum order stays put so nothing that aims at a
 // row by name has to care where it sits. The clock sits under Files over
 // WiFi, because both are the same sentence to the person doing them: get the
-// phone out. It is last in the enum and fourth on the screen.
-inline constexpr int ROOT_POS[ACT_COUNT] = {2, 0, 1, 3, 5, 6, 7, 4};
+// phone out; the font sits under the wallpaper and the lock screen, because
+// all three are what the device looks like.
+//
+// The page holds eight rows and no more. "Show the how-to cards again" left
+// it for the apps page, which is where the cards belong: it is a row about
+// apps, and it was sitting in EXTRAS because that is where rows go when
+// nobody asks where they belong.
+inline constexpr int ROOT_POS[ACT_COUNT] = {3, 0, 1, 4, 6, 7, 5, 2};
 // How many group headings sit above each visual row.
-inline constexpr int ROOT_HEADS[ACT_COUNT] = {1, 1, 2, 3, 3, 4, 5, 5};
+inline constexpr int ROOT_HEADS[ACT_COUNT] = {1, 1, 1, 2, 3, 3, 4, 5};
 inline TRect actionRect(int i) {
   const int r = ROOT_POS[i];
   return TRect{BTN_X, ROOT_Y0 + r * BTN_STEP + ROOT_HEADS[r] * ROOT_HEAD, BTN_W, BTN_H};
@@ -50,6 +56,22 @@ inline TRect actionRect(int i) {
 // holds the display's bus.
 inline constexpr int FILES_QR = 240, FILES_QR_X = (SCREEN_W - FILES_QR) / 2, FILES_QR_Y = 150;
 inline TRect filesDoneRect() { return TRect{16, 700, SCREEN_W - 32, 60}; }
+
+// The font page: the families the card offers, one per row, with the one in
+// use wearing a tick. The first row is the firmware's own face, so "put it
+// back" is a row rather than a separate button -- the same shape as choosing
+// any other one.
+inline constexpr int FONT_Y0 = 128, FONT_ROW_H = 56, FONT_ROW_STEP = 62, FONT_PER = 8;
+inline constexpr int FONT_MAX = 24;
+inline TRect fontRect(int i) {
+  return TRect{16, FONT_Y0 + i * FONT_ROW_STEP, SCREEN_W - 32, FONT_ROW_H};
+}
+inline int fontPagerY() { return FONT_Y0 + FONT_PER * FONT_ROW_STEP + 6; }
+inline TRect fontPagerPrev() { return TRect{16, fontPagerY(), 130, 44}; }
+inline TRect fontPagerNext() { return TRect{SCREEN_W - 16 - 130, fontPagerY(), 130, 44}; }
+
+// The how-to cards, on the apps page now.
+inline TRect appsCardsRect() { return TRect{16, 700, SCREEN_W - 32, 56}; }
 
 // The clock page: the same two pairing steps as the files page, at the same
 // coordinates, because it is the same act. What differs is the end -- the
@@ -195,6 +217,9 @@ class SettingsScreen {
   void renderClock(ToolsHost& host, ToolsCanvas& c);
   bool tapClock(ToolsHost& host, int x, int y);
   void leaveClock();
+  void renderFont(ToolsHost& host, ToolsCanvas& c);
+  bool tapFont(ToolsHost& host, int x, int y);
+  void enterFont(ToolsHost& host);
 
   // Erasing every score on the device deserves a second tap, not a second
   // screen: the button asks, and any other tap takes the question away.
@@ -202,7 +227,7 @@ class SettingsScreen {
   const char* _note = nullptr;
   char _coverNote[96] = {};
   // 0 = settings, 1 = lock, 2 = wallpaper, 3 = apps, 4 = files,
-  // 5 = the lock screen's picture, off the card, 6 = the clock
+  // 5 = the lock screen's picture, off the card, 6 = the clock, 7 = the font
   uint8_t _page = 0;
   lock::Config _lock;
   // The card's offerings, read once on entering the page: the card is powered
@@ -219,6 +244,12 @@ class SettingsScreen {
   // The clock page's access point, on the same terms. Two access points are
   // never up at once: both pages are reached from the root and every way out
   // of one goes through its own stop().
+  // The card's font families, read once on entering the page: reading them
+  // claims the card's bus and takes the panel with it, and doing that on every
+  // repaint would strobe the screen.
+  char _fontNames[setui::FONT_MAX][32] = {};
+  int8_t _fontN = -1;
+  int8_t _fontPage = 0;
   cweb::ClockServer _clock;
   bool _clockOk = false;
   bool _clockSawClient = false;

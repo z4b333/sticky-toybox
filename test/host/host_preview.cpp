@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <utility>
+#include <vector>
 
 #include "appvis.h"
 #include "board_pins.h"
@@ -21,6 +22,8 @@
 #include "toybox.h"
 #include "settings.h"
 #include "bmp_gray.h"
+#include "cardfonts.h"
+#include "tools/cpfont.h"
 #include "tools/lock_image.h"
 #include "tools/lockscreen.h"
 #include "nonogram.h"
@@ -409,6 +412,347 @@ static_assert(randui::MODE_NUM.y >= BAR_TOUCH_H, "random mode row is inside the 
 static_assert(timerui::MODE_CD.y >= BAR_TOUCH_H, "timer mode row is inside the back button");
 static_assert(nui::BODY.y >= BAR_TOUCH_H, "the note body is inside the back button");
 
+// --- CrossInk .cpfont ---------------------------------------------------------
+// The fixture is a real file, made by CrossInk's own converter from DejaVu Sans
+// at their size 8, with all four cuts. Hand-writing one would only prove this
+// reader agrees with my reading of their format; a file their tool produced
+// proves it agrees with their tool.
+//
+// The path is searched rather than assumed: the documented way to run this is
+// from test/host, and the second font pass is run from a scratch directory so
+// its .pgm files do not overwrite the first pass's.
+static bool readFixture(std::vector<uint8_t>& out) {
+  const char* env = getenv("TOYBOX_FIXTURES");
+  char envPath[512] = "";
+  if (env) snprintf(envPath, sizeof(envPath), "%s/fixture_dejavu_8.cpfont", env);
+  const char* tries[] = {"fixture_dejavu_8.cpfont", "test/host/fixture_dejavu_8.cpfont",
+                         "../../test/host/fixture_dejavu_8.cpfont", envPath};
+  for (const char* path : tries) {
+    if (!path[0]) continue;
+    FILE* f = fopen(path, "rb");
+    if (!f) continue;
+    fseek(f, 0, SEEK_END);
+    const long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    out.resize((size_t)n);
+    const bool ok = fread(out.data(), 1, (size_t)n, f) == (size_t)n;
+    fclose(f);
+    return ok;
+  }
+  return false;
+}
+
+static void checkCpFont() {
+  std::vector<uint8_t> blob;
+  if (!readFixture(blob)) {
+    printf("CPFONT FAIL: fixture_dejavu_8.cpfont not found (run from test/host, or set "
+           "TOYBOX_FIXTURES)\n");
+    abort();
+  }
+  cpfont::Font font;
+  if (!font.open(blob.data(), (uint32_t)blob.size()) || font.styles() != 4) {
+    printf("CPFONT FAIL: the fixture would not open (%d styles)\n", font.styles());
+    abort();
+  }
+  // The four cuts, found by name rather than by position.
+  for (uint8_t cut : {cpfont::REGULAR, cpfont::BOLD, cpfont::ITALIC, cpfont::BOLD_ITALIC}) {
+    if (font.find(cut) < 0) {
+      printf("CPFONT FAIL: cut %d missing from a four-cut file\n", cut);
+      abort();
+    }
+  }
+
+  const cpfont::Style& reg = font.style(font.find(cpfont::REGULAR));
+  cpfont::Glyph a{}, space{}, bold{}, miss{};
+  if (reg.advanceY != 19 || !font.glyph(reg, 'A', a) || a.w != 12 || a.h != 12 ||
+      a.advance() != 11 || a.top != 12) {
+    printf("CPFONT FAIL: line %u, A is %ux%u adv %d top %d\n", reg.advanceY, a.w, a.h,
+           a.advance(), a.top);
+    abort();
+  }
+  // A space has an advance and no bitmap. A reader that assumes every glyph
+  // has pixels draws nothing and moves nowhere, and the words run together.
+  if (!font.glyph(reg, ' ', space) || space.w != 0 || space.bytes != 0 || space.advance() <= 0) {
+    printf("CPFONT FAIL: the space is %ux%u adv %d\n", space.w, space.h, space.advance());
+    abort();
+  }
+  // These packs carry no Thai and no CJK, so the answer has to be an honest
+  // "not here" -- which is what lets the baked tables keep drawing Thai under
+  // a card font that has never heard of it.
+  if (font.glyph(reg, 0x0E01, miss) || font.glyph(reg, 0x4E00, miss)) {
+    printf("CPFONT FAIL: a Latin pack claimed Thai or CJK coverage\n");
+    abort();
+  }
+
+  // The bitmap is a continuous 2-bit stream with no padding at the end of a
+  // row, so a row-by-row reader drifts further out of step on every glyph
+  // whose width is not a multiple of four. The letter A has ink at its apex
+  // and none between its legs: geometry no misaligned reader survives.
+  int apex = 0, betweenLegs = 0;
+  for (int x = 0; x < a.w; x++)
+    if (font.on(reg, a, x, 1)) apex++;
+  for (int x = a.w / 2 - 1; x <= a.w / 2 + 1; x++)
+    if (font.on(reg, a, x, a.h - 1)) betweenLegs++;
+  if (apex < 1 || apex > 4 || betweenLegs != 0) {
+    printf("CPFONT FAIL: A has %d px at the apex and %d between the legs\n", apex, betweenLegs);
+    abort();
+  }
+
+  // Bold is a different bitmap for the same letter, not a copy of it.
+  const cpfont::Style& bst = font.style(font.find(cpfont::BOLD));
+  int inkReg = 0, inkBold = 0;
+  if (!font.glyph(bst, 'A', bold)) {
+    printf("CPFONT FAIL: no A in the bold cut\n");
+    abort();
+  }
+  for (int y = 0; y < a.h; y++)
+    for (int x = 0; x < a.w; x++)
+      if (font.on(reg, a, x, y)) inkReg++;
+  for (int y = 0; y < bold.h; y++)
+    for (int x = 0; x < bold.w; x++)
+      if (font.on(bst, bold, x, y)) inkBold++;
+  if (inkBold <= inkReg) {
+    printf("CPFONT FAIL: bold has %d px of ink against regular's %d\n", inkBold, inkReg);
+    abort();
+  }
+
+  // Rubbish in, "no" out -- never a half-open font, because half a font is a
+  // page of blanks nobody can explain.
+  cpfont::Font bad;
+  std::vector<uint8_t> wrong(blob);
+  wrong[9] = 99;  // a version this does not read
+  const bool refused = !bad.open(nullptr, 0) && !bad.open(blob.data(), 8) &&
+                       !bad.open(wrong.data(), (uint32_t)wrong.size()) &&
+                       !bad.open(blob.data(), 200);  // sections past the end
+  if (!refused) {
+    printf("CPFONT FAIL: a broken file opened anyway\n");
+    abort();
+  }
+  printf("cpfont ok (4 cuts, %u glyphs, %u px line, Thai and CJK refused honestly)\n",
+         reg.glyphCount, reg.advanceY);
+}
+
+// Drawing with a card face: the fixture is loaded into the 18 px box and the
+// same line is measured and drawn with it and without it. Three things have to
+// hold, and each was a way to ship a font that looks installed and is not.
+static void checkCardFace() {
+  std::vector<uint8_t> blob;
+  if (!readFixture(blob)) {
+    printf("CARD FONT FAIL: fixture missing\n");
+    abort();
+  }
+  const char* kLine = "Hamburgefonstiv";
+  const char* kThai = "\xe0\xb8\xaa\xe0\xb8\xa7\xe0\xb8\xb1\xe0\xb8\xaa\xe0\xb8\x94\xe0\xb8\xb5";
+  auto inkOnScreen = [&](const char* text, int px) {
+    epd.clear(true);
+    gfx::drawText(20, 100, text, px, 0);
+    int n = 0;
+    for (int y = 90; y < 150; y++)
+      for (int x = 0; x < 480; x++) {
+        int pxx, pyy;
+        epdMapPixel(epd.rotation(), epd.panelFlipX(), epd.panelFlipY(), x, y, pxx, pyy);
+        if ((epd.fb()[(uint32_t)pyy * EPD_WB + (pxx >> 3)] & (0x80 >> (pxx & 7))) == 0) n++;
+      }
+    return n;
+  };
+
+  const int bakedInk = inkOnScreen(kLine, 18);
+  const int bakedWidth = gfx::textWidth(kLine, 18, false, 0);
+  const int bakedThai = inkOnScreen(kThai, 18);
+
+  uint8_t* owned = (uint8_t*)malloc(blob.size());
+  memcpy(owned, blob.data(), blob.size());
+  if (!gfx::cardFaceSet(18, owned, (uint32_t)blob.size(), false, true) || !gfx::cardFaceLive(false)) {
+    printf("CARD FONT FAIL: the fixture would not install\n");
+    abort();
+  }
+
+  const int cardInk = inkOnScreen(kLine, 18);
+  const int cardWidth = gfx::textWidth(kLine, 18, false, 0);
+  // 1. It is actually being used. A face that installs and never draws is the
+  //    failure mode this whole feature invites.
+  if (cardInk == bakedInk || cardWidth == bakedWidth) {
+    printf("CARD FONT FAIL: same ink (%d) or same width (%d) as the baked face\n", cardInk,
+           cardWidth);
+    abort();
+  }
+  if (cardInk < 100) {
+    printf("CARD FONT FAIL: the card face drew %d px -- nothing legible\n", cardInk);
+    abort();
+  }
+  // 2. Thai still draws. This pack has no Thai; the baked tables have to keep
+  //    answering underneath, or choosing a font silently empties the language.
+  const int cardThai = inkOnScreen(kThai, 18);
+  if (cardThai != bakedThai) {
+    printf("CARD FONT FAIL: Thai drew %d px under the card face, %d without\n", cardThai,
+           bakedThai);
+    abort();
+  }
+  // 3. Measuring and drawing agree. A width taken from the baked tables while
+  //    the glyphs come off the card is how centred text drifts and how a page
+  //    turn loses its last word.
+  epd.clear(true);
+  gfx::drawText(20, 100, kLine, 18, 0);
+  int rightmost = 0;
+  for (int y = 90; y < 150; y++)
+    for (int x = 0; x < 480; x++) {
+      int pxx, pyy;
+      epdMapPixel(epd.rotation(), epd.panelFlipX(), epd.panelFlipY(), x, y, pxx, pyy);
+      if ((epd.fb()[(uint32_t)pyy * EPD_WB + (pxx >> 3)] & (0x80 >> (pxx & 7))) == 0 && x > rightmost)
+        rightmost = x;
+    }
+  const int drawnWidth = rightmost - 20 + 1;
+  if (drawnWidth > cardWidth || drawnWidth < cardWidth - 6) {
+    printf("CARD FONT FAIL: drew %d px wide, measured %d\n", drawnWidth, cardWidth);
+    abort();
+  }
+
+  // One picture of the two faces on one screen, because "the widths differ" is
+  // not the same as "it looks like a font".
+  {
+    epd.clear(true);
+    gfx::cardFaceClear(false);
+    gfx::drawText(20, 40, "The baked face, DejaVu Sans", 18, 0);
+    gfx::drawText(20, 70, kLine, 18, 0);
+    gfx::drawText(20, 100, kThai, 18, 0);
+    uint8_t* again = (uint8_t*)malloc(blob.size());
+    memcpy(again, blob.data(), blob.size());
+    gfx::cardFaceSet(18, again, (uint32_t)blob.size(), false, true);
+    gfx::drawText(20, 160, "The card face, off a .cpfont", 18, 0);
+    gfx::drawText(20, 190, kLine, 18, 0);
+    gfx::drawText(20, 220, kThai, 18, 0);
+    gfx::drawText(20, 250, "0123456789 !?,.;: quick brown fox", 18, 0);
+    setScreen("card_font");
+    epd.displayFull();
+  }
+
+  gfx::cardFaceClear(false);
+  if (gfx::cardFaceLive(false) || gfx::textWidth(kLine, 18, false, 0) != bakedWidth) {
+    printf("CARD FONT FAIL: clearing the face did not put the baked one back\n");
+    abort();
+  }
+  epd.clear(true);
+  printf("card face ok (%d px of ink against the baked %d, %d px wide against %d, Thai intact)\n",
+         cardInk, bakedInk, cardWidth, bakedWidth);
+}
+
+// Choosing a family off the card: three sizes of one face are planted where
+// CrossInk puts them, and the chooser has to put the right file in each box.
+// Their sizes are points at 150 DPI and ours are pixel boxes, so this is the
+// step where a family gets matched to a device by the numbers each file states
+// rather than by the number in its name.
+static void checkCardFamily() {
+  static const char* kSizes[3] = {"DejaVuSerif_8.cpfont", "DejaVuSerif_12.cpfont",
+                                  "DejaVuSerif_18.cpfont"};
+  for (const char* name : kSizes) {
+    char path[256];
+    snprintf(path, sizeof(path), "fixture_family/%s", name);
+    FILE* f = fopen(path, "rb");
+    if (!f) {
+      const char* env = getenv("TOYBOX_FIXTURES");
+      snprintf(path, sizeof(path), "%s/fixture_family/%s", env ? env : "../../test/host", name);
+      f = fopen(path, "rb");
+    }
+    if (!f) {
+      printf("CARD FAMILY FAIL: %s missing\n", name);
+      abort();
+    }
+    fseek(f, 0, SEEK_END);
+    const long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    std::vector<uint8_t> bytes((size_t)n);
+    if (fread(bytes.data(), 1, (size_t)n, f) != (size_t)n) abort();
+    fclose(f);
+    char onCard[128];
+    snprintf(onCard, sizeof(onCard), "/.fonts/DejaVuSerif/%s", name);
+    sdcard::hostPutCardFile(onCard, bytes.data(), (int)bytes.size());
+  }
+  // A folder with no font in it is not a family: it would be a name in a list
+  // that does nothing when tapped.
+  sdcard::hostPutCardFile("/.fonts/NotAFamily/readme.txt", "hello", 5);
+
+  char names[cardfonts::MAX_FAMILIES][32];
+  const int n = cardfonts::families(names, cardfonts::MAX_FAMILIES);
+  bool found = false, ghost = false;
+  for (int i = 0; i < n; i++) {
+    if (strcmp(names[i], "DejaVuSerif") == 0) found = true;
+    if (strcmp(names[i], "NotAFamily") == 0) ghost = true;
+  }
+  if (!found || ghost) {
+    printf("CARD FAMILY FAIL: %d families, DejaVuSerif %d, empty folder listed %d\n", n, found,
+           ghost);
+    abort();
+  }
+
+  if (!cardfonts::useUniversal("DejaVuSerif") || strcmp(cardfonts::universal(), "DejaVuSerif") != 0) {
+    printf("CARD FAMILY FAIL: the family would not load\n");
+    abort();
+  }
+  // 8 pt is a 19 px line, 12 pt is 29 and 18 pt is 44. The 18 px box takes the
+  // 19; the 24 px box takes it too, because 29 would overrun and airy beats
+  // colliding; 32 takes the 29 and 44 takes the 44.
+  struct { int box, want; } expect[] = {{18, 19}, {24, 19}, {32, 29}, {44, 44}};
+  for (auto& e : expect) {
+    const int got = gfx::cardFaceLine(e.box, false);
+    if (got != e.want) {
+      printf("CARD FAMILY FAIL: the %d px box got a %d px line, wanted %d\n", e.box, got, e.want);
+      abort();
+    }
+  }
+
+  // A family that is not there changes nothing -- the face that was working a
+  // moment ago is still the face.
+  if (cardfonts::useUniversal("NoSuchFamily") || strcmp(cardfonts::universal(), "DejaVuSerif") != 0) {
+    printf("CARD FAMILY FAIL: a missing family disturbed the loaded one\n");
+    abort();
+  }
+
+  // Two faces at once: the firmware's own, and one app's. The whole point is
+  // that they do not leak into each other -- a novel in a serif must not put
+  // the settings page in a serif too, and the app's face must vanish the
+  // moment the app stops asking for it.
+  {
+    std::vector<uint8_t> sans;
+    if (!readFixture(sans)) abort();
+    sdcard::hostPutCardFile("/.fonts/DejaVuSans/DejaVuSans_8.cpfont", sans.data(),
+                            (int)sans.size());
+    if (!cardfonts::useContent("DejaVuSans") ||
+        strcmp(cardfonts::content(), "DejaVuSans") != 0) {
+      printf("CARD FAMILY FAIL: the content family would not load\n");
+      abort();
+    }
+    const char* kLine = "Hamburgefonstiv";
+    gfx::contentFace(false);
+    const int uiWidth = gfx::textWidth(kLine, 18, false, 0);
+    gfx::contentFace(true);
+    const int appWidth = gfx::textWidth(kLine, 18, false, 0);
+    gfx::contentFace(false);
+    const int backAgain = gfx::textWidth(kLine, 18, false, 0);
+    if (uiWidth == appWidth || backAgain != uiWidth) {
+      printf("CARD FAMILY FAIL: ui %d, content %d, back to %d\n", uiWidth, appWidth, backAgain);
+      abort();
+    }
+    // Dropping the app's face leaves the firmware's alone. The other order --
+    // leaving an app and finding the menus in the book's font -- is the bug
+    // this separation exists to prevent.
+    cardfonts::noneContent();
+    gfx::contentFace(true);
+    const int afterDrop = gfx::textWidth(kLine, 18, false, 0);
+    gfx::contentFace(false);
+    if (afterDrop != uiWidth || cardfonts::content()[0] || !cardfonts::universal()[0]) {
+      printf("CARD FAMILY FAIL: dropping the app face disturbed the firmware's\n");
+      abort();
+    }
+  }
+
+  cardfonts::noneUniversal();
+  if (gfx::cardFaceLive(false) || cardfonts::universal()[0]) {
+    printf("CARD FAMILY FAIL: the baked faces did not come back\n");
+    abort();
+  }
+  printf("card family ok (three sizes into four boxes, and an app face that stays in its app)\n");
+}
+
 // The clock every options panel carries in the bar's far corner. It is drawn
 // there rather than on the page behind it because a page is not redrawn often
 // enough to hold a true time, and both halves of that promise have to be kept:
@@ -520,6 +864,9 @@ int main() {
   // Grid routing: the dock, every folder tile, and the gaps, must resolve to
   // the thing under the finger. requestScreen is stubbed, so record what it
   // asked for and compare against the drawing order.
+  checkCpFont();
+  checkCardFace();
+  checkCardFamily();
   checkHubRouting("all shown");
 
   // The three folder pages, drawn as a finger would reach them.
@@ -4713,7 +5060,10 @@ int main() {
   g_dumpEnabled = false;
   prefs.putBool("h_wrd", true);
   toybox.openSettings();  // the routing walk left us on the hub: go back in
-  tapRect(setui::actionRect(setui::ACT_CARDS));
+  // The cards row lives on the apps page now, which is the page about apps.
+  tapRect(setui::actionRect(setui::ACT_APPS));
+  tapRect(setui::appsCardsRect());
+  toybox.hostSettings().back();
   tapRect(setui::actionRect(setui::ACT_RESET));  // armed again
   tapRect(setui::actionRect(setui::ACT_RESET));  // ...and confirmed
   // Cleared means gone, not zeroed: a sentinel default proves the key itself
@@ -4724,6 +5074,54 @@ int main() {
     abort();
   }
   printf("settings ok (hides, reflows, clears scores, restores cards)\n");
+
+  // The font row: the card's families, the firmware's own face as the first
+  // row rather than a button off to one side, and the choice actually taking.
+  {
+    g_dumpEnabled = false;
+    toybox.openSettings();
+    tapRect(setui::actionRect(setui::ACT_FONT));
+    if (toybox.hostSettings().hostPage() != 7) {
+      printf("FONT PAGE FAIL: the row did not open the page\n");
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("settings_font");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+
+    // Row 0 is the built-in face; the card's families follow it.
+    tapRect(setui::fontRect(1));
+    if (!gfx::cardFaceLive(false) || !stickyHost.fontChosen()[0]) {
+      printf("FONT PAGE FAIL: choosing a family did not take\n");
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("settings_font_chosen");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+
+    // And it is remembered, which is the difference between a setting and a
+    // gesture: the name has to survive in NVS, not just in the running face.
+    char saved[32] = "";
+    prefs.getString("font_uni", saved, sizeof(saved));
+    if (!saved[0] || strcmp(saved, stickyHost.fontChosen()) != 0) {
+      printf("FONT PAGE FAIL: chose %s, remembered '%s'\n", stickyHost.fontChosen(), saved);
+      abort();
+    }
+
+    tapRect(setui::fontRect(0));  // back to the built-in face
+    prefs.getString("font_uni", saved, sizeof(saved));
+    if (gfx::cardFaceLive(false) || stickyHost.fontChosen()[0] || saved[0]) {
+      printf("FONT PAGE FAIL: the built-in row did not put it back (kept '%s')\n", saved);
+      abort();
+    }
+    toybox.hostSettings().back();
+    toybox.goHub();
+    toybox.hostHub().goHome();
+    g_dumpEnabled = true;
+    printf("font page ok (card families listed, chosen, remembered, and given back)\n");
+  }
 
   appvis::g_mask = appvis::ALL;
   buzzer::setEnabled(true);

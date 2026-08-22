@@ -1,5 +1,7 @@
 #include "sticky_host.h"
 
+#include "cardfonts.h"
+
 #include "sdcard.h"
 #include "tools/book_thumbs.h"
 #include "tools/epub/epubcore.h"
@@ -324,3 +326,24 @@ int StickyHost::sdMgrList(SdFile* out, int max) {
   }
   return n;
 }
+
+// --- the reading face ---------------------------------------------------------
+// The card work lives in cardfonts.cpp; this is only the seam core asks
+// through. The chosen family is remembered in NVS, so a device that is turned
+// off in a serif comes back in one.
+int StickyHost::fontFamilies(char names[][FONT_FAMILY_LEN], int max) {
+  return cardfonts::families(names, max);
+}
+
+bool StickyHost::fontUse(const char* family) {
+  if (!cardfonts::useUniversal(family)) return false;
+  prefs().putString("font_uni", family);
+  return true;
+}
+
+void StickyHost::fontNone() {
+  cardfonts::noneUniversal();
+  prefs().remove("font_uni");
+}
+
+const char* StickyHost::fontChosen() const { return cardfonts::universal(); }

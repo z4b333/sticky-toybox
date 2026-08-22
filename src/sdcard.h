@@ -192,6 +192,26 @@ int listJson(char names[][64], int max);
 // readWhole("<dir>/<name>"). Files are skipped if empty or over 256 KB.
 int listText(const char* dir, char names[][64], int max);
 
+// --- fonts, in CrossInk's on-card layout --------------------------------------
+// Families are folders under /.fonts (their preferred root -- hidden, so a
+// desktop does not show it) or /fonts (the visible one), each holding one
+// .cpfont file per size. Both roots are searched, in that order, because a
+// card may have been filled by either firmware or by hand.
+//
+// -1 from either means no card answered, which is different from a card with
+// no fonts on it: one is worth saying out loud and the other is just an empty
+// list.
+inline constexpr int FONT_NAME_LEN = 32;
+inline constexpr int FONT_FILE_LEN = 48;
+int fontFamilies(char names[][FONT_NAME_LEN], int max);
+int fontFiles(const char* family, char names[][FONT_FILE_LEN], int max);
+// Where one of those files actually is, so nothing above has to remember which
+// root it came from. False when it is on neither.
+bool fontPath(const char* family, const char* file, char* out, int cap);
+// How big a file is, without reading it -- the caller has to allocate before
+// it reads, and a font is megabytes. -1 when there is no such file.
+int fileSize(const char* path);
+
 // A file on the card written a piece at a time, for anything too big to
 // assemble in RAM first. Only valid while something already holds the bus;
 // the cover builder streams into this while a book is being opened.
