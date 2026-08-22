@@ -107,8 +107,34 @@ void fillLockInfo(lock::Info& out) {
   }
 }
 
-void setClockFromPhone(int64_t localEpochMs) {
-  if (sensors::setClockFromEpochMs(localEpochMs)) Serial.println("clock set from phone");
+// Written, then READ BACK -- but not instantly, and this is the part that was
+// wrong for as long as the clock has existed.
+//
+// The PCF8563 raises VL when its oscillator has stopped, and every read is
+// refused while that bit is up. Writing the seconds register clears it, but
+// the bit comes straight back up until the crystal is actually running, which
+// on a device that has just been flashed or has sat with a flat backup cell
+// takes a moment. So the write lands, the immediate read is refused, the
+// screen shows nothing -- and after a restart the time is there and correct,
+// which is exactly the "reboot to see the time" behaviour this device has
+// always had. A second of patience is the whole fix.
+bool setClockFromPhone(int64_t localEpochMs) {
+  const bool wrote = sensors::setClockFromEpochMs(localEpochMs);
+  if (!wrote) {
+    Serial.println("clock from phone: the chip refused the write");
+    return false;
+  }
+  sensors::Clock back;
+  for (int i = 0; i < 12; i++) {  // ~1.8 s, then we admit it is not starting
+    if (sensors::readClock(back)) {
+      Serial.printf("clock from phone: set, reads back %02d:%02d after %d ms\n", back.hour,
+                    back.minute, i * 150);
+      return true;
+    }
+    delay(150);
+  }
+  Serial.println("clock from phone: written, but the oscillator has not started");
+  return false;
 }
 
 // --- auto-rotate ---------------------------------------------------------------

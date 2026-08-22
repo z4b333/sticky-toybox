@@ -183,6 +183,14 @@ void run() {
   r.touchAddr = touch.address();
   r.gauge = sensors::batteryPresent();
   r.rtc = sensors::clockPresent();
+  r.clockRunning = sensors::clockValid();
+  {
+    sensors::Clock ck;
+    if (sensors::readClock(ck)) {
+      r.clockHour = ck.hour;
+      r.clockMinute = ck.minute;
+    }
+  }
   r.sht = sensors::climatePresent();
   r.imu = sensors::imuPresent();
   r.battMv = sensors::batteryMillivolts();

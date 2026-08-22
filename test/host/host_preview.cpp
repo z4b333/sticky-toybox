@@ -448,9 +448,15 @@ static void checkCornerClock(const char* what) {
 // the screen that follows it: a page that says "the clock is set" while the
 // hook never fired is exactly the bug worth catching.
 static int64_t g_clockSetMs = 0;
-static void hostSetClockFromPhone(int64_t localEpochMs) {
+// The device's answer can be no: the chip refuses the write, or takes it and
+// does not start keeping time. The page has to be able to say so, so the
+// harness can make the hook fail on purpose.
+static bool g_clockRefuses = false;
+static bool hostSetClockFromPhone(int64_t localEpochMs) {
   g_clockSetMs = localEpochMs;
+  if (g_clockRefuses) return false;
   sensors::hostSetClock(true);
+  return true;
 }
 
 // Tap a tool without emitting a frame for every intermediate state.
@@ -1048,6 +1054,28 @@ int main() {
       printf("CLOCK FAIL: DONE did not close the session\n");
       abort();
     }
+
+    // And the answer the device gave for a year without anyone seeing it: the
+    // phone sends, the chip does not keep it, and the page used to say "THE
+    // CLOCK IS SET" over an empty space where the digits belong. It must say
+    // what happened instead.
+    g_clockRefuses = true;
+    sensors::hostSetClock(false);
+    g_clockSetMs = 0;
+    tapRect(setui::actionRect(setui::ACT_CLOCK));
+    for (int i = 0; i < 5 && !toybox.hostSettings().hostClock().wasRefused(); i++) toybox.tick();
+    auto& cs2 = toybox.hostSettings().hostClock();
+    if (!cs2.wasRefused() || cs2.wasSet() || g_clockSetMs == 0) {
+      printf("CLOCK FAIL: a refused write reported set=%d refused=%d hook=%lld\n",
+             cs2.wasSet() ? 1 : 0, cs2.wasRefused() ? 1 : 0, (long long)g_clockSetMs);
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("settings_clock_refused");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    tapRect(setui::clockDoneRect());
+    g_clockRefuses = false;
     tapRect(setui::actionRect(setui::ACT_CLOCK));
     toybox.goHub();
     if (toybox.hostSettings().hostClock().hasClient()) {

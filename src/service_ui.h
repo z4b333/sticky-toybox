@@ -25,6 +25,12 @@ struct Report {
   bool touchOk = false;
   uint8_t touchAddr = 0;
   bool gauge = false, rtc = false, sht = false, imu = false;
+  // The clock answering at its address is not the same as the clock keeping
+  // time: the oscillator flag can be up on a chip that ACKs perfectly well,
+  // and then every read of the time is refused. Reported apart for exactly
+  // that reason -- "rtc 1" was true on a device showing no time at all.
+  bool clockRunning = false;
+  int clockHour = -1, clockMinute = -1;
   // Raw accelerometer, and the rotation the mapping currently derives from it.
   // Printed because that mapping is a guess: turn the device through four
   // positions, read four lines, and the right answer falls out of the numbers
@@ -145,6 +151,15 @@ inline void render(ToolsCanvas& c, const Report& r, const Config& cfg, int sel, 
 
   snprintf(buf, sizeof(buf), "sensors  %d%d%d%d   fonts %d", r.gauge ? 1 : 0, r.rtc ? 1 : 0,
            r.sht ? 1 : 0, r.imu ? 1 : 0, r.fontFaces);
+  c.text(MARGIN, y, buf, TS_MED, true);
+  y += 26;
+
+  if (!r.rtc)
+    snprintf(buf, sizeof(buf), "clock    no chip");
+  else if (r.clockRunning)
+    snprintf(buf, sizeof(buf), "clock    running  %02d:%02d", r.clockHour, r.clockMinute);
+  else
+    snprintf(buf, sizeof(buf), "clock    STOPPED  (set it from a phone)");
   c.text(MARGIN, y, buf, TS_MED, true);
   y += 26;
 

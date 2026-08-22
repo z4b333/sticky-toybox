@@ -16,7 +16,11 @@
 
 namespace clockset {
 
-using Fn = void (*)(int64_t localEpochMs);
+// Returns whether the time actually landed somewhere -- written to the chip
+// AND read back from it. A hook that reports success it did not have produces
+// a screen that says "the clock is set" over a device that has no idea what
+// time it is, which is worse than a screen that admits it failed.
+using Fn = bool (*)(int64_t localEpochMs);
 inline Fn g_set = nullptr;
 
 // Called once at boot by a firmware that has a clock to set. A host without
@@ -24,12 +28,9 @@ inline Fn g_set = nullptr;
 inline void hook(Fn f) { g_set = f; }
 inline bool available() { return g_set != nullptr; }
 
-// True when there was somewhere to put it. False is not an error worth a
-// screen of its own -- it means this build has no clock.
-inline bool apply(int64_t localEpochMs) {
-  if (!g_set) return false;
-  g_set(localEpochMs);
-  return true;
-}
+// True when the time was taken AND read back. False means either that this
+// build has no clock at all or that the one it has refused the write; the
+// screens say so rather than claiming a success nobody verified.
+inline bool apply(int64_t localEpochMs) { return g_set && g_set(localEpochMs); }
 
 }  // namespace clockset

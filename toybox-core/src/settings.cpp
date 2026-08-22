@@ -177,7 +177,7 @@ bool SettingsScreen::tick(ToolsHost& host) {
     _clock.loop();
     // Two repaints, both of which the screen learns about rather than causes:
     // a phone joining (step one becomes step two), and the time arriving.
-    if (!_clockSawSet && _clock.wasSet()) {
+    if (!_clockSawSet && (_clock.wasSet() || _clock.wasRefused())) {
       _clockSawSet = true;
       return true;
     }
@@ -550,7 +550,20 @@ void SettingsScreen::renderClock(ToolsHost& host, ToolsCanvas& c) {
     return;
   }
 
-  if (_clock.wasSet()) {
+  if (_clock.wasRefused()) {
+    // The phone did its half. Saying "waiting for the phone" here would send
+    // somebody back to a QR code that was never the problem.
+    c.textCentered(SCREEN_W / 2, 120, "THE PHONE SENT THE TIME", TS_MED, true, true);
+    c.textCentered(SCREEN_W / 2, 200, "the clock has not started yet", TS_LARGE, true);
+    c.fillRect(48, 260, SCREEN_W - 96, 1, true);
+    c.textCentered(SCREEN_W / 2, 300, "The time was written to the clock chip,", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, 328, "which has not begun keeping it. That", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, 356, "happens on a device just flashed, or", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, 384, "one whose backup cell ran flat.", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, 440, "Restart the device. The time is usually", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, 468, "there afterwards, and right -- the chip", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, 496, "kept what it was given.", TS_SMALL, true);
+  } else if (_clock.wasSet()) {
     c.textCentered(SCREEN_W / 2, 120, "THE CLOCK IS SET", TS_MED, true, true);
     int hh = 0, mm = 0;
     if (host.clockHHMM(hh, mm)) {

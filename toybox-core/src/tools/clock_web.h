@@ -25,6 +25,7 @@ class ClockServer {
   bool start() {
     _ticks = 0;
     _set = false;
+    _refused = false;
     return _portal.begin();
   }
   void stop() { _portal.end(); }
@@ -33,11 +34,16 @@ class ClockServer {
     if (_ticks >= 1) _portal.hostSetClient(true);
     if (_ticks == 3) hostSendTime(1787305260000LL);  // 21 Aug 2026, 09:41 as the phone reads it
   }
-  // The harness posts through the same door a phone would.
+  // The harness posts through the same door a phone would, including the door
+  // slamming: a hook that says no leaves the page refused, never set.
   void hostSendTime(int64_t localEpochMs) {
-    if (clockset::apply(localEpochMs)) _set = true;
+    if (clockset::apply(localEpochMs))
+      _set = true;
+    else
+      _refused = true;
   }
   bool wasSet() const { return _set; }
+  bool wasRefused() const { return _refused; }
   bool hasClient() const { return _portal.hasClient(); }
   const char* ssid() const { return _portal.ssid(); }
   const char* password() const { return _portal.password(); }
@@ -46,7 +52,7 @@ class ClockServer {
 
  private:
   portal::Portal _portal;
-  bool _set = false;
+  bool _set = false, _refused = false;
   int _ticks = 0;
 };
 
@@ -57,6 +63,7 @@ class ClockServer {
   bool start() {
     if (_portal.running()) return true;
     _set = false;
+    _refused = false;
     if (!_portal.begin()) return false;
     _portal.serveIndex([this] { sendPage(); });
     _portal.on("/t", HTTP_POST, [this] { takeTime(); });
@@ -65,6 +72,10 @@ class ClockServer {
   void stop() { _portal.end(); }
   void loop() { _portal.loop(); }
   bool wasSet() const { return _set; }
+  // The phone sent, the firmware could not keep it. Its own state, because a
+  // page that shows "waiting for the phone" after a refusal sends somebody
+  // back to scan a QR code that was never the problem.
+  bool wasRefused() const { return _refused; }
   bool hasClient() const { return _portal.hasClient(); }
   const char* ssid() const { return _portal.ssid(); }
   const char* password() const { return _portal.password(); }
@@ -76,14 +87,21 @@ class ClockServer {
     WebServer& s = _portal.server();
     // atoll rather than toInt(): the number is milliseconds since 1970 and
     // overflowed a 32-bit int in 1970 + 24 days.
-    if (s.hasArg("t") && clockset::apply(atoll(s.arg("t").c_str()))) _set = true;
+    if (s.hasArg("t")) {
+      if (clockset::apply(atoll(s.arg("t").c_str()))) {
+        _set = true;
+        _refused = false;
+      } else {
+        _refused = true;
+      }
+    }
     s.send(200, "application/json", _set ? "{\"ok\":1}" : "{\"ok\":0}");
   }
 
   void sendPage();
 
   portal::Portal _portal;
-  bool _set = false;
+  bool _set = false, _refused = false;
 };
 
 // The phone's page. It sends on load and says what it sent, because the device
@@ -117,7 +135,7 @@ function send(){
  fetch('/t',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
   .then(function(r){return r.json()})
   .then(function(j){document.getElementById('msg').textContent=
-    j.ok?'Done. The device clock is set.':'This device has no clock to set.'})
+    j.ok?'Done. The device clock is set.':'The device did not keep it. Its clock chip is not answering \u2014 see the device screen.'})
   .catch(function(){document.getElementById('msg').textContent=
     'Could not reach the device. Still connected to its wifi?'});
 }
