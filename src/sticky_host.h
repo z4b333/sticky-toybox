@@ -151,6 +151,13 @@ class StickyHost : public ToolsHost {
     return true;
   }
 
+  // The reading face, off the card. Declared out of line for the same reason
+  // as the rest of the card calls below.
+  int fontFamilies(char names[][FONT_FAMILY_LEN], int max) override;
+  bool fontUse(const char* family) override;
+  void fontNone() override;
+  const char* fontChosen() const override;
+
   // All of these go to the card. Declared out of line because sdcard.h and
   // this header meet awkwardly in the harness build.
   int sdWallpapers(char names[][SD_NAME_LEN], int max) override;

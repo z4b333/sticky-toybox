@@ -15,6 +15,7 @@
 #include "buzzer.h"
 #include "epd.h"
 #include "gfx.h"
+#include "cardfonts.h"
 #include "sdcard.h"
 #include "sensors.h"
 #include "service.h"
@@ -520,6 +521,15 @@ void setup() {
   // Full-coverage font packs, if any have been installed (see gfx.h). Loaded
   // before the first paint so a pinned Chinese note wakes up whole.
   TB_LOG("font packs: %d faces\n", gfx::loadFontPacks());
+  // The face the owner chose off the card, if there is one and the card is
+  // still in. Absent -- no card, no folder, a family deleted since -- the
+  // firmware reads in its baked face, which is the same honesty as a device
+  // with no card having no books.
+  {
+    char fam[32] = "";
+    stickyHost.prefs().getString("font_uni", fam, sizeof(fam));
+    if (fam[0]) TB_LOG("card font: %s %s\n", fam, cardfonts::useUniversal(fam) ? "ok" : "MISSING");
+  }
 
   // Hold UP through power-on to correct the display and touch mapping. This is
   // the one screen that has to work when nothing else does, so it comes before

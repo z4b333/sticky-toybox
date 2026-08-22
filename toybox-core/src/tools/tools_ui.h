@@ -324,6 +324,28 @@ class ToolsHost {
     return false;
   }
 
+  // Font families on the SD card, for the settings page: CrossInk's .cpfont
+  // families, which this firmware reads and draws from. -1 means no card
+  // answered, which is a different thing from a card with no fonts on it.
+  //
+  // Core asks; the firmware owns the card, the bus and the memory the fonts
+  // live in. Same seam as the wallpapers below.
+  static constexpr int FONT_FAMILY_LEN = 32;
+  virtual int fontFamilies(char names[][FONT_FAMILY_LEN], int max) {
+    (void)names;
+    (void)max;
+    return -1;
+  }
+  // The face the firmware itself is drawn in. False leaves the current one
+  // alone -- a card that cannot be read does not take away the font that was
+  // working a moment ago.
+  virtual bool fontUse(const char* family) {
+    (void)family;
+    return false;
+  }
+  virtual void fontNone() {}
+  virtual const char* fontChosen() const { return ""; }
+
   // Wallpapers on the SD card, for the settings page. Fills names (bare file
   // names, NUL-terminated, truncated to fit) and returns how many were found;
   // -1 means no card answered. A host with no card slot keeps the default and

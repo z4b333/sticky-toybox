@@ -119,9 +119,8 @@ inline void draw(ToolsCanvas& c, int act, int cx, int cy, bool dark) {
       c.drawLine(cx, cy, cx, cy - 8, 2, dark);
       c.drawLine(cx, cy, cx + 6, cy + 3, 2, dark);
       break;
-    case ACT_CARDS:  // the "?" the how-to cards wear
-      c.drawCircle(cx, cy, 14, 2, dark);
-      c.textInBox(cx - 10, cy - 11, 20, 22, "?", TS_SMALL, dark, true);
+    case ACT_FONT:  // a letter, which is the only honest icon for a typeface
+      c.textInBox(cx - 14, cy - 15, 28, 30, "Aa", TS_MED, dark, true);
       break;
     default:  // ACT_RESET: a circle coming back around
       c.drawCircle(cx, cy, 11, 2, dark);
@@ -533,6 +532,108 @@ void SettingsScreen::renderFiles(ToolsHost& host, ToolsCanvas& c) {
   c.button(d.x, d.y, d.w, d.h, "DONE", false, TS_LARGE);
 }
 
+// --- the font page ------------------------------------------------------------
+// The families the card offers, one per row, the one in use wearing a tick.
+// The firmware's own face is the first row rather than a separate button: "put
+// it back" is the same kind of choice as "use that one", and a REMOVE off to
+// one side would say otherwise.
+void SettingsScreen::enterFont(ToolsHost& host) {
+  _fontN = (int8_t)host.fontFamilies(_fontNames, setui::FONT_MAX);
+  _fontPage = 0;
+}
+
+void SettingsScreen::renderFont(ToolsHost& host, ToolsCanvas& c) {
+  using namespace setui;
+  drawTopBar(c, "FONT");
+  c.textTracked(16, 56, "THE DEVICE'S OWN TEXT", TS_SMALL, true, false, 1);
+  c.fillRect(16, 78, SCREEN_W - 32, 1, true);
+  c.textCentered(SCREEN_W / 2, 92, "menus, labels and every screen Toybox draws", TS_SMALL, true);
+
+  if (_fontN < 0) {
+    c.textCentered(SCREEN_W / 2, 320, "no card found", TS_LARGE, true);
+    c.textCentered(SCREEN_W / 2, 364, "is one in the slot?", TS_MED, true);
+    return;
+  }
+
+  // Row 0 is the built-in face, then whatever the card has.
+  const int total = _fontN + 1;
+  const int pages = (total + FONT_PER - 1) / FONT_PER;
+  const char* chosen = host.fontChosen();
+  for (int k = 0; k < FONT_PER; k++) {
+    const int idx = _fontPage * FONT_PER + k;
+    if (idx >= total) break;
+    const TRect r = fontRect(k);
+    const bool builtIn = idx == 0;
+    const char* name = builtIn ? "The built-in face" : _fontNames[idx - 1];
+    const bool on = builtIn ? !chosen[0] : strcmp(chosen, name) == 0;
+    c.text(r.x + 12, r.y + (r.h - c.textHeight(TS_MED)) / 2, name, TS_MED, true, on);
+    if (on) {
+      // The same tick the app list uses, so "this is the one" reads the same
+      // way on both pages.
+      const int cy = r.y + r.h / 2;
+      c.drawLine(r.x + r.w - 44, cy, r.x + r.w - 34, cy + 10, 3, true);
+      c.drawLine(r.x + r.w - 34, cy + 10, r.x + r.w - 14, cy - 10, 3, true);
+    }
+    if (k < FONT_PER - 1 && idx < total - 1) c.fillRect(r.x, r.y + r.h - 1, r.w, 1, true);
+  }
+
+  if (pages > 1) {
+    char buf[24];
+    snprintf(buf, sizeof(buf), "%d / %d", _fontPage + 1, pages);
+    c.textCentered(SCREEN_W / 2, fontPagerY() + 10, buf, TS_SMALL, true);
+    if (_fontPage > 0) {
+      const TRect p = fontPagerPrev();
+      c.button(p.x, p.y, p.w, p.h, "< PREV", false, TS_SMALL);
+    }
+    if (_fontPage < pages - 1) {
+      const TRect n = fontPagerNext();
+      c.button(n.x, n.y, n.w, n.h, "NEXT >", false, TS_SMALL);
+    }
+  }
+
+  if (_fontN == 0)
+    c.textCentered(SCREEN_W / 2, 700, "no fonts on the card - put .cpfont families in /.fonts",
+                   TS_SMALL, true);
+  else
+    c.textCentered(SCREEN_W / 2, 776, "apps can each be given their own face", TS_SMALL, true);
+}
+
+bool SettingsScreen::tapFont(ToolsHost& host, int x, int y) {
+  using namespace setui;
+  if (_fontN < 0) return false;
+  const int total = _fontN + 1;
+  const int pages = (total + FONT_PER - 1) / FONT_PER;
+  if (pages > 1 && y >= fontPagerY()) {
+    if (_fontPage > 0 && fontPagerPrev().hit(x, y)) {
+      _fontPage--;
+      host.beep(0);
+      return true;
+    }
+    if (_fontPage < pages - 1 && fontPagerNext().hit(x, y)) {
+      _fontPage++;
+      host.beep(0);
+      return true;
+    }
+    return false;
+  }
+  for (int k = 0; k < FONT_PER; k++) {
+    const int idx = _fontPage * FONT_PER + k;
+    if (idx >= total) break;
+    if (!fontRect(k).hit(x, y)) continue;
+    host.beep(1);
+    if (idx == 0)
+      host.fontNone();
+    else
+      host.fontUse(_fontNames[idx - 1]);
+    // Every glyph on the panel just changed, and reading the card took the
+    // panel's bus with it. Nothing about this screen can be drawn as a
+    // difference from what was there.
+    host.refresh(true);
+    return false;
+  }
+  return false;
+}
+
 // --- the clock page -----------------------------------------------------------
 // The same two pairing steps as the files page, because it is the same act,
 // and then a third state the files page has no equivalent of: the phone's page
@@ -656,6 +757,10 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
     renderClock(host, c);
     return;
   }
+  if (_page == 7) {
+    renderFont(host, c);
+    return;
+  }
   if (_page == 3) {
     renderApps(host, c);
     return;
@@ -667,7 +772,7 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
   // rects come from -- so a row cannot move without its heading following.
   {
     static const char* kHeads[5] = {"LOOK", "APPS", "PHONE", "DEVICE", "EXTRAS"};
-    static const int kFirstRow[5] = {0, 2, 3, 5, 6};
+    static const int kFirstRow[5] = {0, 3, 4, 6, 7};
     for (int k = 0; k < 5; k++) {
       const int y = ROOT_Y0 + kFirstRow[k] * BTN_STEP + (k + 1) * ROOT_HEAD - 28;
       c.textTracked(BTN_X, y, kHeads[k], TS_SMALL, true, false, 1);
@@ -700,11 +805,11 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
   const Row rows[ACT_COUNT] = {
       {ACT_WALL, "Wallpaper", wallimg::have() ? "set" : "none", true},
       {ACT_LOCK, "Lock screen", emptyLabelSmall(lock::config().empty), true},
+      {ACT_FONT, "Font", host.fontChosen()[0] ? host.fontChosen() : "built-in", true},
       {ACT_APPS, "Apps on the hub", apps, true},
       {ACT_FILES, "Files over WiFi", "", true},
       {ACT_CLOCK, "Clock", clockV, true},
       {ACT_SOUND, "Sound", soundV, false},
-      {ACT_CARDS, "Show the how-to cards again", "", false},
       {ACT_RESET, _armed ? "Tap again to erase scores" : "Reset stats and tallies", "", false},
   };
   for (const Row& r : rows) {
@@ -754,10 +859,21 @@ void SettingsScreen::renderApps(ToolsHost& host, ToolsCanvas& c) {
     c.text(x + BOX + 12, rowTop + (ROW_H - c.textHeight(TS_MED)) / 2, nameOf(it), TS_MED, true);
   });
 
+  // The cards row came off the settings page: it is a row about apps, and this
+  // is the page about apps.
+  const TRect r = setui::appsCardsRect();
+  c.button(r.x, r.y, r.w, r.h, _note ? "THE CARDS WILL SHOW AGAIN" : "SHOW THE HOW-TO CARDS AGAIN",
+           false, TS_MED);
   c.textCentered(SCREEN_W / 2, 776, "hiding an app keeps everything saved in it", TS_SMALL, true);
 }
 
 bool SettingsScreen::tapApps(ToolsHost& host, int x, int y) {
+  if (setui::appsCardsRect().hit(x, y)) {
+    for (const char* k : HELP_KEYS) host.prefs().remove(k);
+    _note = "the rules cards will show again";
+    host.beep(1);
+    return true;
+  }
   bool hit = false;
   walkList([&](const applist::Item& it, const applist::Group&, int, int rowTop, int col) {
     if (hit || !inRect(x, y, COL_X[col], rowTop, COL_W, ROW_H)) return;
@@ -975,6 +1091,7 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
   if (_page == 3) return tapApps(host, x, y);
   if (_page == 4) return tapFiles(host, x, y);
   if (_page == 6) return tapClock(host, x, y);
+  if (_page == 7) return tapFont(host, x, y);
 
   // Any tap that is not the reset takes the confirm back down, so an armed
   // button never survives long enough to be pressed by accident later.
@@ -1018,6 +1135,16 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
     return false;
   }
 
+  if (actionRect(ACT_FONT).hit(x, y)) {
+    host.beep(1);
+    enterFont(host);
+    _page = 7;
+    // Reading the card takes the panel's bus with it, so what comes back has
+    // to be drawn from nothing rather than from a difference.
+    host.refresh(true);
+    return false;
+  }
+
   if (actionRect(ACT_CLOCK).hit(x, y)) {
     host.beep(1);
     _clockOk = _clock.start();
@@ -1048,13 +1175,6 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
     const int n = host.soundLevels();
     host.setSoundLevel((host.soundLevel() + n - 1) % n);
     host.beep(0);  // at the level just chosen, which is the only useful preview
-    host.beep(1);
-    return true;
-  }
-
-  if (actionRect(ACT_CARDS).hit(x, y)) {
-    for (const char* k : HELP_KEYS) host.prefs().remove(k);
-    _note = "the rules cards will show again";
     host.beep(1);
     return true;
   }

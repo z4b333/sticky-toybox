@@ -5060,7 +5060,10 @@ int main() {
   g_dumpEnabled = false;
   prefs.putBool("h_wrd", true);
   toybox.openSettings();  // the routing walk left us on the hub: go back in
-  tapRect(setui::actionRect(setui::ACT_CARDS));
+  // The cards row lives on the apps page now, which is the page about apps.
+  tapRect(setui::actionRect(setui::ACT_APPS));
+  tapRect(setui::appsCardsRect());
+  toybox.hostSettings().back();
   tapRect(setui::actionRect(setui::ACT_RESET));  // armed again
   tapRect(setui::actionRect(setui::ACT_RESET));  // ...and confirmed
   // Cleared means gone, not zeroed: a sentinel default proves the key itself
@@ -5071,6 +5074,54 @@ int main() {
     abort();
   }
   printf("settings ok (hides, reflows, clears scores, restores cards)\n");
+
+  // The font row: the card's families, the firmware's own face as the first
+  // row rather than a button off to one side, and the choice actually taking.
+  {
+    g_dumpEnabled = false;
+    toybox.openSettings();
+    tapRect(setui::actionRect(setui::ACT_FONT));
+    if (toybox.hostSettings().hostPage() != 7) {
+      printf("FONT PAGE FAIL: the row did not open the page\n");
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("settings_font");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+
+    // Row 0 is the built-in face; the card's families follow it.
+    tapRect(setui::fontRect(1));
+    if (!gfx::cardFaceLive(false) || !stickyHost.fontChosen()[0]) {
+      printf("FONT PAGE FAIL: choosing a family did not take\n");
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("settings_font_chosen");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+
+    // And it is remembered, which is the difference between a setting and a
+    // gesture: the name has to survive in NVS, not just in the running face.
+    char saved[32] = "";
+    prefs.getString("font_uni", saved, sizeof(saved));
+    if (!saved[0] || strcmp(saved, stickyHost.fontChosen()) != 0) {
+      printf("FONT PAGE FAIL: chose %s, remembered '%s'\n", stickyHost.fontChosen(), saved);
+      abort();
+    }
+
+    tapRect(setui::fontRect(0));  // back to the built-in face
+    prefs.getString("font_uni", saved, sizeof(saved));
+    if (gfx::cardFaceLive(false) || stickyHost.fontChosen()[0] || saved[0]) {
+      printf("FONT PAGE FAIL: the built-in row did not put it back (kept '%s')\n", saved);
+      abort();
+    }
+    toybox.hostSettings().back();
+    toybox.goHub();
+    toybox.hostHub().goHome();
+    g_dumpEnabled = true;
+    printf("font page ok (card families listed, chosen, remembered, and given back)\n");
+  }
 
   appvis::g_mask = appvis::ALL;
   buzzer::setEnabled(true);
