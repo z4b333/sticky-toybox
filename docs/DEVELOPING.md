@@ -164,16 +164,21 @@ The `||` is the whole point. Fast-forward when the histories agree, and a
 merge commit when they do not, without anybody having to read a hint about
 rebasing at the moment they are trying to flash a device.
 
-If GitHub Pages does not rebuild within a minute of the push -- no new "pages
-build and deployment" run in Actions -- nudge it:
+### The site
 
-```
-git commit --allow-empty -m "chore: rebuild pages"
-git push origin master
-```
+`docs/` is published by `.github/workflows/pages.yml`, not by GitHub's
+built-in branch deployment. The built-in one does the same job with one flaw
+that cost real time here: it does not always fire. Three releases went out to
+a site still serving the previous version, and the only cure was an empty
+commit to provoke it -- which then diverged the two clones and had to be
+merged.
 
-That empty commit is exactly what diverged the two sides at v1.1.0, which is
-why the recipe above no longer assumes a fast-forward.
+A workflow shows up in Actions like any other job, says why it failed, and has
+a **Run workflow** button. If a release lands and the site is stale, press it:
+Actions -> Pages -> Run workflow. No invented commits.
+
+Check what is actually live with a cache-buster rather than the page itself:
+`https://z4b333.github.io/sticky-toybox/firmware/version.json?v=2`
 
 ## The Seeed Playground registry
 

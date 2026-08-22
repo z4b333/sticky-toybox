@@ -1,0 +1,44 @@
+# Publishing docs/ as the site, from Actions rather than from the branch.
+#
+# GitHub's built-in "deploy from a branch" does the same job with one flaw
+# that cost real time here: it does not always fire. Three releases went out
+# to a site still serving the previous version, and the only way back was an
+# empty commit to provoke it -- which then diverged the two clones and had to
+# be merged. A workflow shows up in Actions like any other job, says why it
+# failed, and has a Run workflow button.
+name: Pages
+
+on:
+  push:
+    branches: [master]
+  # The button. This is the whole reason for the change: a deployment that can
+  # be asked for again without inventing a commit.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time, and never cancel one in flight: a half-written
+# site is worse than an old one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          # The site is docs/ -- the installer page, the firmware binaries it
+          # serves, and the wallpaper, editor and recipe tools.
+          path: docs
+      - id: deployment
+        uses: actions/deploy-pages@v4
