@@ -19,6 +19,22 @@
     align-items: center;
   }
   .hero h1 { max-width: 15ch; }
+  /* The version, at the top where an update is noticed rather than looked
+     for. A hairline pill, not a badge: the page's whole language is rules and
+     type, and a coloured chip would be the loudest thing above the fold. It
+     links to the installer, because "there is a new one" and "put it on"
+     should be one gesture. Hidden until the number is actually known -- an
+     empty pill saying "loading" is worse than nothing. */
+  .verchip {
+    display: none; align-items: baseline; gap: 10px;
+    border: 1px solid var(--line); border-radius: 999px;
+    padding: 7px 16px; margin-bottom: 20px;
+    font-size: 15px; color: var(--muted); text-decoration: none;
+  }
+  .verchip.on { display: inline-flex; }
+  .verchip:hover { border-color: var(--fg); }
+  .verchip b { color: var(--fg); font-weight: 650; font-variant-numeric: tabular-nums; }
+  .verchip .when { font-size: 14px; }
   .hero .device { max-width: 320px; margin-left: auto; }
   .cta { margin-top: 32px; display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
   .cta a.actbtn { text-decoration: none; display: inline-block; }
@@ -139,6 +155,10 @@
   <div class="hero">
     <div class="inner">
       <div>
+        <a class="verchip" id="verchip" href="#install">
+          <span>Latest firmware <b id="verchip-num">&mdash;</b></span>
+          <span class="when" id="verchip-when"></span>
+        </a>
         <h1>Small screen.<br>Big playground.</h1>
         <p class="lede">Games. Notes. Books. Tools.<br>
         Little things, thoughtfully tucked away.</p>
@@ -731,6 +751,14 @@
       // The build goes INSIDE the sentence rather than into a badge beside
       // it: every installer worth copying says "we will write X to it", and
       // nobody reads a metadata card.
+      // The same number at the top of the page, where somebody who already has
+      // Toybox looks once and leaves. Shown only once it is known.
+      var chip = document.getElementById('verchip');
+      if (chip) {
+        document.getElementById('verchip-num').textContent = v.version;
+        document.getElementById('verchip-when').textContent = 'built ' + v.date;
+        chip.className = 'verchip on';
+      }
       document.getElementById('ver').innerHTML =
         'We will write <b>' + v.version + '</b> to it &mdash; built ' + v.date +
         ', ' + mb + ' MB, sha256 <code>' + v.sha256 + '&hellip;</code>. ' +
