@@ -39,6 +39,22 @@ void drawTextCentered(int cx, int y, const char* s, int scale, uint8_t color,
 // A tappable rounded-ish button: filled or outlined, with centered label.
 void drawButton(int x, int y, int w, int h, const char* label, int scale, bool filled);
 
+// A reading face off the SD card, in CrossInk's .cpfont format: one file per
+// line box (18 / 24 / 32 / 44), whichever of a family's sizes lands closest.
+// `blob` must be a live allocation this takes ownership of, and nullptr clears
+// that box. False means the bytes were not a font this can read, and whatever
+// was there before is left alone.
+//
+// A card face answers before the baked tables for every codepoint it carries,
+// and falls through for the ones it does not -- which is what keeps Thai
+// drawing under a Latin-only font.
+bool cardFaceSet(int px, uint8_t* blob, uint32_t len);
+void cardFaceClear();
+bool cardFaceLive();
+// The line box the loaded file was cut for, or 0. The chooser uses it to pick
+// which of a family's sizes belongs in which box.
+int cardFaceLine(int px);
+
 // Loads every *.tfp font pack under /fonts into PSRAM and registers its faces
 // behind the baked tables (full Chinese / Korean / Japanese coverage; see
 // tools/make_font_pack.py). Safe to call again after an install; packs already

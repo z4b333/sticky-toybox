@@ -531,6 +531,110 @@ static void checkCpFont() {
          reg.glyphCount, reg.advanceY);
 }
 
+// Drawing with a card face: the fixture is loaded into the 18 px box and the
+// same line is measured and drawn with it and without it. Three things have to
+// hold, and each was a way to ship a font that looks installed and is not.
+static void checkCardFace() {
+  std::vector<uint8_t> blob;
+  if (!readFixture(blob)) {
+    printf("CARD FONT FAIL: fixture missing\n");
+    abort();
+  }
+  const char* kLine = "Hamburgefonstiv";
+  const char* kThai = "\xe0\xb8\xaa\xe0\xb8\xa7\xe0\xb8\xb1\xe0\xb8\xaa\xe0\xb8\x94\xe0\xb8\xb5";
+  auto inkOnScreen = [&](const char* text, int px) {
+    epd.clear(true);
+    gfx::drawText(20, 100, text, px, 0);
+    int n = 0;
+    for (int y = 90; y < 150; y++)
+      for (int x = 0; x < 480; x++) {
+        int pxx, pyy;
+        epdMapPixel(epd.rotation(), epd.panelFlipX(), epd.panelFlipY(), x, y, pxx, pyy);
+        if ((epd.fb()[(uint32_t)pyy * EPD_WB + (pxx >> 3)] & (0x80 >> (pxx & 7))) == 0) n++;
+      }
+    return n;
+  };
+
+  const int bakedInk = inkOnScreen(kLine, 18);
+  const int bakedWidth = gfx::textWidth(kLine, 18, false, 0);
+  const int bakedThai = inkOnScreen(kThai, 18);
+
+  uint8_t* owned = (uint8_t*)malloc(blob.size());
+  memcpy(owned, blob.data(), blob.size());
+  if (!gfx::cardFaceSet(18, owned, (uint32_t)blob.size()) || !gfx::cardFaceLive()) {
+    printf("CARD FONT FAIL: the fixture would not install\n");
+    abort();
+  }
+
+  const int cardInk = inkOnScreen(kLine, 18);
+  const int cardWidth = gfx::textWidth(kLine, 18, false, 0);
+  // 1. It is actually being used. A face that installs and never draws is the
+  //    failure mode this whole feature invites.
+  if (cardInk == bakedInk || cardWidth == bakedWidth) {
+    printf("CARD FONT FAIL: same ink (%d) or same width (%d) as the baked face\n", cardInk,
+           cardWidth);
+    abort();
+  }
+  if (cardInk < 100) {
+    printf("CARD FONT FAIL: the card face drew %d px -- nothing legible\n", cardInk);
+    abort();
+  }
+  // 2. Thai still draws. This pack has no Thai; the baked tables have to keep
+  //    answering underneath, or choosing a font silently empties the language.
+  const int cardThai = inkOnScreen(kThai, 18);
+  if (cardThai != bakedThai) {
+    printf("CARD FONT FAIL: Thai drew %d px under the card face, %d without\n", cardThai,
+           bakedThai);
+    abort();
+  }
+  // 3. Measuring and drawing agree. A width taken from the baked tables while
+  //    the glyphs come off the card is how centred text drifts and how a page
+  //    turn loses its last word.
+  epd.clear(true);
+  gfx::drawText(20, 100, kLine, 18, 0);
+  int rightmost = 0;
+  for (int y = 90; y < 150; y++)
+    for (int x = 0; x < 480; x++) {
+      int pxx, pyy;
+      epdMapPixel(epd.rotation(), epd.panelFlipX(), epd.panelFlipY(), x, y, pxx, pyy);
+      if ((epd.fb()[(uint32_t)pyy * EPD_WB + (pxx >> 3)] & (0x80 >> (pxx & 7))) == 0 && x > rightmost)
+        rightmost = x;
+    }
+  const int drawnWidth = rightmost - 20 + 1;
+  if (drawnWidth > cardWidth || drawnWidth < cardWidth - 6) {
+    printf("CARD FONT FAIL: drew %d px wide, measured %d\n", drawnWidth, cardWidth);
+    abort();
+  }
+
+  // One picture of the two faces on one screen, because "the widths differ" is
+  // not the same as "it looks like a font".
+  {
+    epd.clear(true);
+    gfx::cardFaceClear();
+    gfx::drawText(20, 40, "The baked face, DejaVu Sans", 18, 0);
+    gfx::drawText(20, 70, kLine, 18, 0);
+    gfx::drawText(20, 100, kThai, 18, 0);
+    uint8_t* again = (uint8_t*)malloc(blob.size());
+    memcpy(again, blob.data(), blob.size());
+    gfx::cardFaceSet(18, again, (uint32_t)blob.size());
+    gfx::drawText(20, 160, "The card face, off a .cpfont", 18, 0);
+    gfx::drawText(20, 190, kLine, 18, 0);
+    gfx::drawText(20, 220, kThai, 18, 0);
+    gfx::drawText(20, 250, "0123456789 !?,.;: quick brown fox", 18, 0);
+    setScreen("card_font");
+    epd.displayFull();
+  }
+
+  gfx::cardFaceClear();
+  if (gfx::cardFaceLive() || gfx::textWidth(kLine, 18, false, 0) != bakedWidth) {
+    printf("CARD FONT FAIL: clearing the face did not put the baked one back\n");
+    abort();
+  }
+  epd.clear(true);
+  printf("card face ok (%d px of ink against the baked %d, %d px wide against %d, Thai intact)\n",
+         cardInk, bakedInk, cardWidth, bakedWidth);
+}
+
 // The clock every options panel carries in the bar's far corner. It is drawn
 // there rather than on the page behind it because a page is not redrawn often
 // enough to hold a true time, and both halves of that promise have to be kept:
@@ -643,6 +747,7 @@ int main() {
   // the thing under the finger. requestScreen is stubbed, so record what it
   // asked for and compare against the drawing order.
   checkCpFont();
+  checkCardFace();
   checkHubRouting("all shown");
 
   // The three folder pages, drawn as a finger would reach them.
