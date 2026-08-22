@@ -671,18 +671,40 @@ static void checkCardFamily() {
   // that does nothing when tapped.
   sdcard::hostPutCardFile("/.fonts/NotAFamily/readme.txt", "hello", 5);
 
+  // The two layouts a person actually produces, as against the one the
+  // documentation describes. Unzipping <Family>.zip inside a folder you made
+  // yourself leaves <Family>/<Family>/, and dragging the files out of the zip
+  // leaves them loose in the root. Both were "no fonts on the card" on real
+  // hardware, with the folders plainly sitting there.
+  {
+    std::vector<uint8_t> one;
+    if (!readFixture(one)) abort();
+    sdcard::hostPutCardFile("/.fonts/Nested/Nested/Nested_8.cpfont", one.data(), (int)one.size());
+    sdcard::hostPutCardFile("/fonts/Loose_8.cpfont", one.data(), (int)one.size());
+  }
+
   char names[cardfonts::MAX_FAMILIES][32];
   const int n = cardfonts::families(names, cardfonts::MAX_FAMILIES);
-  bool found = false, ghost = false;
+  bool found = false, ghost = false, nested = false, loose = false;
   for (int i = 0; i < n; i++) {
     if (strcmp(names[i], "DejaVuSerif") == 0) found = true;
     if (strcmp(names[i], "NotAFamily") == 0) ghost = true;
+    if (strcmp(names[i], "Nested") == 0) nested = true;
+    if (strcmp(names[i], "Loose") == 0) loose = true;
   }
-  if (!found || ghost) {
-    printf("CARD FAMILY FAIL: %d families, DejaVuSerif %d, empty folder listed %d\n", n, found,
-           ghost);
+  if (!found || ghost || !nested || !loose) {
+    printf("CARD FAMILY FAIL: %d families -- plain %d, nested %d, loose %d, empty folder %d\n", n,
+           found, nested, loose, ghost);
     abort();
   }
+  // And each of those shapes has to load, not merely be listed.
+  for (const char* fam : {"Nested", "Loose"}) {
+    if (!cardfonts::useUniversal(fam)) {
+      printf("CARD FAMILY FAIL: %s listed but would not load\n", fam);
+      abort();
+    }
+  }
+  cardfonts::noneUniversal();
 
   if (!cardfonts::useUniversal("DejaVuSerif") || strcmp(cardfonts::universal(), "DejaVuSerif") != 0) {
     printf("CARD FAMILY FAIL: the family would not load\n");

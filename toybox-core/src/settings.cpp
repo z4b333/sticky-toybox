@@ -591,9 +591,15 @@ void SettingsScreen::renderFont(ToolsHost& host, ToolsCanvas& c) {
     }
   }
 
-  if (_fontN == 0)
-    c.textCentered(SCREEN_W / 2, 700, "no fonts on the card - put .cpfont families in /.fonts",
-                   TS_SMALL, true);
+  if (_fontN == 0) {
+    c.textCentered(SCREEN_W / 2, 300, "no fonts on the card", TS_LARGE, true);
+    c.textCentered(SCREEN_W / 2, 360, "A family is a folder of .cpfont files:", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, 392, "/.fonts/Bitter/Bitter_12.cpfont", TS_SMALL, true, true);
+    c.textCentered(SCREEN_W / 2, 432, "/fonts works too, and so do the files", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, 464, "lying loose in either folder.", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, 520, "Downloads are at", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, 552, "github.com/uxjulia/crossink-fonts", TS_SMALL, true, true);
+  }
   else
     c.textCentered(SCREEN_W / 2, 776, "apps can each be given their own face", TS_SMALL, true);
 }
