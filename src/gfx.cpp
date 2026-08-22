@@ -512,7 +512,21 @@ int textWidth(const char* s, int scale, bool bold, int spacing) {
   return w < 0 ? 0 : w;
 }
 
-int textHeight(int px) { return faceFor(px, false)->height; }
+int textHeight(int px) {
+  // A card face has its own line height, and while an app is drawing the
+  // owner's words in one, that is the height its lines have to step by --
+  // otherwise a 30 px face is laid out on 24 px lines and every line lands on
+  // the one below it.
+  //
+  // Only while the content face is on. The firmware's own screens keep the
+  // baked metrics they were laid out against, so choosing a face for a book
+  // cannot move the buttons on a settings page.
+  if (g_contentOn) {
+    const int slot = cardSlot(px);
+    if (g_content[slot].live) return g_content[slot].font.style(0).advanceY;
+  }
+  return faceFor(px, false)->height;
+}
 
 // Blank space a string leaves inside the box textWidth/textHeight report.
 // Centring on that box alone parks the ink off centre -- most visibly on a

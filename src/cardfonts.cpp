@@ -18,6 +18,36 @@ namespace {
 char g_universal[32] = "";
 char g_content[32] = "";
 
+// What the loaded content family offers a reader, smallest first: one entry
+// per distinct line height, and none of them smaller than the body size the
+// firmware settled on. Filled by a content load, so the reader can step
+// through a family's real sizes instead of through Toybox's four boxes.
+constexpr int BODY_MIN = 24;
+int g_sizeN = 0;
+int g_sizeLine[MAX_SIZES] = {};
+int g_sizePt[MAX_SIZES] = {};
+int g_sizeFile[MAX_SIZES] = {};  // which of the family's files each one is
+int g_sizeSel = -1;              // the one in the body box, or -1 for automatic
+
+void forgetSizes() {
+  g_sizeN = 0;
+  g_sizeSel = -1;
+}
+
+// The number a size's file is named for: Bitter_12.cpfont is their 12. Read
+// off the end of the bare name, because it is the number the person seeing
+// their card's contents already knows the file by.
+int ptOf(const char* file) {
+  const char* dot = strrchr(file, '.');
+  int end = dot ? (int)(dot - file) : (int)strlen(file);
+  int start = end;
+  while (start > 0 && file[start - 1] >= '0' && file[start - 1] <= '9') start--;
+  if (start == end) return 0;
+  int v = 0;
+  for (int i = start; i < end; i++) v = v * 10 + (file[i] - '0');
+  return v > 0 && v < 400 ? v : 0;
+}
+
 // The boxes Toybox draws in, and the order they are filled. Every one that
 // finds no reasonable file is simply left baked, which is why a family that
 // only ships small sizes still works for body text and leaves headings alone.
@@ -94,7 +124,7 @@ int families(char names[][32], int max) {
 }
 
 namespace {
-bool load(const char* family, bool content) {
+bool load(const char* family, bool content, int bodyLine) {
   if (!family || !family[0]) return false;
   const bool mine = !sdcard::browsing();
   if (mine && !sdcard::browseOpen()) return false;
@@ -117,6 +147,51 @@ bool load(const char* family, bool content) {
     lines[i] = lineOf(paths[i]);
   }
 
+  // The sizes this family offers a reader, smallest first. Built here because
+  // the headers have just been read and reading them again is a second of card
+  // for numbers already in hand. An insertion sort over at most sixteen, and
+  // a height already in the list is a duplicate cut of the same size -- two
+  // files that draw the same line are one choice on a stepper.
+  int order[MAX_SIZES], orderN = 0;
+  for (int i = 0; i < n; i++) {
+    if (lines[i] < BODY_MIN) continue;
+    bool dup = false;
+    for (int k = 0; k < orderN; k++)
+      if (lines[order[k]] == lines[i]) dup = true;
+    if (dup) continue;
+    int at = orderN;
+    while (at > 0 && lines[order[at - 1]] > lines[i]) {
+      order[at] = order[at - 1];
+      at--;
+    }
+    order[at] = i;
+    orderN++;
+  }
+
+  // Which file the body box gets, and which the headings above it. -1 means
+  // the automatic choice, which is every app but the reader and every family
+  // with nothing to step through.
+  int forceBody = -1, forceHead = -1;
+  if (content && orderN >= 2) {
+    // No size asked for means the body box, which is where the automatic
+    // choice would have landed anyway on every family that ships a size near
+    // it. Going through the list rather than around it is what lets a screen
+    // say which size the words are in without guessing: the answer is always
+    // one of the ones on offer.
+    const int want = bodyLine > 0 ? bodyLine : BOXES[1];
+    int best = 0;
+    for (int k = 1; k < orderN; k++) {
+      const int gap = lines[order[k]] > want ? lines[order[k]] - want : want - lines[order[k]];
+      const int bg =
+          lines[order[best]] > want ? lines[order[best]] - want : want - lines[order[best]];
+      if (gap < bg) best = k;
+    }
+    forceBody = order[best];
+    // A heading is one step up, and at the top of the family it is the body
+    // size in bold -- the same answer the built-in faces give at their largest.
+    forceHead = order[best + 1 < orderN ? best + 1 : best];
+  }
+
   // Everything is read before anything is installed. A half-installed family --
   // two boxes from the card, two baked -- is a page in two fonts, and the way
   // it happens is a card pulled out halfway through.
@@ -126,7 +201,12 @@ bool load(const char* family, bool content) {
   bool any = false;
   int loadedFrom[4] = {-1, -1, -1, -1};
   for (int b = 0; b < 4; b++) {
-    const int pick = pickFor(BOXES[b], files, n, lines);
+    // Boxes 1 and 2 are the reader's body and its headings. When a size was
+    // asked for they are told, not measured; the other two are chosen the
+    // automatic way so that the small print inside an app still has a face.
+    int pick = pickFor(BOXES[b], files, n, lines);
+    if (b == 1 && forceBody >= 0) pick = forceBody;
+    if (b == 2 && forceHead >= 0) pick = forceHead;
     if (pick < 0) continue;
     // The same file often wins two neighbouring boxes -- 8 pt suits both the
     // 18 and the 24 px box on most faces. Read once, shared, freed once.
@@ -177,14 +257,37 @@ bool load(const char* family, bool content) {
     const bool owns = ownsBlob[b];
     if (!gfx::cardFaceSet(BOXES[b], blobs[b], sizes[b], content, owns) && owns) free(blobs[b]);
   }
-  if (!gfx::cardFaceLive(content)) return false;
+  if (!gfx::cardFaceLive(content)) {
+    if (content) forgetSizes();
+    return false;
+  }
   snprintf(content ? g_content : g_universal, 32, "%s", family);
+  if (content) {
+    // Only worth offering when there is a choice: one usable size is not a
+    // scale to step along, and the app keeps its own sizes instead.
+    g_sizeN = orderN >= 2 ? orderN : 0;
+    g_sizeSel = -1;
+    for (int k = 0; k < g_sizeN; k++) {
+      g_sizeLine[k] = lines[order[k]];
+      g_sizePt[k] = ptOf(files[order[k]]);
+      g_sizeFile[k] = order[k];
+      // Where the stepper stands, including after an automatic load: the file
+      // the body box ended up with is one of these, and a reader opening the
+      // Text page should see the size it is already reading in.
+      if (order[k] == (forceBody >= 0 ? forceBody : loadedFrom[1])) g_sizeSel = k;
+    }
+  }
   return true;
 }
 }  // namespace
 
-bool useUniversal(const char* family) { return load(family, false); }
-bool useContent(const char* family) { return load(family, true); }
+bool useUniversal(const char* family) { return load(family, false, 0); }
+bool useContent(const char* family, int bodyLine) { return load(family, true, bodyLine); }
+
+int contentSizeCount() { return g_sizeN; }
+int contentSizeLine(int i) { return (i >= 0 && i < g_sizeN) ? g_sizeLine[i] : 0; }
+int contentSizePt(int i) { return (i >= 0 && i < g_sizeN) ? g_sizePt[i] : 0; }
+int contentSizeIndex() { return g_sizeSel; }
 
 void noneUniversal() {
   gfx::cardFaceClear(false);
@@ -194,6 +297,7 @@ void noneUniversal() {
 void noneContent() {
   gfx::cardFaceClear(true);
   g_content[0] = 0;
+  forgetSizes();
 }
 
 const char* universal() { return g_universal; }

@@ -39,8 +39,13 @@ int families(char names[][32], int max);
 //
 // Only one content family is resident at a time: they are megabytes, and the
 // app that opens next wants its own. Leaving an app drops it.
+// `bodyLine` asks for a particular size in the body box -- the line height
+// wanted, in pixels, nearest match wins -- so that a reader can be set in the
+// family's own 12 pt rather than in whichever of its files happened to land
+// closest to the firmware's 24 px box. 0 leaves every box chosen the automatic
+// way, which is what every app but the reader wants.
 bool useUniversal(const char* family);
-bool useContent(const char* family);
+bool useContent(const char* family, int bodyLine = 0);
 
 // Put the baked faces back and free the card's.
 void noneUniversal();
@@ -49,5 +54,24 @@ void noneContent();
 // The family currently drawn from, or "" for the baked faces.
 const char* universal();
 const char* content();
+
+// The sizes the loaded content family ships, as the line heights its files
+// state, smallest first and one entry per distinct height. Only the ones a
+// book can be read at: a family's 8 pt is a 20 px line, smaller than the body
+// size the whole firmware settled on, and offering it would be offering a page
+// nobody can read.
+//
+// Zero when the content face is baked, or when the family ships only one
+// usable size -- in both cases there is nothing to step through and the caller
+// keeps its own sizes.
+int contentSizeCount();
+int contentSizeLine(int i);
+// The size number the file itself is named for -- CrossInk's points at 150 DPI,
+// which is what the person picking a file off their card sees. 0 when the name
+// carried no number.
+int contentSizePt(int i);
+// Which of them the body box is set in, or -1 when the boxes were filled the
+// automatic way.
+int contentSizeIndex();
 
 }  // namespace cardfonts

@@ -389,6 +389,36 @@ class ToolsHost {
   // in.
   virtual void fontContent(bool on) { (void)on; }
 
+  // The sizes the open app's card family ships, for an app that lets somebody
+  // choose one -- a family is cut at eight or ten sizes and the firmware's own
+  // four boxes only reach three of them, so a reader set in a card face was
+  // choosing between "normal", "large" and "largest" out of ten real sizes.
+  //
+  // 0 when the app's face is a built-in, or when the family offers no choice
+  // worth making: then the app keeps its own sizes, which is what it did
+  // before any of this existed. Only meaningful between fontEnter and
+  // fontLeave -- one family is resident at a time and these describe it.
+  virtual int faceSizeCount() { return 0; }
+  // The line each size draws on, in pixels, and the number its file is named
+  // for -- their points at 150 DPI, which is what somebody who put the file on
+  // the card knows it by. 0 when the name carried no number.
+  virtual int faceSizeLine(int i) {
+    (void)i;
+    return 0;
+  }
+  virtual int faceSizePt(int i) {
+    (void)i;
+    return 0;
+  }
+  // Which one the app's words are set in, or -1 when there is no telling.
+  virtual int faceSize() { return -1; }
+  // Choose one. Reads the family again, so it costs what opening the app
+  // costs; false leaves the face that was working alone.
+  virtual bool faceSizeSet(int i) {
+    (void)i;
+    return false;
+  }
+
   // Wallpapers on the SD card, for the settings page. Fills names (bare file
   // names, NUL-terminated, truncated to fit) and returns how many were found;
   // -1 means no card answered. A host with no card slot keeps the default and
@@ -708,12 +738,21 @@ class ToolsHost {
 // menus, the shelf, the settings page -- in a book's clothes.
 struct ContentFace {
   explicit ContentFace(ToolsHost& h) : _h(h) { _h.fontContent(true); }
-  ~ContentFace() { _h.fontContent(false); }
+  ~ContentFace() { off(); }
   ContentFace(const ContentFace&) = delete;
   ContentFace& operator=(const ContentFace&) = delete;
+  // Ends the face before the scope does, for a function that draws the owner's
+  // words and then something of the firmware's own beneath them -- a page and
+  // the footer under it. Calling it twice is harmless.
+  void off() {
+    if (!_on) return;
+    _on = false;
+    _h.fontContent(false);
+  }
 
  private:
   ToolsHost& _h;
+  bool _on = true;
 };
 
 class ToolApp {

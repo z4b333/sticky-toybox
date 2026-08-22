@@ -350,6 +350,20 @@ int g_fontSlotOpen = -1;
 // this is what it reads back from.
 char g_famCache[cardfonts::MAX_FAMILIES][ToolsHost::FONT_FAMILY_LEN] = {};
 int g_famCached = -1;
+
+// The size an app's words are wanted at, kept beside the family name: a book
+// left at the family's 12 pt opens at 12 pt tomorrow. Stored as the line
+// height in pixels rather than as a position in a list, because a list moves
+// when somebody adds a file to the card and a line height does not.
+//
+// Separate keys from the family ones, and short: NVS caps a name at fifteen
+// characters.
+const char* kSizeKey[ToolsHost::FONT_SLOTS] = {"fsz_uni", "fsz_ep", "fsz_nt", "fsz_fc", "fsz_rc"};
+int g_fontSize[ToolsHost::FONT_SLOTS] = {};
+bool g_sizeRead[ToolsHost::FONT_SLOTS] = {};
+// What the resident content family was read with, so that re-entering an app
+// with the same face and the same size does not read megabytes again.
+int g_contentWant = 0;
 }  // namespace
 
 int StickyHost::fontFamilies(char names[][FONT_FAMILY_LEN], int max) {
@@ -438,15 +452,52 @@ bool StickyHost::fontEnter(int slot) {
     cardfonts::noneContent();
     return false;
   }
-  // Already the resident content family: opening the same book twice should
-  // not read four megabytes twice.
-  if (strcmp(cardfonts::content(), fam) == 0) return true;
-  return cardfonts::useContent(fam);
+  const int want = fontSizeWanted(slot);
+  // Already the resident content family, at the size it is wanted in: opening
+  // the same book twice should not read four megabytes twice.
+  if (strcmp(cardfonts::content(), fam) == 0 && g_contentWant == want) return true;
+  if (!cardfonts::useContent(fam, want)) return false;
+  g_contentWant = want;
+  return true;
 }
 
 void StickyHost::fontLeave() {
   cardfonts::noneContent();
   g_fontSlotOpen = -1;
+  g_contentWant = 0;
+}
+
+// The stored size for a slot, in pixels of line, or 0 for "whichever of the
+// family's sizes lands closest to the firmware's own box".
+int StickyHost::fontSizeWanted(int slot) {
+  if (slot < 0 || slot >= FONT_SLOTS) return 0;
+  if (!g_sizeRead[slot]) {
+    g_sizeRead[slot] = true;
+    g_fontSize[slot] = (int)prefs().getUInt(kSizeKey[slot], 0);
+  }
+  return g_fontSize[slot];
+}
+
+int StickyHost::faceSizeCount() { return cardfonts::contentSizeCount(); }
+int StickyHost::faceSizeLine(int i) { return cardfonts::contentSizeLine(i); }
+int StickyHost::faceSizePt(int i) { return cardfonts::contentSizePt(i); }
+int StickyHost::faceSize() { return cardfonts::contentSizeIndex(); }
+
+bool StickyHost::faceSizeSet(int i) {
+  if (g_fontSlotOpen < 0 || g_fontSlotOpen >= FONT_SLOTS) return false;
+  const int line = cardfonts::contentSizeLine(i);
+  if (line <= 0) return false;
+  const char* fam = fontFor(g_fontSlotOpen);
+  if (!fam[0]) return false;
+  // The family is read again, because a size is a different set of files. It
+  // costs what opening the app costs, and it fails the same way: the face that
+  // was working is left alone.
+  if (!cardfonts::useContent(fam, line)) return false;
+  g_contentWant = line;
+  g_fontSize[g_fontSlotOpen] = line;
+  g_sizeRead[g_fontSlotOpen] = true;
+  prefs().putUInt(kSizeKey[g_fontSlotOpen], (uint32_t)line);
+  return true;
 }
 
 void StickyHost::fontContent(bool on) {

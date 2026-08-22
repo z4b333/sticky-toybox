@@ -893,16 +893,58 @@ class EpubTool : public ToolApp {
     }
   };
 
+  // --- what the book is set in, and how big ------------------------------------
+  // A face off the card is cut at eight or ten sizes; the firmware has four
+  // boxes and the reader reached three of them. So when the book's face is a
+  // family with sizes to choose from, the Size stepper walks the family's own
+  // and the page is always drawn in the body box -- the box is just where the
+  // chosen file was put. With a built-in face there is nothing to walk and the
+  // three named sizes stay exactly as they were.
+  //
+  // The whole difference is confined to these four calls. Everything that lays
+  // out or draws a page asks them rather than epubui::sizeAt, so a size that
+  // came off the card and one that came out of the firmware are the same thing
+  // by the time the page is measured.
+  bool cardSizes() { return host().faceSizeCount() >= 2; }
+  int cardSizeAt() {
+    const int i = host().faceSize();
+    return i < 0 ? 0 : i;
+  }
+  TSize bodyTS() { return cardSizes() ? TS_MED : epubui::sizeAt(_size); }
+  TSize headTS() { return cardSizes() ? TS_LARGE : epubui::headSize(_size); }
+  TSize tsFor(int head) { return head ? headTS() : bodyTS(); }
+  // What to call the size on a panel. A family's file says what it is -- their
+  // 12, at 150 DPI -- and that is the number somebody who put it on the card
+  // knows it by; a file with no number in its name is named for the line it
+  // draws instead.
+  const char* sizeLabel() {
+    if (!cardSizes()) return epubui::sizeName(_size);
+    const int i = cardSizeAt();
+    const int pt = host().faceSizePt(i);
+    if (pt > 0)
+      snprintf(_szLabel, sizeof(_szLabel), "%d pt", pt);
+    else
+      snprintf(_szLabel, sizeof(_szLabel), "%d px line", host().faceSizeLine(i));
+    return _szLabel;
+  }
+
   int layoutPage() {
     LayoutRot lr(host(), _rot);
     FaceScope fs(host(), _face);
+    // Measured in the face the page will be DRAWN in. Laying a book out in the
+    // device's face and then drawing it in the book's is two different pages:
+    // the widths that decided where every line broke are not the widths the
+    // panel gets. It went unnoticed while a card face was only ever a
+    // near-enough substitute for the box it sat in; it stops being subtle the
+    // moment somebody sets a book in a face half again as tall.
+    ContentFace cf(host());
     ToolsCanvas& c = host().canvas();
-    const TSize ts = epubui::sizeAt(_size);
+    const TSize ts = bodyTS();
     const int lineW = c.width() - 2 * epubui::MARGIN;
     // A line's height follows its own type: a heading line is taller than the
     // body around it, so the step cannot be one number for the page any more.
     auto stepFor = [&](int head) {
-      return c.textHeight(epubui::sizeFor(_size, head)) + epubui::leadAir(_lead);
+      return c.textHeight(tsFor(head)) + epubui::leadAir(_lead);
     };
     const int step = stepFor(0);
     // What is on the glass right now, kept in case this call finds nothing.
@@ -1022,7 +1064,7 @@ class EpubTool : public ToolApp {
       }
 
       // a word, measured in the face it will be drawn in
-      const TSize wts = epubui::sizeFor(_size, wHead);
+      const TSize wts = tsFor(wHead);
       const int ww = c.textWidth(w, wts, wBold, wItal);
       // A heading never shares a line with body text: they are different
       // blocks, so a change of level flushes what is in hand.
@@ -1649,15 +1691,19 @@ class EpubTool : public ToolApp {
   // third screen shows what will be kept before it is kept.
 
   int lineStepNow() {
+    ContentFace cf(host());
     ToolsCanvas& c = host().canvas();
-    return c.textHeight(epubui::sizeAt(_size)) + epubui::leadAir(_lead);
+    return c.textHeight(bodyTS()) + epubui::leadAir(_lead);
   }
 
   // Which word of a line a tap landed on, measured from the same string the
   // page was drawn from. -1 when the tap is past the end of the line.
   int wordAt(const char* line, int tapX) {
+    // In the book's face, because it is the book's words being measured: an
+    // underline drawn from the device's widths lands under the wrong word.
+    ContentFace cf(host());
     ToolsCanvas& c = host().canvas();
-    const TSize ts = epubui::sizeAt(_size);
+    const TSize ts = bodyTS();
     char probe[200];
     int i = 0, word = 0;
     while (line[i]) {
@@ -1677,8 +1723,9 @@ class EpubTool : public ToolApp {
   // The x span of word `w` in `line`, for the underline.
   void wordSpan(const char* line, int w, int& x0, int& x1) {
     FaceScope fs(host(), _face);
+    ContentFace cf(host());
     ToolsCanvas& c = host().canvas();
-    const TSize ts = epubui::sizeAt(_size);
+    const TSize ts = bodyTS();
     char probe[200];
     int i = 0, word = 0;
     x0 = x1 = epubui::MARGIN;
@@ -1864,7 +1911,7 @@ class EpubTool : public ToolApp {
       items[1].sub = _rootSub[1];
       items[1].plus = true;
       items[2].label = "Text";
-      snprintf(_rootSub[2], sizeof(_rootSub[2]), "%s, %s spacing", epubui::sizeName(_size),
+      snprintf(_rootSub[2], sizeof(_rootSub[2]), "%s, %s spacing", sizeLabel(),
                epubui::leadName(_lead));
       items[2].sub = _rootSub[2];
       int n = 3;
@@ -1975,7 +2022,7 @@ class EpubTool : public ToolApp {
     if (_menu == rmenu::Page::Text) {
       host().topBar("TEXT", false, "OPTIONS");
       const char* labels[2] = {"Size", "Spacing"};
-      const char* values[2] = {epubui::sizeName(_size), epubui::leadName(_lead)};
+      const char* values[2] = {sizeLabel(), epubui::leadName(_lead)};
       // The steppers live in reader_menu.h now; the recipe app offers the
       // same two and should not have to draw its own circles.
       for (int r = 0; r < 2; r++)
@@ -1992,11 +2039,21 @@ class EpubTool : public ToolApp {
       c.fillRect(24, TURNS_Y + 92, c.width() - 48, 1, true);
 
       // The sample is the point: nobody can picture 32 px with airy leading.
-      const TSize ts = epubui::sizeAt(_size);
-      const int step = c.textHeight(ts) + epubui::leadAir(_lead);
-      static const char* kSample[4] = {"The quick brown fox jumps", "over the lazy dog, and",
-                                       "the page turns after about", "this many lines of it."};
-      for (int i = 0; i < 4; i++) c.text(28, TURNS_Y + 122 + i * step, kSample[i], ts, true);
+      // Set in the book's face, since that is what the size is being chosen
+      // for -- and clipped to the band it has, because a family's largest size
+      // is half again the height of the box the sample was laid out against.
+      {
+        ContentFace cf(host());
+        const TSize ts = bodyTS();
+        const int step = c.textHeight(ts) + epubui::leadAir(_lead);
+        static const char* kSample[4] = {"The quick brown fox jumps", "over the lazy dog, and",
+                                         "the page turns after about", "this many lines of it."};
+        for (int i = 0; i < 4; i++) {
+          const int y = TURNS_Y + 122 + i * step;
+          if (y > 730) break;
+          c.textClipped(28, y, c.width() - 56, kSample[i], ts, true);
+        }
+      }
       c.textCentered(c.width() / 2, 748, "the page you are on is kept when this changes", TS_SMALL,
                      true);
       return;
@@ -2179,6 +2236,21 @@ class EpubTool : public ToolApp {
         const int step = rmenu::hitStepper(x, y, 110 + r * rmenu::STEP_H,
                                            host().canvas().width());
         if (step == 0) continue;
+        // Size, when the book is set in a family off the card, steps through
+        // that family's own sizes -- and each step reads the files for it, the
+        // same second of card that opening the book costs. The firmware's
+        // three named sizes are what a built-in face steps through.
+        if (r == 0 && cardSizes()) {
+          const int nv = cardSizeAt() + step;
+          if (nv < 0 || nv >= host().faceSizeCount() || !host().faceSizeSet(nv)) {
+            host().beep(2);
+            return;
+          }
+          restyle();
+          host().beep(0);
+          paint();
+          return;
+        }
         uint8_t& v = r == 0 ? _size : _lead;
         const int lim = r == 0 ? epubui::SIZES : epubui::LEADS;
         const int nv = (int)v + step;
@@ -2270,12 +2342,15 @@ class EpubTool : public ToolApp {
     // The book's own face, if one was chosen for the reader. Only the page:
     // the footer under it is the firmware saying where you are, not the book
     // speaking, and it stays in the device's face.
-    ContentFace cf(host());
     if (_pageImage[0]) {
-      if (!drawImagePage(c)) drawImagePlate(c);
+      {
+        ContentFace cf(host());
+        if (!drawImagePage(c)) drawImagePlate(c);
+      }
       if (_chrome) renderFooter(c);
       return;
     }
+    ContentFace cf(host());
     // Each line in its own type, and in runs where the STYLE changes inside
     // it: the parser said which bytes were inside a <b> or <strong> and which
     // inside an <i>, <em> or <cite>, and a heading line carries its level.
@@ -2283,7 +2358,7 @@ class EpubTool : public ToolApp {
     // same arithmetic the layout did.
     for (int i = 0; i < _lineN; i++) {
       const Line& ln = _lines[i];
-      const TSize lts = epubui::sizeFor(_size, ln.head);
+      const TSize lts = tsFor(ln.head);
       const int n = (int)strlen(ln.t);
       int x = epubui::MARGIN;
       // A heading is bold throughout, and bold beats italic (see gfx.h), so
@@ -2305,6 +2380,12 @@ class EpubTool : public ToolApp {
       }
     }
     if (!_chrome) return;
+    // Out of the book's face first. The footer is the firmware saying where
+    // you are, not the book speaking -- and it is drawn in the 24 px box,
+    // which is the very box a family's chosen size sits in, so leaving the
+    // face on would set the chapter name and the page number in whatever the
+    // book was set in and run them out of a 56 px band.
+    cf.off();
     renderFooter(c);
   }
 
@@ -2385,6 +2466,7 @@ class EpubTool : public ToolApp {
   int _nmarks = 0;
   char _rootSub[5][48] = {};
   uint8_t _size = 0, _lead = 1;
+  char _szLabel[16] = "";  // "12 pt", when the size came off the card
   uint8_t _face = 0;  // which built-in cut sits under whatever is chosen
   // The card's families, read once on the way in (see enter): inside a book
   // the card's bus belongs to the book.

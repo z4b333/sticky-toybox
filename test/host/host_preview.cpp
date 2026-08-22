@@ -2920,6 +2920,139 @@ int main() {
       printf("book face ok (built-ins and card families in one list, the place stands still)\n");
     }
 
+    // --- a book set in a family off the card walks THAT family's sizes -------
+    // The firmware has three named sizes because it has four line boxes. A
+    // family is cut at as many sizes as its maker felt like -- eight or ten is
+    // ordinary -- and a reader set in one was choosing between "normal",
+    // "large" and "largest" out of ten real cuts, three of which the boxes
+    // happened to reach. DejaVuSerif on this card draws a 29 px line and a
+    // 44 px one above the body floor, and the Size stepper has to walk those.
+    //
+    // The layout half is the part that bites: a page laid out against the
+    // firmware's 24 px box and drawn in a 44 px face is a page whose lines sit
+    // on top of each other, and a footer left in the book's face runs a
+    // chapter name out of the bottom of the panel.
+    {
+      const uint32_t offBefore = et->hostPageOffset();
+      const int spineBefore = et->hostSpine();
+      if (!stickyHost.fontSet(ToolsHost::FONT_READER, "DejaVuSerif") ||
+          !stickyHost.fontEnter(ToolsHost::FONT_READER)) {
+        printf("READER SIZE FAIL: the card family would not become the book's face\n");
+        abort();
+      }
+      // Two sizes on offer, named by their own files, and the body is in the
+      // smaller because that is the one nearest the box the firmware reads in.
+      if (stickyHost.faceSizeCount() != 2 || stickyHost.faceSizeLine(0) != 29 ||
+          stickyHost.faceSizeLine(1) != 44 || stickyHost.faceSizePt(0) != 12 ||
+          stickyHost.faceSizePt(1) != 18 || stickyHost.faceSize() != 0) {
+        printf("READER SIZE FAIL: %d sizes -- %d px/%d pt then %d px/%d pt, at %d\n",
+               stickyHost.faceSizeCount(), stickyHost.faceSizeLine(0), stickyHost.faceSizePt(0),
+               stickyHost.faceSizeLine(1), stickyHost.faceSizePt(1), stickyHost.faceSize());
+        abort();
+      }
+      // The 8 pt file is a 19 px line: below the body size this firmware
+      // settled on, so it is not offered at all. A page nobody can read is not
+      // a choice.
+      if (stickyHost.faceSizeLine(2) != 0) {
+        printf("READER SIZE FAIL: a %d px line was offered as a reading size\n",
+               stickyHost.faceSizeLine(2));
+        abort();
+      }
+      et->hostSetStyle(0);
+      const int linesSmall = et->hostLineCount();
+
+      toybox.onTap(240, rmenu::rootRect(2, 480).y + 40);
+      if (et->hostMenu() != (int)rmenu::Page::Text) {
+        printf("READER SIZE FAIL: the text page did not open\n");
+        abort();
+      }
+      g_dumpEnabled = true;
+      setScreen("tool_epub_text_card");
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+
+      toybox.onTap(440, 110 + 34 + 20);  // SIZE +, to the family's 18 pt
+      if (stickyHost.faceSize() != 1 || gfx::cardFaceLine(24, true) != 44) {
+        printf("READER SIZE FAIL: stepping up left the size at %d and the body box at %d px\n",
+               stickyHost.faceSize(), gfx::cardFaceLine(24, true));
+        abort();
+      }
+      // The page has to have been laid out against the face it is drawn in.
+      // Same offset, and fewer lines because each one is half again as tall.
+      if (et->hostPageOffset() > offBefore) {
+        printf("READER SIZE FAIL: a bigger size moved the reader forward\n");
+        abort();
+      }
+      if (et->hostLineCount() >= linesSmall) {
+        printf("READER SIZE FAIL: 44 px lines gave %d of them, 29 px gave %d\n",
+               et->hostLineCount(), linesSmall);
+        abort();
+      }
+      // And the lines do not land on each other: every line has to sit at
+      // least a 44 px line below the one above it.
+      for (int i = 1; i < et->hostLineCount(); i++) {
+        const int gap = et->hostLineY(i) - et->hostLineY(i - 1);
+        if (gap > 0 && gap < 44) {
+          printf("READER SIZE FAIL: line %d sits %d px under line %d, in a 44 px face\n", i, gap,
+                 i - 1);
+          abort();
+        }
+      }
+      // The top of the family is the top: there is no next size to step to.
+      toybox.onTap(440, 110 + 34 + 20);
+      if (stickyHost.faceSize() != 1) {
+        printf("READER SIZE FAIL: stepping past the family's largest gave %d\n",
+               stickyHost.faceSize());
+        abort();
+      }
+
+      // The footer stays in the DEVICE's face. It is drawn in the 24 px box --
+      // the very box a chosen size sits in -- so leaving the book's face on
+      // would set the chapter name in 44 px inside a 56 px band and run it off
+      // the bottom of the panel.
+      toybox.onButton(SideBtn::Ok);  // back to the panel root
+      toybox.onButton(SideBtn::Ok);  // panel down, onto the page
+      toybox.onTap(240, 400);        // the middle: the footer comes up
+      stickyHost.refresh(true);
+      int first = -1, last = -1;
+      for (int y = 800 - epubui::FOOT_H + 8; y < 800; y++)
+        for (int x = 0; x < 480; x++) {
+          int pxx, pyy;
+          epdMapPixel(epd.rotation(), epd.panelFlipX(), epd.panelFlipY(), x, y, pxx, pyy);
+          if ((epd.fb()[(uint32_t)pyy * EPD_WB + (pxx >> 3)] & (0x80 >> (pxx & 7))) == 0) {
+            if (first < 0) first = y;
+            last = y;
+          }
+        }
+      // Measured from under the band's rule, which is ink of its own. The
+      // device's face fills eighteen rows here; the book's 44 px one fills
+      // thirty-two and would fill more if the band let it.
+      if (first < 0 || last - first > 24) {
+        printf("READER SIZE FAIL: the footer's ink spans %d rows (%d..%d) -- the book's face\n",
+               first < 0 ? -1 : last - first, first, last);
+        abort();
+      }
+      if (gfx::contentFaceOn()) {
+        printf("READER SIZE FAIL: the book's face was left on after a page was drawn\n");
+        abort();
+      }
+      toybox.onTap(240, 400);  // the footer back down
+
+      // Put the book back the way the next check expects to find it.
+      toybox.onButton(SideBtn::Ok);
+      toybox.onTap(240, rmenu::rootRect(2, 480).y + 40);
+      toybox.onTap(40, 110 + 34 + 20);  // SIZE -, back to the family's 12 pt
+      toybox.onButton(SideBtn::Ok);
+      toybox.onButton(SideBtn::Ok);
+      stickyHost.fontSet(ToolsHost::FONT_READER, "");
+      stickyHost.fontEnter(ToolsHost::FONT_READER);
+      et->hostSetStyle(0);
+      et->hostGoto(spineBefore, offBefore);
+      toybox.onButton(SideBtn::Ok);  // the panel again, as it was
+      printf("reader sizes ok (%d cuts walked, %d px lines laid out, footer in the device face)\n",
+             stickyHost.faceSizeCount() ? stickyHost.faceSizeCount() : 2, 44);
+    }
+
     // --- no word may vanish at a page boundary ------------------------------
     // The same stretch of chapter is read twice, once at largest and once at
     // normal, and the words joined across pages must be identical: the layout

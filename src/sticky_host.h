@@ -160,6 +160,12 @@ class StickyHost : public ToolsHost {
   bool fontEnter(int slot) override;
   void fontLeave() override;
   void fontContent(bool on) override;
+  int faceSizeCount() override;
+  int faceSizeLine(int i) override;
+  int faceSizePt(int i) override;
+  int faceSize() override;
+  bool faceSizeSet(int i) override;
+  int fontSizeWanted(int slot);
 
   // All of these go to the card. Declared out of line because sdcard.h and
   // this header meet awkwardly in the harness build.
