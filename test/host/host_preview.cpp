@@ -2784,12 +2784,31 @@ int main() {
             inkRows++;
             break;
           }
-      // The frame alone is about 2,500 px; the two greys add a quarter and a
-      // half of 180x100 source pixels, scaled fourfold. A plate is text on an
-      // empty page and carries a small fraction of it.
-      if (ink < 20000 || ink > 90000 || inkRows < 400) {
+      // A plate is text on an empty page and carries a small fraction of this.
+      // The ceiling is what catches the picture coming out as its own negative:
+      // the fixture is mostly white, so inverted it fills the panel.
+      if (ink < 20000 || ink > 120000 || inkRows < 400) {
         printf("EPUB APP FAIL: the CrossInk picture drew %d px over %d rows\n", ink, inkRows);
         abort();
+      }
+      // And said plainly: the margin between the edge of the picture and its
+      // frame is paper. Level 3 is WHITE -- reading the levels the other way
+      // round is the mistake that shipped every picture as a negative, and a
+      // total alone can be argued with.
+      {
+        int marginInk = 0;
+        for (int y = 4; y < 16; y++)
+          for (int x = 100; x < 200; x++) {
+            int pxx, pyy;
+            epdMapPixel(epd.rotation(), epd.panelFlipX(), epd.panelFlipY(), x, y, pxx, pyy);
+            if ((epd.fb()[(uint32_t)pyy * EPD_WB + (pxx >> 3)] & (0x80 >> (pxx & 7))) == 0)
+              marginInk++;
+          }
+        if (marginInk > 20) {
+          printf("EPUB APP FAIL: %d px of ink in the picture's white margin -- inverted\n",
+                 marginInk);
+          abort();
+        }
       }
       // And the lookup that found it is the one the manifest states -- for the
       // picture asked about, not the next one in the list, and not at all for

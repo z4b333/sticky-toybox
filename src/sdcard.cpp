@@ -489,6 +489,11 @@ const uint8_t kFakePlatePng[] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
 // second time, already rendered for this panel: a .pxc of four grey levels,
 // and a manifest saying which belongs to which image. This is one of each.
 //
+// The level is BRIGHTNESS -- 0 black, 3 white -- which is the thing that was
+// got backwards first time and shipped every picture as its own negative. So
+// the fixture is mostly 3, the way a real page is mostly paper: a renderer
+// that inverts it fills the panel and blows through the ink bound below.
+//
 // 240x400, so it is scaled x2 on the way to the panel and a scaler that got
 // its arithmetic wrong shows up as a picture that is half the page or twice
 // it. All four levels are used -- an ordered dither turns 1 and 2 into
@@ -513,24 +518,25 @@ uint32_t fakePxcBuild() {
   const int W = 240, H = 400, STRIDE = (W + 3) / 4;
   const uint32_t len = 4u + (uint32_t)STRIDE * H;
   if (g_fakePxc) return len;
-  g_fakePxc = (uint8_t*)calloc(len, 1);  // 0 is white, which is most of it
+  g_fakePxc = (uint8_t*)malloc(len);
   put16(g_fakePxc + 0, (uint32_t)W);
   put16(g_fakePxc + 2, (uint32_t)H);
   uint8_t* bits = g_fakePxc + 4;
+  memset(bits, 0xFF, (size_t)STRIDE * H);  // 3 is white, which is most of it
   auto set = [&](int x, int y, uint8_t v) {
     if (x < 0 || y < 0 || x >= W || y >= H) return;
     uint8_t& b2 = bits[(size_t)y * STRIDE + (x >> 2)];
     const int sh = (3 - (x & 3)) * 2;
     b2 = (uint8_t)((b2 & ~(3 << sh)) | ((v & 3) << sh));
   };
-  for (int x = 10; x < W - 10; x++) { set(x, 10, 3); set(x, H - 11, 3); }
-  for (int y = 10; y < H - 10; y++) { set(10, y, 3); set(W - 11, y, 3); }
+  for (int x = 10; x < W - 10; x++) { set(x, 10, 0); set(x, H - 11, 0); }
+  for (int y = 10; y < H - 10; y++) { set(10, y, 0); set(W - 11, y, 0); }
   for (int y = 40; y < 140; y++)
-    for (int x = 30; x < 210; x++) set(x, y, 1);   // the lightest grey
+    for (int x = 30; x < 210; x++) set(x, y, 2);   // the lighter grey
   for (int y = 160; y < 260; y++)
-    for (int x = 30; x < 210; x++) set(x, y, 2);   // the middle one
+    for (int x = 30; x < 210; x++) set(x, y, 1);   // the darker one
   for (int y = 20; y < 36; y++)
-    for (int x = 20; x < 60; x++) set(x, y, 3);    // the top-left mark
+    for (int x = 20; x < 60; x++) set(x, y, 0);    // the top-left mark, solid
   return len;
 }
 

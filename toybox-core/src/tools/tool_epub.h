@@ -1469,8 +1469,10 @@ class EpubTool : public ToolApp {
   }
 
   // Draws one. The file is four bytes of size and then two bits a pixel, rows
-  // padded to a byte -- the same packing the card fonts use -- with 0 white and
-  // 3 black.
+  // padded to a byte -- the same packing the card fonts use -- and the level is
+  // BRIGHTNESS: 0 is black and 3 is white, a straight ramp that lands on 0, 85,
+  // 170 and 255 against the JPEG the book still carries. Guessing that the
+  // other way round shipped every picture as its own negative.
   //
   // Scaled to the panel and dithered down to the one bit the page is drawn in.
   // A 4x4 ordered dither, not a threshold: their four greys thresholded would
@@ -1510,7 +1512,9 @@ class EpubTool : public ToolApp {
     // or 16 sixteenths, so white stays white and black stays black and the two
     // middle greys become patterns.
     static const uint8_t kBayer[16] = {0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5};
-    static const uint8_t kCover[4] = {0, 4, 8, 16};
+    // Ink is what is left of the light: the levels are 0, 1/3, 2/3 and 1 bright,
+    // so they are 16, 11, 5 and 0 sixteenths dark.
+    static const uint8_t kCover[4] = {16, 11, 5, 0};
     int haveRow = -1;
     for (int dy = 0; dy < dh; dy++) {
       const int sy = (int)((int64_t)dy * h / dh);
@@ -1527,7 +1531,7 @@ class EpubTool : public ToolApp {
       for (int dx = 0; dx < dw; dx++) {
         const int sx = (int)((int64_t)dx * w / dw);
         const uint8_t byte = row[sx >> 2];
-        if (!byte) {  // four white pixels, which is most of most pictures
+        if (byte == 0xFF) {  // four white pixels, which is most of most pictures
           const int skip = 3 - (sx & 3);
           dx += skip;
           continue;
