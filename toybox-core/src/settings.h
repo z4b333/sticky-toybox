@@ -61,6 +61,13 @@ inline TRect filesDoneRect() { return TRect{16, 700, SCREEN_W - 32, 60}; }
 // use wearing a tick. The first row is the firmware's own face, so "put it
 // back" is a row rather than a separate button -- the same shape as choosing
 // any other one.
+// The first font page: which text is being dressed. The device's own, then
+// one row per app that shows the owner's words.
+inline constexpr int FONT_WHO_Y0 = 120, FONT_WHO_H = 76, FONT_WHO_STEP = 84;
+inline TRect fontWhoRect(int i) {
+  return TRect{16, FONT_WHO_Y0 + i * FONT_WHO_STEP, SCREEN_W - 32, FONT_WHO_H};
+}
+
 inline constexpr int FONT_Y0 = 128, FONT_ROW_H = 56, FONT_ROW_STEP = 62, FONT_PER = 8;
 inline constexpr int FONT_MAX = 24;
 inline TRect fontRect(int i) {
@@ -217,6 +224,8 @@ class SettingsScreen {
   void renderClock(ToolsHost& host, ToolsCanvas& c);
   bool tapClock(ToolsHost& host, int x, int y);
   void leaveClock();
+  void renderFontWho(ToolsHost& host, ToolsCanvas& c);
+  bool tapFontWho(ToolsHost& host, int x, int y);
   void renderFont(ToolsHost& host, ToolsCanvas& c);
   bool tapFont(ToolsHost& host, int x, int y);
   void enterFont(ToolsHost& host);
@@ -227,7 +236,8 @@ class SettingsScreen {
   const char* _note = nullptr;
   char _coverNote[96] = {};
   // 0 = settings, 1 = lock, 2 = wallpaper, 3 = apps, 4 = files,
-  // 5 = the lock screen's picture, off the card, 6 = the clock, 7 = the font
+  // 5 = the lock screen's picture, off the card, 6 = the clock,
+  // 7 = which text to dress, 8 = the families to dress it in
   uint8_t _page = 0;
   lock::Config _lock;
   // The card's offerings, read once on entering the page: the card is powered
@@ -250,6 +260,8 @@ class SettingsScreen {
   char _fontNames[setui::FONT_MAX][32] = {};
   int8_t _fontN = -1;
   int8_t _fontPage = 0;
+  // Which of the five faces the list is choosing for.
+  int8_t _fontSlot = 0;
   cweb::ClockServer _clock;
   bool _clockOk = false;
   bool _clockSawClient = false;

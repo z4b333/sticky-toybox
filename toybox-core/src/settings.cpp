@@ -151,7 +151,7 @@ bool SettingsScreen::back() {
   leaveClock();  // ditto for the clock page's access point
   // The picture list was opened from the lock screen page, so it goes back
   // there rather than all the way out; every other page came from the top.
-  _page = _page == 5 ? 1 : 0;
+  _page = _page == 5 ? 1 : (_page == 8 ? 7 : 0);
   _note = nullptr;
   return true;
 }
@@ -542,12 +542,70 @@ void SettingsScreen::enterFont(ToolsHost& host) {
   _fontPage = 0;
 }
 
-void SettingsScreen::renderFont(ToolsHost& host, ToolsCanvas& c) {
+// Which text is being dressed. Five faces: the one the firmware talks in, and
+// one for each app that shows the owner's own words. An app's face covers the
+// book, the note, the card, the recipe -- never the menus around them, so
+// leaving an app never leaves the firmware wearing its clothes.
+namespace {
+struct FontWho {
+  int slot;
+  const char* name;
+  const char* what;
+};
+const FontWho kFontWho[ToolsHost::FONT_SLOTS] = {
+    {ToolsHost::FONT_DEVICE, "The device", "menus, labels, every screen Toybox draws"},
+    {ToolsHost::FONT_READER, "Books", "the page you read, not the shelf"},
+    {ToolsHost::FONT_NOTES, "Notes", "what you wrote, not the list"},
+    {ToolsHost::FONT_CARDS, "Flashcards", "what is on the card"},
+    {ToolsHost::FONT_RECIPES, "Recipes", "the step you are cooking"},
+};
+}  // namespace
+
+void SettingsScreen::renderFontWho(ToolsHost& host, ToolsCanvas& c) {
   using namespace setui;
   drawTopBar(c, "FONT");
-  c.textTracked(16, 56, "THE DEVICE'S OWN TEXT", TS_SMALL, true, false, 1);
+  c.textCentered(SCREEN_W / 2, 68, "Anything not chosen is the built-in face,", TS_SMALL, true);
+  c.textCentered(SCREEN_W / 2, 94, "which also fills in Thai and Chinese underneath.", TS_SMALL,
+                 true);
+
+  for (int i = 0; i < ToolsHost::FONT_SLOTS; i++) {
+    const TRect r = fontWhoRect(i);
+    const char* fam = host.fontFor(kFontWho[i].slot);
+    c.text(r.x + 12, r.y + 6, kFontWho[i].name, TS_MED, true);
+    c.textClipped(r.x + 12, r.y + 40, r.w - 160, kFontWho[i].what, TS_SMALL, true);
+    const char* value = fam[0] ? fam : "built-in";
+    const int vw = c.textWidth(value, TS_MED, true);
+    c.text(r.x + r.w - 34 - vw, r.y + 6, value, TS_MED, true, true);
+    const int cy = r.y + 18;
+    c.drawLine(r.x + r.w - 22, cy - 8, r.x + r.w - 14, cy, 2, true);
+    c.drawLine(r.x + r.w - 14, cy, r.x + r.w - 22, cy + 8, 2, true);
+    if (i < ToolsHost::FONT_SLOTS - 1) c.fillRect(r.x, r.y + r.h, r.w, 1, true);
+  }
+  c.textCentered(SCREEN_W / 2, 776, "an app's face never dresses the menus around it", TS_SMALL,
+                 true);
+}
+
+bool SettingsScreen::tapFontWho(ToolsHost& host, int x, int y) {
+  using namespace setui;
+  for (int i = 0; i < ToolsHost::FONT_SLOTS; i++) {
+    if (!fontWhoRect(i).hit(x, y)) continue;
+    host.beep(1);
+    _fontSlot = (int8_t)kFontWho[i].slot;
+    enterFont(host);
+    _page = 8;
+    host.refresh(true);  // reading the card took the panel's bus with it
+    return false;
+  }
+  return false;
+}
+
+void SettingsScreen::renderFont(ToolsHost& host, ToolsCanvas& c) {
+  using namespace setui;
+  drawTopBar(c, "FONT", false, "BACK");
+  const FontWho& who = kFontWho[_fontSlot < ToolsHost::FONT_SLOTS ? _fontSlot : 0];
+  c.textTracked(16, 56, who.name, TS_SMALL, true, false, 1);
   c.fillRect(16, 78, SCREEN_W - 32, 1, true);
-  c.textCentered(SCREEN_W / 2, 92, "menus, labels and every screen Toybox draws", TS_SMALL, true);
+  c.textCentered(SCREEN_W / 2, 92, who.what, TS_SMALL, true);
 
   if (_fontN < 0) {
     c.textCentered(SCREEN_W / 2, 320, "no card found", TS_LARGE, true);
@@ -558,7 +616,7 @@ void SettingsScreen::renderFont(ToolsHost& host, ToolsCanvas& c) {
   // Row 0 is the built-in face, then whatever the card has.
   const int total = _fontN + 1;
   const int pages = (total + FONT_PER - 1) / FONT_PER;
-  const char* chosen = host.fontChosen();
+  const char* chosen = host.fontFor(_fontSlot);
   for (int k = 0; k < FONT_PER; k++) {
     const int idx = _fontPage * FONT_PER + k;
     if (idx >= total) break;
@@ -627,10 +685,10 @@ bool SettingsScreen::tapFont(ToolsHost& host, int x, int y) {
     if (idx >= total) break;
     if (!fontRect(k).hit(x, y)) continue;
     host.beep(1);
-    if (idx == 0)
-      host.fontNone();
-    else
-      host.fontUse(_fontNames[idx - 1]);
+    if (!host.fontSet(_fontSlot, idx == 0 ? "" : _fontNames[idx - 1])) {
+      _note = "that family could not be read";
+      return true;
+    }
     // Every glyph on the panel just changed, and reading the card took the
     // panel's bus with it. Nothing about this screen can be drawn as a
     // difference from what was there.
@@ -764,6 +822,10 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
     return;
   }
   if (_page == 7) {
+    renderFontWho(host, c);
+    return;
+  }
+  if (_page == 8) {
     renderFont(host, c);
     return;
   }
@@ -811,7 +873,10 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
   const Row rows[ACT_COUNT] = {
       {ACT_WALL, "Wallpaper", wallimg::have() ? "set" : "none", true},
       {ACT_LOCK, "Lock screen", emptyLabelSmall(lock::config().empty), true},
-      {ACT_FONT, "Font", host.fontChosen()[0] ? host.fontChosen() : "built-in", true},
+      {ACT_FONT, "Font", host.fontFor(ToolsHost::FONT_DEVICE)[0]
+                             ? host.fontFor(ToolsHost::FONT_DEVICE)
+                             : "built-in",
+       true},
       {ACT_APPS, "Apps on the hub", apps, true},
       {ACT_FILES, "Files over WiFi", "", true},
       {ACT_CLOCK, "Clock", clockV, true},
@@ -1097,7 +1162,8 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
   if (_page == 3) return tapApps(host, x, y);
   if (_page == 4) return tapFiles(host, x, y);
   if (_page == 6) return tapClock(host, x, y);
-  if (_page == 7) return tapFont(host, x, y);
+  if (_page == 7) return tapFontWho(host, x, y);
+  if (_page == 8) return tapFont(host, x, y);
 
   // Any tap that is not the reset takes the confirm back down, so an armed
   // button never survives long enough to be pressed by accident later.
@@ -1143,7 +1209,6 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
 
   if (actionRect(ACT_FONT).hit(x, y)) {
     host.beep(1);
-    enterFont(host);
     _page = 7;
     // Reading the card takes the panel's bus with it, so what comes back has
     // to be drawn from nothing rather than from a difference.

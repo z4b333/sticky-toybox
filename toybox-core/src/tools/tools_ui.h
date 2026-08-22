@@ -324,9 +324,9 @@ class ToolsHost {
     return false;
   }
 
-  // Font families on the SD card, for the settings page: CrossInk's .cpfont
-  // families, which this firmware reads and draws from. -1 means no card
-  // answered, which is a different thing from a card with no fonts on it.
+  // Font families on the SD card: CrossInk's .cpfont families, which this
+  // firmware reads and draws from. -1 means no card answered, which is a
+  // different thing from a card with no fonts on it.
   //
   // Core asks; the firmware owns the card, the bus and the memory the fonts
   // live in. Same seam as the wallpapers below.
@@ -336,15 +336,48 @@ class ToolsHost {
     (void)max;
     return -1;
   }
-  // The face the firmware itself is drawn in. False leaves the current one
-  // alone -- a card that cannot be read does not take away the font that was
-  // working a moment ago.
-  virtual bool fontUse(const char* family) {
+
+  // Five faces can be chosen: the one the firmware talks in, and one for each
+  // app that shows the owner's own words. An app's face covers the book, the
+  // note, the card, the recipe -- never the menus around them, which stay in
+  // the device's face so that leaving an app never leaves the firmware
+  // wearing its clothes.
+  //
+  // Anything not chosen is the built-in DejaVu, which is also what every
+  // face falls back to per character: the card packs are Latin, Cyrillic and
+  // punctuation, so Thai and CJK come off the baked tables underneath
+  // whatever is on top.
+  enum FontSlot : uint8_t {
+    FONT_DEVICE = 0,
+    FONT_READER,
+    FONT_NOTES,
+    FONT_CARDS,
+    FONT_RECIPES,
+    FONT_SLOTS
+  };
+  virtual const char* fontFor(int slot) const {
+    (void)slot;
+    return "";
+  }
+  // "" puts the built-in face back. False means the card could not give it,
+  // and whatever was working a moment ago is left alone.
+  virtual bool fontSet(int slot, const char* family) {
+    (void)slot;
     (void)family;
     return false;
   }
-  virtual void fontNone() {}
-  virtual const char* fontChosen() const { return ""; }
+  // The shell calls these as an app opens and closes: load that app's face,
+  // then let it go. Only one app's face is resident at a time -- they are
+  // megabytes, and the app that opens next wants its own.
+  virtual bool fontEnter(int slot) {
+    (void)slot;
+    return false;
+  }
+  virtual void fontLeave() {}
+  // An app turns its face on around the owner's words and off again. Off is
+  // the default and the state every screen the firmware draws for itself is
+  // in.
+  virtual void fontContent(bool on) { (void)on; }
 
   // Wallpapers on the SD card, for the settings page. Fills names (bare file
   // names, NUL-terminated, truncated to fit) and returns how many were found;
@@ -659,6 +692,20 @@ class ToolsHost {
   virtual int contentTop() const = 0;
 };
 
+// The owner's words, drawn in the face the owner chose for this app, with the
+// firmware's own face restored whatever happens on the way out. Scoped for the
+// same reason FaceScope is: a flag left on would put the next screen -- the
+// menus, the shelf, the settings page -- in a book's clothes.
+struct ContentFace {
+  explicit ContentFace(ToolsHost& h) : _h(h) { _h.fontContent(true); }
+  ~ContentFace() { _h.fontContent(false); }
+  ContentFace(const ContentFace&) = delete;
+  ContentFace& operator=(const ContentFace&) = delete;
+
+ private:
+  ToolsHost& _h;
+};
+
 class ToolApp {
  public:
   virtual ~ToolApp() = default;
@@ -695,6 +742,10 @@ class ToolApp {
     (void)file;
     return false;
   }
+  // Which face this app shows the owner's words in, or -1 for an app whose
+  // screens are all the firmware talking -- the games, the dice, the timer.
+  // The shell loads it on the way in and drops it on the way out.
+  virtual int fontSlot() const { return -1; }
 
  protected:
   ToolsHost* _host = nullptr;

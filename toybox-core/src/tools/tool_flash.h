@@ -88,6 +88,7 @@ inline int listBottom(int n) { return LIST_Y + n * rowH(n); }
 
 class FlashTool : public ToolApp {
  public:
+  int fontSlot() const override { return ToolsHost::FONT_CARDS; }
   const char* title() const override {
     switch (_screen) {
       case Screen::Study: return _deckName;
@@ -510,7 +511,12 @@ class FlashTool : public ToolApp {
 
     const fcard::Card& card = _cards[_queue[_pos]];
     c.drawRect(CARD_BOX.x, CARD_BOX.y, CARD_BOX.w, CARD_BOX.h, _flipped ? 4 : 2, true);
-    drawWrapped(c, _flipped ? card.back : card.front, CARD_BOX);
+    {
+      // What is written on the card, in the face chosen for flashcards. The
+      // box around it, the buttons and the count below stay the firmware's.
+      ContentFace cf(host());
+      drawWrapped(c, _flipped ? card.back : card.front, CARD_BOX);
+    }
 
     if (!_flipped) {
       // Sat in the band the buttons will occupy, so the answer appears where the

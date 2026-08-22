@@ -111,6 +111,7 @@ inline int tocRowForSpine(const epubc::Book::TocEntry* toc, int n, int spine) {
 class EpubTool : public ToolApp {
  public:
   const char* title() const override { return "EPUB"; }
+  int fontSlot() const override { return ToolsHost::FONT_READER; }
 
   ~EpubTool() override {
     if (_open && _host) closeBook(false);
@@ -2184,6 +2185,10 @@ class EpubTool : public ToolApp {
 
   void renderPage(ToolsCanvas& c) {
     FaceScope fs(host(), _face);
+    // The book's own face, if one was chosen for the reader. Only the page:
+    // the footer under it is the firmware saying where you are, not the book
+    // speaking, and it stays in the device's face.
+    ContentFace cf(host());
     if (_pageImage[0]) {
       if (!drawImagePage(c)) drawImagePlate(c);
       if (_chrome) renderFooter(c);

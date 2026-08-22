@@ -53,6 +53,7 @@ inline constexpr TRect DONE_BTN{40, 672, 400, 72};
 class RecipeTool : public ToolApp {
  public:
   const char* title() const override { return "RECIPES"; }
+  int fontSlot() const override { return ToolsHost::FONT_RECIPES; }
   bool enterTouchesCard() const override { return true; }  // the list reads /recipes
 
   void enter(ToolsHost& h) override {
@@ -614,6 +615,8 @@ class RecipeTool : public ToolApp {
     char bar[24];
     snprintf(bar, sizeof(bar), "STEP %d OF %d", _step + 1, (int)_r.nSteps);
     host().topBar(bar, false, "RECIPE");
+    // The step itself is the recipe talking; the bar above it is the device.
+    ContentFace cf(host());
     // The step, large, wrapped over the whole page -- read from arm's length
     // with wet hands, which is why its smallest size is the recipe page's
     // largest. The line step follows the face rather than a written-down 46:

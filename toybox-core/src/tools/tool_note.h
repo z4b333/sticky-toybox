@@ -188,6 +188,7 @@ inline bool tapPinnedFullScreen(ToolsCanvas& c, int x, int y) {
 
 class NoteTool : public ToolApp {
  public:
+  int fontSlot() const override { return ToolsHost::FONT_NOTES; }
   const char* title() const override {
     switch (_screen) {
       case Screen::View: return _name;
@@ -548,6 +549,9 @@ class NoteTool : public ToolApp {
   void renderView(ToolsCanvas& c) {
     using namespace nui;
     if (!_buf) return;
+    // The note is the owner's words, so it gets the face they chose for
+    // notes. The pager and the chrome around it are the firmware's.
+    ContentFace cf(host());
     _next = nmd::render(c, _buf, _blocks, _blockCount, _pageStack[_pageDepth], BODY, _hits,
                         kMaxHits, &_hitCount);
 

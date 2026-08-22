@@ -327,23 +327,77 @@ int StickyHost::sdMgrList(SdFile* out, int max) {
   return n;
 }
 
-// --- the reading face ---------------------------------------------------------
-// The card work lives in cardfonts.cpp; this is only the seam core asks
-// through. The chosen family is remembered in NVS, so a device that is turned
-// off in a serif comes back in one.
+// --- the faces, device and per app --------------------------------------------
+// The card work lives in cardfonts.cpp; this is the seam core asks through,
+// plus the five NVS keys. A device turned off in a serif comes back in one,
+// and so does a book.
+namespace {
+// Short keys, because NVS names are capped at 15 characters and these five
+// have to stay stable: renaming one loses somebody's choice.
+const char* kFontKey[ToolsHost::FONT_SLOTS] = {"font_uni", "font_ep", "font_nt", "font_fc",
+                                               "font_rc"};
+char g_fontName[ToolsHost::FONT_SLOTS][ToolsHost::FONT_FAMILY_LEN] = {};
+bool g_fontRead[ToolsHost::FONT_SLOTS] = {};
+}  // namespace
+
 int StickyHost::fontFamilies(char names[][FONT_FAMILY_LEN], int max) {
   return cardfonts::families(names, max);
 }
 
-bool StickyHost::fontUse(const char* family) {
-  if (!cardfonts::useUniversal(family)) return false;
-  prefs().putString("font_uni", family);
+const char* StickyHost::fontFor(int slot) const {
+  if (slot < 0 || slot >= FONT_SLOTS) return "";
+  // Read once and cached: this is asked while drawing a settings row, and NVS
+  // reads are not free.
+  if (!g_fontRead[slot]) {
+    g_fontRead[slot] = true;
+    const_cast<StickyHost*>(this)->prefs().getString(kFontKey[slot], g_fontName[slot],
+                                                     FONT_FAMILY_LEN);
+  }
+  return g_fontName[slot];
+}
+
+bool StickyHost::fontSet(int slot, const char* family) {
+  if (slot < 0 || slot >= FONT_SLOTS) return false;
+  const bool none = !family || !family[0];
+  // The device's own face is loaded the moment it is chosen, because the
+  // screen the choice was made on is drawn in it. An app's face is only
+  // remembered here; it loads when the app opens.
+  if (slot == FONT_DEVICE) {
+    if (none)
+      cardfonts::noneUniversal();
+    else if (!cardfonts::useUniversal(family))
+      return false;
+  } else if (!none) {
+    // Checked now rather than at the door of the app: being told "that card
+    // has no such family" belongs where the choice is made.
+    char names[cardfonts::MAX_FAMILIES][FONT_FAMILY_LEN];
+    const int n = cardfonts::families(names, cardfonts::MAX_FAMILIES);
+    bool there = false;
+    for (int i = 0; i < n; i++)
+      if (strcmp(names[i], family) == 0) there = true;
+    if (!there) return false;
+  }
+  snprintf(g_fontName[slot], FONT_FAMILY_LEN, "%s", none ? "" : family);
+  g_fontRead[slot] = true;
+  if (none)
+    prefs().remove(kFontKey[slot]);
+  else
+    prefs().putString(kFontKey[slot], family);
   return true;
 }
 
-void StickyHost::fontNone() {
-  cardfonts::noneUniversal();
-  prefs().remove("font_uni");
+bool StickyHost::fontEnter(int slot) {
+  const char* fam = fontFor(slot);
+  if (!fam[0]) {
+    cardfonts::noneContent();
+    return false;
+  }
+  // Already the resident content family: opening the same book twice should
+  // not read four megabytes twice.
+  if (strcmp(cardfonts::content(), fam) == 0) return true;
+  return cardfonts::useContent(fam);
 }
 
-const char* StickyHost::fontChosen() const { return cardfonts::universal(); }
+void StickyHost::fontLeave() { cardfonts::noneContent(); }
+
+void StickyHost::fontContent(bool on) { gfx::contentFace(on); }

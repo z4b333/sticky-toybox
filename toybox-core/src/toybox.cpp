@@ -58,6 +58,12 @@ bool Toybox::build(bool game, int idx) {
 }
 
 void Toybox::release() {
+  // The app's face goes with the app. Two families resident at once is the
+  // memory this device does not have, and the next app wants its own.
+  if (_host) {
+    _host->fontContent(false);
+    _host->fontLeave();
+  }
   delete _active;
   _active = nullptr;
   _activeIdx = -1;
@@ -104,6 +110,10 @@ void Toybox::open(bool game, int idx, bool paint) {
   if (!sameG) p.putBool("last_g", game);
   if (!sameI) p.putInt("last_i", idx);
   _active->enter(*_host);
+  // The app's own face, if it has been given one. Loaded here rather than
+  // inside every app: it is the same act for all of them, and the shell is
+  // the only place that knows an app is being opened at all.
+  if (_active->fontSlot() >= 0) _host->fontEnter(_active->fontSlot());
   // Entering an app is text and hairlines replacing the home screen: partial,
   // unless a photo wallpaper is under the ink (a photograph ghosts through a
   // partial in a way hairlines never do), or entry itself borrowed the SD bus
@@ -171,6 +181,10 @@ void Toybox::openPairPicture() {
   _where = Where::App;
   _hub.openFolder(2);  // notes lives in STUDY; HUB from here should land there
   _active->enter(*_host);
+  // The app's own face, if it has been given one. Loaded here rather than
+  // inside every app: it is the same act for all of them, and the shell is
+  // the only place that knows an app is being opened at all.
+  if (_active->fontSlot() >= 0) _host->fontEnter(_active->fontSlot());
   _active->openPairing();
   _host->refresh(true);
 }

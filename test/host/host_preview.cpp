@@ -5108,13 +5108,24 @@ int main() {
       abort();
     }
     g_dumpEnabled = true;
+    setScreen("settings_font_who");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+
+    // The device's own face first: row 0 of the five.
+    tapRect(setui::fontWhoRect(ToolsHost::FONT_DEVICE));
+    if (toybox.hostSettings().hostPage() != 8) {
+      printf("FONT PAGE FAIL: the device row did not open the family list\n");
+      abort();
+    }
+    g_dumpEnabled = true;
     setScreen("settings_font");
     stickyHost.refresh(true);
     g_dumpEnabled = false;
 
     // Row 0 is the built-in face; the card's families follow it.
     tapRect(setui::fontRect(1));
-    if (!gfx::cardFaceLive(false) || !stickyHost.fontChosen()[0]) {
+    if (!gfx::cardFaceLive(false) || !stickyHost.fontFor(ToolsHost::FONT_DEVICE)[0]) {
       printf("FONT PAGE FAIL: choosing a family did not take\n");
       abort();
     }
@@ -5127,18 +5138,60 @@ int main() {
     // gesture: the name has to survive in NVS, not just in the running face.
     char saved[32] = "";
     prefs.getString("font_uni", saved, sizeof(saved));
-    if (!saved[0] || strcmp(saved, stickyHost.fontChosen()) != 0) {
-      printf("FONT PAGE FAIL: chose %s, remembered '%s'\n", stickyHost.fontChosen(), saved);
+    if (!saved[0] || strcmp(saved, stickyHost.fontFor(ToolsHost::FONT_DEVICE)) != 0) {
+      printf("FONT PAGE FAIL: chose %s, remembered '%s'\n",
+             stickyHost.fontFor(ToolsHost::FONT_DEVICE), saved);
       abort();
     }
 
     tapRect(setui::fontRect(0));  // back to the built-in face
     prefs.getString("font_uni", saved, sizeof(saved));
-    if (gfx::cardFaceLive(false) || stickyHost.fontChosen()[0] || saved[0]) {
+    if (gfx::cardFaceLive(false) || stickyHost.fontFor(ToolsHost::FONT_DEVICE)[0] || saved[0]) {
       printf("FONT PAGE FAIL: the built-in row did not put it back (kept '%s')\n", saved);
       abort();
     }
+
+    // An app's face is a different slot, remembered under its own key, and it
+    // must NOT become the device's face -- the whole point of the split.
+    toybox.hostSettings().back();  // back to the five rows
+    tapRect(setui::fontWhoRect(ToolsHost::FONT_READER));
+    tapRect(setui::fontRect(1));
+    char forBooks[32] = "";
+    prefs.getString("font_ep", forBooks, sizeof(forBooks));
+    if (!forBooks[0] || stickyHost.fontFor(ToolsHost::FONT_DEVICE)[0] ||
+        strcmp(stickyHost.fontFor(ToolsHost::FONT_READER), forBooks) != 0) {
+      printf("FONT PAGE FAIL: books got '%s', device got '%s'\n", forBooks,
+             stickyHost.fontFor(ToolsHost::FONT_DEVICE));
+      abort();
+    }
+    // Choosing it does not load it -- an app's face arrives when the app does.
+    if (gfx::cardFaceLive(true)) {
+      printf("FONT PAGE FAIL: the book face loaded before any book was opened\n");
+      abort();
+    }
+    // ...and the shell loads it when the reader opens, then drops it on the
+    // way back to the hub.
     toybox.hostSettings().back();
+    toybox.goHub();
+    toybox.hostHub().goHome();
+    toybox.onTap(80 + 2 * 160, hubui::DOCK_Y + 30);  // the STUDY drawer
+    toybox.onTap(3 * EPD_W / 4, hubui::FOLDER_TOP + hubui::TILE / 2);  // EPUB
+    if (!toybox.hostInApp() || strcmp(toybox.activeTitle(), "EPUB") != 0) {
+      printf("FONT PAGE FAIL: could not open the reader to check its face\n");
+      abort();
+    }
+    const bool loaded = gfx::cardFaceLive(true);
+    toybox.goHub();
+    if (!loaded) {
+      printf("FONT PAGE FAIL: opening the reader did not load its face\n");
+      abort();
+    }
+    if (gfx::cardFaceLive(true)) {
+      printf("FONT PAGE FAIL: leaving the app kept its face resident\n");
+      abort();
+    }
+    stickyHost.fontSet(ToolsHost::FONT_READER, "");
+    toybox.openSettings();
     toybox.goHub();
     toybox.hostHub().goHome();
     g_dumpEnabled = true;
