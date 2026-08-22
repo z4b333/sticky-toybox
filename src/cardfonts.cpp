@@ -94,7 +94,10 @@ bool load(const char* family, bool content) {
   if (!family || !family[0]) return false;
   if (!sdcard::browseOpen()) return false;
 
-  char files[MAX_SIZES][sdcard::FONT_FILE_LEN];
+  // Static, not stack: sixteen names and sixteen paths is 3.6 KB, and the
+  // ESP32 task these run on has 8. Nothing here is reentrant -- one font is
+  // chosen at a time, by a person, on a screen.
+  static char files[MAX_SIZES][sdcard::FONT_FILE_LEN];
   const int n = sdcard::fontFiles(family, files, MAX_SIZES);
   if (n <= 0) {
     sdcard::browseClose();
@@ -102,7 +105,8 @@ bool load(const char* family, bool content) {
   }
 
   int lines[MAX_SIZES] = {};
-  char paths[MAX_SIZES][160];
+  static char paths[MAX_SIZES][160];
+  memset(paths, 0, sizeof(paths));
   for (int i = 0; i < n; i++) {
     if (!sdcard::fontPath(family, files[i], paths[i], sizeof(paths[i]))) continue;
     lines[i] = lineOf(paths[i]);

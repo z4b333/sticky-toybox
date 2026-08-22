@@ -382,6 +382,19 @@
       <div class="changes">
         <h3>What changed</h3>
         <dl>
+          <div><dt>1.1.0</dt><dd>The device can be read in a font off the SD
+            card. Settings &rarr; <b>Font</b> lists whatever families the card
+            carries in <code>/.fonts</code>, in CrossInk's <code>.cpfont</code>
+            format &mdash; two dozen families are published for it, with a web
+            builder and a converter, so nothing new had to be invented and one
+            card serves both firmwares. A family's sizes are matched to this
+            panel by the line height each file states rather than by the number
+            in its name. Fonts stay on the card and the built-in face is always
+            the first row, so it is one tap back. Thai, Chinese, Japanese and
+            Korean keep drawing from the built-in tables underneath, since
+            those packs are Latin, Cyrillic and punctuation only. Also: the
+            how-to cards button moved to the apps page, which is the page about
+            apps.</dd></div>
           <div><dt>1.0.5</dt><dd>The time now appears as soon as it is sent,
             without the restart this device has always needed after an update
             or a fresh install. Its clock chip refuses to be read until its
