@@ -1,8 +1,8 @@
 {
-  "version": "v1.1.1",
-  "commit": "v1.1.1",
+  "version": "v1.2.0",
+  "commit": "v1.2.0",
   "date": "22 Aug 2026",
-  "bytes": 4038832,
-  "sha256": "e668353372589e5c",
-  "appBytes": 3973296
+  "bytes": 4040880,
+  "sha256": "d8dbb262cdc0a1c0",
+  "appBytes": 3975344
 }
