@@ -22,6 +22,7 @@
 #include "toybox.h"
 #include "settings.h"
 #include "bmp_gray.h"
+#include "cardfonts.h"
 #include "tools/cpfont.h"
 #include "tools/lock_image.h"
 #include "tools/lockscreen.h"
@@ -635,6 +636,85 @@ static void checkCardFace() {
          cardInk, bakedInk, cardWidth, bakedWidth);
 }
 
+// Choosing a family off the card: three sizes of one face are planted where
+// CrossInk puts them, and the chooser has to put the right file in each box.
+// Their sizes are points at 150 DPI and ours are pixel boxes, so this is the
+// step where a family gets matched to a device by the numbers each file states
+// rather than by the number in its name.
+static void checkCardFamily() {
+  static const char* kSizes[3] = {"DejaVuSerif_8.cpfont", "DejaVuSerif_12.cpfont",
+                                  "DejaVuSerif_18.cpfont"};
+  for (const char* name : kSizes) {
+    char path[256];
+    snprintf(path, sizeof(path), "fixture_family/%s", name);
+    FILE* f = fopen(path, "rb");
+    if (!f) {
+      const char* env = getenv("TOYBOX_FIXTURES");
+      snprintf(path, sizeof(path), "%s/fixture_family/%s", env ? env : "../../test/host", name);
+      f = fopen(path, "rb");
+    }
+    if (!f) {
+      printf("CARD FAMILY FAIL: %s missing\n", name);
+      abort();
+    }
+    fseek(f, 0, SEEK_END);
+    const long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    std::vector<uint8_t> bytes((size_t)n);
+    if (fread(bytes.data(), 1, (size_t)n, f) != (size_t)n) abort();
+    fclose(f);
+    char onCard[128];
+    snprintf(onCard, sizeof(onCard), "/.fonts/DejaVuSerif/%s", name);
+    sdcard::hostPutCardFile(onCard, bytes.data(), (int)bytes.size());
+  }
+  // A folder with no font in it is not a family: it would be a name in a list
+  // that does nothing when tapped.
+  sdcard::hostPutCardFile("/.fonts/NotAFamily/readme.txt", "hello", 5);
+
+  char names[cardfonts::MAX_FAMILIES][32];
+  const int n = cardfonts::families(names, cardfonts::MAX_FAMILIES);
+  bool found = false, ghost = false;
+  for (int i = 0; i < n; i++) {
+    if (strcmp(names[i], "DejaVuSerif") == 0) found = true;
+    if (strcmp(names[i], "NotAFamily") == 0) ghost = true;
+  }
+  if (!found || ghost) {
+    printf("CARD FAMILY FAIL: %d families, DejaVuSerif %d, empty folder listed %d\n", n, found,
+           ghost);
+    abort();
+  }
+
+  if (!cardfonts::use("DejaVuSerif") || strcmp(cardfonts::chosen(), "DejaVuSerif") != 0) {
+    printf("CARD FAMILY FAIL: the family would not load\n");
+    abort();
+  }
+  // 8 pt is a 19 px line, 12 pt is 29 and 18 pt is 44. The 18 px box takes the
+  // 19; the 24 px box takes it too, because 29 would overrun and airy beats
+  // colliding; 32 takes the 29 and 44 takes the 44.
+  struct { int box, want; } expect[] = {{18, 19}, {24, 19}, {32, 29}, {44, 44}};
+  for (auto& e : expect) {
+    const int got = gfx::cardFaceLine(e.box);
+    if (got != e.want) {
+      printf("CARD FAMILY FAIL: the %d px box got a %d px line, wanted %d\n", e.box, got, e.want);
+      abort();
+    }
+  }
+
+  // A family that is not there changes nothing -- the face that was working a
+  // moment ago is still the face.
+  if (cardfonts::use("NoSuchFamily") || strcmp(cardfonts::chosen(), "DejaVuSerif") != 0) {
+    printf("CARD FAMILY FAIL: a missing family disturbed the loaded one\n");
+    abort();
+  }
+
+  cardfonts::none();
+  if (gfx::cardFaceLive() || cardfonts::chosen()[0]) {
+    printf("CARD FAMILY FAIL: the baked faces did not come back\n");
+    abort();
+  }
+  printf("card family ok (three sizes sorted into four boxes, empty folder ignored)\n");
+}
+
 // The clock every options panel carries in the bar's far corner. It is drawn
 // there rather than on the page behind it because a page is not redrawn often
 // enough to hold a true time, and both halves of that promise have to be kept:
@@ -748,6 +828,7 @@ int main() {
   // asked for and compare against the drawing order.
   checkCpFont();
   checkCardFace();
+  checkCardFamily();
   checkHubRouting("all shown");
 
   // The three folder pages, drawn as a finger would reach them.

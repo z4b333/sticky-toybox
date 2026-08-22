@@ -671,7 +671,15 @@ int readFileAt(const char* path, void* dst, int max) {
       memcpy(dst, s.data, (size_t)n);
       return n;
     }
-  return -1;
+  // Sidecars live in g_side, which is capped at 2 KB a file; everything else a
+  // guard plants -- pictures, books, fonts -- lives in the card map. Reading
+  // only the first store made the fake card answer -1 for files it plainly
+  // had, which is a difference from the device that a guard would inherit.
+  auto it = fakeCard().find(path);
+  if (it == fakeCard().end()) return -1;
+  const int n = (int)it->second.size() < max ? (int)it->second.size() : max;
+  memcpy(dst, it->second.data(), (size_t)n);
+  return n;
 }
 
 bool writeFileAtomic(const char* path, const void* data, int n) {
@@ -972,6 +980,76 @@ void hostPlantSide(const char* path, const void* data, int n) {
       s.n = n;
       return;
     }
+}
+
+
+// --- fonts on the fake card ---------------------------------------------------
+// The same two roots and the same shape as the device walk below, over the
+// map the rest of the host card is made of.
+namespace {
+const char* kFontRoots[2] = {"/.fonts", "/fonts"};
+
+bool isCpFont(const std::string& p) {
+  return p.size() > 7 && p.compare(p.size() - 7, 7, ".cpfont") == 0;
+}
+}  // namespace
+
+int fontFamilies(char names[][FONT_NAME_LEN], int max) {
+  int n = 0;
+  for (const char* root : kFontRoots) {
+    const std::string pre = std::string(root) + "/";
+    for (const auto& kv : fakeCard()) {
+      if (n >= max) break;
+      const std::string& p = kv.first;
+      if (p.rfind(pre, 0) != 0 || !isCpFont(p)) continue;
+      const size_t slash = p.find('/', pre.size());
+      if (slash == std::string::npos) continue;  // a file loose in the root
+      const std::string fam = p.substr(pre.size(), slash - pre.size());
+      bool seen = false;
+      for (int i = 0; i < n; i++)
+        if (fam == names[i]) seen = true;
+      if (seen || fam.empty() || (int)fam.size() >= FONT_NAME_LEN) continue;
+      snprintf(names[n], FONT_NAME_LEN, "%s", fam.c_str());
+      n++;
+    }
+  }
+  return n;
+}
+
+int fontFiles(const char* family, char names[][FONT_FILE_LEN], int max) {
+  int n = 0;
+  for (const char* root : kFontRoots) {
+    const std::string pre = std::string(root) + "/" + family + "/";
+    for (const auto& kv : fakeCard()) {
+      if (n >= max) break;
+      const std::string& p = kv.first;
+      if (p.rfind(pre, 0) != 0 || !isCpFont(p)) continue;
+      if (p.find('/', pre.size()) != std::string::npos) continue;  // a deeper folder
+      const std::string base = p.substr(pre.size());
+      if ((int)base.size() >= FONT_FILE_LEN) continue;
+      snprintf(names[n], FONT_FILE_LEN, "%s", base.c_str());
+      n++;
+    }
+  }
+  return n;
+}
+
+bool fontPath(const char* family, const char* file, char* out, int cap) {
+  for (const char* root : kFontRoots) {
+    char path[160];
+    snprintf(path, sizeof(path), "%s/%s/%s", root, family, file);
+    if (fakeCard().count(path)) {
+      snprintf(out, cap, "%s", path);
+      return true;
+    }
+  }
+  return false;
+}
+
+int fileSize(const char* path) {
+  if (!busHeld()) return -1;
+  auto it = fakeCard().find(path);
+  return it == fakeCard().end() ? -1 : (int)it->second.size();
 }
 
 void hostPutCardFile(const char* path, const void* data, int n) {
@@ -1565,6 +1643,124 @@ void epubClose() {
     busRelease();
     g_epubBusUp = false;
   }
+}
+
+
+// --- fonts on the card --------------------------------------------------------
+// CrossInk's layout: /.fonts/<Family>/<Family>_<size>.cpfont, or /fonts for
+// people who would rather see the folder. Both are walked, in that order.
+namespace {
+const char* kFontRoots[2] = {"/.fonts", "/fonts"};
+
+bool endsCpFont(const char* name) {
+  const size_t len = strlen(name);
+  return len > 7 && strcasecmp(name + len - 7, ".cpfont") == 0;
+}
+
+const char* baseName(const char* path) {
+  const char* slash = strrchr(path, '/');
+  return slash ? slash + 1 : path;
+}
+}  // namespace
+
+int fontFamilies(char names[][FONT_NAME_LEN], int max) {
+  if (!busHeld()) return -1;
+  int n = 0;
+  for (const char* root : kFontRoots) {
+    File dir = SD.open(root);
+    if (!dir || !dir.isDirectory()) {
+      if (dir) dir.close();
+      continue;
+    }
+    for (File e = dir.openNextFile(); e; e = dir.openNextFile()) {
+      if (n >= max) {
+        e.close();
+        break;
+      }
+      if (!e.isDirectory()) {
+        e.close();
+        continue;
+      }
+      const char* fam = baseName(e.name());
+      // A folder counts as a family only if it holds a font. An empty one is
+      // a name in a list that does nothing when tapped.
+      bool any = false;
+      char inner[160];
+      snprintf(inner, sizeof(inner), "%s/%s", root, fam);
+      File fd = SD.open(inner);
+      if (fd && fd.isDirectory()) {
+        for (File f = fd.openNextFile(); f; f = fd.openNextFile()) {
+          const bool hit = !f.isDirectory() && endsCpFont(baseName(f.name()));
+          f.close();
+          if (hit) {
+            any = true;
+            break;
+          }
+        }
+      }
+      if (fd) fd.close();
+      bool seen = false;
+      for (int i = 0; i < n; i++)
+        if (strcmp(names[i], fam) == 0) seen = true;
+      if (any && !seen && strlen(fam) < FONT_NAME_LEN) {
+        snprintf(names[n], FONT_NAME_LEN, "%s", fam);
+        n++;
+      }
+      e.close();
+    }
+    dir.close();
+  }
+  return n;
+}
+
+int fontFiles(const char* family, char names[][FONT_FILE_LEN], int max) {
+  if (!busHeld()) return -1;
+  int n = 0;
+  for (const char* root : kFontRoots) {
+    char path[160];
+    snprintf(path, sizeof(path), "%s/%s", root, family);
+    File dir = SD.open(path);
+    if (!dir || !dir.isDirectory()) {
+      if (dir) dir.close();
+      continue;
+    }
+    for (File f = dir.openNextFile(); f; f = dir.openNextFile()) {
+      if (n >= max) {
+        f.close();
+        break;
+      }
+      const char* base = baseName(f.name());
+      if (!f.isDirectory() && endsCpFont(base) && strlen(base) < FONT_FILE_LEN) {
+        snprintf(names[n], FONT_FILE_LEN, "%s", base);
+        n++;
+      }
+      f.close();
+    }
+    dir.close();
+  }
+  return n;
+}
+
+bool fontPath(const char* family, const char* file, char* out, int cap) {
+  if (!busHeld()) return false;
+  for (const char* root : kFontRoots) {
+    char path[160];
+    snprintf(path, sizeof(path), "%s/%s/%s", root, family, file);
+    if (SD.exists(path)) {
+      snprintf(out, cap, "%s", path);
+      return true;
+    }
+  }
+  return false;
+}
+
+int fileSize(const char* path) {
+  if (!busHeld()) return -1;
+  File f = SD.open(path, FILE_READ);
+  if (!f) return -1;
+  const int n = f.isDirectory() ? -1 : (int)f.size();
+  f.close();
+  return n;
 }
 
 int readFileAt(const char* path, void* dst, int max) {
