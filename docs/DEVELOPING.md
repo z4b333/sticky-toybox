@@ -125,6 +125,7 @@ exactly which. That is more useful on a service screen than another beta
 number.
 
 ```
+git fetch origin && git merge --ff-only origin/master   # FIRST, always
 git tag -f v1.1.0          # only when it is going out
 sh tools/make_image.sh     # writes docs/firmware/ and prebuilt/
 git add -A && git commit -m "build: v1.1.0"
@@ -133,6 +134,46 @@ git tag -f v1.1.0          # onto the build commit, so describe is exact
 
 The second `git tag -f` matters: the image records the version it was built
 with, so the tag has to end up on the commit that carries the image.
+
+**The first line matters just as much**, and it is the one that gets skipped.
+A release built without syncing to origin first is a chain of commits hanging
+off a stale tip, and the person on the other end cannot fast-forward it -- they
+get "Diverging branches can't be fast-forwarded" and have to decide something
+under pressure. It happened with v1.1.0: an empty "rebuild pages" commit made
+on the owner's machine was enough.
+
+### Handing a release over
+
+The sandbox this is often developed in cannot push (the git proxy answers 403
+for this repo), so a release travels as a bundle. The receiving end should
+never have to think about whether the histories line up:
+
+```
+cd ~/sticky-toybox
+git fetch origin && git merge --ff-only origin/master
+git fetch "$HOME/Downloads/toybox110.bundle" master:incoming --tags
+git merge --ff-only incoming || git merge --no-ff incoming -m "Merge v1.1.0"
+git branch -D incoming
+git push origin master --tags
+```
+
+`$HOME` rather than `~`: the tilde does not expand inside quotes, and the
+download will have a name with no hyphens in it, because browsers strip them.
+
+The `||` is the whole point. Fast-forward when the histories agree, and a
+merge commit when they do not, without anybody having to read a hint about
+rebasing at the moment they are trying to flash a device.
+
+If GitHub Pages does not rebuild within a minute of the push -- no new "pages
+build and deployment" run in Actions -- nudge it:
+
+```
+git commit --allow-empty -m "chore: rebuild pages"
+git push origin master
+```
+
+That empty commit is exactly what diverged the two sides at v1.1.0, which is
+why the recipe above no longer assumes a fast-forward.
 
 ## The Seeed Playground registry
 
