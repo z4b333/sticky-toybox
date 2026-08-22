@@ -338,10 +338,46 @@ const char* kFontKey[ToolsHost::FONT_SLOTS] = {"font_uni", "font_ep", "font_nt",
                                                "font_rc"};
 char g_fontName[ToolsHost::FONT_SLOTS][ToolsHost::FONT_FAMILY_LEN] = {};
 bool g_fontRead[ToolsHost::FONT_SLOTS] = {};
+
+// Which slot the open app is drawing from, so turning its face on knows which
+// baked cut to ask for as well as which card family.
+int g_fontSlotOpen = -1;
+
+// The card's families, remembered from the last successful listing. Inside an
+// app the card's bus belongs to that app -- a reader has a book open on it --
+// and asking again would answer "no card" to a device with a card plainly in
+// it. The reader lists them on its way in, while the bus is still free, and
+// this is what it reads back from.
+char g_famCache[cardfonts::MAX_FAMILIES][ToolsHost::FONT_FAMILY_LEN] = {};
+int g_famCached = -1;
 }  // namespace
 
 int StickyHost::fontFamilies(char names[][FONT_FAMILY_LEN], int max) {
-  return cardfonts::families(names, max);
+  const int n = cardfonts::families(names, max);
+  if (n >= 0) {
+    g_famCached = n < cardfonts::MAX_FAMILIES ? n : cardfonts::MAX_FAMILIES;
+    for (int i = 0; i < g_famCached; i++) snprintf(g_famCache[i], FONT_FAMILY_LEN, "%s", names[i]);
+    return n;
+  }
+  // -1 means the card did not answer, which is two different things: there is
+  // no card, or somebody else is holding its bus. Only the second deserves the
+  // remembered list -- handing back a stale one for a card that has been taken
+  // out would offer families that are not there.
+  if (sdcard::busHeld() && g_famCached >= 0) {
+    const int m = g_famCached < max ? g_famCached : max;
+    for (int i = 0; i < m; i++) snprintf(names[i], FONT_FAMILY_LEN, "%s", g_famCache[i]);
+    return m;
+  }
+  return -1;
+}
+
+// Which built-in a stored name means, or -1 for a card family. "" is the first
+// one, which is the face this firmware has always drawn in.
+static int builtInIndex(const StickyHost& h, const char* name) {
+  if (!name || !name[0]) return 0;
+  for (int i = 0; i < h.typefaceCount(); i++)
+    if (strcmp(h.typefaceName(i), name) == 0) return i;
+  return -1;
 }
 
 const char* StickyHost::fontFor(int slot) const {
@@ -358,16 +394,23 @@ const char* StickyHost::fontFor(int slot) const {
 
 bool StickyHost::fontSet(int slot, const char* family) {
   if (slot < 0 || slot >= FONT_SLOTS) return false;
-  const bool none = !family || !family[0];
+  const int built = builtInIndex(*this, family);
+  // The first built-in is stored as "", not as its name. One canonical value
+  // for "the face this firmware has always drawn in" means a screen asking
+  // "is anything chosen here?" gets one answer rather than two spellings of
+  // the same one.
+  const bool none = built == 0;
   // The device's own face is loaded the moment it is chosen, because the
   // screen the choice was made on is drawn in it. An app's face is only
   // remembered here; it loads when the app opens.
   if (slot == FONT_DEVICE) {
-    if (none)
+    if (none || built >= 0) {
       cardfonts::noneUniversal();
-    else if (!cardfonts::useUniversal(family))
+      gfx::setTypeface(built > 0 ? built : 0);
+    } else if (!cardfonts::useUniversal(family)) {
       return false;
-  } else if (!none) {
+    }
+  } else if (!none && built < 0) {
     // Checked now rather than at the door of the app: being told "that card
     // has no such family" belongs where the choice is made.
     char names[cardfonts::MAX_FAMILIES][FONT_FAMILY_LEN];
@@ -387,8 +430,11 @@ bool StickyHost::fontSet(int slot, const char* family) {
 }
 
 bool StickyHost::fontEnter(int slot) {
+  g_fontSlotOpen = slot;
   const char* fam = fontFor(slot);
-  if (!fam[0]) {
+  // A built-in face needs no card at all: it is already in the firmware, and
+  // turning the app's face on is a matter of asking for the right cut.
+  if (!fam[0] || builtInIndex(*this, fam) >= 0) {
     cardfonts::noneContent();
     return false;
   }
@@ -398,6 +444,21 @@ bool StickyHost::fontEnter(int slot) {
   return cardfonts::useContent(fam);
 }
 
-void StickyHost::fontLeave() { cardfonts::noneContent(); }
+void StickyHost::fontLeave() {
+  cardfonts::noneContent();
+  g_fontSlotOpen = -1;
+}
 
-void StickyHost::fontContent(bool on) { gfx::contentFace(on); }
+void StickyHost::fontContent(bool on) {
+  gfx::contentFace(on);
+  // The baked cut belongs to the same choice as the card family: an app set to
+  // Literata is set to Literata whether or not a card is in the slot. Off puts
+  // the device's own face back, which is the state every firmware screen draws
+  // in.
+  if (!on) {
+    gfx::setTypeface(builtInIndex(*this, fontFor(FONT_DEVICE)) > 0 ? 1 : 0);
+    return;
+  }
+  const int built = g_fontSlotOpen >= 0 ? builtInIndex(*this, fontFor(g_fontSlotOpen)) : 0;
+  gfx::setTypeface(built > 0 ? built : 0);
+}

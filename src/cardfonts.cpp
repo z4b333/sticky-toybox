@@ -81,18 +81,23 @@ uint8_t* bigAlloc(uint32_t n) {
 
 int families(char names[][32], int max) {
   if (max > MAX_FAMILIES) max = MAX_FAMILIES;
-  if (!sdcard::browseOpen()) return -1;
+  // Whoever opened the browse session owns it. The reader lists the card's
+  // families on its way in, while its own shelf session is up, and closing
+  // that would take the bus out from under a shelf still listing books.
+  const bool mine = !sdcard::browsing();
+  if (mine && !sdcard::browseOpen()) return -1;
   char found[MAX_FAMILIES][sdcard::FONT_NAME_LEN];
   const int n = sdcard::fontFamilies(found, max);
   for (int i = 0; i < n && i < max; i++) snprintf(names[i], 32, "%s", found[i]);
-  sdcard::browseClose();
+  if (mine) sdcard::browseClose();
   return n;
 }
 
 namespace {
 bool load(const char* family, bool content) {
   if (!family || !family[0]) return false;
-  if (!sdcard::browseOpen()) return false;
+  const bool mine = !sdcard::browsing();
+  if (mine && !sdcard::browseOpen()) return false;
 
   // Static, not stack: sixteen names and sixteen paths is 3.6 KB, and the
   // ESP32 task these run on has 8. Nothing here is reentrant -- one font is
@@ -100,7 +105,7 @@ bool load(const char* family, bool content) {
   static char files[MAX_SIZES][sdcard::FONT_FILE_LEN];
   const int n = sdcard::fontFiles(family, files, MAX_SIZES);
   if (n <= 0) {
-    sdcard::browseClose();
+    if (mine) sdcard::browseClose();
     return false;
   }
 
@@ -153,7 +158,7 @@ bool load(const char* family, bool content) {
     loadedFrom[b] = pick;
     any = true;
   }
-  sdcard::browseClose();
+  if (mine) sdcard::browseClose();
 
   if (!any) {
     for (int b = 0; b < 4; b++)

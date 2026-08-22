@@ -902,6 +902,8 @@ bool g_streaming = false;
 bool g_browseUp = false;
 bool busHeld() { return g_mgrUp || g_fakeEpubOpen || g_fakeOpenPages > 0 || g_browseUp; }
 
+bool browsing() { return g_browseUp; }
+
 bool browseOpen() {
   if (g_browseUp) return true;
   if (busHeld()) return false;
@@ -1942,6 +1944,8 @@ bool mgrSafePath(const char* p) {
 bool g_browseUp = false;
 
 bool busHeld() { return g_epubBusUp || g_bookBusUp || g_mgrUp || g_browseUp; }
+
+bool browsing() { return g_browseUp; }
 
 bool browseOpen() {
   if (g_browseUp) return true;

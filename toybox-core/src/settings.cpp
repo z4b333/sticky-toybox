@@ -581,6 +581,15 @@ void SettingsScreen::renderFontWho(ToolsHost& host, ToolsCanvas& c) {
     c.drawLine(r.x + r.w - 14, cy, r.x + r.w - 22, cy + 8, 2, true);
     if (i < ToolsHost::FONT_SLOTS - 1) c.fillRect(r.x, r.y + r.h, r.w, 1, true);
   }
+  // Said here, once, under all five rows: it is a consequence of choosing a
+  // card face rather than a hazard of it, and it applies to whichever row was
+  // just tapped. A warning on the picker itself would arrive after the
+  // decision and read as a hazard.
+  c.fillRect(16, 700, SCREEN_W - 32, 1, true);
+  c.textCentered(SCREEN_W / 2, 716, "A face off the card is megabytes, read each time", TS_SMALL,
+                 true);
+  c.textCentered(SCREEN_W / 2, 744, "it is needed - so the app it dresses opens slower.", TS_SMALL,
+                 true);
   c.textCentered(SCREEN_W / 2, 776, "an app's face never dresses the menus around it", TS_SMALL,
                  true);
 }

@@ -2868,32 +2868,56 @@ int main() {
     g_dumpEnabled = false;
     toybox.onButton(SideBtn::Ok);  // back to the root
 
-    // The typeface row cycles in place: a tap per face comes back to DejaVu,
-    // the preference sticks, and the page never leaves the panel. In between,
-    // a different face must actually measure differently -- that is the whole
-    // point -- so the second face's line count is allowed to differ but the
-    // reading offset must not move. Counted from the host rather than written
-    // down here: dropping Atkinson took the count from three to two, and a
-    // literal 3 would have walked one face past the end.
+    // The Font row opens a list of every face this device can set a book in --
+    // the built-ins and whatever the card offered -- rather than cycling the
+    // two that happen to be compiled in. There used to be two controls for
+    // this one question, this row and the Books row in settings, and a book
+    // could be set to Literata and to Bitter at once with neither screen
+    // showing the other's answer.
+    //
+    // Whichever is chosen, the place being read must not move: a different
+    // face measures differently, so the page boundaries shift under the
+    // reader's eyes and the offset is what has to stay put.
     {
       const uint32_t offBefore = et->hostPageOffset();
-      for (int i = 0; i < stickyHost.typefaceCount(); i++) {
-        toybox.onTap(240, rmenu::rootRect(3, 480).y + 40);
-        if (et->hostMenu() == 0) {
-          printf("EPUB APP FAIL: the typeface row left the panel\n");
-          abort();
-        }
-        if (et->hostPageOffset() != offBefore) {
-          printf("EPUB APP FAIL: changing typeface moved the reader (%u -> %u)\n",
-                 (unsigned)offBefore, (unsigned)et->hostPageOffset());
-          abort();
-        }
-      }
-      if (stickyHost.prefs().getUInt("rd_face", 99) != 0) {
-        printf("EPUB APP FAIL: a full cycle of typeface taps did not come back to DejaVu\n");
+      toybox.onTap(240, rmenu::rootRect(3, 480).y + 40);
+      if (et->hostMenu() != (int)rmenu::Page::Font) {
+        printf("EPUB APP FAIL: the Font row did not open the list (menu %d)\n", et->hostMenu());
         abort();
       }
-      printf("typeface ok (three faces cycle, the place read from stands still)\n");
+      g_dumpEnabled = true;
+      setScreen("tool_epub_font");
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+
+      // The second built-in, by name.
+      toybox.onTap(240, shelf::Y0 + shelf::ROW_H + 20);
+      if (strcmp(stickyHost.fontFor(ToolsHost::FONT_READER), stickyHost.typefaceName(1)) != 0) {
+        printf("EPUB APP FAIL: choosing the second face stored '%s'\n",
+               stickyHost.fontFor(ToolsHost::FONT_READER));
+        abort();
+      }
+      if (et->hostPageOffset() != offBefore) {
+        printf("EPUB APP FAIL: changing the face moved the reader (%u -> %u)\n",
+               (unsigned)offBefore, (unsigned)et->hostPageOffset());
+        abort();
+      }
+      // ...and it is the same answer settings gives, because it is one
+      // setting now rather than two.
+      if (strcmp(stickyHost.fontFor(ToolsHost::FONT_READER), "Literata") != 0) {
+        printf("EPUB APP FAIL: settings and the reader disagree about the face\n");
+        abort();
+      }
+      // Back to the first, which stores nothing: "" is the face this firmware
+      // has always drawn in.
+      toybox.onTap(240, rmenu::rootRect(3, 480).y + 40);
+      toybox.onTap(240, shelf::Y0 + 20);
+      if (stickyHost.fontFor(ToolsHost::FONT_READER)[0] ||
+          et->hostPageOffset() != offBefore) {
+        printf("EPUB APP FAIL: the first row did not put the built-in face back\n");
+        abort();
+      }
+      printf("book face ok (built-ins and card families in one list, the place stands still)\n");
     }
 
     // --- no word may vanish at a page boundary ------------------------------

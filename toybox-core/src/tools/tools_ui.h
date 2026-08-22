@@ -276,6 +276,12 @@ class ToolsHost {
   // one text draws with right now. The reader sets it around its own pages
   // and puts it back; a host with one face ignores both.
   virtual int typefaceCount() const { return 1; }
+  // What to call each built-in face on a screen where they are listed beside
+  // the card's families. A host with one face never has to answer.
+  virtual const char* typefaceName(int n) const {
+    (void)n;
+    return "Built-in";
+  }
   virtual int typeface() const { return 0; }
   virtual void setTypeface(int n) { (void)n; }
   // Which way up the device is being HELD, from the accelerometer, in the same
@@ -369,6 +375,10 @@ class ToolsHost {
   // The shell calls these as an app opens and closes: load that app's face,
   // then let it go. Only one app's face is resident at a time -- they are
   // megabytes, and the app that opens next wants its own.
+  // A face is named, not numbered: "" is the first built-in, another built-in
+  // by its own name, and anything else is a family on the card. One vocabulary
+  // for both, because to the person choosing there is no difference -- they
+  // are picking what the words look like.
   virtual bool fontEnter(int slot) {
     (void)slot;
     return false;

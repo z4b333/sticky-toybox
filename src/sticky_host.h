@@ -119,6 +119,7 @@ class StickyHost : public ToolsHost {
   }
   int canvasRotation() const override { return epd.rotation(); }
   int typefaceCount() const override { return 2; }
+  const char* typefaceName(int n) const override { return n == 1 ? "Literata" : "DejaVu"; }
   int typeface() const override { return gfx::typeface(); }
   void setTypeface(int n) override { gfx::setTypeface(n); }
   int deviceOrientation() override {

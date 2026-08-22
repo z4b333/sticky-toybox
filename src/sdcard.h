@@ -154,6 +154,9 @@ bool busHeld();
 // it.
 bool browseOpen();
 void browseClose();
+// Is a browse session already up? Whoever opened one owns it: closing
+// somebody else's takes the bus out from under a shelf that is still listing.
+bool browsing();
 #ifdef TOYBOX_HOST
 bool hostBrowsing();  // for the guards: is the shelf holding the card?
 #endif

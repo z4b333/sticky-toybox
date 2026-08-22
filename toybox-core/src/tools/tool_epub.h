@@ -137,8 +137,20 @@ class EpubTool : public ToolApp {
     reload();
     _size = (uint8_t)prefs().getUInt("rd_size", 0);
     _lead = (uint8_t)prefs().getUInt("rd_lead", 1);
-    _face = (uint8_t)prefs().getUInt("rd_face", 0);
-    if (_face >= h.typefaceCount()) _face = 0;
+    // The face is one choice now, not two. It used to live in "rd_face" as a
+    // number 0 or 1; it lives in the Books slot as a NAME, which can equally
+    // be a family off the card. A device that was reading in Literata is
+    // carried across the first time it opens the reader.
+    if (!h.fontFor(ToolsHost::FONT_READER)[0]) {
+      const uint32_t old = prefs().getUInt("rd_face", 0);
+      if (old == 1 && h.typefaceCount() > 1) h.fontSet(ToolsHost::FONT_READER, h.typefaceName(1));
+      prefs().remove("rd_face");
+    }
+    _face = faceIndexOf(h, h.fontFor(ToolsHost::FONT_READER));
+    // The card's families, listed while the bus is still free. Once a book is
+    // open the reader owns the card, and asking then answers "no card" to a
+    // device with one plainly in it.
+    _famN = (int8_t)h.fontFamilies(_famNames, MAX_FAMS);
     _rot = (uint8_t)prefs().getUInt("rd_rot", 0);
     if (_rot != 1 && _rot != 3) _rot = 0;
     if (_size >= epubui::SIZES) _size = 0;
@@ -819,6 +831,31 @@ class EpubTool : public ToolApp {
   // Lays out the next page from the stream into _lines. Returns the number of
   // words placed (0 means the chapter had nothing left).
   static const char* faceName(int f) { return f == 1 ? "Literata" : "DejaVu"; }
+
+  // A stored face name means one of the built-ins, or a family on the card --
+  // in which case the baked cut underneath it is the plain one, since the card
+  // face answers first for everything it carries.
+  static uint8_t faceIndexOf(ToolsHost& h, const char* name) {
+    if (!name || !name[0]) return 0;
+    for (int i = 0; i < h.typefaceCount(); i++)
+      if (strcmp(h.typefaceName(i), name) == 0) return (uint8_t)i;
+    return 0;
+  }
+  // What to show on the Font row: the name of whatever is set, which is a
+  // built-in's name or a family's.
+  // Every face this device can set a book in: the built-ins first, because
+  // they are always there, then whatever the card offered when the reader
+  // opened.
+  int faceCount() { return host().typefaceCount() + (_famN > 0 ? _famN : 0); }
+  const char* faceAt(int i) {
+    if (i < host().typefaceCount()) return host().typefaceName(i);
+    return _famNames[i - host().typefaceCount()];
+  }
+
+  const char* faceLabel() {
+    const char* f = host().fontFor(ToolsHost::FONT_READER);
+    return f[0] ? f : host().typefaceName(0);
+  }
 
   // The panel's screens are drawn portrait; the page is drawn at the chosen
   // rotation. The reflow decision compares against the rotation the CURRENT
@@ -1831,15 +1868,15 @@ class EpubTool : public ToolApp {
                epubui::leadName(_lead));
       items[2].sub = _rootSub[2];
       int n = 3;
-      const int rowFace = host().typefaceCount() > 1 ? n : -1;
-      if (rowFace >= 0) {
-        // A row that cycles in place -- but its answer is SHOWN, not named:
-        // the line under the label is the book's own words drawn in the face,
-        // so each tap is a live specimen rather than a name to imagine.
-        items[n].label = "Typeface";
-        items[n].sub = "";
-        n++;
-      }
+      // One row for the face, whether it is one of the two built in or a
+      // family off the card. Two controls for one question -- a Typeface row
+      // here and a Books row in settings -- meant a book could be set to
+      // Literata and to Bitter at the same time, with neither screen showing
+      // the other's answer.
+      const int rowFace = n;
+      items[n].label = "Font";
+      items[n].sub = faceLabel();
+      n++;
       const int rowRot = n;
       items[n].label = "Rotation";
       items[n].sub = "";  // three buttons, drawn below
@@ -1862,16 +1899,6 @@ class EpubTool : public ToolApp {
         c.fillRect(r.x, r.y + 1, r.w, r.h - 2, true);
         c.text(r.x + 8, r.y + 20, "Start again", TS_LARGE, false);
         c.text(r.x + 8, r.y + 62, "tap again to forget this book's place", TS_SMALL, false);
-      }
-      if (rowFace >= 0) {
-        const TRect r = rmenu::rootRect(rowFace, c.width());
-        char sample[120];
-        // The face's name, then the page being read -- the words already on
-        // the reader's mind are the fairest test of a font.
-        snprintf(sample, sizeof(sample), "%s - %s", faceName(_face),
-                 _lineN > 0 && _lines[0].t[0] ? _lines[0].t : "The quick brown fox");
-        FaceScope fs(host(), _face);
-        c.textClipped(r.x + 8, r.y + 58, r.w - 16, sample, TS_MED, true);
       }
       // The turn itself still waits for the panel to close, so the panel is
       // never asked to draw itself sideways.
@@ -1914,6 +1941,34 @@ class EpubTool : public ToolApp {
       c.drawRect(40, 560, (c.width() - 100) / 2, 96, 1, true);
       c.textInBox(40, 560, (c.width() - 100) / 2, 96, "Save", TS_LARGE, true, true);
       c.button(c.width() / 2 + 10, 560, (c.width() - 100) / 2, 96, "Cancel", false);
+      return;
+    }
+
+    if (_menu == rmenu::Page::Font) {
+      host().topBar("FONT", false, "OPTIONS");
+      c.textCentered(c.width() / 2, 56, "what this book is set in", TS_SMALL, true);
+      const int total = faceCount();
+      for (int k = 0; k < shelf::PER_PAGE; k++) {
+        const int idx = _mpage * shelf::PER_PAGE + k;
+        if (idx >= total) break;
+        const char* name = faceAt(idx);
+        const bool on = strcmp(name, faceLabel()) == 0;
+        // A built-in is drawn in itself -- the fairest test of a face is the
+        // face. A family off the card is drawn in the reading face instead:
+        // showing it would mean reading megabytes to set one line, at the
+        // moment somebody is only browsing a list.
+        if (idx < host().typefaceCount()) {
+          FaceScope fs(host(), idx);
+          rmenu::drawRow(c, k, name, "built in", shelf::rowSep(k, idx, total), on);
+        } else {
+          rmenu::drawRow(c, k, name, "on the card", shelf::rowSep(k, idx, total), on);
+        }
+      }
+      shelf::drawPager(c, _mpage, total);
+      c.textCentered(c.width() / 2, 770,
+                     _famN < 0 ? "no card, so only the built-in faces"
+                               : "a card face takes a moment to open a book",
+                     TS_SMALL, true);
       return;
     }
 
@@ -2008,9 +2063,8 @@ class EpubTool : public ToolApp {
         pickStart();
         return;
       }
-      const bool hasFace = host().typefaceCount() > 1;
-      const int rowFace = hasFace ? 3 : -1;
-      const int rowRot = hasFace ? 4 : 3;
+      const int rowFace = 3;
+      const int rowRot = 4;
       const int rowReset = rowRot + 1;
       const int rowClose = rowReset + 1;
       const int hit = rmenu::hitRoot(x, y, rowClose + 1, W);
@@ -2050,12 +2104,9 @@ class EpubTool : public ToolApp {
         return;
       }
       if (hit == rowFace) {
-        // Cycle and reflow from the offset being read: a different face has
-        // different widths, so the page boundaries just moved.
-        _face = (uint8_t)((_face + 1) % host().typefaceCount());
-        prefs().putUInt("rd_face", _face);
-        host().beep(0);
-        restyle();
+        _menu = rmenu::Page::Font;
+        _mpage = 0;
+        host().beep(1);
         paint();
         return;
       }
@@ -2083,6 +2134,37 @@ class EpubTool : public ToolApp {
         else
           pickCancel();
       }
+      return;
+    }
+
+    if (_menu == rmenu::Page::Font) {
+      const int total = faceCount();
+      const int pages = shelf::pageCount(total);
+      if (y >= shelf::PAGER_Y && pages > 1) {
+        if (_mpage > 0 && shelf::prevRect().hit(x, y)) {
+          _mpage--;
+          host().beep(0);
+          paint();
+        } else if (_mpage < pages - 1 && shelf::nextRect().hit(x, y)) {
+          _mpage++;
+          host().beep(0);
+          paint();
+        }
+        return;
+      }
+      const int idx = shelf::hitRow(x, y, total, _mpage);
+      if (idx < 0) return;
+      host().beep(1);
+      // Stored as a name, applied at once, and the page reflowed from the
+      // offset being read: a different face has different widths, so the page
+      // boundaries have just moved under the reader's eyes.
+      if (host().fontSet(ToolsHost::FONT_READER, faceAt(idx))) {
+        host().fontEnter(ToolsHost::FONT_READER);
+        _face = faceIndexOf(host(), host().fontFor(ToolsHost::FONT_READER));
+        restyle();
+      }
+      _menu = rmenu::Page::Root;
+      paint();
       return;
     }
 
@@ -2303,7 +2385,12 @@ class EpubTool : public ToolApp {
   int _nmarks = 0;
   char _rootSub[5][48] = {};
   uint8_t _size = 0, _lead = 1;
-  uint8_t _face = 0;  // 0 DejaVu, 1 Literata, 2 Atkinson
+  uint8_t _face = 0;  // which built-in cut sits under whatever is chosen
+  // The card's families, read once on the way in (see enter): inside a book
+  // the card's bus belongs to the book.
+  static constexpr int MAX_FAMS = 16;
+  char _famNames[MAX_FAMS][ToolsHost::FONT_FAMILY_LEN] = {};
+  int8_t _famN = -1;
   bool _browsing = false;    // this app owns the card's shelf session
   bool _resetArmed = false;  // "Start again" asked once and waiting on a second tap
   uint8_t _rot = 0;      // the page view's rotation; every menu screen is portrait

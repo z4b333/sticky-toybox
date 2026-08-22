@@ -77,7 +77,7 @@ inline void setRefreshMode(Preferences& p, bool epub, Refresh r) {
 }
 
 // Which page of the panel is showing. `None` means the book itself.
-enum class Page : uint8_t { None, Root, Contents, Marks, Text, Keep };
+enum class Page : uint8_t { None, Root, Contents, Marks, Text, Keep, Font };
 
 // Rows, generously spaced, divided by hairlines. A thumb needs the height
 // whether or not there is a box drawn around it.
