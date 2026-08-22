@@ -1003,8 +1003,17 @@ int fontFamilies(char names[][FONT_NAME_LEN], int max) {
       const std::string& p = kv.first;
       if (p.rfind(pre, 0) != 0 || !isCpFont(p)) continue;
       const size_t slash = p.find('/', pre.size());
-      if (slash == std::string::npos) continue;  // a file loose in the root
-      const std::string fam = p.substr(pre.size(), slash - pre.size());
+      std::string fam;
+      if (slash == std::string::npos) {
+        // Loose in the root: the name says which family it belongs to, since
+        // CrossInk writes <Family>_<size>.cpfont.
+        fam = p.substr(pre.size());
+        const size_t us = fam.rfind('_');
+        if (us == std::string::npos) continue;
+        fam = fam.substr(0, us);
+      } else {
+        fam = p.substr(pre.size(), slash - pre.size());
+      }
       bool seen = false;
       for (int i = 0; i < n; i++)
         if (fam == names[i]) seen = true;
@@ -1018,26 +1027,52 @@ int fontFamilies(char names[][FONT_NAME_LEN], int max) {
 
 int fontFiles(const char* family, char names[][FONT_FILE_LEN], int max) {
   int n = 0;
+  // The four shapes a family can arrive in, in the order the device tries
+  // them: under either root, one level deeper inside a folder of the same
+  // name (what unzipping <Family>.zip into <Family>/ leaves), and loose in a
+  // root with the family in the file name.
+  const std::string fam = family;
   for (const char* root : kFontRoots) {
-    const std::string pre = std::string(root) + "/" + family + "/";
+    const std::string a = std::string(root) + "/" + fam + "/";
+    const std::string b = a + fam + "/";
+    const std::string c = std::string(root) + "/";
     for (const auto& kv : fakeCard()) {
       if (n >= max) break;
       const std::string& p = kv.first;
-      if (p.rfind(pre, 0) != 0 || !isCpFont(p)) continue;
-      if (p.find('/', pre.size()) != std::string::npos) continue;  // a deeper folder
-      const std::string base = p.substr(pre.size());
+      if (!isCpFont(p)) continue;
+      std::string base;
+      if (p.rfind(b, 0) == 0 && p.find('/', b.size()) == std::string::npos)
+        base = p.substr(b.size());
+      else if (p.rfind(a, 0) == 0 && p.find('/', a.size()) == std::string::npos)
+        base = p.substr(a.size());
+      else if (p.rfind(c, 0) == 0 && p.find('/', c.size()) == std::string::npos &&
+               p.compare(c.size(), fam.size(), fam) == 0 && p[c.size() + fam.size()] == '_')
+        base = p.substr(c.size());
+      else
+        continue;
       if ((int)base.size() >= FONT_FILE_LEN) continue;
       snprintf(names[n], FONT_FILE_LEN, "%s", base.c_str());
       n++;
     }
+    if (n) break;
   }
   return n;
 }
 
 bool fontPath(const char* family, const char* file, char* out, int cap) {
   for (const char* root : kFontRoots) {
-    char path[160];
+    char path[224];
     snprintf(path, sizeof(path), "%s/%s/%s", root, family, file);
+    if (fakeCard().count(path)) {
+      snprintf(out, cap, "%s", path);
+      return true;
+    }
+    snprintf(path, sizeof(path), "%s/%s/%s/%s", root, family, family, file);
+    if (fakeCard().count(path)) {
+      snprintf(out, cap, "%s", path);
+      return true;
+    }
+    snprintf(path, sizeof(path), "%s/%s", root, file);
     if (fakeCard().count(path)) {
       snprintf(out, cap, "%s", path);
       return true;
@@ -1661,6 +1696,27 @@ const char* baseName(const char* path) {
   const char* slash = strrchr(path, '/');
   return slash ? slash + 1 : path;
 }
+
+// How many .cpfont files a directory holds. -1 when there is no such
+// directory, which is a different answer from an empty one and is what lets
+// the walk try one level deeper without guessing.
+int countCpFonts(const char* path) {
+  File dir = SD.open(path);
+  if (!dir || !dir.isDirectory()) {
+    if (dir) dir.close();
+    return -1;
+  }
+  int n = 0;
+  for (File f = dir.openNextFile(); f; f = dir.openNextFile()) {
+    char bare[FONT_FILE_LEN];
+    snprintf(bare, sizeof(bare), "%s", baseName(f.name()));
+    const bool ok = !f.isDirectory() && endsCpFont(bare);
+    f.close();
+    if (ok) n++;
+  }
+  dir.close();
+  return n;
+}
 }  // namespace
 
 int fontFamilies(char names[][FONT_NAME_LEN], int max) {
@@ -1669,46 +1725,62 @@ int fontFamilies(char names[][FONT_NAME_LEN], int max) {
   for (const char* root : kFontRoots) {
     File dir = SD.open(root);
     if (!dir || !dir.isDirectory()) {
+      Serial.printf("fonts: %s not there\n", root);
       if (dir) dir.close();
       continue;
     }
+    int folders = 0, loose = 0;
     for (File e = dir.openNextFile(); e; e = dir.openNextFile()) {
       if (n >= max) {
         e.close();
         break;
       }
-      if (!e.isDirectory()) {
-        e.close();
+      char bare[FONT_FILE_LEN];
+      snprintf(bare, sizeof(bare), "%s", baseName(e.name()));
+      const bool isDir = e.isDirectory();
+      e.close();
+
+      // Files dropped straight into the root, with no family folder around
+      // them. CrossInk's own layout has the folder, but an unzip into the
+      // wrong place is one drag away and the names still say which family
+      // they belong to: Bitter_12.cpfont is Bitter's.
+      if (!isDir) {
+        if (!endsCpFont(bare)) continue;
+        loose++;
+        char fam[FONT_NAME_LEN];
+        snprintf(fam, sizeof(fam), "%s", bare);
+        char* us = strrchr(fam, '_');
+        if (us) *us = 0;
+        bool seen = false;
+        for (int i = 0; i < n; i++)
+          if (strcmp(names[i], fam) == 0) seen = true;
+        if (!seen && fam[0]) snprintf(names[n++], FONT_NAME_LEN, "%s", fam);
         continue;
       }
-      const char* fam = baseName(e.name());
-      // A folder counts as a family only if it holds a font. An empty one is
-      // a name in a list that does nothing when tapped.
-      bool any = false;
+
+      folders++;
+      if (strlen(bare) >= FONT_NAME_LEN) continue;
+      // A folder counts as a family only if a font is findable in it: at the
+      // top, or one level down inside a folder of the same name, which is
+      // what unzipping <Family>.zip into <Family>/ leaves behind.
       char inner[160];
-      snprintf(inner, sizeof(inner), "%s/%s", root, fam);
-      File fd = SD.open(inner);
-      if (fd && fd.isDirectory()) {
-        for (File f = fd.openNextFile(); f; f = fd.openNextFile()) {
-          const bool hit = !f.isDirectory() && endsCpFont(baseName(f.name()));
-          f.close();
-          if (hit) {
-            any = true;
-            break;
-          }
-        }
+      snprintf(inner, sizeof(inner), "%s/%s", root, bare);
+      int found = countCpFonts(inner);
+      if (found == 0) {
+        char deeper[224];
+        snprintf(deeper, sizeof(deeper), "%s/%s", inner, bare);
+        found = countCpFonts(deeper);
       }
-      if (fd) fd.close();
+      Serial.printf("fonts: %s holds %d\n", inner, found);
+      if (found <= 0) continue;
       bool seen = false;
       for (int i = 0; i < n; i++)
-        if (strcmp(names[i], fam) == 0) seen = true;
-      if (any && !seen && strlen(fam) < FONT_NAME_LEN) {
-        snprintf(names[n], FONT_NAME_LEN, "%s", fam);
-        n++;
-      }
-      e.close();
+        if (strcmp(names[i], bare) == 0) seen = true;
+      if (!seen) snprintf(names[n++], FONT_NAME_LEN, "%s", bare);
     }
     dir.close();
+    Serial.printf("fonts: %s had %d folders, %d loose files, %d families so far\n", root, folders,
+                  loose, n);
   }
   return n;
 }
@@ -1716,36 +1788,69 @@ int fontFamilies(char names[][FONT_NAME_LEN], int max) {
 int fontFiles(const char* family, char names[][FONT_FILE_LEN], int max) {
   if (!busHeld()) return -1;
   int n = 0;
-  for (const char* root : kFontRoots) {
-    char path[160];
-    snprintf(path, sizeof(path), "%s/%s", root, family);
+  for (int which = 0; which < 4 && n == 0; which++) {
+    const char* root = kFontRoots[which % 2];
+    char path[224];
+    if (which < 2)
+      snprintf(path, sizeof(path), "%s/%s", root, family);
+    else
+      snprintf(path, sizeof(path), "%s/%s/%s", root, family, family);
     File dir = SD.open(path);
     if (!dir || !dir.isDirectory()) {
       if (dir) dir.close();
       continue;
     }
-    for (File f = dir.openNextFile(); f; f = dir.openNextFile()) {
-      if (n >= max) {
-        f.close();
-        break;
-      }
-      const char* base = baseName(f.name());
-      if (!f.isDirectory() && endsCpFont(base) && strlen(base) < FONT_FILE_LEN) {
-        snprintf(names[n], FONT_FILE_LEN, "%s", base);
-        n++;
-      }
+    for (File f = dir.openNextFile(); f && n < max; f = dir.openNextFile()) {
+      char bare[FONT_FILE_LEN];
+      snprintf(bare, sizeof(bare), "%s", baseName(f.name()));
+      const bool ok = !f.isDirectory() && endsCpFont(bare);
       f.close();
+      if (ok) snprintf(names[n++], FONT_FILE_LEN, "%s", bare);
     }
     dir.close();
+  }
+  // Loose files in a root, named for their family.
+  if (n == 0) {
+    for (const char* root : kFontRoots) {
+      File dir = SD.open(root);
+      if (!dir || !dir.isDirectory()) {
+        if (dir) dir.close();
+        continue;
+      }
+      const size_t flen = strlen(family);
+      for (File f = dir.openNextFile(); f && n < max; f = dir.openNextFile()) {
+        char bare[FONT_FILE_LEN];
+        snprintf(bare, sizeof(bare), "%s", baseName(f.name()));
+        const bool ok = !f.isDirectory() && endsCpFont(bare) &&
+                        strncmp(bare, family, flen) == 0 && bare[flen] == '_';
+        f.close();
+        if (ok) snprintf(names[n++], FONT_FILE_LEN, "%s", bare);
+      }
+      dir.close();
+      if (n) break;
+    }
   }
   return n;
 }
 
 bool fontPath(const char* family, const char* file, char* out, int cap) {
   if (!busHeld()) return false;
+  // The same four shapes fontFiles() accepts, in the same order: the family
+  // folder under either root, a folder of the same name inside it, and the
+  // file lying loose in a root.
   for (const char* root : kFontRoots) {
-    char path[160];
+    char path[224];
     snprintf(path, sizeof(path), "%s/%s/%s", root, family, file);
+    if (SD.exists(path)) {
+      snprintf(out, cap, "%s", path);
+      return true;
+    }
+    snprintf(path, sizeof(path), "%s/%s/%s/%s", root, family, family, file);
+    if (SD.exists(path)) {
+      snprintf(out, cap, "%s", path);
+      return true;
+    }
+    snprintf(path, sizeof(path), "%s/%s", root, file);
     if (SD.exists(path)) {
       snprintf(out, cap, "%s", path);
       return true;
