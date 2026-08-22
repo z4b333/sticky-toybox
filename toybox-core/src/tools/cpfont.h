@@ -155,23 +155,34 @@ class Font {
       } else if (cp > last) {
         lo = mid + 1;
       } else {
-        const uint32_t idx = rd32(iv + 8) + (cp - first);
-        if (idx >= s.glyphCount) return false;
-        const uint8_t* g = _data + s.glyphs + (size_t)idx * 16;
-        out.w = g[0];
-        out.h = g[1];
-        out.advance16 = rd16(g + 2);
-        out.left = rds16(g + 4);
-        out.top = rds16(g + 6);
-        out.bytes = rd16(g + 8);
-        out.offset = rd32(g + 12);
-        // A glyph whose bitmap runs off the end is a glyph this does not have.
-        if ((uint64_t)s.bitmaps + out.offset + out.bytes > _len) return false;
-        return true;
+        return glyphAt(s, rd32(iv + 8) + (cp - first), out);
       }
     }
     return false;
   }
+
+  // A glyph by its place in the style's table rather than by codepoint, for
+  // anything walking the table itself -- preparing a cut-down copy of the file
+  // is the one caller (see cpfont_prep.h).
+  bool glyphAt(const Style& s, uint32_t idx, Glyph& out) const {
+    using namespace detail;
+    if (!_data || idx >= s.glyphCount) return false;
+    const uint8_t* g = _data + s.glyphs + (size_t)idx * 16;
+    out.w = g[0];
+    out.h = g[1];
+    out.advance16 = rd16(g + 2);
+    out.left = rds16(g + 4);
+    out.top = rds16(g + 6);
+    out.bytes = rd16(g + 8);
+    out.offset = rd32(g + 12);
+    // A glyph whose bitmap runs off the end is a glyph this does not have.
+    if ((uint64_t)s.bitmaps + out.offset + out.bytes > _len) return false;
+    return true;
+  }
+
+  // The bytes themselves, for the same one caller.
+  const uint8_t* raw() const { return _data; }
+  uint32_t length() const { return _len; }
 
   // Ink at (x, y) of a glyph, 0 (paper) to 3 (black). The bitmap is a
   // continuous 2-bit stream: no padding at the end of a row, and none between

@@ -7,6 +7,7 @@
 #include "gfx.h"
 #include "sdcard.h"
 #include "tools/cpfont.h"
+#include "tools/cpfont_prep.h"
 
 #ifndef TOYBOX_HOST
 #include <esp_heap_caps.h>
@@ -98,6 +99,19 @@ int pickFor(int box, char files[][48], int n, const int* lines) {
   return best;
 }
 
+// Where a font's prepared copy lives: beside it, under the same name with a
+// different extension. The family walk only accepts .cpfont, so this never
+// shows up as another size to choose from, and copying the folder to another
+// card brings the prepared copy with it.
+bool prepPath(const char* src, char* out, int cap) {
+  const int n = (int)strlen(src);
+  if (n < 8 || strcasecmp(src + n - 7, ".cpfont") != 0) return false;
+  if (n - 7 + 5 >= cap) return false;
+  memcpy(out, src, (size_t)(n - 7));
+  memcpy(out + n - 7, ".tbf", 5);
+  return true;
+}
+
 uint8_t* bigAlloc(uint32_t n) {
 #ifndef TOYBOX_HOST
   // PSRAM: a family's four sizes are a few megabytes, and the internal heap is
@@ -105,6 +119,66 @@ uint8_t* bigAlloc(uint32_t n) {
   if (uint8_t* p = (uint8_t*)heap_caps_malloc(n, MALLOC_CAP_SPIRAM)) return p;
 #endif
   return (uint8_t*)malloc(n);
+}
+
+// One face's bytes, prepared. The first time a file is used it is read whole,
+// cut down to the cuts and codepoints this device draws (see cpfont_prep.h),
+// and written back beside itself; every open after that reads the small copy.
+// Bitter at 16 pt is 962 KB and prepares to 297.
+//
+// The bytes come back owned by the caller either way. A card that will not
+// take the prepared copy -- full, or write-protected -- still gets the cut-down
+// bytes in memory; it just pays for them again next time.
+uint8_t* readFace(const char* path, uint32_t& outLen) {
+  const int srcSize = sdcard::fileSize(path);
+  if (srcSize <= 0) return nullptr;
+
+  char prep[192];
+  const bool named = prepPath(path, prep, sizeof(prep));
+  if (named) {
+    const int pn = sdcard::fileSize(prep);
+    if (pn > 32) {
+      if (uint8_t* blob = bigAlloc((uint32_t)pn)) {
+        cpfont::Font probe;
+        // Three questions, in the cheap order: did it read, was it made from
+        // THIS font, and is it a font at all. The middle one is what makes
+        // replacing a file on the card enough to get a new prepared copy.
+        if (sdcard::readFileAt(prep, blob, pn) == pn &&
+            cpfont::prepStamped(blob, (uint32_t)pn, (uint32_t)srcSize) &&
+            probe.open(blob, (uint32_t)pn)) {
+          outLen = (uint32_t)pn;
+          return blob;
+        }
+        free(blob);
+      }
+    }
+  }
+
+  uint8_t* src = bigAlloc((uint32_t)srcSize);
+  if (!src) return nullptr;
+  if (sdcard::readFileAt(path, src, srcSize) != srcSize) {
+    free(src);
+    return nullptr;
+  }
+  outLen = (uint32_t)srcSize;
+
+  cpfont::Font f;
+  if (!f.open(src, (uint32_t)srcSize)) return src;  // let gfx refuse it, as before
+  const uint32_t need = cpfont::prepSize(f);
+  // Nothing to gain -- a file that is already this small, or one already
+  // prepared and copied here from another card.
+  if (!need || need >= (uint32_t)srcSize) return src;
+  uint8_t* out = bigAlloc(need);
+  if (!out) return src;
+  const uint32_t n = cpfont::prepare(f, (uint32_t)srcSize, out, need);
+  if (!n) {
+    free(out);
+    return src;
+  }
+  free(src);
+  if (named) sdcard::writeFileAtomic(prep, out, (int)n);  // best effort
+  outLen = n;
+  return out;
 }
 
 }  // namespace
@@ -223,17 +297,11 @@ bool load(const char* family, bool content, int bodyLine) {
       any = true;
       continue;
     }
-    const int size = sdcard::fileSize(paths[pick]);
-    if (size <= 0) continue;
-    uint8_t* blob = bigAlloc((uint32_t)size);
-    if (!blob) continue;  // out of PSRAM: this box stays baked
-    const int got = sdcard::readFileAt(paths[pick], blob, size);
-    if (got != size) {
-      free(blob);
-      continue;
-    }
+    uint32_t len = 0;
+    uint8_t* blob = readFace(paths[pick], len);
+    if (!blob) continue;  // out of PSRAM, or the card went away: this box stays baked
     blobs[b] = blob;
-    sizes[b] = (uint32_t)size;
+    sizes[b] = len;
     ownsBlob[b] = true;
     loadedFrom[b] = pick;
     any = true;

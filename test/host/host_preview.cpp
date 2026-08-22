@@ -23,6 +23,7 @@
 #include "settings.h"
 #include "bmp_gray.h"
 #include "cardfonts.h"
+#include "tools/cpfont_prep.h"
 #include "tools/cpfont.h"
 #include "tools/lock_image.h"
 #include "tools/lockscreen.h"
@@ -641,6 +642,213 @@ static void checkCardFace() {
 // Their sizes are points at 150 DPI and ours are pixel boxes, so this is the
 // step where a family gets matched to a device by the numbers each file states
 // rather than by the number in its name.
+// --- a font is prepared once, and read small ever after ---------------------
+// The published packs are generous -- Bitter at 16 pt is 962 KB, four cuts of
+// 1,650 glyphs covering Latin, Greek, Cyrillic, Vietnamese, punctuation and a
+// few hundred emoji -- and every byte of it crossed the bus each time an app
+// opened. So the first use cuts the file down to what this device draws and
+// writes the small copy back beside it.
+//
+// The font here is built rather than planted, because the point is exactly
+// which codepoints and cuts survive, and a fixture cannot be asked that
+// question unless it carries the ones that should not.
+namespace prepfix {
+
+struct Range {
+  uint32_t first, last;
+};
+// Latin capitals (kept), Cyrillic (dropped), an em dash from the punctuation
+// block (kept), and a smiling face from the emoji block (dropped).
+static const Range kRanges[4] = {{0x20, 0x7E}, {0x400, 0x44F}, {0x2014, 0x2014},
+                                 {0x1F600, 0x1F600}};
+
+// Four pixels square, so a glyph is exactly four bytes at 2 bits a pixel, and
+// its ink is derived from its codepoint -- which is what makes "the prepared
+// copy draws the same glyph" a question with an answer.
+static void glyphBits(uint32_t cp, uint8_t* out) {
+  for (int i = 0; i < 4; i++) out[i] = (uint8_t)((cp * 7 + i * 31) & 0xFF);
+}
+
+static void put32(std::vector<uint8_t>& v, size_t at, uint32_t x) { memcpy(&v[at], &x, 4); }
+static void put16(std::vector<uint8_t>& v, size_t at, uint16_t x) { memcpy(&v[at], &x, 2); }
+
+// A .cpfont with all four cuts, three of which should survive.
+static std::vector<uint8_t> build(uint8_t advanceY) {
+  uint32_t nGlyphs = 0;
+  for (const Range& r : kRanges) nGlyphs += r.last - r.first + 1;
+  const int kCuts = 4;
+  std::vector<uint8_t> v(32 + kCuts * 32, 0);
+  memcpy(v.data(), "CPFONT\0\0", 8);
+  put16(v, 8, 4);  // version
+  v[12] = kCuts;
+  for (int c = 0; c < kCuts; c++) {
+    const size_t at = v.size();
+    // intervals
+    for (uint32_t gi = 0, k = 0; k < 4; k++) {
+      v.resize(v.size() + 12);
+      put32(v, v.size() - 12, kRanges[k].first);
+      put32(v, v.size() - 8, kRanges[k].last);
+      put32(v, v.size() - 4, gi);
+      gi += kRanges[k].last - kRanges[k].first + 1;
+    }
+    // glyphs
+    uint32_t off = 0;
+    for (const Range& r : kRanges)
+      for (uint32_t cp = r.first; cp <= r.last; cp++) {
+        v.resize(v.size() + 16, 0);
+        uint8_t* g = &v[v.size() - 16];
+        g[0] = 4;  // w
+        g[1] = 4;  // h
+        put16(v, v.size() - 14, (uint16_t)(64 + c));  // advance16, per cut
+        put16(v, v.size() - 12, 0);                   // left
+        put16(v, v.size() - 10, 4);                   // top
+        put16(v, v.size() - 8, 4);                    // bytes
+        put32(v, v.size() - 4, off);
+        off += 4;
+      }
+    // bitmaps
+    for (const Range& r : kRanges)
+      for (uint32_t cp = r.first; cp <= r.last; cp++) {
+        uint8_t b[4];
+        glyphBits(cp + c, b);
+        v.insert(v.end(), b, b + 4);
+      }
+    uint8_t* t = &v[32 + (size_t)c * 32];
+    t[0] = (uint8_t)c;  // cut id: 0 regular, 1 bold, 2 italic, 3 bold-italic
+    put32(v, 32 + (size_t)c * 32 + 4, 4);
+    put32(v, 32 + (size_t)c * 32 + 8, nGlyphs);
+    t[12] = advanceY;
+    put16(v, 32 + (size_t)c * 32 + 13, 20);  // ascender
+    put16(v, 32 + (size_t)c * 32 + 15, (uint16_t)(int16_t)-6);
+    put32(v, 32 + (size_t)c * 32 + 24, (uint32_t)at);
+  }
+  return v;
+}
+
+}  // namespace prepfix
+
+static void checkPreparedFonts() {
+  std::vector<uint8_t> src = prepfix::build(24);
+  cpfont::Font f;
+  if (!f.open(src.data(), (uint32_t)src.size()) || f.styles() != 4) {
+    printf("PREP FAIL: the built font is not one this reads (%d cuts)\n", f.styles());
+    abort();
+  }
+
+  std::vector<uint8_t> out(src.size());
+  const uint32_t n = cpfont::prepare(f, (uint32_t)src.size(), out.data(), (uint32_t)out.size());
+  cpfont::Font g;
+  if (!n || n >= src.size() || !g.open(out.data(), n)) {
+    printf("PREP FAIL: %zu bytes prepared to %u, parses %d\n", src.size(), n,
+           (int)g.open(out.data(), n));
+    abort();
+  }
+  // The bold-italic cut goes: gfx never draws it -- bold beats italic there --
+  // and it is a quarter of every file.
+  if (g.styles() != 3 || g.find(cpfont::BOLD_ITALIC) >= 0) {
+    printf("PREP FAIL: %d cuts survived, bold-italic at %d\n", g.styles(),
+           g.find(cpfont::BOLD_ITALIC));
+    abort();
+  }
+  // What a book is set in stays; what it is not, goes. A dropped codepoint is
+  // not a hole -- the baked tables answer for it, the way they already do for
+  // Thai under every Latin pack.
+  struct {
+    uint32_t cp;
+    bool keep;
+    const char* what;
+  } want[4] = {{0x41, true, "capital A"},
+               {0x2014, true, "an em dash"},
+               {0x410, false, "Cyrillic A"},
+               {0x1F600, false, "an emoji"}};
+  for (int c = 0; c < g.styles(); c++) {
+    const cpfont::Style& gs = g.style(c);
+    const cpfont::Style& fs = f.style(f.find(gs.cut));
+    if (gs.advanceY != fs.advanceY || gs.ascender != fs.ascender ||
+        gs.descender != fs.descender) {
+      printf("PREP FAIL: cut %d came back with different metrics\n", gs.cut);
+      abort();
+    }
+    for (auto& w : want) {
+      cpfont::Glyph a, b;
+      const bool has = g.glyph(gs, w.cp, b);
+      if (has != w.keep) {
+        printf("PREP FAIL: %s is %s the prepared font\n", w.what, has ? "in" : "not in");
+        abort();
+      }
+      if (!w.keep) continue;
+      // And it is the SAME glyph: same metrics, same ink, off a rebuilt offset
+      // table. An offset a byte out reads the middle of its neighbour and
+      // looks like a font that is subtly, unfixably wrong.
+      if (!f.glyph(fs, w.cp, a) || a.w != b.w || a.h != b.h || a.advance16 != b.advance16 ||
+          a.bytes != b.bytes) {
+        printf("PREP FAIL: %s came back a different shape\n", w.what);
+        abort();
+      }
+      for (int y = 0; y < a.h; y++)
+        for (int x = 0; x < a.w; x++)
+          if (f.ink(fs, a, x, y) != g.ink(gs, b, x, y)) {
+            printf("PREP FAIL: %s differs at %d,%d in cut %d\n", w.what, x, y, gs.cut);
+            abort();
+          }
+    }
+  }
+
+  // Now the same thing through the card. The first load reads the whole font
+  // and leaves a prepared copy beside it; the second reads only that.
+  sdcard::hostPutCardFile("/.fonts/Prepped/Prepped_10.cpfont", src.data(), (int)src.size());
+  if (!cardfonts::useUniversal("Prepped")) {
+    printf("PREP FAIL: the built family would not load\n");
+    abort();
+  }
+  const int madeSize = sdcard::hostCardFileSize("/.fonts/Prepped/Prepped_10.tbf");
+  if (madeSize <= 32 || madeSize >= (int)src.size()) {
+    printf("PREP FAIL: the prepared copy is %d bytes beside a %zu byte font\n", madeSize,
+           src.size());
+    abort();
+  }
+  // A .tbf is not another size to choose from: the family walk takes .cpfont
+  // and nothing else, or every prepared copy would double its family's list.
+  char sizes[cardfonts::MAX_SIZES][sdcard::FONT_FILE_LEN];
+  if (sdcard::fontFiles("Prepped", sizes, cardfonts::MAX_SIZES) != 1) {
+    printf("PREP FAIL: the prepared copy showed up as a size of its own\n");
+    abort();
+  }
+
+  sdcard::hostResetBytesRead();
+  cardfonts::noneUniversal();
+  if (!cardfonts::useUniversal("Prepped")) {
+    printf("PREP FAIL: the family would not load a second time\n");
+    abort();
+  }
+  const uint32_t again = sdcard::hostBytesRead();
+  if (again >= src.size()) {
+    printf("PREP FAIL: the second load read %u bytes of a %zu byte font -- not the prepared copy\n",
+           again, src.size());
+    abort();
+  }
+
+  // Replace the font with a different one and the prepared copy stops
+  // matching: it is stamped with the length of the file it was made from, so a
+  // card whose owner swapped a face does not read yesterday's ghost of it.
+  std::vector<uint8_t> other = prepfix::build(26);
+  other.push_back(0);  // a different length, which is what the stamp records
+  sdcard::hostPutCardFile("/.fonts/Prepped/Prepped_10.cpfont", other.data(), (int)other.size());
+  cardfonts::noneUniversal();
+  if (!cardfonts::useUniversal("Prepped")) {
+    printf("PREP FAIL: the replaced font would not load\n");
+    abort();
+  }
+  if (gfx::cardFaceLine(24, false) != 26) {
+    printf("PREP FAIL: the replaced font drew a %d px line, not 26 -- the old copy was reused\n",
+           gfx::cardFaceLine(24, false));
+    abort();
+  }
+  cardfonts::noneUniversal();
+  printf("prepared fonts ok (%zu -> %u bytes, 4 cuts to 3, second load read %u, stamp rebuilds)\n",
+         src.size(), n, again);
+}
+
 static void checkCardFamily() {
   static const char* kSizes[3] = {"DejaVuSerif_8.cpfont", "DejaVuSerif_12.cpfont",
                                   "DejaVuSerif_18.cpfont"};
@@ -889,6 +1097,7 @@ int main() {
   checkCpFont();
   checkCardFace();
   checkCardFamily();
+  checkPreparedFonts();
   checkHubRouting("all shown");
 
   // The three folder pages, drawn as a finger would reach them.

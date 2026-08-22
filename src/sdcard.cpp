@@ -160,6 +160,9 @@ std::map<std::string, std::string>& fakeCard() {
   static std::map<std::string, std::string> fs;
   return fs;
 }
+// Every byte readFileAt has handed back, so a guard can say what a flow costs
+// the card rather than inferring it from a stopwatch nobody has.
+uint32_t g_hostBytesRead = 0;
 }  // namespace
 
 int listTbi(char names[][40], int max) {
@@ -669,6 +672,7 @@ int readFileAt(const char* path, void* dst, int max) {
     if (s.n > 0 && strcmp(s.path, path) == 0) {
       const int n = s.n < max ? s.n : max;
       memcpy(dst, s.data, (size_t)n);
+      g_hostBytesRead += (uint32_t)n;
       return n;
     }
   // Sidecars live in g_side, which is capped at 2 KB a file; everything else a
@@ -679,12 +683,19 @@ int readFileAt(const char* path, void* dst, int max) {
   if (it == fakeCard().end()) return -1;
   const int n = (int)it->second.size() < max ? (int)it->second.size() : max;
   memcpy(dst, it->second.data(), (size_t)n);
+  g_hostBytesRead += (uint32_t)n;
   return n;
 }
 
 bool writeFileAtomic(const char* path, const void* data, int n) {
   if (!busHeld()) return false;  // see readFileAt
-  if (n > (int)sizeof(g_side[0].data)) return false;
+  // Anything larger than a sidecar goes into the card map. The device writes
+  // whatever it is handed -- a prepared font is a few hundred kilobytes -- and
+  // a mock that refused it would hide the one path that matters.
+  if (n > (int)sizeof(g_side[0].data)) {
+    fakeCard()[path] = std::string((const char*)data, (size_t)n);
+    return true;
+  }
   FakeSide* slot = nullptr;
   for (FakeSide& s : g_side)
     if (s.n > 0 && strcmp(s.path, path) == 0) slot = &s;
@@ -1092,6 +1103,9 @@ int fileSize(const char* path) {
 void hostPutCardFile(const char* path, const void* data, int n) {
   fakeCard()[path] = std::string((const char*)data, (size_t)n);
 }
+
+uint32_t hostBytesRead() { return g_hostBytesRead; }
+void hostResetBytesRead() { g_hostBytesRead = 0; }
 
 int hostCardFileSize(const char* path) {
   auto it = fakeCard().find(path);

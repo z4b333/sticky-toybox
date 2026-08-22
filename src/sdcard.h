@@ -237,6 +237,10 @@ void hostSetCrossRoots(bool on);  // the fake card grows a /Read shelf
 void hostDumpSides();
 int hostReadSide(const char* path, void* dst, int max);
 int hostCardFileSize(const char* path);
+// What readFileAt has handed back since the last reset, so a guard can measure
+// what opening something costs the card.
+uint32_t hostBytesRead();
+void hostResetBytesRead();
 #endif
 
 // Reads a whole file. If nothing holds the bus this claims it for the read
