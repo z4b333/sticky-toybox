@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <utility>
+#include <vector>
 
 #include "appvis.h"
 #include "board_pins.h"
@@ -21,6 +22,7 @@
 #include "toybox.h"
 #include "settings.h"
 #include "bmp_gray.h"
+#include "tools/cpfont.h"
 #include "tools/lock_image.h"
 #include "tools/lockscreen.h"
 #include "nonogram.h"
@@ -409,6 +411,126 @@ static_assert(randui::MODE_NUM.y >= BAR_TOUCH_H, "random mode row is inside the 
 static_assert(timerui::MODE_CD.y >= BAR_TOUCH_H, "timer mode row is inside the back button");
 static_assert(nui::BODY.y >= BAR_TOUCH_H, "the note body is inside the back button");
 
+// --- CrossInk .cpfont ---------------------------------------------------------
+// The fixture is a real file, made by CrossInk's own converter from DejaVu Sans
+// at their size 8, with all four cuts. Hand-writing one would only prove this
+// reader agrees with my reading of their format; a file their tool produced
+// proves it agrees with their tool.
+//
+// The path is searched rather than assumed: the documented way to run this is
+// from test/host, and the second font pass is run from a scratch directory so
+// its .pgm files do not overwrite the first pass's.
+static bool readFixture(std::vector<uint8_t>& out) {
+  const char* env = getenv("TOYBOX_FIXTURES");
+  char envPath[512] = "";
+  if (env) snprintf(envPath, sizeof(envPath), "%s/fixture_dejavu_8.cpfont", env);
+  const char* tries[] = {"fixture_dejavu_8.cpfont", "test/host/fixture_dejavu_8.cpfont",
+                         "../../test/host/fixture_dejavu_8.cpfont", envPath};
+  for (const char* path : tries) {
+    if (!path[0]) continue;
+    FILE* f = fopen(path, "rb");
+    if (!f) continue;
+    fseek(f, 0, SEEK_END);
+    const long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    out.resize((size_t)n);
+    const bool ok = fread(out.data(), 1, (size_t)n, f) == (size_t)n;
+    fclose(f);
+    return ok;
+  }
+  return false;
+}
+
+static void checkCpFont() {
+  std::vector<uint8_t> blob;
+  if (!readFixture(blob)) {
+    printf("CPFONT FAIL: fixture_dejavu_8.cpfont not found (run from test/host, or set "
+           "TOYBOX_FIXTURES)\n");
+    abort();
+  }
+  cpfont::Font font;
+  if (!font.open(blob.data(), (uint32_t)blob.size()) || font.styles() != 4) {
+    printf("CPFONT FAIL: the fixture would not open (%d styles)\n", font.styles());
+    abort();
+  }
+  // The four cuts, found by name rather than by position.
+  for (uint8_t cut : {cpfont::REGULAR, cpfont::BOLD, cpfont::ITALIC, cpfont::BOLD_ITALIC}) {
+    if (font.find(cut) < 0) {
+      printf("CPFONT FAIL: cut %d missing from a four-cut file\n", cut);
+      abort();
+    }
+  }
+
+  const cpfont::Style& reg = font.style(font.find(cpfont::REGULAR));
+  cpfont::Glyph a{}, space{}, bold{}, miss{};
+  if (reg.advanceY != 19 || !font.glyph(reg, 'A', a) || a.w != 12 || a.h != 12 ||
+      a.advance() != 11 || a.top != 12) {
+    printf("CPFONT FAIL: line %u, A is %ux%u adv %d top %d\n", reg.advanceY, a.w, a.h,
+           a.advance(), a.top);
+    abort();
+  }
+  // A space has an advance and no bitmap. A reader that assumes every glyph
+  // has pixels draws nothing and moves nowhere, and the words run together.
+  if (!font.glyph(reg, ' ', space) || space.w != 0 || space.bytes != 0 || space.advance() <= 0) {
+    printf("CPFONT FAIL: the space is %ux%u adv %d\n", space.w, space.h, space.advance());
+    abort();
+  }
+  // These packs carry no Thai and no CJK, so the answer has to be an honest
+  // "not here" -- which is what lets the baked tables keep drawing Thai under
+  // a card font that has never heard of it.
+  if (font.glyph(reg, 0x0E01, miss) || font.glyph(reg, 0x4E00, miss)) {
+    printf("CPFONT FAIL: a Latin pack claimed Thai or CJK coverage\n");
+    abort();
+  }
+
+  // The bitmap is a continuous 2-bit stream with no padding at the end of a
+  // row, so a row-by-row reader drifts further out of step on every glyph
+  // whose width is not a multiple of four. The letter A has ink at its apex
+  // and none between its legs: geometry no misaligned reader survives.
+  int apex = 0, betweenLegs = 0;
+  for (int x = 0; x < a.w; x++)
+    if (font.on(reg, a, x, 1)) apex++;
+  for (int x = a.w / 2 - 1; x <= a.w / 2 + 1; x++)
+    if (font.on(reg, a, x, a.h - 1)) betweenLegs++;
+  if (apex < 1 || apex > 4 || betweenLegs != 0) {
+    printf("CPFONT FAIL: A has %d px at the apex and %d between the legs\n", apex, betweenLegs);
+    abort();
+  }
+
+  // Bold is a different bitmap for the same letter, not a copy of it.
+  const cpfont::Style& bst = font.style(font.find(cpfont::BOLD));
+  int inkReg = 0, inkBold = 0;
+  if (!font.glyph(bst, 'A', bold)) {
+    printf("CPFONT FAIL: no A in the bold cut\n");
+    abort();
+  }
+  for (int y = 0; y < a.h; y++)
+    for (int x = 0; x < a.w; x++)
+      if (font.on(reg, a, x, y)) inkReg++;
+  for (int y = 0; y < bold.h; y++)
+    for (int x = 0; x < bold.w; x++)
+      if (font.on(bst, bold, x, y)) inkBold++;
+  if (inkBold <= inkReg) {
+    printf("CPFONT FAIL: bold has %d px of ink against regular's %d\n", inkBold, inkReg);
+    abort();
+  }
+
+  // Rubbish in, "no" out -- never a half-open font, because half a font is a
+  // page of blanks nobody can explain.
+  cpfont::Font bad;
+  std::vector<uint8_t> wrong(blob);
+  wrong[9] = 99;  // a version this does not read
+  const bool refused = !bad.open(nullptr, 0) && !bad.open(blob.data(), 8) &&
+                       !bad.open(wrong.data(), (uint32_t)wrong.size()) &&
+                       !bad.open(blob.data(), 200);  // sections past the end
+  if (!refused) {
+    printf("CPFONT FAIL: a broken file opened anyway\n");
+    abort();
+  }
+  printf("cpfont ok (4 cuts, %u glyphs, %u px line, Thai and CJK refused honestly)\n",
+         reg.glyphCount, reg.advanceY);
+}
+
 // The clock every options panel carries in the bar's far corner. It is drawn
 // there rather than on the page behind it because a page is not redrawn often
 // enough to hold a true time, and both halves of that promise have to be kept:
@@ -520,6 +642,7 @@ int main() {
   // Grid routing: the dock, every folder tile, and the gaps, must resolve to
   // the thing under the finger. requestScreen is stubbed, so record what it
   // asked for and compare against the drawing order.
+  checkCpFont();
   checkHubRouting("all shown");
 
   // The three folder pages, drawn as a finger would reach them.
