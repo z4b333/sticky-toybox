@@ -2751,9 +2751,9 @@ int main() {
       }
     }
 
-    // The next picture is one the book carries no .tbi for, so the reader says
-    // so by name rather than showing a blank page. Rendered here because a
-    // plate is text, and text is what runs off the edge of a 480-pixel panel.
+    // The next picture is one the book carries no .tbi and no .bmp for -- so
+    // before CrossInk, the reader said so by name rather than showing a blank
+    // page.
     g_dumpEnabled = false;
     toybox.onButton(SideBtn::Down);
     if (et->hostPage() != 2 || strcmp(et->hostPageImage(), "OEBPS/images/missing.png") != 0) {
@@ -2762,8 +2762,54 @@ int main() {
       abort();
     }
     g_dumpEnabled = true;
-    setScreen("tool_epub_art_missing");
+    setScreen("tool_epub_art_crossink");
     stickyHost.refresh(true);
+    {
+      // ...except that this book has been through CrossInk's optimizer, which
+      // left the picture in it already rendered for this panel. So the page
+      // that used to be the "no picture prepared for it" plate is the picture.
+      //
+      // The fixture is 240x400 and the panel is 480x800, so it is scaled x2 --
+      // a scaler out by a factor shows up here as half a page or a picture
+      // running off it. Two of its four levels are greys, which an ordered
+      // dither turns into patterns: a renderer that thresholded instead would
+      // draw one of them white and the other black, and the ink would come out
+      // well outside this range.
+      int ink = 0;
+      for (uint32_t i = 0; i < EPD_BUF_SIZE; i++) ink += __builtin_popcount((uint8_t)~epd.fb()[i]);
+      int inkRows = 0;
+      for (int y = 0; y < 480; y++)
+        for (int xb = 0; xb < 100; xb++)
+          if ((uint8_t)~epd.fb()[(size_t)y * 100 + xb]) {
+            inkRows++;
+            break;
+          }
+      // The frame alone is about 2,500 px; the two greys add a quarter and a
+      // half of 180x100 source pixels, scaled fourfold. A plate is text on an
+      // empty page and carries a small fraction of it.
+      if (ink < 20000 || ink > 90000 || inkRows < 400) {
+        printf("EPUB APP FAIL: the CrossInk picture drew %d px over %d rows\n", ink, inkRows);
+        abort();
+      }
+      // And the lookup that found it is the one the manifest states -- for the
+      // picture asked about, not the next one in the list, and not at all for
+      // a picture the optimizer left alone.
+      char pxc[224];
+      if (!et->hostPxcEntry("OEBPS/images/missing.png", pxc, sizeof(pxc)) ||
+          strcmp(pxc, "META-INF/crossink/pxc/0123456789abcdef0123.pxc") != 0) {
+        printf("EPUB APP FAIL: the manifest gave '%s' for the picture\n", pxc);
+        abort();
+      }
+      if (et->hostPxcEntry("OEBPS/images/nowhere.png", pxc, sizeof(pxc))) {
+        printf("EPUB APP FAIL: a picture with no pxc borrowed '%s'\n", pxc);
+        abort();
+      }
+      if (et->hostPxcEntry("OEBPS/images/not-in-the-book.png", pxc, sizeof(pxc))) {
+        printf("EPUB APP FAIL: a picture not in the manifest got '%s'\n", pxc);
+        abort();
+      }
+      printf("crossink art ok (%d px over %d rows, scaled x2, manifest read)\n", ink, inkRows);
+    }
 
     // Back one: the two pictures share an offset with each other and with the
     // word after them, so only the count of pictures already passed says which

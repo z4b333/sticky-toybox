@@ -485,6 +485,55 @@ uint32_t fakeArtBmpBuild() {
 // it in pass one; it is here so the entry the .tbi shadows actually exists.
 const uint8_t kFakePlatePng[] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
 
+// A book that has been through CrossInk's optimizer carries every picture a
+// second time, already rendered for this panel: a .pxc of four grey levels,
+// and a manifest saying which belongs to which image. This is one of each.
+//
+// 240x400, so it is scaled x2 on the way to the panel and a scaler that got
+// its arithmetic wrong shows up as a picture that is half the page or twice
+// it. All four levels are used -- an ordered dither turns 1 and 2 into
+// patterns, and a renderer that merely thresholded would show two flat blocks
+// instead. The solid mark sits near the top left, so a picture drawn upside
+// down or mirrored is wrong on the screenshot rather than merely dark.
+const char kFakeCrossManifest[] =
+    "{\n \"format\": \"crossink-optimizer\",\n \"version\": 1,\n"
+    " \"target\": { \"device\": \"sticky\", \"width\": 800, \"height\": 480,"
+    " \"grayscaleLevels\": 4 },\n"
+    " \"features\": { \"prebuiltPxc\": true },\n"
+    " \"images\": [\n"
+    "  { \"href\": \"OEBPS/images/missing.png\","
+    " \"pxc\": \"META-INF/crossink/pxc/0123456789abcdef0123.pxc\","
+    " \"width\": 240, \"height\": 400 },\n"
+    "  { \"href\": \"OEBPS/images/nowhere.png\","
+    " \"width\": 10, \"height\": 10 }\n"
+    " ]\n}\n";
+
+uint8_t* g_fakePxc = nullptr;
+uint32_t fakePxcBuild() {
+  const int W = 240, H = 400, STRIDE = (W + 3) / 4;
+  const uint32_t len = 4u + (uint32_t)STRIDE * H;
+  if (g_fakePxc) return len;
+  g_fakePxc = (uint8_t*)calloc(len, 1);  // 0 is white, which is most of it
+  put16(g_fakePxc + 0, (uint32_t)W);
+  put16(g_fakePxc + 2, (uint32_t)H);
+  uint8_t* bits = g_fakePxc + 4;
+  auto set = [&](int x, int y, uint8_t v) {
+    if (x < 0 || y < 0 || x >= W || y >= H) return;
+    uint8_t& b2 = bits[(size_t)y * STRIDE + (x >> 2)];
+    const int sh = (3 - (x & 3)) * 2;
+    b2 = (uint8_t)((b2 & ~(3 << sh)) | ((v & 3) << sh));
+  };
+  for (int x = 10; x < W - 10; x++) { set(x, 10, 3); set(x, H - 11, 3); }
+  for (int y = 10; y < H - 10; y++) { set(10, y, 3); set(W - 11, y, 3); }
+  for (int y = 40; y < 140; y++)
+    for (int x = 30; x < 210; x++) set(x, y, 1);   // the lightest grey
+  for (int y = 160; y < 260; y++)
+    for (int x = 30; x < 210; x++) set(x, y, 2);   // the middle one
+  for (int y = 20; y < 36; y++)
+    for (int x = 20; x < 60; x++) set(x, y, 3);    // the top-left mark
+  return len;
+}
+
 void buildFakeEpub() {
   if (g_fakeEpub) return;
   struct E {
@@ -496,7 +545,8 @@ void buildFakeEpub() {
   };
   const uint32_t tbiLen = fakeTbiBuild();
   const uint32_t artBmpLen = fakeArtBmpBuild();
-  E ents[12] = {
+  const uint32_t pxcLen = fakePxcBuild();
+  E ents[14] = {
       {"META-INF/container.xml", (const uint8_t*)kFakeContainer, (uint32_t)strlen(kFakeContainer),
        (uint32_t)strlen(kFakeContainer), 0, 0},
       {"OEBPS/content.opf", (const uint8_t*)kFakeOpf, (uint32_t)strlen(kFakeOpf),
@@ -523,6 +573,11 @@ void buildFakeEpub() {
        (uint32_t)sizeof(kFakePlatePng), 0, 0},
       {"OEBPS/nav.xhtml", (const uint8_t*)kFakeNav, (uint32_t)strlen(kFakeNav),
        (uint32_t)strlen(kFakeNav), 0, 0},
+      // ...and the same book seen by CrossInk's optimizer: missing.png has no
+      // picture of ours, and this is where the one it left is.
+      {"META-INF/crossink/optimizer-v1.json", (const uint8_t*)kFakeCrossManifest,
+       (uint32_t)strlen(kFakeCrossManifest), (uint32_t)strlen(kFakeCrossManifest), 0, 0},
+      {"META-INF/crossink/pxc/0123456789abcdef0123.pxc", g_fakePxc, pxcLen, pxcLen, 0, 0},
   };
   uint32_t total = 22;
   for (const E& e : ents) total += 30 + 46 + 2 * (uint32_t)strlen(e.name) + e.csize;

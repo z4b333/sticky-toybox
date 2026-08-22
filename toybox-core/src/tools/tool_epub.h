@@ -381,6 +381,10 @@ class EpubTool : public ToolApp {
   int hostPage() const { return _page; }
   uint32_t hostPageOffset() const { return curOffset(); }
   const char* hostPageImage() const { return _pageImage; }
+  // The manifest scan, for a guard: a book through CrossInk's optimizer says
+  // which of its .pxc files belongs to which picture, and getting that lookup
+  // wrong is a picture drawn from somebody else's bytes.
+  bool hostPxcEntry(const char* img, char* out, int cap) { return pxcEntryFor(img, out, cap); }
   int hostMenu() const { return (int)_menu; }
   bool hostPicking() const { return _picking; }
   const char* hostPhrase() const { return _phrase; }
@@ -1394,6 +1398,149 @@ class EpubTool : public ToolApp {
   // Blits the picture for this page, a band at a time. The whole picture is
   // 48 KB and this device has no 48 KB to spare, so it never exists whole:
   // 16 rows arrive, 16 rows are drawn, and the buffer is reused 50 times.
+  // --- CrossInk's own picture, already rendered for this panel ---------------
+  // An EPUB run through CrossInk's optimizer (inky) carries every illustration
+  // a second time, as a .pxc under META-INF/crossink/pxc/ -- quantised to the
+  // four greys this panel has, at the size it will be shown. Their manifest
+  // says which file belongs to which image:
+  //
+  //   META-INF/crossink/optimizer-v1.json
+  //     "images": [ { "href": "OEBPS/images/Art_ch1.jpg",
+  //                   "pxc":  "META-INF/crossink/pxc/<20 hex>.pxc",
+  //                   "width": 320, "height": 480 }, ... ]
+  //
+  // Read rather than parsed: the manifest is machine-written by one tool, and
+  // what is wanted from it is one string that follows another. The image's own
+  // path is looked for in quotes, and the "pxc" after it is taken -- which is
+  // robust to their formatting changing and costs no table in memory. A book
+  // has a handful of pictures; this runs when one is turned to.
+  bool pxcEntryFor(const char* img, char* out, int cap) {
+    if (!img || !img[0]) return false;
+    if (!_book.blobOpen("META-INF/crossink/optimizer-v1.json")) return false;
+    char needle[200];
+    const int need = snprintf(needle, sizeof(needle), "\"%s\"", img);
+    if (need <= 0 || need >= (int)sizeof(needle)) {
+      _book.blobClose();
+      return false;
+    }
+    // Two little state machines over one pass of the file: match the needle,
+    // then find "pxc" and copy the quoted string after it. `after` bounds the
+    // second so a book without a pxc for this picture does not adopt the next
+    // picture's.
+    int at = 0, after = -1, pat = 0;
+    int outN = -1;
+    bool inValue = false;
+    uint8_t buf[192];
+    static const char kPxc[] = "\"pxc\"";
+    while (true) {
+      const int got = _book.blobRead(buf, (int)sizeof(buf));
+      if (got <= 0) break;
+      for (int i = 0; i < got; i++) {
+        const char ch = (char)buf[i];
+        if (after < 0) {
+          at = (ch == needle[at]) ? at + 1 : (ch == needle[0] ? 1 : 0);
+          if (at == need) after = 0;
+          continue;
+        }
+        if (++after > 400) {  // no pxc belongs to this picture
+          _book.blobClose();
+          return false;
+        }
+        if (outN < 0) {
+          pat = (ch == kPxc[pat]) ? pat + 1 : (ch == kPxc[0] ? 1 : 0);
+          if (pat == (int)sizeof(kPxc) - 1) outN = 0;
+          continue;
+        }
+        if (!inValue) {
+          if (ch == '"') inValue = true;  // the opening quote of the value
+          continue;
+        }
+        if (ch == '"') {
+          out[outN] = 0;
+          _book.blobClose();
+          return outN > 0;
+        }
+        if (outN >= cap - 1) break;
+        out[outN++] = ch;
+      }
+    }
+    _book.blobClose();
+    return false;
+  }
+
+  // Draws one. The file is four bytes of size and then two bits a pixel, rows
+  // padded to a byte -- the same packing the card fonts use -- with 0 white and
+  // 3 black.
+  //
+  // Scaled to the panel and dithered down to the one bit the page is drawn in.
+  // A 4x4 ordered dither, not a threshold: their four greys thresholded would
+  // throw away three of them, and on an illustration that is the difference
+  // between a picture and a silhouette. Nearest-neighbour on the way up, since
+  // the source was already rendered at nearly this size by a tool that knew
+  // the panel.
+  //
+  // Streamed a row at a time. A 480x720 picture is 86 KB unpacked and this
+  // device has no 86 KB to spare; one source row is eighty bytes.
+  bool drawPxcPage(ToolsCanvas& c, const char* entry) {
+    if (!_book.blobOpen(entry)) return false;
+    uint8_t head[4];
+    if (!blobReadFull(head, sizeof(head))) {
+      _book.blobClose();
+      return false;
+    }
+    const int w = head[0] | (head[1] << 8), h = head[2] | (head[3] << 8);
+    const int stride = (w + 3) / 4;
+    if (w <= 0 || h <= 0 || stride > (int)sizeof(epubui::g_imgBand)) {
+      _book.blobClose();
+      return false;
+    }
+    // Fit, keeping the shape: whichever of width and height runs out first.
+    const int cw = c.width(), chh = c.height();
+    int dw = cw, dh = (int)((int64_t)cw * h / w);
+    if (dh > chh) {
+      dh = chh;
+      dw = (int)((int64_t)chh * w / h);
+    }
+    if (dw <= 0 || dh <= 0) {
+      _book.blobClose();
+      return false;
+    }
+    const int x0 = (cw - dw) / 2, y0 = (chh - dh) / 2;
+    // The classic 4x4, as sixteenths. Compared against a coverage of 0, 4, 8
+    // or 16 sixteenths, so white stays white and black stays black and the two
+    // middle greys become patterns.
+    static const uint8_t kBayer[16] = {0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5};
+    static const uint8_t kCover[4] = {0, 4, 8, 16};
+    int haveRow = -1;
+    for (int dy = 0; dy < dh; dy++) {
+      const int sy = (int)((int64_t)dy * h / dh);
+      // The source is read forward only: a row is read when it is reached and
+      // reused for as many output rows as land on it.
+      while (haveRow < sy) {
+        if (!blobReadFull(epubui::g_imgBand, stride)) {
+          _book.blobClose();
+          return haveRow >= 0;  // half a picture beats the "none prepared" plate
+        }
+        haveRow++;
+      }
+      const uint8_t* row = epubui::g_imgBand;
+      for (int dx = 0; dx < dw; dx++) {
+        const int sx = (int)((int64_t)dx * w / dw);
+        const uint8_t byte = row[sx >> 2];
+        if (!byte) {  // four white pixels, which is most of most pictures
+          const int skip = 3 - (sx & 3);
+          dx += skip;
+          continue;
+        }
+        const uint8_t v = (uint8_t)((byte >> ((3 - (sx & 3)) * 2)) & 3);
+        if (kCover[v] > kBayer[((dy & 3) << 2) | (dx & 3)])
+          c.fillRect(x0 + dx, y0 + dy, 1, 1, true);
+      }
+    }
+    _book.blobClose();
+    return true;
+  }
+
   // A prepared .bmp inside the book. Streamed, never buffered: a BMP written
   // for this panel -- 1 bpp, 480 wide, 800 tall -- is the same 48 KB of bits
   // a .tbi is, in a wrapper the rest of the world can open, and its rows can
@@ -1445,14 +1592,11 @@ class EpubTool : public ToolApp {
     return true;
   }
 
-  bool drawImagePage(ToolsCanvas& c) {
+  // Ours, if the book was through the Toybox PC app. The .bmp first and the
+  // .tbi after it: a book carrying both is a book being converted, and the new
+  // picture is the one to believe.
+  bool drawOurImage(ToolsCanvas& c) {
     char entry[224];
-    // Reading another entry spends the chapter stream; ensureStream() rebuilds
-    // it when a turn next needs it.
-    _book.chapterClose();
-    _streamLost = true;
-    // The one format first, the old one after it: a book carrying both is a
-    // book being converted, and the new picture is the one to believe.
     artEntryFor(_pageImage, ".bmp", entry, sizeof(entry));
     if (drawBmpPage(c, entry)) return true;
     artEntryFor(_pageImage, ".tbi", entry, sizeof(entry));
@@ -1489,6 +1633,20 @@ class EpubTool : public ToolApp {
     }
     _book.blobClose();
     return true;
+  }
+
+  bool drawImagePage(ToolsCanvas& c) {
+    // Reading another entry spends the chapter stream; ensureStream() rebuilds
+    // it when a turn next needs it.
+    _book.chapterClose();
+    _streamLost = true;
+    if (drawOurImage(c)) return true;
+    // Nothing of ours in the book. If it came through CrossInk's optimizer the
+    // picture is already in there, rendered for this panel -- which is most of
+    // the illustrated books anybody puts on this device, and the reason the
+    // "no picture prepared for it" plate was the usual outcome.
+    char pxc[224];
+    return pxcEntryFor(_pageImage, pxc, sizeof(pxc)) && drawPxcPage(c, pxc);
   }
 
   // What an illustration looks like when the book carries no picture for it.
