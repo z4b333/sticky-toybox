@@ -53,6 +53,7 @@ class StickyCanvas : public ToolsCanvas {
     return w;
   }
   int textHeight(TSize sz) const override { return gfx::textHeight(scaleOf(sz)); }
+  int textMidline(TSize sz) const override { return gfx::textMidline(scaleOf(sz)); }
   void textPad(const char* s, TSize sz, int& l, int& r, int& t, int& b) const override {
     gfx::textInk(s, scaleOf(sz), false, 0, l, r, t, b);
   }

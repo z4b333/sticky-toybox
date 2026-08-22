@@ -26,6 +26,10 @@ int typeface();
 void setItalic(bool on);
 bool italic();
 int textHeight(int scale);
+// Where a line drawn through the words belongs, from the top of the line box.
+// Not the middle of the box: a card face hangs from its own baseline, and half
+// its line box can sit well below the lowercase.
+int textMidline(int scale);
 
 // Blank space left inside that width and height by the glyphs themselves, so
 // callers can centre on the ink rather than on the box.

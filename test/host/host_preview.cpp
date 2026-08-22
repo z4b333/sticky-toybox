@@ -849,6 +849,99 @@ static void checkPreparedFonts() {
          src.size(), n, again);
 }
 
+// --- a card face sits on its own baseline, and a strike goes through it ------
+// A card face hangs from a baseline it states; the baked faces are packed into
+// their box. Everything used to be drawn against the BAKED baseline, which was
+// near enough while a card file only ever stood in for the box it sat in --
+// and wrong by twenty pixels the moment a reader could set a book in a face
+// half again as tall as its box. The same mistake put the strikethrough on a
+// done task under the words instead of through them.
+static void checkCardBaseline() {
+  std::vector<uint8_t> big;
+  {
+    // The 18 pt cut: a 44 px line, ascender 35, x-height 20 -- deliberately
+    // put in the 18 px box, because that is where the two baselines disagree
+    // most and where a bug is unmissable.
+    char path[256];
+    snprintf(path, sizeof(path), "fixture_family/DejaVuSerif_18.cpfont");
+    FILE* f = fopen(path, "rb");
+    if (!f) {
+      const char* env = getenv("TOYBOX_FIXTURES");
+      snprintf(path, sizeof(path), "%s/fixture_family/DejaVuSerif_18.cpfont",
+               env ? env : "../../test/host");
+      f = fopen(path, "rb");
+    }
+    if (!f) {
+      printf("BASELINE FAIL: fixture missing\n");
+      abort();
+    }
+    fseek(f, 0, SEEK_END);
+    const long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    big.resize((size_t)n);
+    if (fread(big.data(), 1, (size_t)n, f) != (size_t)n) abort();
+    fclose(f);
+  }
+  uint8_t* owned = (uint8_t*)malloc(big.size());
+  memcpy(owned, big.data(), big.size());
+  if (!gfx::cardFaceSet(18, owned, (uint32_t)big.size(), true, true)) {
+    printf("BASELINE FAIL: the tall face would not install\n");
+    abort();
+  }
+  gfx::contentFace(true);
+
+  const int top = 100;
+  epd.clear(true);
+  gfx::drawText(20, top, "xxxxx", 18, 0);
+  int inkT = -1, inkB = -1;
+  for (int y = 0; y < 400; y++)
+    for (int x = 0; x < 480; x++) {
+      int pxx, pyy;
+      epdMapPixel(epd.rotation(), epd.panelFlipX(), epd.panelFlipY(), x, y, pxx, pyy);
+      if ((epd.fb()[(uint32_t)pyy * EPD_WB + (pxx >> 3)] & (0x80 >> (pxx & 7))) == 0) {
+        if (inkT < 0) inkT = y;
+        inkB = y;
+      }
+    }
+  const int line = gfx::textHeight(18);
+  if (inkT < 0) {
+    printf("BASELINE FAIL: the tall face drew nothing\n");
+    abort();
+  }
+  // 1. The words stay inside the line they were given. Drawn against the baked
+  //    18 px box's baseline, a 35 px ascender put this fifteen pixels above the
+  //    top of its own line -- on top of the line above it.
+  if (inkT < top) {
+    printf("BASELINE FAIL: a %d px face drew %d px above its own line\n", line, top - inkT);
+    abort();
+  }
+  if (inkB > top + line) {
+    printf("BASELINE FAIL: lowercase ran %d px below a %d px line\n", inkB - top - line, line);
+    abort();
+  }
+  // 2. A line through the words goes through the WORDS. Half the line box is
+  //    not the answer for a face that hangs from a baseline: here the box is
+  //    44 px and the lowercase sits between 15 and 35.
+  const int mid = gfx::textMidline(18);
+  const int want = (inkT - top + inkB - top) / 2;
+  if (mid < inkT - top || mid > inkB - top || mid < want - 3 || mid > want + 3) {
+    printf("BASELINE FAIL: the strike sits at %d, the lowercase between %d and %d\n", mid,
+           inkT - top, inkB - top);
+    abort();
+  }
+  gfx::contentFace(false);
+  // 3. And the firmware's own faces are untouched: half the box, less one, is
+  //    where every screen already draws it.
+  const int baked = gfx::textMidline(24);
+  if (baked != gfx::textHeight(24) / 2 - 1) {
+    printf("BASELINE FAIL: the baked midline moved to %d\n", baked);
+    abort();
+  }
+  gfx::cardFaceClear(true);
+  printf("card baseline ok (%d px face inside a %d px line, strike at %d of %d..%d)\n", line, line,
+         mid, inkT - top, inkB - top);
+}
+
 static void checkCardFamily() {
   static const char* kSizes[3] = {"DejaVuSerif_8.cpfont", "DejaVuSerif_12.cpfont",
                                   "DejaVuSerif_18.cpfont"};
@@ -1098,6 +1191,7 @@ int main() {
   checkCardFace();
   checkCardFamily();
   checkPreparedFonts();
+  checkCardBaseline();
   checkHubRouting("all shown");
 
   // The three folder pages, drawn as a finger would reach them.

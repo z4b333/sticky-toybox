@@ -342,6 +342,28 @@ struct CardHit {
   cpfont::Glyph glyph;
 };
 
+// The face a box would draw from, or nullptr for the baked tables. Same rule
+// as cardFind: content wins while an app has its face on.
+const CardFace* cardFaceAt(int px) {
+  const int slot = cardSlot(px);
+  const CardFace& c = (g_contentOn && g_content[slot].live) ? g_content[slot] : g_ui[slot];
+  return c.live ? &c : nullptr;
+}
+
+// Where the baseline sits inside the line box. A card face states it -- the
+// ascender is the distance from the top of the line to the baseline -- and the
+// baked faces are measured. This is the number every glyph on the line is
+// placed against, whichever set it comes from, because a line with two
+// baselines in it visibly staggers.
+int baselineIn(int px, const UiFont* f) {
+  if (const CardFace* c = cardFaceAt(px)) {
+    const int cut = c->font.find(cpfont::REGULAR);
+    const cpfont::Style& st = c->font.style(cut < 0 ? 0 : cut);
+    if (st.ascender > 0) return st.ascender;
+  }
+  return bakedBaseline(f);
+}
+
 bool cardFind(int px, bool bold, bool italic, uint32_t cp, CardHit& out) {
   const int slot = cardSlot(px);
   const CardFace& c = (g_contentOn && g_content[slot].live) ? g_content[slot] : g_ui[slot];
@@ -434,7 +456,13 @@ int drawText(int x, int y, const char* s, int scale, uint8_t color, bool bold, i
   }
 #endif
   const UiFont* f = faceFor(scale, bold);
-  const int baseline = y + bakedBaseline(f);
+  const int baseline = y + baselineIn(scale, f);
+  // Where a baked glyph's BOX has to start for its own baseline to land on the
+  // line's. Before this, a card face was drawn against the baked face's
+  // baseline: fine while a card file was a near-enough stand-in for the box it
+  // sat in, and badly wrong the moment somebody set a book in a face half
+  // again as tall -- a 50 px face hung twenty pixels above its own line.
+  const int yb = baseline - bakedBaseline(f);
   int cx = x;
   uint32_t prev = 0;
   for (const char* p = s; *p;) {
@@ -452,7 +480,7 @@ int drawText(int x, int y, const char* s, int scale, uint8_t color, bool bold, i
     }
     if (glyphIndex(cp) >= 0) {
       const FontGlyph g = glyphOf(f, cp);
-      blit(f, g, cx, y, color);
+      blit(f, g, cx, yb, color);
       cx += g.width + spacing;
       prev = cp;
       continue;
@@ -463,14 +491,14 @@ int drawText(int x, int y, const char* s, int scale, uint8_t color, bool bold, i
       // A hollow box the size of a typical glyph: honest about the gap without
       // derailing the line.
       const int bw = intlAdvance(scale, cp) - 4;
-      epd.drawRect(cx + 1, y + 2, bw, scale - 4, color, 1);
+      epd.drawRect(cx + 1, yb + 2, bw, scale - 4, color, 1);
       cx += bw + 4 + spacing;
       prev = cp;
       continue;
     }
     const IntlFace* F = hit.f;
     const IntlGlyph* g = hit.g;
-    int gy = y + yAdj;
+    int gy = yb + yAdj;
     // A tone mark is baked at second-storey height (where it sits over an upper
     // vowel); over a bare consonant it comes down by the measured drop.
     if (uni::thaiTone(cp) && !uni::thaiUpper(prev)) gy += F->toneDrop;
@@ -526,6 +554,29 @@ int textHeight(int px) {
     if (g_content[slot].live) return g_content[slot].font.style(0).advanceY;
   }
   return faceFor(px, false)->height;
+}
+
+// Where a line drawn THROUGH the words belongs, measured from the top of the
+// line box: a strikethrough on a done task, and anything else that has to sit
+// in the middle of the letters rather than in the middle of their box.
+//
+// The two are the same thing only for the baked faces, whose glyphs are packed
+// into their box. A card face hangs from a baseline and brings its own
+// ascender and x-height, so half the line box can be well below the lowercase
+// -- which is what put the strike under the words instead of through them the
+// moment somebody set a note in a card font.
+int textMidline(int px) {
+  if (const CardFace* c = cardFaceAt(px)) {
+    const int cut = c->font.find(cpfont::REGULAR);
+    const cpfont::Style& st = c->font.style(cut < 0 ? 0 : cut);
+    // Halfway up the lowercase, which is where a strike reads as struck. The
+    // x-height is asked of the letter x itself; a face without one falls back
+    // to a quarter of the ascender, which is about where an x-height lands.
+    cpfont::Glyph g;
+    const int xh = c->font.glyph(st, 'x', g) && g.top > 0 ? g.top : st.ascender / 2;
+    return st.ascender - xh / 2;
+  }
+  return faceFor(px, false)->height / 2 - 1;
 }
 
 // Blank space a string leaves inside the box textWidth/textHeight report.

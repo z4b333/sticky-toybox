@@ -62,6 +62,11 @@ class ToolsCanvas {
                     bool ital = false) = 0;
   virtual int textWidth(const char* s, TSize sz, bool bold = false, bool ital = false) const = 0;
   virtual int textHeight(TSize sz) const = 0;
+  // Where a line drawn THROUGH the words belongs, from the top of the line
+  // box -- a strikethrough on a done task. Half the box is only the right
+  // answer for a face whose glyphs are packed into it; one that hangs from a
+  // baseline needs asking.
+  virtual int textMidline(TSize sz) const { return textHeight(sz) / 2 - 1; }
 
   // Blank space the glyphs leave inside textWidth/textHeight. A bitmap font
   // carries its advance as padding inside the cell -- usually all of it on one

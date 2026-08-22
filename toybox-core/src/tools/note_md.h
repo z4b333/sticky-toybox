@@ -247,7 +247,7 @@ inline int drawRich(ToolsCanvas& c, int x, int y, int maxW, const char* src, int
         const int pw = c.textWidth(piece, sz, bold);
         c.text(x, y, piece, sz, true, bold);
         if (forceStrike || seg.strike)
-          c.fillRect(x - 1, y + c.textHeight(sz) / 2 - 1, pw + 2, 2, true);
+          c.fillRect(x - 1, y + c.textMidline(sz), pw + 2, 2, true);
         if (*p) {
           y += lh;
         } else {
@@ -262,7 +262,7 @@ inline int drawRich(ToolsCanvas& c, int x, int y, int maxW, const char* src, int
     // The line goes through the middle of the glyphs, not under them: struck
     // out has to be unmistakable from arm's length on the fridge.
     if (forceStrike || seg.strike)
-      c.fillRect(cx - 1, y + c.textHeight(sz) / 2 - 1, ww + 2, 2, true);
+      c.fillRect(cx - 1, y + c.textMidline(sz), ww + 2, 2, true);
     cx += ww;
     lineStarted = true;
   }
