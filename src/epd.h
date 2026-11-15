@@ -1,7 +1,18 @@
-// Minimal SSD1677 e-paper driver for the Seeed reTerminal Sticky (800x480 B/W).
-// Waveform sequences follow the vendor demo / FreeInk SDK Sticky config:
+// Minimal e-paper driver for the Seeed reTerminal Sticky (800x480 B/W).
+//
+// Two controllers ship on this board, and which one is fitted is asked at boot
+// (Epd::chip()); everything above this driver draws the same way on both.
+//
+// SSD1677 (the original). Waveform sequences follow the vendor demo / FreeInk
+// SDK Sticky config:
 //   FULL:    border 0x01, CTRL2=0xF7  (~1.7 s, absolute, clears ghosting)
 //   PARTIAL: border 0x80, CTRL2=0xFF  (fast DU, differential vs previous frame)
+//
+// SSD2677 (the supply-chain replacement). A UC81xx-style command set taking two
+// bits a pixel; its waveform is chosen per refresh from the panel's
+// temperature, and its BUSY line is active LOW. Sequences follow Seeed's
+// reference driver for it. See the SSD2677 section of epd.cpp.
+//
 // Framebuffer: 1bpp, MSB-first within a byte, 1 = white, 0 = black.
 #pragma once
 #include <Arduino.h>
@@ -76,6 +87,16 @@ class Epd {
   // you cannot use to report a broken display is the display.
   bool panelAnswered() const { return _panelOk; }
 
+  // Which controller answered the chip-ID question at boot. Decided once, in
+  // begin(), and never asked again: reinit() runs after the SD card has had the
+  // shared bus, and a card leaning on MISO is the one thing that could make the
+  // answer come back wrong.
+  enum class Chip : uint8_t { SSD1677, SSD2677 };
+  Chip chip() const { return _chip; }
+  const char* chipName() const { return _chip == Chip::SSD2677 ? "SSD2677" : "SSD1677"; }
+  uint8_t chipId() const { return _chipId; }  // the raw byte, for the service screen
+  bool busyIdleHigh() const { return _busyIdleHigh; }  // the other half of the answer
+
   // Reset the controller and ask again, without touching the framebuffer.
   // Used after the SD card has had the bus, which is the one situation where a
   // panel that was answering a moment ago might not be.
@@ -139,6 +160,9 @@ class Epd {
  private:
   int _rot = 0;
   bool _panelOk = false;
+  Chip _chip = Chip::SSD1677;
+  uint8_t _chipId = 0;
+  bool _busyIdleHigh = false;
   bool _flipX = false, _flipY = false;
 
  public:
@@ -153,6 +177,22 @@ class Epd {
   bool probePanel();
   void initController();
   void setRamAreaFull();
+  bool busy() const;          // BUSY's sense differs between the two chips
+  uint8_t readChipId();
+  uint8_t read3w();
+
+  // --- SSD2677 ---
+  enum class S2Mode : uint8_t { None, Full, Partial, Grey };
+  void s2Init();
+  bool s2Ready();
+  uint8_t s2Temperature();
+  void s2Latch(S2Mode m);
+  void s2StreamMono(bool diff);
+  void s2Drive(S2Mode m);
+  void s2Refresh(S2Mode m, bool diff);
+  bool s2Grey(GreySource& src);
+  bool _s2Powered = false;          // high voltage left on between partials
+  S2Mode _s2Mode = S2Mode::None;    // the mode the controller was last set up for
 
   uint8_t* _fb = nullptr;    // current frame
   uint8_t* _prev = nullptr;  // previous frame (differential baseline)

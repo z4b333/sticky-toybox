@@ -22,6 +22,7 @@ namespace svc {
 // What the board answered when it was asked, at boot, before any of this drew.
 struct Report {
   bool panelOk = false;
+  const char* panelChip = "SSD1677";  // which controller answered the chip-ID question
   bool touchOk = false;
   uint8_t touchAddr = 0;
   bool gauge = false, rtc = false, sht = false, imu = false;
@@ -145,8 +146,8 @@ inline void render(ToolsCanvas& c, const Report& r, const Config& cfg, int sel, 
   // off the right edge. What each line is FOR decides what shares it: the two
   // chips that must answer or nothing works, the four that only matter when
   // one is missing, and the two memories, which are only ever read together.
-  snprintf(buf, sizeof(buf), "panel    %s      touch  %s", r.panelOk ? "ok" : "NO ANSWER",
-           r.touchOk ? "ok" : "NOT FOUND");
+  snprintf(buf, sizeof(buf), "panel    %s %s  touch  %s", r.panelOk ? "ok" : "NO ANSWER",
+           r.panelChip + 3, r.touchOk ? "ok" : "NOT FOUND");
   c.text(MARGIN, y, buf, TS_MED, true);
   y += 26;
 

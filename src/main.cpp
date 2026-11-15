@@ -510,6 +510,10 @@ void setup() {
   } else {
     TB_LOG("panel: answered\n");
   }
+  // Which of the two controllers this board carries. The SSD2677 replaced the
+  // SSD1677 for supply reasons; the driver asks at boot and says so here.
+  TB_LOG("panel: controller %s (chip id 0x%02X, busy idle %s)\n", epd.chipName(),
+         (unsigned)epd.chipId(), epd.busyIdleHigh() ? "high" : "low");
 
   // Whatever the service screen last saved about this particular board, before
   // the first pixel is drawn or the first tap is read.
