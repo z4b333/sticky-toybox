@@ -99,7 +99,7 @@ g++ -std=gnu++17 -O2 -w -DTOYBOX_HOST -I . -I mock -I ../../src \
   ../../src/fonts_intl.cpp ../../src/sensors.cpp ../../src/sticky_host.cpp ../../src/sdcard.cpp \
   ../../src/cardfonts.cpp \
   ../../toybox-core/src/toybox.cpp ../../toybox-core/src/hub.cpp ../../toybox-core/src/epubcore.cpp \
-  ../../toybox-core/src/epubcover.cpp -x c ../../lib/tjpgd/src/tjpgd.c -x none \
+  ../../toybox-core/src/epubcover.cpp ../../toybox-core/src/epubart.cpp -x c ../../lib/tjpgd/src/tjpgd.c -x none \
   ../../lib/miniz/src/toybox_miniz_impl.c \
   ../../toybox-core/src/settings.cpp ../../toybox-core/src/wordle.cpp \
   ../../toybox-core/src/nonogram.cpp ../../toybox-core/src/game2048.cpp \
