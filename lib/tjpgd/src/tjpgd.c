@@ -1002,7 +1002,10 @@ static JRESULT mcu_output (
                             py += 64 - 8;    /* Jump to next block if double block height */
                         }
                     }
-                    *pix++ = (uint8_t) * py++;          /* Get and store a Y value as grayscale */
+                    /* Toybox: clipped. With JD_FASTDECODE >= 1 the MCU buffer holds
+                       int16 samples that can run past 0..255, and a bare cast wrapped
+                       every highlight above 255 round to near-black. */
+                    *pix++ = BYTECLIP(*py++);          /* Get and store a Y value as grayscale */
                 }
             }
         }
@@ -1060,7 +1063,7 @@ static JRESULT mcu_output (
                     *pix++ = /*G*/ BYTECLIP(yy - ((int)(0.344 * CVACC) * cb + (int)(0.714 * CVACC) * cr) / CVACC);
                     *pix++ = /*B*/ BYTECLIP(yy + ((int)(1.772 * CVACC) * cb / CVACC));
                 } else {
-                    *pix++ = yy;
+                    *pix++ = BYTECLIP(yy);  /* Toybox: clipped, as above */
                 }
             }
         }
