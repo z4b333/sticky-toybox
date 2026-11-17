@@ -36,7 +36,10 @@ constexpr uint8_t BORDER_INIT = 0x01;
 constexpr uint8_t BORDER_FULL = 0x01;
 constexpr uint8_t BORDER_PARTIAL = 0x80;
 
-const SPISettings kSpi(10000000, MSBFIRST, SPI_MODE0);  // conservative 10 MHz
+// 20 MHz: the SSD1677's write-clock ceiling (50 ns cycle). Every refresh
+// streams ~96 KB (two 1-bit planes, or one 2 bpp frame on the SSD2677), which
+// at the old, conservative 10 MHz was ~77 ms of every page turn.
+const SPISettings kSpi(20000000, MSBFIRST, SPI_MODE0);
 }  // namespace
 
 bool Epd::begin() {
