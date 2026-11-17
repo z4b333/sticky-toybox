@@ -84,13 +84,22 @@ class StickyHost : public ToolsHost {
 #ifdef TOYBOX_HOST
     _paints++;  // so a guard can count what a flow costs the panel
 #endif
+    const uint32_t t0 = millis();
     epd.clear();
     toybox.render(_canvas);
+    const uint32_t t1 = millis();
     if (full)
       epd.displayFull();
     else
       epd.displayPartial();
+    const uint32_t t2 = millis();
+    char line[64];
+    snprintf(line, sizeof(line), "paint %s render %lu ms, panel %lu ms", full ? "full" : "partial",
+             (unsigned long)(t1 - t0), (unsigned long)(t2 - t1));
+    perfLog(line);
   }
+  uint32_t nowMs() override { return millis(); }
+  void perfLog(const char* line) override;
   // One full refresh every `cleanEvery` fast ones. The caller decides the
   // number -- it is a reading cadence and belongs to the reader, not here --
   // and the driver keeps its own backstop at forty partials, which is ghost

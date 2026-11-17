@@ -262,6 +262,11 @@ class ToolsHost {
   // refresh(true).
   void refreshUi() { refreshFast(8); }
   virtual void beep(uint8_t kind) = 0;  // 0 tap, 1 confirm, 2 reject, 3 alarm
+  // Timing, for finding out where a page turn's time goes before guessing.
+  // A monotonic millisecond clock and one line to the serial console; the
+  // defaults do nothing, so a host without a console pays nothing.
+  virtual uint32_t nowMs() { return 0; }
+  virtual void perfLog(const char* line) { (void)line; }
   virtual void goHub() = 0;
   // Opens the notes tool straight into its pairing screen, where the phone's
   // page carries the picture uploader. The settings screen uses this for the
@@ -777,6 +782,12 @@ class ToolApp {
   virtual void onSwipe(int dx, int dy) { (void)dx; (void)dy; }
   virtual void tick() {}                       // ~50 Hz, for running timers
   virtual bool wantsTick() const { return false; }
+  // Write out anything the app is holding back in RAM. The reader saves its
+  // place a moment AFTER a page turn rather than during it (the three small
+  // files cost ~420 ms, a third of a turn); the shell calls this before the
+  // app is deleted and before the device powers off, so a held-back place
+  // is never lost to either.
+  virtual void flush() {}
   // The two side buttons, for an app that has something for them to do. Only
   // flashcards does: a hand holding the device can grade a card without the
   // other hand coming up to the panel. Everything else leaves these alone, and

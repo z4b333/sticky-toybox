@@ -64,9 +64,14 @@ void Toybox::release() {
     _host->fontContent(false);
     _host->fontLeave();
   }
+  if (_active) _active->flush();
   delete _active;
   _active = nullptr;
   _activeIdx = -1;
+}
+
+void Toybox::flush() {
+  if (_where == Where::App && _active) _active->flush();
 }
 
 void Toybox::begin(ToolsHost& h) {

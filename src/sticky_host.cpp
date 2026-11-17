@@ -13,6 +13,20 @@ extern Preferences prefs;  // opened in main.cpp
 
 Preferences& StickyHost::prefs() { return ::prefs; }
 
+// "[tb   1234] perf: ..." -- the same stamp and prefix main.cpp's TB_LOG puts
+// on boot lines, so one capture from the installer's console reads as one
+// timeline. Both UARTs, for the same reason TB_OUT writes both.
+void StickyHost::perfLog(const char* line) {
+#ifndef TOYBOX_HOST
+  Serial.printf("[tb %6lu] perf: %s\n", (unsigned long)millis(), line);
+#if ARDUINO_USB_CDC_ON_BOOT
+  Serial0.printf("[tb %6lu] perf: %s\n", (unsigned long)millis(), line);
+#endif
+#else
+  (void)line;
+#endif
+}
+
 void StickyHost::beep(uint8_t kind) {
   switch (kind) {
     case 0: buzzer::tap(); break;

@@ -223,6 +223,12 @@ void Epd::displayFull() {
 void Epd::displayPartial() {
   g_paintCount++;
   g_partialCount++;
+  // The loading screen is a partial now (the open ends in a full anyway), so
+  // the first-paint watch has to see partials too.
+  if (g_rotWatch) {
+    *g_rotWatch = rotation();
+    g_rotWatch = nullptr;
+  }
   dumpFrame(_fb);
 }
 void Epd::deepSleep() {}
@@ -3131,6 +3137,20 @@ int main() {
     }
     const uint32_t page1Off = et->hostPageOffset();
 
+    // A turn holds its save back until the reader pauses (EpubTool::saveSoon):
+    // the reader must be asking for ticks now, and stop once the pause has
+    // passed and the place is on the card.
+    if (!toybox.wantsTick()) {
+      printf("EPUB APP FAIL: a page turn left no save pending\n");
+      abort();
+    }
+    delay(3001);
+    toybox.tick();
+    if (toybox.wantsTick()) {
+      printf("EPUB APP FAIL: the held-back save did not happen after the pause\n");
+      abort();
+    }
+
     // What did that write to the card? Exactly what CrossPoint reads.
     {
       uint8_t buf[16];
@@ -3993,6 +4013,8 @@ int main() {
         abort();
       }
       toybox.onButton(SideBtn::Down);  // a turn: the save lands in the FNV dir
+      delay(3001);                     // ...once the reader pauses
+      toybox.tick();
       uint8_t back[16];
       epubc::Progress q;
       const int m =

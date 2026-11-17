@@ -505,7 +505,33 @@ class EpubTool : public ToolApp {
     snprintf(out, (size_t)cap, "%s/progress.bin", dir);
   }
 
+  // A page turn does not save on the spot: the place goes to the card once
+  // the reader pauses (SAVE_DELAY_MS after the last turn), or sooner when the
+  // book closes, a menu opens, the app is left or the device powers off --
+  // flush() and every direct saveProgress() call clear the pending one. Three
+  // atomic writes per turn were ~420 ms of a ~1.15 s turn, measured on the
+  // device; a fast reader now pays for one save per pause instead.
+  static constexpr uint32_t SAVE_DELAY_MS = 3000;
+  void saveSoon() {
+    _saveDue = host().nowMs() + SAVE_DELAY_MS;
+    if (_saveDue == 0) _saveDue = 1;  // 0 means "nothing pending"
+  }
+  bool wantsTick() const override { return _saveDue != 0; }
+  void tick() override {
+    if (_saveDue && (int32_t)(host().nowMs() - _saveDue) >= 0) {
+      const uint32_t t0 = host().nowMs();
+      saveProgress();
+      char line[48];
+      snprintf(line, sizeof(line), "save (deferred) %lu ms", (unsigned long)(host().nowMs() - t0));
+      host().perfLog(line);
+    }
+  }
+  void flush() override {
+    if (_saveDue) saveProgress();
+  }
+
   void saveProgress() {
+    _saveDue = 0;
     if (_cur < 0 || _page >= _lutN) return;
     epubc::Progress p;
     p.spine = (uint16_t)_spine;
@@ -578,6 +604,7 @@ class EpubTool : public ToolApp {
 
   void openBook(int i) {
     _cur = i;
+    const uint32_t tOpen0 = host().nowMs();
     // The cheap cover sources first, BEFORE the loading paint: a sidecar the
     // owner put beside the book, or a cover CrossInk already decoded. Neither
     // costs a decode, so even a book's very first open can lead with its own
@@ -598,7 +625,11 @@ class EpubTool : public ToolApp {
     // page itself. The reading rotation goes on at the Page transition.
     host().setCanvasRotation(0);
     _screen = Screen::Loading;
-    host().refresh(true);
+    // Partial, not full: this screen is up for well under a second on any
+    // book opened before, and a full refresh here was 1.74 s of an open that
+    // already ends in one (the first page, below). The page's full refresh
+    // cleans whatever ghost the cover leaves.
+    host().refresh(false);
     if (!host().epubOpen(_books[i].file)) {
       _cur = -1;
       _screen = Screen::List;
@@ -618,6 +649,7 @@ class EpubTool : public ToolApp {
       return;
     }
     _open = true;
+    const uint32_t tZip = host().nowMs();  // loading paint + zip walk + OPF
     _menu = rmenu::Page::None;
     _picking = false;
     _ntoc = -1;
@@ -660,6 +692,7 @@ class EpubTool : public ToolApp {
     // place Toybox last saw rather than the place the reader actually
     // stopped, while CrossPoint, which never looks at ours, opened the same
     // book at page one. Both halves of that were one wrong preference.
+    const uint32_t tCover = host().nowMs();
     epubc::Progress p;
     uint8_t buf[10];
     char path[128];
@@ -686,6 +719,13 @@ class EpubTool : public ToolApp {
       host().beep(2);
       host().refresh(true);
       return;
+    }
+    {
+      char line[112];
+      snprintf(line, sizeof(line), "open: zip %lu ms, cover %lu ms, place %lu ms (%d pages)",
+               (unsigned long)(tZip - tOpen0), (unsigned long)(tCover - tZip),
+               (unsigned long)(host().nowMs() - tCover), _lutN);
+      host().perfLog(line);
     }
     // A book whose first page is its cover art opens portrait, whatever the
     // reading rotation: see syncPageRot.
@@ -1330,14 +1370,27 @@ class EpubTool : public ToolApp {
     if (_page < _lutN) showPageAt(_page);
   }
 
+  // Where a turn's time goes, one console line per turn: finding the page
+  // (layout forward, or a chapter replay backward), then saving the position.
+  // The host's own "paint" line follows with the render and the panel time.
+  void perfTurn(const char* how, uint32_t t0, uint32_t tPage, uint32_t tSave) {
+    char line[96];
+    snprintf(line, sizeof(line), "turn %s: page %lu ms, save %lu ms", how,
+             (unsigned long)(tPage - t0), (unsigned long)(tSave - tPage));
+    host().perfLog(line);
+  }
+
   void turn(int dir) {
     if (!_open) return;
+    const uint32_t t0 = host().nowMs();
     ensureStream();
     if (dir > 0) {
       if (_pendValid || !_atEnd) {
         if (layoutPage() > 0) {
           _page = _lutN - 1;
-          saveProgress();
+          const uint32_t tPage = host().nowMs();
+          saveSoon();
+          perfTurn("next", t0, tPage, host().nowMs());
           host().beep(0);
           paint();
           return;
@@ -1346,7 +1399,9 @@ class EpubTool : public ToolApp {
       // end of chapter: the next one, if there is one
       if (_spine + 1 < _book.spineCount()) {
         if (gotoPlace(_spine + 1, 0)) {
-          saveProgress();
+          const uint32_t tPage = host().nowMs();
+          saveSoon();
+          perfTurn("next chapter", t0, tPage, host().nowMs());
           host().beep(0);
           paint();
           return;
@@ -1358,7 +1413,9 @@ class EpubTool : public ToolApp {
     // backwards
     if (_page > 0) {
       if (!showPageAt(_page - 1)) return;
-      saveProgress();
+      const uint32_t tPage = host().nowMs();
+      saveSoon();
+      perfTurn("back", t0, tPage, host().nowMs());
       host().beep(0);
       paint();
       return;
@@ -1372,7 +1429,9 @@ class EpubTool : public ToolApp {
     while (layoutPage() > 0 && !(_atEnd && !_pendValid)) {
     }
     _page = _lutN > 0 ? _lutN - 1 : 0;
-    saveProgress();
+    const uint32_t tPage = host().nowMs();
+    saveSoon();
+    perfTurn("back chapter", t0, tPage, host().nowMs());
     host().beep(0);
     paint();
   }
@@ -2605,6 +2664,7 @@ class EpubTool : public ToolApp {
   int _n = -1;
   int _cur = -1;
   bool _open = false;
+  uint32_t _saveDue = 0;  // nowMs() the held-back place is written at; 0 = none
   bool _chrome = false;
   const char* _note = nullptr;
   bool _help = false;       // the HOW TO READ card, once per device

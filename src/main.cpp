@@ -214,6 +214,9 @@ bool paintGreySleep() {
 }
 
 void powerOff(bool lowBattery = false) {
+  // First, while the card and the app are both still there: a reader that
+  // has turned a page in the last few seconds has not saved its place yet.
+  toybox.flush();
   // E-paper keeps its last image with no power. If a note is pinned, leave that
   // on the panel instead of a goodbye card — that is the whole point of a note
   // you stick on the fridge.

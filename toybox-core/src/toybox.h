@@ -26,6 +26,8 @@ class Toybox {
   bool onButton(SideBtn b);
   void tick();
   bool wantsTick() const;
+  // Before power-off: the open app writes what it is holding (ToolApp::flush).
+  void flush();
 
   // Where the back button goes. Apps reach this through ToolsHost::goHub(),
   // which every host forwards here.
