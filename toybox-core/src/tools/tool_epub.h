@@ -630,6 +630,7 @@ class EpubTool : public ToolApp {
     // already ends in one (the first page, below). The page's full refresh
     // cleans whatever ghost the cover leaves.
     host().refresh(false);
+    const uint32_t tPaint = host().nowMs();
     if (!host().epubOpen(_books[i].file)) {
       _cur = -1;
       _screen = Screen::List;
@@ -649,7 +650,7 @@ class EpubTool : public ToolApp {
       return;
     }
     _open = true;
-    const uint32_t tZip = host().nowMs();  // loading paint + zip walk + OPF
+    const uint32_t tZip = host().nowMs();  // zip directory + container + OPF
     _menu = rmenu::Page::None;
     _picking = false;
     _ntoc = -1;
@@ -722,9 +723,9 @@ class EpubTool : public ToolApp {
     }
     {
       char line[112];
-      snprintf(line, sizeof(line), "open: zip %lu ms, cover %lu ms, place %lu ms (%d pages)",
-               (unsigned long)(tZip - tOpen0), (unsigned long)(tCover - tZip),
-               (unsigned long)(host().nowMs() - tCover), _lutN);
+      snprintf(line, sizeof(line), "open: screen %lu ms, book %lu ms, cover %lu ms, place %lu ms (%d pages)",
+               (unsigned long)(tPaint - tOpen0), (unsigned long)(tZip - tPaint),
+               (unsigned long)(tCover - tZip), (unsigned long)(host().nowMs() - tCover), _lutN);
       host().perfLog(line);
     }
     // A book whose first page is its cover art opens portrait, whatever the

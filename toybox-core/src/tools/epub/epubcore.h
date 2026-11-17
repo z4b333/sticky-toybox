@@ -166,6 +166,14 @@ class Book {
   int _spineN = 0;
   uint32_t _cdOfs = 0;
   int _cdCount = 0;
+  // The zip's central directory, read whole on open (one card read; PSRAM,
+  // being over the 4 KB malloc line). Every name lookup walks this instead of
+  // two small card reads per entry -- and lookups happen on open, on every
+  // chapter open (so on every backward turn that replays a chapter) and for
+  // every picture. nullptr = too big or no memory: walkCD reads the card.
+  uint8_t* _cd = nullptr;
+  uint32_t _cdSize = 0;
+  static constexpr uint32_t CD_MAX = 1024u * 1024u;
   const char* _err = "";
   char _opfDir[128] = "";
   Ent _cover{};

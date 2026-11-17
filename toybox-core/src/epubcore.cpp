@@ -348,6 +348,7 @@ bool Book::open(IO& io) {
     for (int i = (int)chunk - 22; i >= 0; i--) {
       if (buf[i] == 'P' && buf[i + 1] == 'K' && buf[i + 2] == 5 && buf[i + 3] == 6) {
         cdCount = le16(buf + i + 10);
+        _cdSize = le32(buf + i + 12);
         cdOfs = le32(buf + i + 16);
         break;
       }
@@ -360,6 +361,15 @@ bool Book::open(IO& io) {
   }
   _cdOfs = cdOfs;
   _cdCount = cdCount;
+  // The whole directory in one read, when it is sane and memory allows. A
+  // failure here is not an error: walkCD falls back to reading the card.
+  if (_cdSize >= 46 && _cdSize <= CD_MAX && (uint64_t)cdOfs + _cdSize <= fsize) {
+    _cd = (uint8_t*)malloc(_cdSize);
+    if (_cd && io.read(cdOfs, _cd, _cdSize) != (int)_cdSize) {
+      free(_cd);
+      _cd = nullptr;
+    }
+  }
 
   _spine = (Ent*)calloc(MAX_SPINE, sizeof(Ent));
   if (!_spine) {
@@ -398,11 +408,41 @@ void Book::close() {
   _window = nullptr;
   free(_inBuf);
   _inBuf = nullptr;
+  free(_cd);
+  _cd = nullptr;
+  _cdSize = 0;
   _io = nullptr;
 }
 
 template <typename F>
 bool Book::walkCD(F cb) {
+  if (_cd) {
+    // In memory: the same records, the same rules, no card.
+    uint32_t at = 0;
+    for (int i = 0; i < _cdCount; i++) {
+      if (at + 46 > _cdSize) return false;
+      const uint8_t* h = _cd + at;
+      if (le32(h) != 0x02014b50u) return false;
+      const uint16_t nameLen = le16(h + 28);
+      const uint16_t extraLen = le16(h + 30);
+      const uint16_t commentLen = le16(h + 32);
+      if (at + 46u + nameLen > _cdSize) return false;
+      char name[300];
+      const uint16_t keep = nameLen < sizeof(name) - 1 ? nameLen : (uint16_t)(sizeof(name) - 1);
+      memcpy(name, h + 46, keep);
+      name[keep] = 0;
+      if (nameLen == keep) {
+        Ent e{};
+        e.method = le16(h + 10);
+        e.csize = le32(h + 20);
+        e.usize = le32(h + 24);
+        e.lho = le32(h + 42);
+        cb((const char*)name, e);
+      }
+      at += 46u + nameLen + extraLen + commentLen;
+    }
+    return true;
+  }
   uint32_t at = _cdOfs;
   for (int i = 0; i < _cdCount; i++) {
     uint8_t h[46];
