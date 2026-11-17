@@ -15,6 +15,7 @@
 // the chapter, which disappears inside the panel's own refresh time.
 #pragma once
 #include "book_thumbs.h"
+#include "epub/epub_art.h"
 #include "epub/epub_cover.h"
 #include "epub/epubcore.h"
 #include "epub/koreader_sdr.h"
@@ -390,6 +391,21 @@ class EpubTool : public ToolApp {
   // which of its .pxc files belongs to which picture, and getting that lookup
   // wrong is a picture drawn from somebody else's bytes.
   bool hostPxcEntry(const char* img, char* out, int cap) { return pxcEntryFor(img, out, cap); }
+  // The on-device picture pipeline, for a guard: prepare `entry` as if a page
+  // showed it, and say where the two pictures went. The page's own picture is
+  // put back afterwards.
+  bool hostDeviceArt(const char* entry, char* g2, char* b1, int cap) {
+    char keep[sizeof(_pageImage)];
+    memcpy(keep, _pageImage, sizeof(keep));
+    snprintf(_pageImage, sizeof(_pageImage), "%s", entry);
+    _artKey = 0;
+    const bool ok = deviceArtReady();
+    snprintf(g2, (size_t)cap, "%s", _artG2);
+    snprintf(b1, (size_t)cap, "%s", _artB1);
+    memcpy(_pageImage, keep, sizeof(keep));
+    _artKey = 0;
+    return ok;
+  }
   int hostMenu() const { return (int)_menu; }
   bool hostPicking() const { return _picking; }
   const char* hostPhrase() const { return _phrase; }
@@ -604,6 +620,8 @@ class EpubTool : public ToolApp {
 
   void openBook(int i) {
     _cur = i;
+    _artKey = 0;  // picture decisions belong to the book they were made in
+    _artBadN = 0;
     const uint32_t tOpen0 = host().nowMs();
     // The cheap cover sources first, BEFORE the loading paint: a sidecar the
     // owner put beside the book, or a cover CrossInk already decoded. Neither
@@ -1715,7 +1733,126 @@ class EpubTool : public ToolApp {
     // the illustrated books anybody puts on this device, and the reason the
     // "no picture prepared for it" plate was the usual outcome.
     char pxc[224];
-    return pxcEntryFor(_pageImage, pxc, sizeof(pxc)) && drawPxcPage(c, pxc);
+    if (pxcEntryFor(_pageImage, pxc, sizeof(pxc)) && drawPxcPage(c, pxc)) return true;
+    // Nothing prepared anywhere: the device prepares it now, from the book's
+    // own JPEG or PNG, once -- later visits read the card.
+    return deviceArtReady() && drawDeviceArt(c);
+  }
+
+  // --- pictures prepared on the device (epub_art.h) ---------------------------
+  // Which kind of picture this image page shows, worked out once per picture:
+  // the grey decision in paint() comes before anything is drawn, so it cannot
+  // learn the answer from the draw.
+  enum ArtKind : uint8_t { ART_NONE, ART_BOOK, ART_DEVICE };
+  uint32_t _artKey = 0;  // which _pageImage _artKind and the paths describe
+  ArtKind _artKind = ART_NONE;
+  char _artG2[48] = "", _artB1[48] = "";
+  // Pictures that could not be decoded this session (a GIF, an SVG, a corrupt
+  // file), so a page is not re-decoded on every paint. Transient failures --
+  // memory, the card -- are not recorded, and get another go.
+  uint32_t _artBad[16] = {};
+  int _artBadN = 0;
+
+  bool entryThere(const char* entry) {
+    const bool ok = _book.blobOpen(entry);
+    _book.blobClose();
+    return ok;
+  }
+
+  ArtKind resolveArt() {
+    const uint32_t k = bthumb::key(_pageImage);
+    if (!_pageImage[0]) return ART_NONE;
+    if (k == _artKey && _artKind != ART_NONE) return _artKind;
+    _artKey = k;
+    _artKind = ART_NONE;
+    _book.chapterClose();
+    _streamLost = true;
+    char entry[224];
+    artEntryFor(_pageImage, ".bmp", entry, sizeof(entry));
+    bool book = entryThere(entry);
+    if (!book) {
+      artEntryFor(_pageImage, ".tbi", entry, sizeof(entry));
+      book = entryThere(entry);
+    }
+    if (!book) book = pxcEntryFor(_pageImage, entry, sizeof(entry));
+    if (book) {
+      _artKind = ART_BOOK;
+    } else if (deviceArtReady()) {
+      _artKind = ART_DEVICE;
+    }
+    return _artKind;
+  }
+
+  // Both prepared files on the card, decoding the picture first if need be.
+  bool deviceArtReady() {
+    const uint32_t k = bthumb::key(_pageImage);
+    for (int i = 0; i < _artBadN; i++)
+      if (_artBad[i] == k) return false;
+    if (!_book.blobOpen(_pageImage)) {
+      _book.blobClose();
+      return false;
+    }
+    const uint32_t usize = _book.blobSize();
+    _book.blobClose();
+    epubart::paths(_books[_cur].file, _pageImage, usize, _artG2, _artB1, sizeof(_artG2));
+    uint8_t probe;
+    if (host().sdReadSlice(_artB1, epubart::B1_BYTES - 1, &probe, 1) == 1 &&
+        host().sdReadSlice(_artG2, epubart::G2_BYTES - 1, &probe, 1) == 1)
+      return true;
+    const uint32_t t0 = host().nowMs();
+    bool transient = false;
+    const bool ok = epubart::prepare(host(), _book, _pageImage, _artG2, _artB1, &transient);
+    char line[96];
+    snprintf(line, sizeof(line), "art: %s %lu ms", ok ? "prepared" : (transient ? "not now" : "cannot"),
+             (unsigned long)(host().nowMs() - t0));
+    host().perfLog(line);
+    if (!ok && !transient && _artBadN < (int)(sizeof(_artBad) / sizeof(_artBad[0])))
+      _artBad[_artBadN++] = k;
+    return ok;
+  }
+
+  // The one-bit picture through the canvas: read whole (one card open, into
+  // PSRAM), then only the ink is drawn.
+  bool drawDeviceArt(ToolsCanvas& c) {
+    uint8_t* bits = (uint8_t*)malloc(epubart::B1_BYTES);
+    if (!bits) return false;
+    const bool ok = host().sdReadSlice(_artB1, 0, bits, (int)epubart::B1_BYTES) ==
+                    (int)epubart::B1_BYTES;
+    if (ok) {
+      constexpr int STRIDE = epubart::W / 8;
+      for (int y = 0; y < epubart::H; y++) {
+        const uint8_t* row = bits + (size_t)y * STRIDE;
+        for (int xb = 0; xb < STRIDE; xb++) {
+          const uint8_t v = row[xb];
+          if (v == 0xFF) continue;  // a run of white, which is most of most art
+          for (int k = 0; k < 8; k++)
+            if (!(v & (0x80 >> k))) c.fillRect(xb * 8 + k, y, 1, 1, true);
+        }
+      }
+    }
+    free(bits);
+    return ok;
+  }
+
+  // The four-grey picture, straight through the panel's grey waveform, when
+  // nothing is drawn over the page. False (and the canvas path) on a host
+  // with no grey, or when the file or the memory is not there.
+  bool showDeviceArtGrey() {
+    if (!_pageImage[0] || _chrome || _menu != rmenu::Page::None || _screen != Screen::Page)
+      return false;
+    if (resolveArt() != ART_DEVICE) return false;
+    uint8_t* g = (uint8_t*)malloc(epubart::G2_BYTES);
+    if (!g) return false;
+    bool ok = host().sdReadSlice(_artG2, 0, g, (int)epubart::G2_BYTES) == (int)epubart::G2_BYTES;
+    const uint32_t t0 = host().nowMs();
+    ok = ok && host().bookShowGrey(g);
+    free(g);
+    if (ok) {
+      char line[48];
+      snprintf(line, sizeof(line), "paint grey art %lu ms", (unsigned long)(host().nowMs() - t0));
+      host().perfLog(line);
+    }
+    return ok;
   }
 
   // What an illustration looks like when the book carries no picture for it.
@@ -1758,7 +1895,12 @@ class EpubTool : public ToolApp {
   }
 
   void paint() {
-    if (syncPageRot()) {
+    const bool turned = syncPageRot();
+    // An illustration the device prepared, with nothing over it: four greys.
+    // The grey waveform is a full sequence anyway, and the driver promotes the
+    // next ordinary paint to a full clean by itself.
+    if (showDeviceArtGrey()) return;
+    if (turned) {
       host().refresh(true);
       return;
     }

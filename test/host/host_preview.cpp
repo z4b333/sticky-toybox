@@ -3083,6 +3083,76 @@ int main() {
         abort();
       }
       printf("crossink art ok (%d px over %d rows, scaled x2, manifest read)\n", ink, inkRows);
+
+      // A picture nothing prepared: the device decodes the book's own JPEG
+      // (the fixture's 240x400 cover, grey, baseline) and keeps both
+      // pictures on the card. Checked against the source itself, not against
+      // what the code under test believes: the fixture is a light picture
+      // with dark type, so most of the page must be paper, a real share must
+      // be ink, and the 4-grey and 1-bit versions must agree on where.
+      {
+        char g2[64], b1[64];
+        if (!et->hostDeviceArt("OEBPS/cover.jpg", g2, b1, sizeof(g2))) {
+          printf("EPUB APP FAIL: the device could not prepare a plain JPEG\n");
+          abort();
+        }
+        static uint8_t g2b[96000], b1b[48000];
+        if (sdcard::readWhole(g2, g2b, sizeof(g2b)) != 96000 ||
+            sdcard::readWhole(b1, b1b, sizeof(b1b)) != 48000) {
+          printf("EPUB APP FAIL: prepared art has the wrong size (%s, %s)\n", g2, b1);
+          abort();
+        }
+        // 240x400 fits 480x800 exactly: no letterbox, scaled x2.
+        long greySum = 0;
+        int b1Ink = 0, agree = 0, cells = 0;
+        for (int y = 0; y < 800; y += 8)
+          for (int x = 0; x < 480; x += 8) {
+            int g = 0, k = 0;
+            for (int dy = 0; dy < 8; dy++)
+              for (int dx = 0; dx < 8; dx++) {
+                const int px = x + dx, py = y + dy;
+                g += (g2b[py * 120 + px / 4] >> (6 - 2 * (px & 3))) & 3;
+                if (!(b1b[py * 60 + px / 8] & (0x80 >> (px & 7)))) k++;
+              }
+            greySum += g;
+            b1Ink += k;
+            // dark in one is dark in the other, cell by cell
+            const bool darkG = g < 64 * 3 / 2, darkB = k > 32;
+            agree += darkG == darkB;
+            cells++;
+          }
+        const int meanLevel100 = (int)(greySum * 100 / (480L * 800));  // 0..300
+        if (meanLevel100 < 120 || meanLevel100 > 295 || b1Ink < 4000 || b1Ink > 300000 ||
+            agree * 100 < cells * 85) {
+          printf("EPUB APP FAIL: device art looks wrong: mean level %d.%02d, %d px ink, %d/%d cells agree\n",
+                 meanLevel100 / 100, meanLevel100 % 100, b1Ink, agree, cells);
+          abort();
+        }
+        // Which way up the tones are, measured from the source: the fixture's
+        // top quarter averages 80 of 255 and its bottom quarter 136, so the
+        // top must come out clearly darker. A negative swaps them; a total
+        // could not tell (the picture averages almost exactly mid-grey).
+        {
+          long top = 0, bot = 0;
+          for (int y = 0; y < 200; y++)
+            for (int x = 0; x < 480; x++) {
+              top += (g2b[y * 120 + x / 4] >> (6 - 2 * (x & 3))) & 3;
+              bot += (g2b[(799 - y) * 120 + x / 4] >> (6 - 2 * (x & 3))) & 3;
+            }
+          if (top * 10 > bot * 8) {
+            printf("EPUB APP FAIL: device art tones upside down (top %ld vs bottom %ld)\n", top, bot);
+            abort();
+          }
+        }
+        // Something it cannot decode is refused, and refused for good.
+        if (et->hostDeviceArt("OEBPS/images/missing.png", g2, b1, sizeof(g2)) ||
+            et->hostDeviceArt("OEBPS/nav.xhtml", g2, b1, sizeof(g2))) {
+          printf("EPUB APP FAIL: device art accepted something that is not a picture\n");
+          abort();
+        }
+        printf("device art ok (mean level %d.%02d, %d px ink, %d/%d cells agree)\n",
+               meanLevel100 / 100, meanLevel100 % 100, b1Ink, agree, cells);
+      }
     }
 
     // Back one: the two pictures share an offset with each other and with the
