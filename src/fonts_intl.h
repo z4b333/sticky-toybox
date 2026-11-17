@@ -25,8 +25,18 @@ struct IntlFace {
   uint32_t count;
   const uint16_t* cps;      // sorted; binary-search me
   const IntlGlyph* glyphs;  // parallel to cps
+  // Raw bitmaps (font packs). nullptr for the baked faces, whose bitmaps are
+  // raw-deflate blocks instead (tools/intl_zip.py): block i holds raw bytes
+  // zRaw[i]..zRaw[i+1] and its stream is z[zOff[i]..zOff[i+1]].
   const uint8_t* bits;
+  uint32_t zBlocks;
+  const uint32_t* zRaw;
+  const uint32_t* zOff;
+  const uint8_t* z;
 };
+
+// Largest raw block of any baked face: the size of one inflate slot.
+#define INTL_ZBLOCK_MAX 4608
 
 extern const IntlFace INTL_16;
 extern const IntlFace INTL_24;

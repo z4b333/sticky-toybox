@@ -5,7 +5,10 @@
 #include "board_pins.h"
 #include "tools/tiny_fs.h"
 
+#include <toybox_miniz.h>  // tinfl, for the compressed baked glyphs
+
 #ifndef TOYBOX_HOST
+#include <esp_heap_caps.h>
 #include <esp_partition.h>
 #include <spi_flash_mmap.h>
 #endif
@@ -225,12 +228,85 @@ Hit intlFind(int px, int& yAdjust, uint32_t cp) {
   return {baked, nullptr};
 }
 
+// --- compressed baked bitmaps ---------------------------------------------------
+// The baked faces keep their bitmaps as raw-deflate blocks (tools/intl_zip.py):
+// left raw they were 1.7 MB of a 4 MB app. A block is inflated into a PSRAM
+// slot the first time one of its glyphs is drawn, and the least recently used
+// slot is recycled. Blocks are cut at glyph boundaries, so a glyph's bytes are
+// always whole inside one slot, and the pointer handed back stays good until
+// the NEXT lookup -- blitIntl uses it and lets go before asking again.
+// A page of Latin+Thai touches a handful of blocks; a dense page of CJK a few
+// dozen, which is why the slot count is generous: an evicted block costs ~1 ms
+// to inflate again, a missing slot costs nothing but that.
+constexpr int Z_SLOTS = 64;  // 64 x 4.5 KB = 288 KB of PSRAM, taken on first use
+struct ZSlot {
+  const IntlFace* f = nullptr;
+  uint32_t block = 0;
+  uint32_t used = 0;  // LRU stamp; 0 = empty
+};
+ZSlot g_zSlot[Z_SLOTS];
+uint8_t* g_zMem = nullptr;
+uint32_t g_zClock = 0;
+uint32_t g_zInflates = 0;
+
+const uint8_t* zBlockFor(const IntlFace* f, uint32_t off, uint32_t& base) {
+  // The block holding `off`: the last zRaw[] start not past it.
+  uint32_t lo = 0, hi = f->zBlocks;
+  while (hi - lo > 1) {
+    const uint32_t mid = (lo + hi) / 2;
+    if (pgm_read_dword(&f->zRaw[mid]) <= off)
+      lo = mid;
+    else
+      hi = mid;
+  }
+  const uint32_t block = lo;
+  base = pgm_read_dword(&f->zRaw[block]);
+  if (!g_zMem) {
+#ifdef TOYBOX_HOST
+    g_zMem = (uint8_t*)malloc((size_t)Z_SLOTS * INTL_ZBLOCK_MAX);
+#else
+    g_zMem = (uint8_t*)heap_caps_malloc((size_t)Z_SLOTS * INTL_ZBLOCK_MAX, MALLOC_CAP_SPIRAM);
+#endif
+    if (!g_zMem) return nullptr;
+  }
+  int victim = 0;
+  for (int i = 0; i < Z_SLOTS; i++) {
+    if (g_zSlot[i].used && g_zSlot[i].f == f && g_zSlot[i].block == block) {
+      g_zSlot[i].used = ++g_zClock;
+      return g_zMem + (size_t)i * INTL_ZBLOCK_MAX;
+    }
+    if (g_zSlot[i].used < g_zSlot[victim].used) victim = i;
+  }
+  uint8_t* dst = g_zMem + (size_t)victim * INTL_ZBLOCK_MAX;
+  const uint32_t rawLen = pgm_read_dword(&f->zRaw[block + 1]) - base;
+  const uint32_t z0 = pgm_read_dword(&f->zOff[block]);
+  const uint32_t zLen = pgm_read_dword(&f->zOff[block + 1]) - z0;
+  // flags 0 = raw deflate, no zlib header -- what intl_zip.py writes.
+  const size_t got = tinfl_decompress_mem_to_mem(dst, INTL_ZBLOCK_MAX, f->z + z0, zLen, 0);
+  g_zSlot[victim].used = 0;
+  if (got != rawLen) return nullptr;
+  g_zSlot[victim] = {f, block, ++g_zClock};
+  g_zInflates++;
+  return dst;
+}
+
+// The bytes of one glyph, wherever its face keeps them. nullptr only if a
+// block fails to inflate (or PSRAM is gone), and then the glyph is skipped.
+const uint8_t* intlBits(const IntlFace* f, uint32_t off) {
+  if (f->bits) return f->bits + off;
+  uint32_t base = 0;
+  const uint8_t* blk = zBlockFor(f, off, base);
+  return blk ? blk + (off - base) : nullptr;
+}
+
 void blitIntl(const IntlFace* f, const IntlGlyph* g, int x, int y, uint8_t color) {
   const uint8_t w = pgm_read_byte(&g->w), h = pgm_read_byte(&g->h);
   const uint32_t off = pgm_read_dword(&g->off);
   const int stride = (w + 7) / 8;
+  const uint8_t* bits = intlBits(f, off);
+  if (!bits) return;
   for (int row = 0; row < h; row++) {
-    const uint8_t* line = &f->bits[off + (uint32_t)row * stride];
+    const uint8_t* line = &bits[(uint32_t)row * stride];
     for (int col = 0; col < w; col++)
       if (pgm_read_byte(&line[col >> 3]) & (0x80 >> (col & 7)))
         epd.drawPixel(x + col, y + row, color);
@@ -667,7 +743,7 @@ bool registerPack(char* blob, size_t len) {
   size_t at = 8;
   for (uint32_t i = 0; i < faces; i++) {
     if (at + 16 > len || g_packFaceCount >= MAX_PACK_FACES) return false;
-    IntlFace f;
+    IntlFace f{};  // zBlocks/zRaw/zOff/z stay zero: packs keep raw bits
     f.box = (uint16_t)rd32(blob + at);
     f.toneDrop = (uint16_t)rd32(blob + at + 4);
     f.count = rd32(blob + at + 8);

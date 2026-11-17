@@ -21,7 +21,11 @@ Run from the repo root:
     python3 tools/make_fonts_intl.py
 writes src/fonts_intl.h and src/fonts_intl.cpp, and prints a size budget.
 """
+import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import intl_zip  # noqa: E402
 from PIL import Image, ImageDraw, ImageFont
 from fontTools.ttLib import TTFont, TTCollection
 
@@ -229,12 +233,10 @@ def emit_face(h, c, box, glyphs, drop):
     for off, l, t, w, hh, adv in recs:
         c.write('    {%d,%d,%d,%d,%d,%d},\n' % (off, l, t, w, hh, adv))
     c.write('};\n')
-    c.write('static const uint8_t %s_BITS[%d] PROGMEM = {\n' % (name, len(bits)))
-    for i in range(0, len(bits), 16):
-        c.write('    ' + ''.join('0x%02X,' % b for b in bits[i:i + 16]) + '\n')
-    c.write('};\n')
-    c.write('const IntlFace %s = {%d, %d, %d, %s_CPS, %s_G, %s_BITS};\n\n'
-            % (name, box, drop, len(cps), name, name, name))
+    # The bitmaps go out as raw-deflate blocks (tools/intl_zip.py), inflated
+    # on first use by gfx.cpp -- raw, they were most of the app partition.
+    n_blocks, _ = intl_zip.emit_z(c, name, bits, [r[0] for r in recs])
+    c.write(intl_zip.face_line(name, box, drop, len(cps), n_blocks) + '\n')
     h.write('extern const IntlFace %s;\n' % name)
     return len(bits) + len(recs) * 12 + len(cps) * 2
 
@@ -255,13 +257,7 @@ def main():
     h.write('struct IntlGlyph {\n')
     h.write('  uint32_t off;\n  int8_t left;\n  int8_t top;\n')
     h.write('  uint8_t w;\n  uint8_t h;\n  uint8_t adv;\n};\n\n')
-    h.write('struct IntlFace {\n')
-    h.write('  uint16_t box;       // line box the glyphs were baked into\n')
-    h.write('  uint16_t toneDrop;  // px a lone Thai tone mark descends (measured)\n')
-    h.write('  uint32_t count;\n')
-    h.write('  const uint16_t* cps;      // sorted; binary-search me\n')
-    h.write('  const IntlGlyph* glyphs;  // parallel to cps\n')
-    h.write('  const uint8_t* bits;\n};\n\n')
+    h.write(intl_zip.HEADER_STRUCT + '\n')
     c.write('#include "fonts_intl.h"\n\n')
 
     total = 0
