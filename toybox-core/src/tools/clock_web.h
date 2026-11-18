@@ -11,6 +11,7 @@
 // the device is wrong and wants to say so.
 #pragma once
 #include "clock_set.h"
+#include "home_net.h"
 #include "portal.h"
 #include "tools_ui.h"
 
@@ -22,28 +23,37 @@ namespace cweb {
 // the first poll and its page sends the time a couple of polls later.
 class ClockServer {
  public:
-  bool start() {
+  bool start(Preferences& prefs) {
+    _prefs = &prefs;
     _ticks = 0;
     _set = false;
     _refused = false;
+    _wifiSaved = false;
     return _portal.begin();
   }
   void stop() { _portal.end(); }
   void loop() {
     _ticks++;
     if (_ticks >= 1) _portal.hostSetClient(true);
-    if (_ticks == 3) hostSendTime(1787305260000LL);  // 21 Aug 2026, 09:41 as the phone reads it
+    if (_ticks == 3) hostSendTime(1787305260000LL, "STD-7");  // 21 Aug 2026, 09:41 in Bangkok
   }
   // The harness posts through the same door a phone would, including the door
   // slamming: a hook that says no leaves the page refused, never set.
-  void hostSendTime(int64_t localEpochMs) {
+  void hostSendTime(int64_t localEpochMs, const char* tz = nullptr) {
+    if (tz && _prefs) homenet::saveTz(*_prefs, tz);
     if (clockset::apply(localEpochMs))
       _set = true;
     else
       _refused = true;
   }
+  // The page's home-Wi-Fi form, through the same rules the device applies.
+  bool hostSendWifi(const char* ssid, const char* pass) {
+    _wifiSaved = _prefs && homenet::saveWifi(*_prefs, ssid, pass);
+    return _wifiSaved;
+  }
   bool wasSet() const { return _set; }
   bool wasRefused() const { return _refused; }
+  bool wifiSaved() const { return _wifiSaved; }
   bool hasClient() const { return _portal.hasClient(); }
   const char* ssid() const { return _portal.ssid(); }
   const char* password() const { return _portal.password(); }
@@ -52,7 +62,8 @@ class ClockServer {
 
  private:
   portal::Portal _portal;
-  bool _set = false, _refused = false;
+  Preferences* _prefs = nullptr;
+  bool _set = false, _refused = false, _wifiSaved = false;
   int _ticks = 0;
 };
 
@@ -60,13 +71,16 @@ class ClockServer {
 
 class ClockServer {
  public:
-  bool start() {
+  bool start(Preferences& prefs) {
     if (_portal.running()) return true;
+    _prefs = &prefs;
     _set = false;
     _refused = false;
+    _wifiSaved = false;
     if (!_portal.begin()) return false;
     _portal.serveIndex([this] { sendPage(); });
     _portal.on("/t", HTTP_POST, [this] { takeTime(); });
+    _portal.on("/w", HTTP_POST, [this] { takeWifi(); });
     return true;
   }
   void stop() { _portal.end(); }
@@ -76,6 +90,7 @@ class ClockServer {
   // page that shows "waiting for the phone" after a refusal sends somebody
   // back to scan a QR code that was never the problem.
   bool wasRefused() const { return _refused; }
+  bool wifiSaved() const { return _wifiSaved; }
   bool hasClient() const { return _portal.hasClient(); }
   const char* ssid() const { return _portal.ssid(); }
   const char* password() const { return _portal.password(); }
@@ -85,6 +100,9 @@ class ClockServer {
  private:
   void takeTime() {
     WebServer& s = _portal.server();
+    // The zone rides along with the time: the phone is the only thing here
+    // that knows it, and the internet clock (home_net.h) cannot work without.
+    if (s.hasArg("z") && _prefs) homenet::saveTz(*_prefs, s.arg("z").c_str());
     // atoll rather than toInt(): the number is milliseconds since 1970 and
     // overflowed a 32-bit int in 1970 + 24 days.
     if (s.hasArg("t")) {
@@ -98,10 +116,22 @@ class ClockServer {
     s.send(200, "application/json", _set ? "{\"ok\":1}" : "{\"ok\":0}");
   }
 
+  // The home network, for the device to fetch the time (and, later, sync)
+  // on its own. Kept until replaced; the device never shows the password.
+  void takeWifi() {
+    WebServer& s = _portal.server();
+    const bool ok = _prefs && s.hasArg("s") &&
+                    homenet::saveWifi(*_prefs, s.arg("s").c_str(),
+                                      s.hasArg("p") ? s.arg("p").c_str() : "");
+    if (ok) _wifiSaved = true;
+    s.send(200, "application/json", ok ? "{\"ok\":1}" : "{\"ok\":0}");
+  }
+
   void sendPage();
 
   portal::Portal _portal;
-  bool _set = false, _refused = false;
+  Preferences* _prefs = nullptr;
+  bool _set = false, _refused = false, _wifiSaved = false;
 };
 
 // The phone's page. It sends on load and says what it sent, because the device
@@ -118,20 +148,46 @@ h1{font-size:20px;margin:0 0 4px}p{margin:0 0 16px;color:#444}
 button{font-size:17px;padding:12px 18px;width:100%;border:1px solid #111;border-radius:8px;
 background:#111;color:#fff}
 small{color:#666;display:block;margin-top:20px}
+h2{font-size:17px;margin:28px 0 4px}h2 span{font-weight:400;color:#666}
+input{font-size:17px;padding:10px;width:100%;box-sizing:border-box;border:1px solid #999;
+border-radius:8px;margin-bottom:10px}#wm{margin-top:8px;color:#444}
 </style></head><body>
 <h1>Set the device clock</h1>
-<p>Toybox has no internet, so it takes the time from this phone.</p>
+<p>Toybox takes the time and time zone from this phone.</p>
 <div id="now">--:--</div>
 <div id="msg">Sending&hellip;</div>
 <button id="again">Send this time again</button>
-<small>The device stores the digits, not your timezone. If you travel, open this
-page again and send.</small>
+<h2>Home Wi-Fi <span>(optional)</span></h2>
+<p>Lets the device set its own clock from the internet later, and sync your
+reading. The password stays on the device.</p>
+<form id="wf"><input id="ws" placeholder="Wi-Fi name" autocapitalize="off" autocomplete="off" maxlength="32">
+<input id="wp" type="password" placeholder="Password" autocomplete="off" maxlength="63">
+<button>Save home Wi-Fi</button></form><div id="wm"></div>
+<small>Your time zone is sent with the time. If you travel, open this page
+again and send.</small>
 <script>
+function posixTz(){
+ function off(t){return -new Date(t).getTimezoneOffset()}
+ function hm(m){m=Math.abs(m);var h=Math.floor(m/60),r=m%60;return h+(r?':'+(r<10?'0':'')+r:'')}
+ function name(m){return (m>0?'-':m<0?'':'')+hm(m)}
+ var y=new Date().getFullYear(),a=Date.UTC(y,0,1),b=Date.UTC(y+1,0,1),D=864e5,tr=[];
+ for(var t=a;t<b;t+=D){if(off(t)!==off(t+D)){var lo=t,hi=t+D;
+  while(hi-lo>6e4){var mid=lo+Math.floor((hi-lo)/12e4)*6e4;if(off(mid)===off(lo))lo=mid;else hi=mid}
+  tr.push(hi)}}
+ var s=off(a),j=off(Date.UTC(y,6,1));
+ if(tr.length!==2||s===j){return 'STD'+name(off(Date.now()))}
+ var std=Math.min(s,j),dst=Math.max(s,j);
+ function rule(T){var w=new Date(T+off(T-6e4)*6e4),d=w.getUTCDate(),
+  last=new Date(Date.UTC(w.getUTCFullYear(),w.getUTCMonth()+1,0)).getUTCDate(),
+  wk=d+7>last?5:Math.ceil(d/7),mins=w.getUTCHours()*60+w.getUTCMinutes();
+  return ',M'+(w.getUTCMonth()+1)+'.'+wk+'.'+w.getUTCDay()+(mins===120?'':'/'+hm(mins))}
+ var on=off(tr[0])===dst?tr[0]:tr[1],offT=on===tr[0]?tr[1]:tr[0];
+ return 'STD'+name(std)+'DST'+(dst-std===60?'':name(dst))+rule(on)+rule(offT)}
 function two(n){return (n<10?'0':'')+n}
 function send(){
  var d=new Date();
  document.getElementById('now').textContent=two(d.getHours())+':'+two(d.getMinutes());
- var body='t='+(d.getTime()-d.getTimezoneOffset()*60000);
+ var body='t='+(d.getTime()-d.getTimezoneOffset()*60000)+'&z='+encodeURIComponent(posixTz());
  fetch('/t',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
   .then(function(r){return r.json()})
   .then(function(j){document.getElementById('msg').textContent=
@@ -141,6 +197,16 @@ function send(){
 }
 document.getElementById('again').addEventListener('click',send);
 send();
+document.getElementById('wf').addEventListener('submit',function(e){
+ e.preventDefault();var m=document.getElementById('wm'),n=document.getElementById('ws').value,
+ k=document.getElementById('wp').value;
+ if(!n){m.textContent='Type the Wi-Fi name first.';return}
+ if(k&&k.length<8){m.textContent='A Wi-Fi password has at least 8 characters.';return}
+ fetch('/w',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
+  body:'s='+encodeURIComponent(n)+'&p='+encodeURIComponent(k)})
+ .then(function(r){return r.json()}).then(function(j){m.textContent=j.ok?
+  'Saved. The device will use '+n+' when it goes online.':'The device did not accept that.'})
+ .catch(function(){m.textContent='Could not reach the device. Still connected to its wifi?'})});
 </script></body></html>)HTML";
   _portal.server().send_P(200, "text/html", kPage);
 }

@@ -86,6 +86,9 @@ inline TRect appsCardsRect() { return TRect{16, 700, SCREEN_W - 32, 56}; }
 // now believes, in digits big enough to check from arm's length.
 inline constexpr int CLOCK_BIG_Y = 560;
 inline TRect clockDoneRect() { return filesDoneRect(); }
+// Shown only once a home Wi-Fi and a time zone are saved: the clock without a
+// phone. Above DONE, under the last line of the pairing text.
+inline TRect clockNetRect() { return TRect{16, 620, SCREEN_W - 32, 60}; }
 
 // The wallpaper and lock-picture pages: what is on the device now -- shown
 // as the picture itself, a 1:5 miniature, beside its name and its REMOVE --
@@ -206,6 +209,7 @@ class SettingsScreen {
   int hostPage() const { return _page; }
   fweb::FilesServer& hostFiles() { return _files; }
   cweb::ClockServer& hostClock() { return _clock; }
+  uint8_t hostNetStage() const { return _netStage; }
 #endif
 
  private:
@@ -223,6 +227,7 @@ class SettingsScreen {
   void leaveFiles();
   void renderClock(ToolsHost& host, ToolsCanvas& c);
   bool tapClock(ToolsHost& host, int x, int y);
+  bool netReady(ToolsHost& host);
   void leaveClock();
   void renderFontWho(ToolsHost& host, ToolsCanvas& c);
   bool tapFontWho(ToolsHost& host, int x, int y);
@@ -269,4 +274,9 @@ class SettingsScreen {
   bool _clockOk = false;
   bool _clockSawClient = false;
   bool _clockSawSet = false;
+  // The clock from the internet: 0 = not asked, 1 = asked (the "connecting"
+  // screen is up; the next tick does the blocking work), 2 = answered.
+  uint8_t _netStage = 0;
+  homenet::Result _netResult = homenet::Result::Ok;
+  char _netName[homenet::SSID_MAX] = {};
 };

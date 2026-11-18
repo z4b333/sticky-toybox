@@ -149,6 +149,7 @@ bool SettingsScreen::back() {
   if (_page == 0) return false;
   leaveFiles();  // no-op unless the files page was the one being left
   leaveClock();  // ditto for the clock page's access point
+  _netStage = 0;
   // The picture list was opened from the lock screen page, so it goes back
   // there rather than all the way out; every other page came from the top.
   _page = _page == 5 ? 1 : (_page == 8 ? 7 : 0);
@@ -172,6 +173,14 @@ void SettingsScreen::leave() {
 
 bool SettingsScreen::tick(ToolsHost& host) {
   if (_page == 6) {
+    if (_netStage == 1) {
+      // The "connecting" screen went up with the tap; this is the wait it
+      // promised. The portal is already down -- one radio job at a time.
+      _netResult = homenet::syncClock(host.prefs());
+      _netStage = 2;
+      host.beep(_netResult == homenet::Result::Ok ? 1 : 2);
+      return true;
+    }
     if (!_clockOk) return false;
     _clock.loop();
     // Two repaints, both of which the screen learns about rather than causes:
@@ -717,6 +726,40 @@ void SettingsScreen::renderClock(ToolsHost& host, ToolsCanvas& c) {
   drawTopBar(c, "CLOCK");
   char buf[72];
 
+  if (_netStage == 1) {
+    c.textCentered(SCREEN_W / 2, 260, "CONNECTING", TS_MED, true, true);
+    c.textCentered(SCREEN_W / 2, 320, _netName, TS_LARGE, true);
+    c.textCentered(SCREEN_W / 2, 400, "asking the internet for the time", TS_MED, true);
+    c.textCentered(SCREEN_W / 2, 436, "this takes up to half a minute", TS_SMALL, true);
+    return;
+  }
+  if (_netStage == 2) {
+    const bool ok = _netResult == homenet::Result::Ok;
+    c.textCentered(SCREEN_W / 2, 120, ok ? "THE CLOCK IS SET" : "NOT SET", TS_MED, true, true);
+    int hh = 0, mm = 0;
+    if (ok && host.clockHHMM(hh, mm)) {
+      snprintf(buf, sizeof(buf), "%02d:%02d", hh, mm);
+      c.textCentered(SCREEN_W / 2, 220, buf, TS_HUGE, true, true);
+      snprintf(buf, sizeof(buf), "from the internet, through %s", _netName);
+      c.textCentered(SCREEN_W / 2, 340, buf, TS_SMALL, true);
+    } else if (!ok) {
+      c.textCentered(SCREEN_W / 2, 220, homenet::describe(_netResult), TS_LARGE, true);
+      const char* hint = "";
+      switch (_netResult) {
+        case homenet::Result::NotFound: hint = "is the router on and in range?"; break;
+        case homenet::Result::Refused: hint = "save the wifi again from the phone"; break;
+        case homenet::Result::NoInternet: hint = "the wifi works; the internet did not"; break;
+        case homenet::Result::ClockRefused: hint = "restart the device and try again"; break;
+        default: hint = "set it from the phone once first"; break;
+      }
+      c.textCentered(SCREEN_W / 2, 300, hint, TS_MED, true);
+    }
+    c.textCentered(SCREEN_W / 2, 440, "the wifi is off again", TS_SMALL, true);
+    const TRect d = clockDoneRect();
+    c.button(d.x, d.y, d.w, d.h, "DONE", false, TS_LARGE);
+    return;
+  }
+
   if (!_clockOk) {
     c.textCentered(SCREEN_W / 2, 320, "could not start wifi", TS_LARGE, true, true);
     const TRect d = clockDoneRect();
@@ -746,9 +789,18 @@ void SettingsScreen::renderClock(ToolsHost& host, ToolsCanvas& c) {
     }
     c.textCentered(SCREEN_W / 2, 340, "from the phone that just joined", TS_MED, true);
     c.fillRect(48, 400, SCREEN_W - 96, 1, true);
-    c.textCentered(SCREEN_W / 2, 430, "The device keeps the digits, not the", TS_SMALL, true);
-    c.textCentered(SCREEN_W / 2, 458, "timezone. Somewhere else one day?", TS_SMALL, true);
-    c.textCentered(SCREEN_W / 2, 486, "Come back here and send again.", TS_SMALL, true);
+    if (_clock.wifiSaved()) {
+      char name[homenet::SSID_MAX];
+      homenet::wifiName(host.prefs(), name, sizeof(name));
+      snprintf(buf, sizeof(buf), "home wifi saved: %s", name);
+      c.textCentered(SCREEN_W / 2, 430, buf, TS_SMALL, true);
+      c.textCentered(SCREEN_W / 2, 458, "next time, the clock can come", TS_SMALL, true);
+      c.textCentered(SCREEN_W / 2, 486, "from the internet instead", TS_SMALL, true);
+    } else {
+      c.textCentered(SCREEN_W / 2, 430, "The time zone came with it. Somewhere", TS_SMALL, true);
+      c.textCentered(SCREEN_W / 2, 458, "else one day? Send again, or save a", TS_SMALL, true);
+      c.textCentered(SCREEN_W / 2, 486, "home wifi on the phone's page.", TS_SMALL, true);
+    }
     c.textCentered(SCREEN_W / 2, CLOCK_BIG_Y, "it keeps time on its own from now on,", TS_SMALL,
                    true);
     c.textCentered(SCREEN_W / 2, CLOCK_BIG_Y + 28, "through reboots and reflashes", TS_SMALL, true);
@@ -762,6 +814,10 @@ void SettingsScreen::renderClock(ToolsHost& host, ToolsCanvas& c) {
     c.textCentered(SCREEN_W / 2, 456, buf, TS_MED, true);
     c.textCentered(SCREEN_W / 2, 492, "this code joins the wifi, nothing more", TS_SMALL, true);
     c.textCentered(SCREEN_W / 2, CLOCK_BIG_Y, "the phone sends the time by itself", TS_SMALL, true);
+    if (netReady(host)) {
+      const TRect n = clockNetRect();
+      c.button(n.x, n.y, n.w, n.h, "FROM THE INTERNET", false, TS_MED);
+    }
   } else {
     c.textCentered(SCREEN_W / 2, 64, "STEP 2 OF 2", TS_MED, true, true);
     c.textCentered(SCREEN_W / 2, 96, "phone joined", TS_MED, true);
@@ -775,8 +831,23 @@ void SettingsScreen::renderClock(ToolsHost& host, ToolsCanvas& c) {
   c.button(d.x, d.y, d.w, d.h, "DONE", false, TS_LARGE);
 }
 
+bool SettingsScreen::netReady(ToolsHost& host) {
+  return homenet::haveWifi(host.prefs()) && homenet::haveTz(host.prefs());
+}
+
 bool SettingsScreen::tapClock(ToolsHost& host, int x, int y) {
+  if (_netStage == 0 && _clockOk && !_clock.hasClient() && !_clock.wasSet() &&
+      !_clock.wasRefused() && netReady(host) && setui::clockNetRect().hit(x, y)) {
+    host.beep(1);
+    leaveClock();  // the device's own access point down before joining the router
+    homenet::wifiName(host.prefs(), _netName, sizeof(_netName));
+    _netStage = 1;
+    host.refresh(true);  // the QR code goes; the next tick does the waiting
+    return false;
+  }
+  if (_netStage == 1) return false;  // nothing to press while it connects
   if (setui::clockDoneRect().hit(x, y)) {
+    _netStage = 0;
     leaveClock();
     _page = 0;
     host.beep(1);
@@ -1251,7 +1322,8 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
 
   if (actionRect(ACT_CLOCK).hit(x, y)) {
     host.beep(1);
-    _clockOk = _clock.start();
+    _clockOk = _clock.start(host.prefs());
+    _netStage = 0;
     _clockSawClient = false;
     _clockSawSet = false;
     _page = 6;

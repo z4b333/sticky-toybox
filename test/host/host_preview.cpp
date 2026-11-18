@@ -2086,6 +2086,134 @@ int main() {
     printf("clock from phone ok (row reads it, page sets it, ap closes)\n");
   }
 
+  // --- the clock from the internet, through the home Wi-Fi ------------------
+  // The phone's page now sends a POSIX time-zone rule with the time, and can
+  // save a home network. With both, the clock page offers FROM THE INTERNET.
+  // Guarded: the zone is stored, a short password is refused before it can
+  // fail at a router, the button exists only when it can work, the number
+  // that reaches the chip is UTC moved into the saved zone, and the radio is
+  // switched off on every path -- success and each failure.
+  {
+    g_dumpEnabled = false;
+    char tzBuf[homenet::TZ_MAX];
+    homenet::tz(prefs, tzBuf, sizeof(tzBuf));
+    if (strcmp(tzBuf, "STD-7") != 0) {
+      printf("NET FAIL: the phone's zone was stored as '%s'\n", tzBuf);
+      abort();
+    }
+    // UTC -> wall clock, under rules the phone page produces. Expected
+    // values from the IANA database (Python zoneinfo) for the real zones.
+    struct { const char* tz; time_t utc; int hh, mm; } cases[] = {
+        {"STD-7", 1787300000, 15, 13},                                  // Bangkok
+        {"STD-1DST,M3.5.0,M10.5.0/3", 1787300000, 10, 13},               // Berlin, summer
+        {"STD-1DST,M3.5.0,M10.5.0/3", 1798761600, 1, 0},                // Berlin, winter
+        {"STD5DST,M3.2.0,M11.1.0", 1798761600, 19, 0},                  // New York, the day before
+        {"STD-5:30", 1787300000, 13, 43},                                 // Kolkata
+        {"STD-10:30DST-11,M10.1.0,M4.1.0", 1798761600, 11, 0},          // Lord Howe, summer
+    };
+    for (const auto& k : cases) {
+      const int64_t ms = homenet::localEpochMs(k.utc, k.tz);
+      const int m = (int)((ms / 60000) % (24 * 60));
+      if (m != k.hh * 60 + k.mm) {
+        printf("NET FAIL: %s at %ld gave %02d:%02d, want %02d:%02d\n", k.tz, (long)k.utc, m / 60,
+               m % 60, k.hh, k.mm);
+        abort();
+      }
+    }
+    if (homenet::tzLooksValid("STD-7;rm") || homenet::saveTz(prefs, "")) {
+      printf("NET FAIL: a junk zone was accepted\n");
+      abort();
+    }
+
+    toybox.goHub();
+    toybox.hostHub().goHome();
+    homenet::forgetWifi(prefs);
+    toybox.openSettings();
+    tapRect(setui::actionRect(setui::ACT_CLOCK));
+    // No home Wi-Fi: the button is not there, and its spot does nothing.
+    tapRect(setui::clockNetRect());
+    if (toybox.hostSettings().hostNetStage() != 0 || toybox.hostSettings().hostPage() != 6) {
+      printf("NET FAIL: the internet button answered with no home wifi saved\n");
+      abort();
+    }
+    auto& cs = toybox.hostSettings().hostClock();
+    if (cs.hostSendWifi("Home", "short") || homenet::haveWifi(prefs)) {
+      printf("NET FAIL: a 5-character WPA password was stored\n");
+      abort();
+    }
+    if (!cs.hostSendWifi("Somchai 5G", "correct horse") || !homenet::haveWifi(prefs)) {
+      printf("NET FAIL: a good home wifi was not stored\n");
+      abort();
+    }
+    for (int i = 0; i < 5 && !cs.wasSet(); i++) toybox.tick();
+    g_dumpEnabled = true;
+    setScreen("settings_clock_set_wifi");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    tapRect(setui::clockDoneRect());
+
+    // With both saved, the first screen offers the internet.
+    tapRect(setui::actionRect(setui::ACT_CLOCK));
+    g_dumpEnabled = true;
+    setScreen("settings_clock_net_offer");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+
+    struct { homenet::Result net; const char* shot; } runs[] = {
+        {homenet::Result::Ok, "settings_clock_net_ok"},
+        {homenet::Result::NotFound, "settings_clock_net_notfound"},
+        {homenet::Result::Refused, "settings_clock_net_refused"},
+        {homenet::Result::NoInternet, "settings_clock_net_nointernet"},
+    };
+    bool first = true;
+    for (const auto& r : runs) {
+      if (!first) tapRect(setui::actionRect(setui::ACT_CLOCK));
+      first = false;
+      homenet::g_hostNet = r.net;
+      homenet::g_hostJoins = homenet::g_hostOffs = 0;
+      g_clockSetMs = 0;
+      if (r.net == homenet::Result::Ok) g_dumpEnabled = true;
+      if (r.net == homenet::Result::Ok) setScreen("settings_clock_net_busy");
+      tapRect(setui::clockNetRect());
+      g_dumpEnabled = false;
+      if (toybox.hostSettings().hostNetStage() != 1 || cs.hasClient()) {
+        printf("NET FAIL: the button did not start (stage %d) or the AP stayed up\n",
+               toybox.hostSettings().hostNetStage());
+        abort();
+      }
+      toybox.tick();
+      if (toybox.hostSettings().hostNetStage() != 2 || homenet::g_hostJoins != 1 ||
+          homenet::g_hostOffs != 1) {
+        printf("NET FAIL (%s): stage %d, joins %d, radio offs %d\n", r.shot,
+               toybox.hostSettings().hostNetStage(), homenet::g_hostJoins, homenet::g_hostOffs);
+        abort();
+      }
+      const bool wantSet = r.net == homenet::Result::Ok;
+      const int64_t want = homenet::localEpochMs(homenet::g_hostUtc, "STD-7");
+      if (wantSet ? g_clockSetMs != want : g_clockSetMs != 0) {
+        printf("NET FAIL (%s): the chip got %lld, want %lld\n", r.shot, (long long)g_clockSetMs,
+               (long long)(wantSet ? want : 0));
+        abort();
+      }
+      g_dumpEnabled = true;
+      setScreen(r.shot);
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+      tapRect(setui::clockDoneRect());
+      if (toybox.hostSettings().hostPage() != 0 || toybox.hostSettings().hostNetStage() != 0) {
+        printf("NET FAIL (%s): DONE did not return to settings\n", r.shot);
+        abort();
+      }
+    }
+    homenet::g_hostNet = homenet::Result::Ok;
+    homenet::forgetWifi(prefs);
+    toybox.goHub();
+    toybox.hostHub().goHome();
+    sensors::hostSetClock(true);
+    g_dumpEnabled = true;
+    printf("clock from the internet ok (zone stored, 6 zones converted, 4 network outcomes, radio off each time)\n");
+  }
+
   // --- the book reader ------------------------------------------------------
   // The .tbk reader against the host's two invented volumes: the list, a page,
   // the turn zones (including the right-to-left swap), the side buttons, the
