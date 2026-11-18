@@ -29,7 +29,7 @@ bool makeThumb(ToolsHost& host, epubc::Book& book, const char* bookFile, bool* t
   bool ok = epubart::coverGrey(book, g, &memory);
   if (ok) {
     bthumb::sweepStale(bookFile);
-    char big[48];
+    char big[bstore::PATH_CAP];
     bthumb::bigPath(bookFile, big, sizeof(big));
     // The loading-screen cover first: the strip thumbnail is only written
     // after it, so "have the small one" still implies the big one is there.
@@ -55,6 +55,7 @@ bool makeThumb(ToolsHost& host, epubc::Book& book, const char* bookFile, bool* t
         bthumb::path(bookFile, sp, sizeof(sp));
         ok = bthumb::saveSmallGrey(small, sp);
         free(small);
+        if (ok) bthumb::sweepOldCovers(host, bookFile);
       } else {
         ok = false;
       }

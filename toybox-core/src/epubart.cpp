@@ -1,6 +1,8 @@
 // A book's own illustrations, prepared on the device. See tools/epub/epub_art.h.
 #include "tools/epub/epub_art.h"
 
+#include "tools/book_store.h"
+
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -414,11 +416,19 @@ bool ditherAtkinson(ToolsHost& host, const uint8_t* g, const uint8_t* tone, cons
 }  // namespace
 
 namespace {
-void stem(const char* bookFile, const char* entry, uint32_t usize, char* out, int cap) {
-  const uint32_t book = fnv(bookFile);
-  const uint32_t pic = fnv(entry) ^ (usize * 2654435761u);
-  snprintf(out, (size_t)cap, "/.toybox/art%d/%08lx/%08lx", PIPELINE, (unsigned long)book,
-           (unsigned long)pic);
+uint32_t picKey(uint32_t entryKey, uint32_t usize) { return entryKey ^ (usize * 2654435761u); }
+
+// In the book's own folder (book_store.h).
+void stemK(const char* bookFile, uint32_t entryKey, uint32_t usize, char* out, int cap) {
+  char d[bstore::PATH_CAP];
+  bstore::dir(bookFile, d, sizeof(d));
+  snprintf(out, (size_t)cap, "%s/%08lx", d, (unsigned long)picKey(entryKey, usize));
+}
+// Where pictures were kept before the per-book folders (79fb940..f8f3985).
+// The folder carried the pipeline number, so only this pipeline's are worth
+// moving; anything older would be prepared again anyway.
+void oldDir(const char* bookFile, char* out, int cap) {
+  snprintf(out, (size_t)cap, "/.toybox/art%d/%08lx", PIPELINE, (unsigned long)fnv(bookFile));
 }
 
 // One part: the 480x800 grey page `g`, dithered both ways and written.
@@ -427,16 +437,96 @@ bool writePart(ToolsHost& host, const uint8_t* g, const char* g2Path, const char
 
 void paths(const char* bookFile, const char* entry, uint32_t usize, int part, char* g2, char* b1,
            int cap) {
-  char st[48];
-  stem(bookFile, entry, usize, st, sizeof(st));
+  char st[bstore::PATH_CAP];
+  stemK(bookFile, fnv(entry), usize, st, sizeof(st));
   snprintf(g2, (size_t)cap, "%s.%d.g2", st, part);
   snprintf(b1, (size_t)cap, "%s.%d.b1", st, part);
 }
 
-void infPath(const char* bookFile, const char* entry, uint32_t usize, char* inf, int cap) {
-  char st[48];
-  stem(bookFile, entry, usize, st, sizeof(st));
-  snprintf(inf, (size_t)cap, "%s.inf", st);
+// --- the index -------------------------------------------------------------------
+// "TBA1", the pipeline, a reserved byte, u16 count, then 9 bytes a picture:
+// u32 key, u32 usize, u8 parts. One read on every open instead of one per
+// picture -- 28 pictures cost 1.2 s of .inf reads on glass.
+
+int indexRead(ToolsHost& host, const char* bookFile, Prepared* out, int max) {
+  char p[bstore::PATH_CAP];
+  bstore::file(bookFile, "art.idx", p, sizeof(p));
+  const int cap = 8 + INDEX_MAX * 9;
+  uint8_t* buf = (uint8_t*)malloc((size_t)cap);
+  if (!buf) return -1;
+  const int got = host.sdReadFile(p, buf, cap);
+  int n = -1;
+  if (got >= 8 && memcmp(buf, "TBA1", 4) == 0 && buf[4] == PIPELINE) {
+    n = buf[6] | (buf[7] << 8);
+    if (n > max) n = max;
+    if (got < 8 + n * 9) n = -1;  // short: not trusted
+    for (int i = 0; i < n; i++) {
+      const uint8_t* e = buf + 8 + i * 9;
+      out[i].key = (uint32_t)e[0] | ((uint32_t)e[1] << 8) | ((uint32_t)e[2] << 16) |
+                   ((uint32_t)e[3] << 24);
+      out[i].usize = (uint32_t)e[4] | ((uint32_t)e[5] << 8) | ((uint32_t)e[6] << 16) |
+                     ((uint32_t)e[7] << 24);
+      out[i].parts = e[8];
+    }
+  }
+  free(buf);
+  return n;
+}
+
+bool indexWrite(ToolsHost& host, const char* bookFile, const Prepared* recs, int n) {
+  if (n > INDEX_MAX) n = INDEX_MAX;
+  const int len = 8 + n * 9;
+  uint8_t* buf = (uint8_t*)malloc((size_t)len);
+  if (!buf) return false;
+  memcpy(buf, "TBA1", 4);
+  buf[4] = (uint8_t)PIPELINE;
+  buf[5] = 0;
+  buf[6] = (uint8_t)(n & 255);
+  buf[7] = (uint8_t)(n >> 8);
+  for (int i = 0; i < n; i++) {
+    uint8_t* e = buf + 8 + i * 9;
+    for (int b = 0; b < 4; b++) {
+      e[b] = (uint8_t)(recs[i].key >> (8 * b));
+      e[4 + b] = (uint8_t)(recs[i].usize >> (8 * b));
+    }
+    e[8] = recs[i].parts;
+  }
+  char p[bstore::PATH_CAP];
+  bstore::file(bookFile, "art.idx", p, sizeof(p));
+  const bool ok = host.sdWriteFileAtomic(p, buf, len);
+  free(buf);
+  return ok;
+}
+
+// --- pictures from before the per-book folders -------------------------------------
+
+int adoptOld(ToolsHost& host, const char* bookFile, uint32_t entryKey, uint32_t usize) {
+  char od[48], from[96], to[bstore::PATH_CAP], st[bstore::PATH_CAP];
+  oldDir(bookFile, od, sizeof(od));
+  const uint32_t pk = picKey(entryKey, usize);
+  snprintf(from, sizeof(from), "%s/%08lx.inf", od, (unsigned long)pk);
+  uint8_t n = 0xFF;
+  if (host.sdReadFile(from, &n, 1) != 1 || n > MAX_PARTS) return -1;
+  stemK(bookFile, entryKey, usize, st, sizeof(st));
+  static const char* const kExt[2] = {"g2", "b1"};
+  for (int part = 0; part < n; part++)
+    for (int e = 0; e < 2; e++) {
+      snprintf(from, sizeof(from), "%s/%08lx.%d.%s", od, (unsigned long)pk, part, kExt[e]);
+      snprintf(to, sizeof(to), "%s.%d.%s", st, part, kExt[e]);
+      if (!host.sdMove(from, to)) return -1;  // half moved: prepare it again
+    }
+  snprintf(from, sizeof(from), "%s/%08lx.inf", od, (unsigned long)pk);
+  host.sdRemove(from);
+  return n;
+}
+
+void dropOldDir(ToolsHost& host, const char* bookFile) {
+  char od[48];
+  oldDir(bookFile, od, sizeof(od));
+  if (host.sdRmdir(od)) {  // empty only: anything left over stays
+    snprintf(od, sizeof(od), "/.toybox/art%d", PIPELINE);
+    host.sdRmdir(od);
+  }
 }
 
 namespace {
@@ -555,7 +645,7 @@ int prepare(ToolsHost& host, epubc::Book& book, const char* bookFile, const char
     return 0;
   }
   bool good = true;
-  char g2[64], b1[64];
+  char g2[bstore::PATH_CAP], b1[bstore::PATH_CAP];
   for (int part = 0; part < parts && good; part++) {
     memset(g, 255, (size_t)W * H);
     int ox, oy, ow, oh;
@@ -595,15 +685,7 @@ int prepare(ToolsHost& host, epubc::Book& book, const char* bookFile, const char
     if (transient) *transient = true;  // memory or the card, not the picture
     return 0;
   }
-  // Last: the part count, whose presence says every part is on the card.
-  char inf[64];
-  infPath(bookFile, entry, usize, inf, sizeof(inf));
-  const uint8_t n = (uint8_t)parts;
-  if (!host.sdStreamOpen(inf) || !host.sdStreamWrite(&n, 1) || !host.sdStreamClose(true)) {
-    if (transient) *transient = true;
-    return 0;
-  }
-  return parts;
+  return parts;  // the caller records it in the book's index
 }
 
 namespace {

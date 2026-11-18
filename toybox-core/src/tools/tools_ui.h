@@ -755,6 +755,23 @@ class ToolsHost {
     (void)max;
     return -1;
   }
+  // Moving and removing the device's own files (book_store.h's move into one
+  // folder per book). Same rule as the stream: only while something already
+  // holds the bus. sdMove makes the destination's folders and replaces a
+  // file already there; sdRmdir removes an EMPTY folder only.
+  virtual bool sdMove(const char* from, const char* to) {
+    (void)from;
+    (void)to;
+    return false;
+  }
+  virtual bool sdRemove(const char* path) {
+    (void)path;
+    return false;
+  }
+  virtual bool sdRmdir(const char* path) {
+    (void)path;
+    return false;
+  }
 
   // Y coordinate where a tool's own content may start (below the top bar).
   virtual int contentTop() const = 0;

@@ -32,6 +32,9 @@
 #include "tools/tool_book.h"
 #include "tools/tool_dice.h"
 #include "tools/bookmarks.h"
+#include "tools/book_store.h"
+#include "tools/epub/epub_art.h"
+#include <string>
 #include "tools/reader_menu.h"
 #include "tools/tool_epub.h"
 #include "tools/epub/epubcore.h"
@@ -2180,7 +2183,7 @@ int main() {
     {
       uint8_t* want = (uint8_t*)malloc(48000);
       uint8_t* got = (uint8_t*)malloc(48000);
-      char bp[48];
+      char bp[bstore::PATH_CAP];
       bthumb::bigPath("/books/One Piece/one-piece-v1.tbk", bp, sizeof(bp));
       if (!want || !got || !stickyHost.bookCover(want)) {
         printf("TBKCOVER FAIL: the book did not hand back its embedded cover\n");
@@ -2192,7 +2195,7 @@ int main() {
       }
       // ...and a book with no embedded cover still gets one from page 0.
       uint8_t* p0 = (uint8_t*)malloc(48000);
-      char wp[48];
+      char wp[bstore::PATH_CAP];
       bthumb::bigPath("/books/walden.tbk", wp, sizeof(wp));
       if (p0 && stickyHost.sdReadWhole(wp, p0, 48000) == 48000 &&
           memcmp(want, p0, 48000) == 0) {
@@ -2331,7 +2334,7 @@ int main() {
       abort();
     }
     {
-      char mp[48];
+      char mp[bstore::PATH_CAP];
       marks::path("/books/grey-test.tbk", mp, sizeof(mp));
       uint8_t raw[marks::FILE_BYTES];
       if (stickyHost.sdReadFile(mp, raw, sizeof(raw)) != marks::FILE_BYTES ||
@@ -2470,7 +2473,7 @@ int main() {
         printf("SIDECAR FAIL: a sidecar beside the book was not picked up\n");
         abort();
       }
-      char big[48];
+      char big[bstore::PATH_CAP];
       bthumb::bigPath(kBook, big, sizeof(big));
       if (sdcard::hostCardFileSize(big) != bthumb::BIG_BYTES) {
         printf("SIDECAR FAIL: the cover on the card is %d bytes\n",
@@ -2910,7 +2913,7 @@ int main() {
     {
       // The enlarged one must actually reach the panel's edges: a frame two
       // pixels thick, spread 2.7x, has to leave ink on the outer columns.
-      char p[48];
+      char p[bstore::PATH_CAP];
       bthumb::bigPath("/books/up.tbk", p, sizeof(p));
       uint8_t* buf = (uint8_t*)malloc(bthumb::BIG_BYTES);
       const int len = stickyHost.sdReadWhole(p, buf, bthumb::BIG_BYTES);
@@ -3083,7 +3086,7 @@ int main() {
       // quarter averages 80 of 255 and its bottom quarter 136, so the top must
       // come out clearly darker. A negative swaps them; a total could not tell
       // (the picture averages almost exactly mid-grey).
-      char g2[64], b1[64];
+      char g2[bstore::PATH_CAP], b1[bstore::PATH_CAP];
       static uint8_t g2b[96000], b1b[48000];
       if (!et->hostArtPaths("OEBPS/images/plate.png", 0, g2, b1, sizeof(g2)) ||
           sdcard::readWhole(g2, g2b, sizeof(g2b)) != 96000 ||
@@ -3127,7 +3130,7 @@ int main() {
       // must be byte for byte the picture page's one-bit version. Anything
       // else means the cover took some other, older road.
       {
-        char big[48];
+        char big[bstore::PATH_CAP];
         static uint8_t cov[48000];
         bthumb::bigPath(et->hostBookFile(), big, sizeof(big));
         if (sdcard::readWhole(big, cov, sizeof(cov)) != 48000 || memcmp(cov, b1b, 48000) != 0) {
@@ -3494,7 +3497,7 @@ int main() {
       abort();
     }
     {
-      char mp[48];
+      char mp[bstore::PATH_CAP];
       marks::path("/books/wind.epub", mp, sizeof(mp));
       uint8_t raw[marks::FILE_BYTES];
       if (stickyHost.sdReadFile(mp, raw, sizeof(raw)) != marks::FILE_BYTES ||
@@ -3545,7 +3548,7 @@ int main() {
       e[2] = 5;                   // page 5
       e[4] = 0x39; e[5] = 0x30;   // off 12345
       snprintf((char*)e + 8, marks::LABEL_V2, "kept before the labels grew");
-      char mp[48];
+      char mp[bstore::PATH_CAP];
       marks::path("/books/old-marks.epub", mp, sizeof(mp));
       sdcard::hostPlantSide(mp, old, (int)sizeof(old));
       static marks::Mark mm[marks::MAX];
@@ -4500,7 +4503,7 @@ int main() {
         printf("BMP FAIL: our own cover.bmp did not parse\n");
         abort();
       }
-      char big[48];
+      char big[bstore::PATH_CAP];
       bthumb::bigPath("/books/wind.epub", big, sizeof(big));
       static uint8_t tbc[48000];
       if (sdcard::readWhole(big, tbc, sizeof(tbc)) != (int)sizeof(tbc)) {
@@ -4720,7 +4723,7 @@ int main() {
         "/books/A Book With The Kind Of Very Long Release Filename Publishers Actually Use Vol "
         "01.epub";
     {  // put the book back to never-opened: no thumbnail, no big face
-      char p[48];
+      char p[bstore::PATH_CAP];
       bthumb::path(kUnwrap, p, sizeof(p));
       tfs::remove(p);
       bthumb::bigPath(kUnwrap, p, sizeof(p));
@@ -4804,6 +4807,217 @@ int main() {
     bthumb::drawPlate(stickyHost.sharedCanvas(), "/books/wind.epub", "Strange Houses");
     epd.displayFull();
   }
+
+  // --- one folder per book (book_store.h) -----------------------------------
+  // Everything the device makes about a book lives in one folder named after
+  // it. Asserted: the names (readable, safe for FAT, whole UTF-8 characters,
+  // two same-named books apart), the cover decoded rather than taken from
+  // CrossPoint's cache, the picture index, pictures from the old layout moved
+  // across rather than prepared again, and old bookmarks moved on first read.
+  {
+    g_dumpEnabled = false;
+    char d[bstore::PATH_CAP], d2[bstore::PATH_CAP], nm[bstore::NAME_BYTES + 1];
+    bstore::dir("/books/Classroom of the Elite - Volume 01 [Seven Seas][Kobo].epub", d,
+                sizeof(d));
+    const char* want = "/.toybox/books/Classroom of the Elite - Volume 01 [Seven Seas][Kobo] ~";
+    if (strncmp(d, want, strlen(want)) != 0 || strlen(d) != strlen(want) + 4) {
+      printf("BOOK FOLDER FAIL: named '%s'\n", d);
+      abort();
+    }
+    bstore::dir("/books/a/Vol 01.epub", d, sizeof(d));
+    bstore::dir("/books/b/Vol 01.epub", d2, sizeof(d2));
+    if (strcmp(d, d2) == 0) {
+      printf("BOOK FOLDER FAIL: two books share '%s'\n", d);
+      abort();
+    }
+    bstore::name("/books/what: a *title*?.epub", nm, sizeof(nm));
+    if (strcmp(nm, "what_ a _title__") != 0) {
+      printf("BOOK FOLDER FAIL: unsafe name came out '%s'\n", nm);
+      abort();
+    }
+    bstore::name("/books/odd. .epub", nm, sizeof(nm));
+    if (strcmp(nm, "odd") != 0) {
+      printf("BOOK FOLDER FAIL: trailing dot/space kept: '%s'\n", nm);
+      abort();
+    }
+    {  // "a" + forty Thai letters (3 bytes each): 72 bytes falls mid-letter
+      std::string thai = "/books/a";
+      for (int i = 0; i < 40; i++) thai += "\xE0\xB8\x81";
+      thai += ".epub";
+      bstore::name(thai.c_str(), nm, sizeof(nm));
+      const int len = (int)strlen(nm);
+      if (len != 70 || nm[0] != 'a' || (len - 1) % 3 != 0) {
+        printf("BOOK FOLDER FAIL: a long Thai name cut to %d bytes\n", len);
+        abort();
+      }
+    }
+    {  // the longest leaf, with the atomic writer's ".tmp", still fits
+      std::string longest = "/books/";
+      longest.append(200, 'x');
+      longest += ".epub";
+      char p[bstore::PATH_CAP];
+      bstore::file(longest.c_str(), "ffffffff.5.g2", p, sizeof(p));
+      if (strlen(p) + 4 >= (size_t)bstore::PATH_CAP) {
+        printf("BOOK FOLDER FAIL: a path of %zu bytes\n", strlen(p));
+        abort();
+      }
+    }
+
+    // The cover: decoded from the book, NOT CrossPoint's cached cover.bmp --
+    // which on a real card is often the soft cover an older Toybox left there.
+    // The long-named book: no sidecar of the owner's, and opened just above.
+    static const char kBook[] =
+        "/books/A Book With The Kind Of Very Long Release Filename Publishers Actually Use Vol "
+        "01.epub";
+    char p[bstore::PATH_CAP];
+    bthumb::path(kBook, p, sizeof(p));
+    tfs::remove(p);
+    strncat(p, "f", sizeof(p) - strlen(p) - 1);
+    tfs::remove(p);
+    bthumb::bigPath(kBook, p, sizeof(p));
+    sdcard::hostCardRemove(p);
+    {
+      static uint8_t bmp[14 + 40 + 1024 + 240 * 400];  // 8-bit, every pixel black
+      const uint32_t off = 14 + 40 + 1024, total = off + 240 * 400;
+      memset(bmp, 0, sizeof(bmp));
+      bmp[0] = 'B'; bmp[1] = 'M';
+      bmp[2] = (uint8_t)total; bmp[3] = (uint8_t)(total >> 8); bmp[4] = (uint8_t)(total >> 16);
+      bmp[10] = (uint8_t)off; bmp[11] = (uint8_t)(off >> 8);
+      bmp[14] = 40;
+      bmp[18] = 240; bmp[22] = (uint8_t)(400 & 255); bmp[23] = (uint8_t)(400 >> 8);
+      bmp[26] = 1; bmp[28] = 8;
+      for (int i = 0; i < 256; i++) bmp[54 + i * 4] = bmp[55 + i * 4] = bmp[56 + i * 4] = (uint8_t)i;
+      char dir[64], cp[112];
+      epubc::cacheDir(kBook, dir, sizeof(dir));
+      snprintf(cp, sizeof(cp), "%s/cover.bmp", dir);
+      sdcard::hostPutCardFile(cp, bmp, (int)total);
+    }
+    toybox.goHub();
+    toybox.open(false, 10, false);
+    auto* eb = static_cast<EpubTool*>(toybox.hostActive());
+    if (!eb->openDirect(kBook)) {
+      printf("BOOK FOLDER FAIL: %s did not open\n", kBook);
+      abort();
+    }
+    {
+      char g2[bstore::PATH_CAP], b1[bstore::PATH_CAP];
+      static uint8_t cov[48000], pic[48000];
+      bthumb::bigPath(kBook, p, sizeof(p));
+      if (!eb->hostArtPaths("OEBPS/images/plate.png", 0, g2, b1, sizeof(g2)) ||
+          sdcard::readWhole(p, cov, sizeof(cov)) != 48000 ||
+          sdcard::readWhole(b1, pic, sizeof(pic)) != 48000 || memcmp(cov, pic, 48000) != 0) {
+        printf("BOOK FOLDER FAIL: the cover was not decoded from the book (CrossPoint's taken?) "
+               "paths %d cover %d pic %d same %d [%s] [%s]\n",
+               eb->hostArtPaths("OEBPS/images/plate.png", 0, g2, b1, sizeof(g2)),
+               sdcard::readWhole(p, cov, sizeof(cov)), sdcard::readWhole(b1, pic, sizeof(pic)),
+               memcmp(cov, pic, 48000) == 0, p, b1);
+        abort();
+      }
+      bstore::dir(kBook, d, sizeof(d));
+      if (strncmp(p, d, strlen(d)) != 0 || strncmp(b1, d, strlen(d)) != 0) {
+        printf("BOOK FOLDER FAIL: cover %s / picture %s outside %s\n", p, b1, d);
+        abort();
+      }
+    }
+    bstore::file(kBook, "art.idx", p, sizeof(p));
+    if (!sdcard::hostCardHasPrefix(p)) {
+      printf("BOOK FOLDER FAIL: no picture index at %s\n", p);
+      abort();
+    }
+
+    // Pictures from the old layout: /.toybox/art2/<hash>/<pic>.<part>.g2|b1
+    // and a one-byte .inf. Rewind this book to that state -- plate.png moved
+    // there and overwritten with a pattern no decoder makes, missing.png
+    // remembered as undecodable, the index gone -- and reopen.
+    const uint32_t uPlate = eb->hostArtUsize("OEBPS/images/plate.png");
+    const uint32_t uMiss = eb->hostArtUsize("OEBPS/images/missing.png");
+    toybox.goHub();
+    auto fnv = [](const char* s) { return bstore::key(s); };
+    char od[64];
+    snprintf(od, sizeof(od), "/.toybox/art%d/%08lx", epubart::PIPELINE, (unsigned long)fnv(kBook));
+    const uint32_t pkPlate = fnv("OEBPS/images/plate.png") ^ (uPlate * 2654435761u);
+    const uint32_t pkMiss = fnv("OEBPS/images/missing.png") ^ (uMiss * 2654435761u);
+    char g2n[bstore::PATH_CAP], b1n[bstore::PATH_CAP], g2o[96], b1o[96], inf[96];
+    epubart::paths(kBook, "OEBPS/images/plate.png", uPlate, 0, g2n, b1n, sizeof(g2n));
+    snprintf(g2o, sizeof(g2o), "%s/%08lx.0.g2", od, (unsigned long)pkPlate);
+    snprintf(b1o, sizeof(b1o), "%s/%08lx.0.b1", od, (unsigned long)pkPlate);
+    static uint8_t pat[96000];
+    memset(pat, 0x55, sizeof(pat));
+    sdcard::hostCardRemove(g2n);
+    sdcard::hostCardRemove(b1n);
+    sdcard::hostPutCardFile(g2o, pat, 96000);
+    sdcard::hostPutCardFile(b1o, pat, 48000);
+    const uint8_t one = 1, zero = 0;
+    snprintf(inf, sizeof(inf), "%s/%08lx.inf", od, (unsigned long)pkPlate);
+    sdcard::hostPutCardFile(inf, &one, 1);
+    snprintf(inf, sizeof(inf), "%s/%08lx.inf", od, (unsigned long)pkMiss);
+    sdcard::hostPutCardFile(inf, &zero, 1);
+    sdcard::hostCardRemove(p);  // art.idx
+    toybox.open(false, 10, false);
+    eb = static_cast<EpubTool*>(toybox.hostActive());
+    if (!eb->openDirect(kBook)) {
+      printf("BOOK FOLDER FAIL: %s did not reopen\n", kBook);
+      abort();
+    }
+    {
+      static uint8_t got[96000];
+      char odSlash[72];
+      snprintf(odSlash, sizeof(odSlash), "%s/", od);
+      if (sdcard::readWhole(g2n, got, 96000) != 96000 || memcmp(got, pat, 96000) != 0 ||
+          sdcard::readWhole(b1n, got, 48000) != 48000 || memcmp(got, pat, 48000) != 0) {
+        printf("BOOK FOLDER FAIL: an old picture was prepared again, not moved\n");
+        abort();
+      }
+      if (sdcard::hostCardHasPrefix(odSlash)) {
+        printf("BOOK FOLDER FAIL: files left behind in %s\n", od);
+        abort();
+      }
+      if (eb->hostArtPrepared("OEBPS/images/missing.png") ||
+          eb->hostArtParts("OEBPS/images/plate.png") != 1 ||
+          eb->hostArtParts("OEBPS/images/art2.png") != 4 || !sdcard::hostCardHasPrefix(p)) {
+        printf("BOOK FOLDER FAIL: after the move: missing %d, plate %d parts, art2 %d, index %d\n",
+               eb->hostArtPrepared("OEBPS/images/missing.png"),
+               eb->hostArtParts("OEBPS/images/plate.png"),
+               eb->hostArtParts("OEBPS/images/art2.png"), sdcard::hostCardHasPrefix(p));
+        abort();
+      }
+    }
+    toybox.goHub();
+    // Leave nothing odd for later guards: the patterned picture goes, and the
+    // next open of this book prepares it properly.
+    sdcard::hostCardRemove(g2n);
+    sdcard::hostCardRemove(b1n);
+    sdcard::hostCardRemove(p);
+
+    // Bookmarks kept before the folders: read from the old place, written to
+    // the new one on that same read, and the old file gone.
+    {
+      static const char kMarked[] = "/books/marked-before.epub";
+      marks::Mark mm[2] = {};
+      mm[0].spine = 3;
+      mm[0].off = 1234;
+      snprintf(mm[0].label, sizeof(mm[0].label), "the phrase that was kept");
+      mm[1].spine = 5;
+      char np[bstore::PATH_CAP], op[48];
+      marks::path(kMarked, np, sizeof(np));
+      marks::oldPath(kMarked, op, sizeof(op));
+      sdcard::browseOpen();
+      marks::save(stickyHost, kMarked, mm, 2);  // into the new place...
+      sdcard::hostCardMove(np, op);             // ...then back to where it used to live
+      marks::Mark back[marks::MAX];
+      const int n = marks::load(stickyHost, kMarked, back);
+      const bool newThere = sdcard::hostCardHasPrefix(np), oldThere = sdcard::hostCardHasPrefix(op);
+      sdcard::browseClose();
+      if (n != 2 || back[0].off != 1234 || strcmp(back[0].label, "the phrase that was kept") != 0 ||
+          !newThere || oldThere) {
+        printf("BOOK FOLDER FAIL: old marks: %d read, new %d, old %d\n", n, newThere, oldThere);
+        abort();
+      }
+    }
+    printf("book folders ok (named, cover decoded first, index, old pictures and marks moved)\n");
+    g_dumpEnabled = true;
+  }
+
 
   // --- the loading screen is portrait, whatever the page's angle -------------
   // A cover is a portrait object: laid into a landscape canvas it is cropped,
@@ -5103,7 +5317,7 @@ int main() {
         printf("REBUILD FAIL: no thumbnail to start from\n");
         abort();
       }
-      char big[48];
+      char big[bstore::PATH_CAP];
       bthumb::bigPath(kOld, big, sizeof(big));
       sdcard::hostPutCardFile(big, "", 0);  // truncate the full-size cover away
     }

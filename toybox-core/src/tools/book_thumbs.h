@@ -35,6 +35,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "book_store.h"
 #include "lock_image.h"
 #include "lockscreen.h"
 #include "tiny_fs.h"
@@ -57,16 +58,25 @@ inline uint32_t key(const char* file) {
 inline void path(const char* file, char* out, int cap) {
   snprintf(out, (size_t)cap, "/th_%08lx", (unsigned long)key(file));
 }
-// On the card, in a folder of our own. Hidden, so the phone's file list and
-// the readers' book lists both walk straight past it.
-//
-// "covers2": EPUB covers have been decoded by the illustration pipeline since
-// v2 (full progressive decode, levels, sharpening, Atkinson). A new folder
-// makes every book rebuild its cover once instead of keeping the old, softer
-// one; the old /.toybox/covers folder is dead weight and safe to delete.
+// On the card, in the book's own folder (book_store.h). Hidden, so the
+// phone's file list and the readers' book lists both walk straight past it.
 inline void bigPath(const char* file, char* out, int cap) {
-  snprintf(out, (size_t)cap, "/.toybox/covers2/%08lx.tbc", (unsigned long)key(file));
+  bstore::file(file, "cover.tbc", out, cap);
 }
+// Where covers lived before the per-book folders: /.toybox/covers (the
+// 1/8-scan decode) and /.toybox/covers2 (f8f3985 only). Not moved -- an old
+// one may be the soft decode or CrossPoint's copy of it -- just removed once
+// the book's new cover is written.
+inline void sweepOldCovers(ToolsHost& h, uint32_t k) {
+  char p[48];
+  snprintf(p, sizeof(p), "/.toybox/covers/%08lx.tbc", (unsigned long)k);
+  h.sdRemove(p);
+  snprintf(p, sizeof(p), "/.toybox/covers2/%08lx.tbc", (unsigned long)k);
+  h.sdRemove(p);
+  h.sdRmdir("/.toybox/covers");  // empty folders only: the last book out turns off the light
+  h.sdRmdir("/.toybox/covers2");
+}
+inline void sweepOldCovers(ToolsHost& h, const char* file) { sweepOldCovers(h, key(file)); }
 // Where the full-size covers used to live, before they moved to the card.
 // Swept as books are reopened rather than in a migration nobody would test.
 inline void staleFlashPath(const char* file, char* out, int cap) {
@@ -94,7 +104,7 @@ inline bool haveLock() { return tbimg::have(LOCK_PATH); }
 // or the card is gone -- and the lock screen falls back to GOODBYE, which is
 // what it does for a picture that was never sent.
 inline bool stashForLock(ToolsHost& h, const char* file) {
-  char p[48];
+  char p[bstore::PATH_CAP];
   bigPath(file, p, sizeof(p));
   // 48,008 bytes, and not one of them in a buffer of its own. This used to
   // malloc the whole picture to hand to tfs::write, which is a transient
@@ -156,7 +166,7 @@ inline bool complete(ToolsHost& h, const char* file) {
 }
 
 inline bool haveBig(ToolsHost& h, const char* file) {
-  char p[48];
+  char p[bstore::PATH_CAP];
   bigPath(file, p, sizeof(p));
   uint8_t probe[4];
   return h.sdReadWhole(p, probe, sizeof(probe)) == (int)sizeof(probe);
@@ -308,6 +318,7 @@ class Builder {
     }
     memset(_small, 255, (size_t)W * H);
     bigPath(file, _bigPath, sizeof(_bigPath));
+    _key = key(file);
     path(file, _smallPath, sizeof(_smallPath));
     sweepStale(file);
     // The card holds the picture, so this only works while something already
@@ -371,7 +382,10 @@ class Builder {
     if (!_live) return false;
     while (_nextOut < BIG_H) emitRow(_nextOut++);
     const bool ok = _host->sdStreamClose(true);
-    if (ok) saveSmall();
+    if (ok) {
+      saveSmall();
+      sweepOldCovers(*_host, _key);
+    }
     _live = false;
     freeAll();
     return ok;
@@ -470,7 +484,8 @@ class Builder {
   int _srcW = 0, _srcH = 0, _outW = 0, _outH = 0, _xOff = 0, _yOff = 0;
   int _nextOut = 0, _smallRow = 0;
   bool _up = false;
-  char _bigPath[48] = {}, _smallPath[20] = {};
+  uint32_t _key = 0;
+  char _bigPath[bstore::PATH_CAP] = {}, _smallPath[20] = {};
   bool _live = false;
 };
 
@@ -540,7 +555,7 @@ inline bool coverFromSidecar(ToolsHost& h, const char* file) {
   // first 64 bytes far more often than not -- which made "replace the .tbi and
   // reopen" quietly do nothing. These four are a fifth, a half, three quarters
   // and near the end of the picture, where the ink is.
-  char big[48];
+  char big[bstore::PATH_CAP];
   bigPath(file, big, sizeof(big));
   {
     static const uint32_t kProbe[4] = {9600, 24000, 36000, 45600};
@@ -585,6 +600,7 @@ inline bool coverFromSidecar(ToolsHost& h, const char* file) {
     }
   }
   if (!h.sdStreamClose(true)) return true;
+  sweepOldCovers(h, file);
 
   // The strip thumbnail: stretched and thresholded, not dithered, exactly as
   // the builder does it -- at 96 px a dither is speckle and a threshold is a
@@ -748,7 +764,7 @@ inline void drawLoading(ToolsHost& h, ToolsCanvas& c, const char* file, const ch
   // Off the card, borrowing the bus for the read if the reader has not taken
   // it yet. That costs about 150 ms and leaves the panel re-initialised,
   // which is free here: this is drawn as part of a full refresh anyway.
-  char p[48];
+  char p[bstore::PATH_CAP];
   bigPath(file, p, sizeof(p));
   if (uint8_t* buf = (uint8_t*)malloc(BIG_BYTES)) {
     const bool got = h.sdReadWhole(p, buf, BIG_BYTES) == BIG_BYTES;

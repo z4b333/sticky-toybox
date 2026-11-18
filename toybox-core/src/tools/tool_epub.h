@@ -396,6 +396,10 @@ class EpubTool : public ToolApp {
   const char* hostPageImage() const { return _pageImage; }
   int hostPageImagePart() const { return _pageImagePart; }
   int hostArtParts(const char* entry) const { return artParts(entry); }
+  uint32_t hostArtUsize(const char* entry) const {
+    const ArtRec* r = artFor(entry);
+    return r ? r->usize : 0;
+  }
   bool hostArtPrepared(const char* entry) const {
     const ArtRec* r = artFor(entry);
     return r && r->parts;
@@ -623,14 +627,19 @@ class EpubTool : public ToolApp {
   void openBook(int i) {
     _cur = i;
     const uint32_t tOpen0 = host().nowMs();
-    // The cheap cover sources first, BEFORE the loading paint: a sidecar the
-    // owner put beside the book, or a cover CrossInk already decoded. Neither
-    // costs a decode, so even a book's very first open can lead with its own
-    // face instead of the titled plate. (The sidecar check runs every open
-    // anyway -- that is how a replaced sidecar is noticed.)
+    // The owner's own cover first, BEFORE the loading paint: a sidecar put
+    // beside the book (.cover.tbi or .cover.bmp) costs no decode and beats
+    // anything decoded here, so even a first open leads with that face. (The
+    // sidecar check runs every open -- that is how a replaced one is noticed.)
+    //
+    // CrossPoint's cached cover.bmp is NOT taken here any more. Toybox used to
+    // leave its own cover there as a favour (crossCoverPut), so on a card that
+    // has seen older builds that cache is often our old, soft 1/8-scan cover
+    // -- and taking it back would hide the decode below for ever. It is now a
+    // last resort, for a cover this device cannot decode.
     if (!bthumb::coverFromSidecar(host(), _books[i].file) &&
         !bthumb::complete(host(), _books[i].file) && !bthumb::failed(_books[i].file)) {
-      if (!host().coverFromBmp(_books[i].file)) host().crossCoverGrab(_books[i].file);
+      host().coverFromBmp(_books[i].file);
     }
     // The cover as the loading screen. An EPUB spends real seconds opening
     // (zip walk, cover decode on the first open, the chapter replayed to the
@@ -675,14 +684,18 @@ class EpubTool : public ToolApp {
     _nmarks = 0;
     recents::note(prefs(), recents::KIND_EPUB, _books[i].file, _books[i].title);
 
-    // The decode fallback: only a book with no cover from any cheap source
-    // (tried above, before the loading paint) pays for the JPEG decode --
-    // once, and a cover that will not decode is marked so it is not retried.
+    // The decode: every book with no cover of the owner's (tried above,
+    // before the loading paint) pays for it -- once, and a cover that will
+    // not decode, with no CrossPoint cover to fall back on, is marked so it
+    // is not retried.
     bool unwrapped = false;
     if (!bthumb::complete(host(), _books[i].file) && !bthumb::failed(_books[i].file)) {
       bool transient = false;
-      if (!epubcov::makeThumb(host(), _book, _books[i].file, &transient) && !transient)
-        bthumb::markFailed(_books[i].file);
+      if (!epubcov::makeThumb(host(), _book, _books[i].file, &transient) && !transient) {
+        // Not decodable here (a GIF or WebP cover, say): CrossPoint's cached
+        // cover is better than none, if it has one.
+        if (!host().crossCoverGrab(_books[i].file)) bthumb::markFailed(_books[i].file);
+      }
       unwrapped = bthumb::complete(host(), _books[i].file);
     }
     // The unwrapping finishes where it promised: the cover that was just
@@ -1501,6 +1514,7 @@ class EpubTool : public ToolApp {
     uint32_t key;    // bthumb::key of the picture's zip path
     uint32_t usize;  // its uncompressed size, part of the card key
     uint8_t parts;   // 0 = not prepared (cannot be decoded, or not yet)
+    bool known;      // settled: goes in the book's index (a transient miss does not)
   };
   static constexpr int ART_MAX = 256;
   ArtRec* _art = nullptr;  // PSRAM, ART_MAX entries
@@ -1521,9 +1535,11 @@ class EpubTool : public ToolApp {
   }
 
   // On every open: which of the book's pictures are on the card already (one
-  // byte read each), and on a first open -- or after a pipeline change --
-  // the rest prepared now, the loading screen counting them off. Slow once,
-  // by design: the owner would rather wait at the door than at every picture.
+  // index read for the whole book), and on a first open -- or after a
+  // pipeline change -- the rest prepared now, the loading screen counting
+  // them off. Slow once, by design: the owner would rather wait at the door
+  // than at every picture. Pictures prepared before the per-book folders are
+  // moved across, not prepared again.
   void prepareBookArt() {
     if (!_art) _art = (ArtRec*)malloc(sizeof(ArtRec) * ART_MAX);
     _artN = 0;
@@ -1539,42 +1555,62 @@ class EpubTool : public ToolApp {
           Names& N = *(Names*)ctx;
           EpubTool& T = *N.self;
           if (T._artN >= ART_MAX || strlen(nm) >= 192) return;
-          T._art[T._artN] = {bthumb::key(nm), usize, 0};
+          T._art[T._artN] = {bthumb::key(nm), usize, 0, false};
           snprintf(N.name[T._artN], 192, "%s", nm);
           T._artN++;
         },
         &names);
+    if (_artN == 0) {
+      free(names.name);
+      return;
+    }
+    const char* file = _books[_cur].file;
     int missing = 0;
-    for (int i = 0; i < _artN; i++) {
-      char inf[64];
-      epubart::infPath(_books[_cur].file, names.name[i], _art[i].usize, inf, sizeof(inf));
-      // One byte: the part count, or 0 for a picture this device cannot
-      // decode -- remembered, so a GIF is not retried on every open.
-      uint8_t n = 0xFF;
-      if (host().sdReadFile(inf, &n, 1) == 1 && n <= epubart::MAX_PARTS)
-        _art[i].parts = n;
-      else
-        _art[i].parts = 0xFF, missing++;
+    bool moved = false;
+    {
+      epubart::Prepared* idx =
+          (epubart::Prepared*)malloc(sizeof(epubart::Prepared) * epubart::INDEX_MAX);
+      const int ni = idx ? epubart::indexRead(host(), file, idx, epubart::INDEX_MAX) : -1;
+      for (int i = 0; i < _artN; i++) {
+        for (int j = 0; j < ni; j++)
+          if (idx[j].key == _art[i].key && idx[j].usize == _art[i].usize &&
+              idx[j].parts <= epubart::MAX_PARTS) {
+            _art[i].parts = idx[j].parts;
+            _art[i].known = true;
+            break;
+          }
+        if (_art[i].known) continue;
+        const int old = epubart::adoptOld(host(), file, _art[i].key, _art[i].usize);
+        if (old >= 0) {
+          _art[i].parts = (uint8_t)old;
+          _art[i].known = true;
+          moved = true;
+        } else {
+          missing++;
+        }
+      }
+      free(idx);
+    }
+    if (moved) {
+      epubart::dropOldDir(host(), file);
+      writeArtIndex();
     }
     if (missing) {
       _artTotal = missing;
       _artDone = 0;
       const uint32_t t0 = host().nowMs();
       for (int i = 0; i < _artN; i++) {
-        if (_art[i].parts != 0xFF) continue;
+        if (_art[i].known) continue;
         host().refresh(false);  // "preparing artwork 3 of 19"
         bool transient = false;
-        _art[i].parts = (uint8_t)epubart::prepare(host(), _book, _books[_cur].file, names.name[i],
-                                                  _art[i].usize, &transient);
-        if (!_art[i].parts && !transient) {
-          char inf[64];
-          epubart::infPath(_books[_cur].file, names.name[i], _art[i].usize, inf, sizeof(inf));
-          const uint8_t zero = 0;
-          if (host().sdStreamOpen(inf)) {
-            const bool w = host().sdStreamWrite(&zero, 1);
-            host().sdStreamClose(w);
-          }
-        }
+        _art[i].parts =
+            (uint8_t)epubart::prepare(host(), _book, file, names.name[i], _art[i].usize, &transient);
+        // A picture that cannot be decoded is remembered as 0 parts, so a GIF
+        // is not tried again on every open; a bad moment (memory, the card) is
+        // not, and the next open tries again.
+        _art[i].known = _art[i].parts > 0 || !transient;
+        // After each one, so a power-off halfway through keeps what is done.
+        if (_art[i].known) writeArtIndex();
         _artDone++;
       }
       char line[64];
@@ -1584,6 +1620,17 @@ class EpubTool : public ToolApp {
       _artTotal = 0;
     }
     free(names.name);
+  }
+
+  void writeArtIndex() {
+    epubart::Prepared* recs =
+        (epubart::Prepared*)malloc(sizeof(epubart::Prepared) * epubart::INDEX_MAX);
+    if (!recs) return;
+    int n = 0;
+    for (int i = 0; i < _artN && n < epubart::INDEX_MAX; i++)
+      if (_art[i].known) recs[n++] = {_art[i].key, _art[i].usize, _art[i].parts};
+    epubart::indexWrite(host(), _books[_cur].file, recs, n);
+    free(recs);
   }
 
   // This page's picture, as card paths: false when it was not prepared.
@@ -1597,7 +1644,7 @@ class EpubTool : public ToolApp {
   // The one-bit picture through the canvas: read whole (one card open, into
   // PSRAM), then only the ink is drawn.
   bool drawImagePage(ToolsCanvas& c) {
-    char g2[64], b1[64];
+    char g2[bstore::PATH_CAP], b1[bstore::PATH_CAP];
     if (!artPathsHere(g2, b1, sizeof(g2))) return false;
     _book.chapterClose();
     _streamLost = true;
@@ -1615,7 +1662,7 @@ class EpubTool : public ToolApp {
   bool showDeviceArtGrey() {
     if (!_pageImage[0] || _chrome || _menu != rmenu::Page::None || _screen != Screen::Page)
       return false;
-    char g2[64], b1[64];
+    char g2[bstore::PATH_CAP], b1[bstore::PATH_CAP];
     if (!artPathsHere(g2, b1, sizeof(g2))) return false;
     uint8_t* g = (uint8_t*)malloc(epubart::G2_BYTES);
     if (!g) return false;

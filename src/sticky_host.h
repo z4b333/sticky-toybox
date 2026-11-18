@@ -232,6 +232,9 @@ class StickyHost : public ToolsHost {
   int sdReadWhole(const char* path, void* dst, int max) override {
     return sdcard::readWhole(path, dst, max);
   }
+  bool sdMove(const char* from, const char* to) override { return sdcard::moveFile(from, to); }
+  bool sdRemove(const char* path) override { return sdcard::removeFile(path); }
+  bool sdRmdir(const char* path) override { return sdcard::removeDir(path); }
 
   ToolsCanvas& sharedCanvas() { return _canvas; }
   int _fastCount = 0;

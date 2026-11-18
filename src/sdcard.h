@@ -222,6 +222,12 @@ int fileSize(const char* path);
 bool streamOpen(const char* path);
 bool streamWrite(const uint8_t* data, uint32_t n);
 bool streamClose(bool keep);
+// The device's own files, moved and removed -- also only while the bus is
+// held. moveFile makes the destination's folders and replaces what is there;
+// removeDir takes an empty folder only.
+bool moveFile(const char* from, const char* to);
+bool removeFile(const char* path);
+bool removeDir(const char* path);
 
 #ifdef TOYBOX_HOST
 // Test hook: make the next streamClose(true) fail, so the harness can walk
@@ -238,6 +244,11 @@ void hostSetCrossRoots(bool on);  // the fake card grows a /Read shelf
 void hostDumpSides();
 int hostReadSide(const char* path, void* dst, int max);
 int hostCardFileSize(const char* path);
+// Moving, removing and looking for files as another build left them, with no
+// session open -- the per-book folder migration's "before".
+bool hostCardMove(const char* from, const char* to);
+bool hostCardRemove(const char* path);
+bool hostCardHasPrefix(const char* prefix);
 // What readFileAt has handed back since the last reset, so a guard can measure
 // what opening something costs the card.
 uint32_t hostBytesRead();

@@ -6,7 +6,8 @@
 // the JPEG or PNG itself the first time the page is reached, and keeps the
 // result on the card, so every later visit is a file read.
 //
-// Each part is two pictures, both 480x800 portrait, letterboxed white:
+// Each part is two pictures, both 480x800 portrait, letterboxed white, in the
+// book's own folder (book_store.h):
 //   .g2  96,000 B  four-level grey, 2 bpp, high pixel first, 0 = black ..
 //                  3 = white -- the .tbk grey page format, shown through the
 //                  panel's grey waveform when the page has no chrome over it
@@ -40,20 +41,41 @@ inline constexpr int PIPELINE = 2;
 // panel is held, at a size where its detail survives.
 inline constexpr int MAX_PARTS = 6;
 
-// Where one illustration's prepared pictures live on the card. Keyed by the
-// book's path, the picture's path inside the zip and its uncompressed size,
-// so a book replaced by a different edition does not inherit stale art. The
-// .inf file (one byte: the part count) is written last, so its presence
-// means every part is there.
+// Where one illustration's prepared pictures live: the book's own folder
+// (book_store.h), named from the picture's path inside the zip and its
+// uncompressed size, so a book replaced by a different edition does not
+// inherit stale art.
 void paths(const char* bookFile, const char* entry, uint32_t usize, int part, char* g2, char* b1,
            int cap);
-void infPath(const char* bookFile, const char* entry, uint32_t usize, char* inf, int cap);
 
-// Decodes `entry` from the open book and writes every part and the .inf.
-// Returns the part count, or 0 when the picture is not one this device can
-// decode (not JPEG/PNG, corrupt, too big) or memory/card failed; `transient`
-// says which -- a transient failure must not be remembered as "this picture
-// cannot be shown".
+// Which of a book's pictures are prepared: the folder's art.idx, read once
+// per open. `key` is the FNV-1a of the picture's zip path (bstore::key);
+// `parts` 0 means it cannot be decoded here -- remembered, so a GIF is not
+// tried again on every open. A transient failure is never recorded.
+struct Prepared {
+  uint32_t key;
+  uint32_t usize;
+  uint8_t parts;
+};
+inline constexpr int INDEX_MAX = 256;
+// The records, or -1 when there is no index (or one from another pipeline,
+// whose pictures look different and are prepared again).
+int indexRead(ToolsHost& host, const char* bookFile, Prepared* out, int max);
+bool indexWrite(ToolsHost& host, const char* bookFile, const Prepared* recs, int n);
+
+// Pictures prepared before the per-book folders, under /.toybox/art<N>/:
+// moves one picture's parts into the book's folder and returns its part
+// count (0 = remembered as undecodable), or -1 when there is nothing old to
+// move or the move failed -- prepare it then. dropOldDir removes the old
+// folder once it is empty.
+int adoptOld(ToolsHost& host, const char* bookFile, uint32_t key, uint32_t usize);
+void dropOldDir(ToolsHost& host, const char* bookFile);
+
+// Decodes `entry` from the open book and writes every part. Returns the part
+// count, or 0 when the picture is not one this device can decode (not
+// JPEG/PNG, corrupt, too big) or memory/card failed; `transient` says which
+// -- a transient failure must not be remembered as "this picture cannot be
+// shown". Recording the result in the index is the caller's job.
 int prepare(ToolsHost& host, epubc::Book& book, const char* bookFile, const char* entry,
             uint32_t usize, bool* transient = nullptr);
 

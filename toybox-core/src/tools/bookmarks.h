@@ -2,10 +2,11 @@
 //
 // On the CARD, not in flash, for the same reason covers are: a card carried to
 // another Sticky brings its books, its reading positions and now its marks,
-// and a reflash takes none of them away. The file is named from a hash of the
-// book's absolute path, like the cover cache, which means the same caveat --
-// rename the book and the marks are orphaned, exactly as its reading position
-// is. The file manager already says so at the moment of renaming.
+// and a reflash takes none of them away. The file sits in the book's own
+// folder (book_store.h), which is named from the book's path, like the cover
+// -- so the same caveat: rename the book and the marks are orphaned, exactly
+// as its reading position is. The file manager already says so at the moment
+// of renaming.
 //
 // Sixteen per book: this is a shelf for the handful of places worth going back
 // to, not a highlighting system. Each carries the words that were on the page
@@ -16,6 +17,7 @@
 #include <stdint.h>
 #include <string.h>
 
+#include "book_store.h"
 #include "tools_ui.h"
 
 namespace marks {
@@ -46,6 +48,11 @@ inline uint32_t key(const char* file) {
 }
 
 inline void path(const char* file, char* out, int cap) {
+  bstore::file(file, "marks.tbm", out, cap);
+}
+// Before the per-book folders. Still read when the new file is not there;
+// removed by the first save that writes the new one.
+inline void oldPath(const char* file, char* out, int cap) {
   snprintf(out, (size_t)cap, "/.toybox/marks/%08lx.tbm", (unsigned long)key(file));
 }
 
@@ -63,13 +70,23 @@ inline constexpr int LABEL_V2 = 40;
 inline constexpr int ENTRY_V2 = 8 + LABEL_V2;
 inline constexpr int FILE_BYTES_V2 = 6 + MAX * ENTRY_V2;
 
+inline bool save(ToolsHost& h, const char* file, const Mark* m, int n);
+
+// Moves an old-place file across as it is read, so the old folder empties
+// without waiting for the owner to keep another mark.
 inline int load(ToolsHost& h, const char* file, Mark* out) {
-  char p[48];
+  char p[bstore::PATH_CAP];
   path(file, p, sizeof(p));
   // Static: 1.7 KB is no stack frame's business, and neither reader loads
   // two books at once.
   static uint8_t buf[FILE_BYTES];
-  const int got = h.sdReadFile(p, buf, sizeof(buf));
+  int got = h.sdReadFile(p, buf, sizeof(buf));
+  bool fromOld = false;
+  if (got <= 0) {
+    oldPath(file, p, sizeof(p));
+    got = h.sdReadFile(p, buf, sizeof(buf));
+    fromOld = got > 0;
+  }
   int entry = ENTRY, labelBytes = LABEL;
   if (got == FILE_BYTES && memcmp(buf, "TBM3", 4) == 0) {
     // current
@@ -91,6 +108,7 @@ inline int load(ToolsHost& h, const char* file, Mark* out) {
     memcpy(out[i].label, e + 8, labelBytes);
     out[i].label[labelBytes - 1] = 0;
   }
+  if (fromOld) save(h, file, out, n);  // writes the new place, removes the old
   return n;
 }
 
@@ -113,9 +131,12 @@ inline bool save(ToolsHost& h, const char* file, const Mark* m, int n) {
     e[7] = (uint8_t)((m[i].off >> 24) & 255);
     memcpy(e + 8, m[i].label, LABEL);
   }
-  char p[48];
+  char p[bstore::PATH_CAP];
   path(file, p, sizeof(p));
-  return h.sdWriteFileAtomic(p, buf, sizeof(buf));
+  if (!h.sdWriteFileAtomic(p, buf, sizeof(buf))) return false;
+  oldPath(file, p, sizeof(p));
+  if (h.sdRemove(p)) h.sdRmdir("/.toybox/marks");  // moved; the folder goes when empty
+  return true;
 }
 
 // Marks are kept in reading order, so the list reads like the book. Returns

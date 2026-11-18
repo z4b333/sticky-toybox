@@ -161,7 +161,7 @@ bool StickyHost::crossCoverPut(const char* file) {
     snprintf(p, sizeof(p), "%s/cover.bmp", dir);
   }
   if (sdcard::exists(p)) return true;
-  char big[48];
+  char big[bstore::PATH_CAP];
   bthumb::bigPath(file, big, sizeof(big));
   // A 1-bit BMP, the shape their converter writes: 62-byte header (file
   // header, BITMAPINFOHEADER, a black-then-white palette), then bottom-up

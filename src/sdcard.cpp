@@ -888,6 +888,56 @@ bool streamClose(bool keep) {
   g_streamBuf.clear();
   return keep;
 }
+
+// Both stores the fake card keeps -- small side files and the card map --
+// because a guard plants into either, and the device has one card.
+static bool moveAny(const char* from, const char* to) {
+  for (FakeSide& s : g_side)
+    if (s.n > 0 && strcmp(s.path, from) == 0) {
+      for (FakeSide& t : g_side)
+        if (t.n > 0 && strcmp(t.path, to) == 0) t.n = 0;
+      fakeCard().erase(to);
+      strncpy(s.path, to, sizeof(s.path) - 1);
+      s.path[sizeof(s.path) - 1] = 0;
+      return true;
+    }
+  auto it = fakeCard().find(from);
+  if (it == fakeCard().end()) return false;
+  std::string data = it->second;
+  fakeCard().erase(it);
+  for (FakeSide& t : g_side)
+    if (t.n > 0 && strcmp(t.path, to) == 0) t.n = 0;
+  fakeCard()[to] = data;
+  return true;
+}
+static bool removeAny(const char* path) {
+  bool gone = fakeCard().erase(path) > 0;
+  for (FakeSide& s : g_side)
+    if (s.n > 0 && strcmp(s.path, path) == 0) s.n = 0, gone = true;
+  return gone;
+}
+bool moveFile(const char* from, const char* to) { return busHeld() && moveAny(from, to); }
+bool removeFile(const char* path) { return busHeld() && removeAny(path); }
+// The guards' back doors: the card as another build left it, with no session.
+bool hostCardMove(const char* from, const char* to) { return moveAny(from, to); }
+bool hostCardRemove(const char* path) { return removeAny(path); }
+bool hostCardHasPrefix(const char* prefix) {
+  const size_t n = strlen(prefix);
+  for (const auto& kv : fakeCard())
+    if (kv.first.compare(0, n, prefix) == 0) return true;
+  for (const FakeSide& s : g_side)
+    if (s.n > 0 && strncmp(s.path, prefix, n) == 0) return true;
+  return false;
+}
+bool removeDir(const char* path) {
+  if (!busHeld()) return false;
+  const std::string pre = std::string(path) + "/";
+  for (const auto& kv : fakeCard())
+    if (kv.first.compare(0, pre.size(), pre) == 0) return false;
+  for (const FakeSide& s : g_side)
+    if (s.n > 0 && strncmp(s.path, pre.c_str(), pre.size()) == 0) return false;
+  return true;
+}
 int readWhole(const char* path, void* dst, int max) {
   auto it = fakeCard().find(path);
   if (it == fakeCard().end()) return -1;
@@ -1579,7 +1629,7 @@ bool isEpubName(const char* n) {
 // mkdir every parent of `path` ("/a/b/c.bin" -> /a, /a/b). FAT mkdir on an
 // existing directory is a cheap no-op-with-false, so no exists() dance.
 void makeParents(const char* path) {
-  char tmp[128];
+  char tmp[160];
   strncpy(tmp, path, sizeof(tmp) - 1);
   tmp[sizeof(tmp) - 1] = 0;
   for (char* p = tmp + 1; *p; p++) {
@@ -2019,6 +2069,24 @@ bool streamClose(bool keep) {
   return keep;
 }
 
+bool moveFile(const char* from, const char* to) {
+  if (!busHeld() || !from || !to || from[0] != '/' || to[0] != '/') return false;
+  if (!SD.exists(from)) return false;
+  makeParents(to);
+  if (SD.exists(to)) SD.remove(to);  // FAT rename does not overwrite
+  return SD.rename(from, to);
+}
+
+bool removeFile(const char* path) {
+  if (!busHeld() || !path || path[0] != '/') return false;
+  return SD.exists(path) && SD.remove(path);
+}
+
+bool removeDir(const char* path) {
+  if (!busHeld() || !path || path[0] != '/') return false;
+  return SD.exists(path) && SD.rmdir(path);
+}
+
 int readWhole(const char* path, void* dst, int max) {
   // Borrow the bus only if nobody else has it. Claiming costs the card's
   // power-up and a controller reset -- about 150 ms, which disappears into
@@ -2337,7 +2405,7 @@ uint32_t mgrFreeMb() {
 bool writeFileAtomic(const char* path, const void* data, int n) {
   if (!busHeld()) return false;  // see readFileAt: any session, not the EPUB one
   makeParents(path);
-  char tmp[128];
+  char tmp[160];
   snprintf(tmp, sizeof(tmp), "%s.tmp", path);
   File f = SD.open(tmp, FILE_WRITE);
   if (!f) return false;
