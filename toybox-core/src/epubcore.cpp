@@ -2,6 +2,7 @@
 // CrossPoint compatibility. Nothing in this file draws or touches hardware:
 // bytes come in through epubc::IO, words come out of Book::next().
 #include "tools/epub/epubcore.h"
+#include <new>
 
 #include <ctype.h>
 #include <stdio.h>
@@ -400,6 +401,7 @@ bool Book::open(IO& io) {
 
 void Book::close() {
   chapterClose();
+  locFree();
   free(_spine);
   _spine = nullptr;
   _spineN = 0;
@@ -1086,6 +1088,7 @@ void Book::tokBlockBreak() {
 void Book::tokEmitCp(uint32_t cp, const char* utf8, int len) {
   if (!_insideBody || _nonVisibleDepth > 0) return;
   const uint32_t at = _offset;
+  if (_loc) locText(at, cp);
   _offset++;
   if (cp == ' ' || cp == '\t' || cp == '\r' || cp == '\n' || cp == '\f' || cp == '\v') {
     tokFlushWord();
@@ -1213,6 +1216,14 @@ int Book::tokPump() {
       if (closeTag) selfClose = false;
 
       // expat-shaped semantics: a self-closing tag is start then end
+      if (_loc && _insideBody) {
+        if (closeTag) {
+          if (!nameIs(name, "body")) locPop(name);
+        } else if (!nameIs(name, "body")) {
+          locPush(name);
+          if (selfClose) locPop(name);
+        }
+      }
       if (closeTag) {
         if (_nonVisibleDepth > 0) {
           _nonVisibleDepth--;
@@ -1226,7 +1237,10 @@ int Book::tokPump() {
         }
         if (_insideBody && _nonVisibleDepth == 0 && isBlockTag(name)) tokBlockBreak();
       } else {
-        if (nameIs(name, "body")) _insideBody = true;
+        if (nameIs(name, "body")) {
+          _insideBody = true;
+          if (_loc) locBody();
+        }
         const bool skip = _insideBody && (_nonVisibleDepth > 0 || isNonVisible(name));
         if (skip) _nonVisibleDepth++;
         if (_insideBody && _nonVisibleDepth == 0 && isBlockTag(name)) tokBlockBreak();
@@ -1385,6 +1399,290 @@ void Book::listImages(void (*fn)(void* ctx, const char* name, uint32_t usize), v
     for (int i = 0; i < 5 && dot[1 + i]; i++) ext[i] = (char)tolower((unsigned char)dot[1 + i]);
     if (!strcmp(ext, "jpg") || !strcmp(ext, "jpeg") || !strcmp(ext, "png")) fn(ctx, name, e.usize);
   });
+}
+
+
+// --- KOReader positions -------------------------------------------------------
+
+struct Book::Loc {
+  static constexpr int DEPTH = 40;   // deeper than any real chapter nests
+  static constexpr int NAMES = 24;   // distinct child names counted per element
+  static constexpr int NAME = 16;
+  struct Seg {
+    char name[NAME];
+    uint16_t idx;     // 1-based among same-named siblings
+    uint16_t textN;   // text runs seen directly inside, 1-based once one starts
+    uint8_t nNames;
+    uint32_t nameHash[NAMES];
+    uint16_t nameCnt[NAMES];
+  };
+  Seg seg[DEPTH + 1];  // seg[0] is <body> itself
+  int depth = 0;       // open elements below body (may exceed DEPTH; those are ignored)
+  bool pendingText = true;
+  uint32_t textStart = 0;
+  uint8_t mode = 0;    // 1 offset->path, 2 path->offset, 3 count
+  bool done = false;
+  // mode 1
+  uint32_t target = 0;
+  int spine = 0;
+  char* out = nullptr;
+  int cap = 0;
+  // mode 2
+  int tDepth = 0;
+  char tName[DEPTH][NAME];
+  uint16_t tIdx[DEPTH];
+  int tText = 0;        // 0 = the element itself, no text() part
+  uint32_t tOff = 0;
+  int inTarget = 0;     // depth of the matched element while it is open
+  uint32_t enterOff = 0, found = 0;
+};
+
+void Book::locFree() {
+  delete _loc;
+  _loc = nullptr;
+}
+
+namespace {
+void locName(const char* name, char* out, int cap) {
+  const char* colon = strchr(name, ':');
+  if (colon) name = colon + 1;
+  int n = 0;
+  for (; *name && n < cap - 1; name++) out[n++] = (char)lower(*name);
+  out[n] = 0;
+}
+}  // namespace
+
+void Book::locBody() {
+  Loc& L = *_loc;
+  L.depth = 0;
+  memset(&L.seg[0], 0, sizeof(L.seg[0]));
+  strcpy(L.seg[0].name, "body");
+  L.pendingText = true;
+}
+
+void Book::locPush(const char* rawName) {
+  Loc& L = *_loc;
+  L.pendingText = true;
+  if (L.depth >= Loc::DEPTH) {
+    L.depth++;
+    return;
+  }
+  char name[Loc::NAME];
+  locName(rawName, name, sizeof(name));
+  Loc::Seg& parent = L.seg[L.depth];
+  const uint32_t h = fnv(name, strlen(name));
+  uint16_t idx = 1;
+  int k = 0;
+  for (; k < parent.nNames; k++)
+    if (parent.nameHash[k] == h) break;
+  if (k < parent.nNames) {
+    idx = ++parent.nameCnt[k];
+  } else if (parent.nNames < Loc::NAMES) {
+    parent.nameHash[parent.nNames] = h;
+    parent.nameCnt[parent.nNames] = 1;
+    parent.nNames++;
+  }
+  L.depth++;
+  Loc::Seg& me = L.seg[L.depth];
+  memset(&me, 0, sizeof(me));
+  memcpy(me.name, name, sizeof(me.name));
+  me.idx = idx;
+
+  if (L.mode == 2 && !L.done && !L.inTarget && L.depth == L.tDepth) {
+    bool same = true;
+    for (int i = 0; i < L.tDepth && same; i++)
+      same = L.seg[i + 1].idx == L.tIdx[i] && !strcmp(L.seg[i + 1].name, L.tName[i]);
+    if (same) {
+      L.inTarget = L.depth;
+      L.enterOff = _offset;
+      if (L.tText == 0) {
+        L.found = _offset;
+        L.done = true;
+      }
+    }
+  }
+}
+
+void Book::locPop(const char* rawName) {
+  Loc& L = *_loc;
+  L.pendingText = true;
+  if (L.depth == 0) return;
+  if (L.depth > Loc::DEPTH) {
+    L.depth--;
+    return;
+  }
+  // A close tag that does not match the top closes back to its own element,
+  // if it is open at all; a stray one is ignored rather than unwinding the
+  // whole stack.
+  char name[Loc::NAME];
+  locName(rawName, name, sizeof(name));
+  int d = L.depth;
+  while (d > 0 && strcmp(L.seg[d].name, name) != 0) d--;
+  if (d == 0) return;
+  if (L.mode == 2 && L.inTarget && d <= L.inTarget && !L.done) {
+    // The element ended before its text run did: its start is the answer.
+    L.found = L.enterOff;
+    L.done = true;
+  }
+  L.depth = d - 1;
+}
+
+void Book::locText(uint32_t at, uint32_t cp) {
+  Loc& L = *_loc;
+  if (L.done) return;
+  const int lvl = L.depth > Loc::DEPTH ? Loc::DEPTH : L.depth;
+  if (L.pendingText) {
+    L.seg[lvl].textN++;
+    L.textStart = at;
+    L.pendingText = false;
+  }
+  const bool ws = cp == ' ' || cp == '\t' || cp == '\r' || cp == '\n' || cp == '\f' ||
+                  cp == '\v';
+  if (L.mode == 1 && at >= L.target && !ws) {
+    // Whitespace is never an anchor: a target inside a run of it lands on
+    // the next character that is drawn. The path is written NOW -- the
+    // tokenizer goes on to the end of the word, and may cross tags doing it.
+    int n = snprintf(L.out, (size_t)L.cap, "/body/DocFragment[%d]/body", L.spine + 1);
+    const int top = lvl;
+    for (int i = 1; i <= top && n > 0 && n < L.cap; i++)
+      n += snprintf(L.out + n, (size_t)(L.cap - n), "/%s[%u]", L.seg[i].name, L.seg[i].idx);
+    if (n > 0 && n < L.cap)
+      n += snprintf(L.out + n, (size_t)(L.cap - n), "/text()[%u].%lu", L.seg[lvl].textN,
+                    (unsigned long)(at - L.textStart));
+    if (!(n > 0 && n < L.cap)) L.out[0] = 0;
+    L.done = true;
+    return;
+  }
+  if (L.mode == 2 && L.inTarget && L.depth == L.inTarget &&
+      L.seg[L.inTarget].textN == L.tText && at == L.textStart) {
+    L.found = at + L.tOff;
+    L.done = true;
+  }
+}
+
+// Replays one chapter with the stack riding along until the job is done or
+// the chapter ends.
+bool Book::locRun(int spineIdx) {
+  if (!chapterOpen(spineIdx)) return false;
+  char word[WORD_CAP];
+  uint32_t off = 0;
+  for (;;) {
+    if (_loc->done) break;
+    const int t = next(word, off);
+    if (t == TOK_END || t == TOK_ERR) break;
+  }
+  chapterClose();
+  return true;
+}
+
+bool Book::xpointerFor(int spineIdx, uint32_t offset, char* out, int cap) {
+  if (!out || cap < 40) return false;
+  out[0] = 0;
+  delete _loc;
+  _loc = new (std::nothrow) Loc();
+  if (!_loc) return false;
+  _loc->mode = 1;
+  _loc->target = offset;
+  _loc->spine = spineIdx;
+  _loc->out = out;
+  _loc->cap = cap;
+  // A target past the last drawn character (the very end of a chapter) has
+  // no character to stand on: the chapter's body is the honest answer.
+  const bool ran = locRun(spineIdx);
+  const bool hit = _loc->done && out[0];
+  delete _loc;
+  _loc = nullptr;
+  if (!ran) return false;
+  if (!hit) snprintf(out, (size_t)cap, "/body/DocFragment[%d]/body", spineIdx + 1);
+  return true;
+}
+
+bool Book::offsetFor(const char* xp, int& spineIdx, uint32_t& offset) {
+  if (!xp) return false;
+  const char* df = strstr(xp, "DocFragment[");
+  if (!df) return false;
+  const int frag = atoi(df + 12);
+  if (frag < 1 || frag > _spineN) return false;
+  const char* p = strchr(df, ']');
+  if (!p) return false;
+  p++;
+  if (strncmp(p, "/body", 5) != 0) return false;
+  p += 5;
+  if (*p == '[') {  // "/body[1]"
+    while (*p && *p != ']') p++;
+    if (*p) p++;
+  }
+
+  delete _loc;
+  _loc = new (std::nothrow) Loc();
+  if (!_loc) return false;
+  Loc& L = *_loc;
+  L.mode = 2;
+  bool bad = false;
+  while (*p == '/' && !bad) {
+    p++;
+    if (!strncmp(p, "text()", 6)) {
+      p += 6;
+      L.tText = 1;
+      if (*p == '[') {
+        L.tText = atoi(p + 1);
+        while (*p && *p != ']') p++;
+        if (*p) p++;
+      }
+      if (*p == '.') L.tOff = (uint32_t)strtoul(p + 1, nullptr, 10);
+      if (L.tText < 1) L.tText = 1;
+      break;
+    }
+    if (L.tDepth >= Loc::DEPTH) {
+      bad = true;
+      break;
+    }
+    char seg[Loc::NAME * 2];
+    int n = 0;
+    while (*p && *p != '/' && *p != '[' && *p != '.' && n < (int)sizeof(seg) - 1) seg[n++] = *p++;
+    seg[n] = 0;
+    locName(seg, L.tName[L.tDepth], Loc::NAME);
+    uint16_t idx = 1;
+    if (*p == '[') {
+      idx = (uint16_t)atoi(p + 1);
+      while (*p && *p != ']') p++;
+      if (*p) p++;
+    }
+    if (*p == '.') {  // an offset on an element: not a form this reader writes
+      while (*p && *p != '/') p++;
+    }
+    L.tIdx[L.tDepth] = idx ? idx : 1;
+    if (!L.tName[L.tDepth][0]) bad = true;
+    L.tDepth++;
+  }
+  bool ok = false;
+  if (!bad) {
+    if (L.tDepth == 0) {  // the chapter's body: its very start
+      spineIdx = frag - 1;
+      offset = 0;
+      ok = true;
+    } else if (locRun(frag - 1) && L.done) {
+      spineIdx = frag - 1;
+      offset = L.found;
+      ok = true;
+    }
+  }
+  delete _loc;
+  _loc = nullptr;
+  return ok;
+}
+
+uint32_t Book::chapterLength(int spineIdx) {
+  if (!chapterOpen(spineIdx)) return 0;
+  char word[WORD_CAP];
+  uint32_t off = 0;
+  for (;;) {
+    const int t = next(word, off);
+    if (t == TOK_END || t == TOK_ERR) break;
+  }
+  const uint32_t n = _offset;
+  chapterClose();
+  return n;
 }
 
 }  // namespace epubc

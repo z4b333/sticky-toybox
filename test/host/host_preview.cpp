@@ -4056,6 +4056,274 @@ int main() {
       printf("rotation ok (three buttons, turns on close, offset pinned)\n");
       toybox.onButton(SideBtn::Ok);  // panel up for the close row below
     }
+    // --- KOReader progress sync, from the panel ---------------------------
+    // With a home Wi-Fi and a sync account saved, the panel grows an eighth
+    // row. Guarded through a stand-in server: an upload carries an xpointer
+    // that reads back to this very page; another reader further on is ASKED
+    // about, never jumped to; JUMP lands on its place and STAY does not move
+    // or upload; a place this file does not have falls back to the
+    // percentage; failures say why; and the radio is off after every run.
+    {
+      g_dumpEnabled = false;
+      toybox.onButton(SideBtn::Ok);  // panel down...
+      homenet::saveWifi(stickyHost.prefs(), "Somchai 5G", "correct horse");
+      kosync::forgetAccount(stickyHost.prefs());
+      kosync::g_server = kosync::HostServer();
+      homenet::g_hostNet = homenet::Result::Ok;
+      toybox.onButton(SideBtn::Ok);  // ...and up again, now with Sync
+      g_dumpEnabled = true;
+      setScreen("tool_epub_options_sync");
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+      const int rowSync = 6;
+      const int signY = 560 + 120 + 40;
+
+      // 0. No account: the row signs in with Readest. A code, shown as a QR
+      // code, polled while pending; CANCEL and an expired code both leave
+      // the radio off and nothing saved; an approval saves the device key as
+      // the account (md5 of it, the x-auth-key Readest checks) and goes
+      // straight on to the sync.
+      {
+        homenet::g_hostJoins = homenet::g_hostOffs = 0;
+        toybox.onTap(240, rmenu::rootRect(rowSync, 480).y + 30);
+        if (et->hostSyncStage() != 3) {
+          printf("SYNC FAIL: with no account the row did not start sign-in (stage %d)\n",
+                 et->hostSyncStage());
+          abort();
+        }
+        toybox.tick();  // asks for the code
+        if (et->hostSyncStage() != 4 || kosync::g_server.codes != 1 || homenet::g_hostOffs != 0) {
+          printf("SYNC FAIL: no code on screen (stage %d, %d codes)\n", et->hostSyncStage(),
+                 kosync::g_server.codes);
+          abort();
+        }
+        g_dumpEnabled = true;
+        setScreen("tool_epub_sync_signin");
+        stickyHost.refresh(true);
+        g_dumpEnabled = false;
+        // CANCEL while pending: radio off, nothing saved, back to the options.
+        toybox.onTap(240, signY);
+        if (et->hostSyncStage() != 0 || homenet::g_hostOffs != 1 ||
+            kosync::haveAccount(stickyHost.prefs()) || et->hostMenu() != (int)rmenu::Page::Root) {
+          printf("SYNC FAIL: CANCEL left stage %d, offs %d, menu %d\n", et->hostSyncStage(),
+                 homenet::g_hostOffs, et->hostMenu());
+          abort();
+        }
+        // An expired code.
+        kosync::g_server.polls = 0;
+        kosync::g_server.expire = true;
+        toybox.onTap(240, rmenu::rootRect(rowSync, 480).y + 30);
+        for (int i = 0; i < 6 && et->hostSyncStage() != 2; i++) toybox.tick();
+        if (et->hostSyncOut() != 3 || kosync::haveAccount(stickyHost.prefs())) {
+          printf("SYNC FAIL: an expired code gave out %d\n", et->hostSyncOut());
+          abort();
+        }
+        toybox.onTap(240, 560 + 40);  // back to the book
+        toybox.onButton(SideBtn::Ok);
+        // Approved after two pending polls.
+        kosync::g_server.polls = 0;
+        kosync::g_server.expire = false;
+        homenet::g_hostOffs = 0;
+        toybox.onTap(240, rmenu::rootRect(rowSync, 480).y + 30);
+        for (int i = 0; i < 8 && et->hostSyncStage() != 2; i++) toybox.tick();
+        char key[40], want[33];
+        stickyHost.prefs().getString(kosync::K_KEY, key, sizeof(key));
+        md5t::hex("devkey-123", want);
+        if (!kosync::isReadest(stickyHost.prefs()) || strcmp(key, want) ||
+            kosync::g_server.polls != 3 || et->hostSyncOut() != 0 || kosync::g_server.puts != 1) {
+          printf("SYNC FAIL: approval: readest %d key ok %d polls %d out %d puts %d\n",
+                 kosync::isReadest(stickyHost.prefs()), !strcmp(key, want), kosync::g_server.polls,
+                 et->hostSyncOut(), kosync::g_server.puts);
+          abort();
+        }
+        if (homenet::g_hostOffs != 2) {  // once after sign-in, once after the sync
+          printf("SYNC FAIL: radio offs %d after sign-in + sync\n", homenet::g_hostOffs);
+          abort();
+        }
+        toybox.onTap(240, 560 + 40);  // back to the book
+        toybox.onButton(SideBtn::Ok);
+        kosync::g_server = kosync::HostServer();
+      }
+      auto tapSync = [&](const char* busyShot) {
+        homenet::g_hostJoins = homenet::g_hostOffs = 0;
+        if (busyShot) {
+          g_dumpEnabled = true;
+          setScreen(busyShot);
+        }
+        toybox.onTap(240, rmenu::rootRect(rowSync, 480).y + 30);
+        g_dumpEnabled = false;
+        if (et->hostMenu() != (int)rmenu::Page::Sync || et->hostSyncStage() != 1) {
+          printf("SYNC FAIL: the Sync row did not start (menu %d stage %d)\n", et->hostMenu(),
+                 et->hostSyncStage());
+          abort();
+        }
+        toybox.tick();
+        if (et->hostSyncStage() != 2 || homenet::g_hostOffs != 1) {
+          printf("SYNC FAIL: stage %d after the tick, radio offs %d\n", et->hostSyncStage(),
+                 homenet::g_hostOffs);
+          abort();
+        }
+      };
+      const int btnY = 560 + 40;
+
+      // 1. Nothing on the server: upload, and the xpointer is this page.
+      const int spineHere = et->hostSpine();
+      const uint32_t offHere = et->hostPageOffset();
+      tapSync("tool_epub_sync_busy");
+      if (et->hostSyncOut() != 0 || kosync::g_server.puts != 1) {
+        printf("SYNC FAIL: an empty server got out %d, %d puts\n", et->hostSyncOut(),
+               kosync::g_server.puts);
+        abort();
+      }
+      g_dumpEnabled = true;
+      setScreen("tool_epub_sync_sent");
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+      kosync::Remote sent;
+      kosync::parseRemote(kosync::g_server.lastPut.c_str(), sent);
+      int s1 = -1;
+      uint32_t o1 = 0;
+      if (!et->hostLocate(sent.progress, s1, o1) || s1 != spineHere || o1 < offHere) {
+        printf("SYNC FAIL: uploaded '%s' reads back as %d:%u, the page is %d:%u\n", sent.progress,
+               s1, o1, spineHere, offHere);
+        abort();
+      }
+      if (fabs(sent.percentage - et->hostBookFraction()) > 1e-6 || strcmp(sent.device, "Toybox")) {
+        printf("SYNC FAIL: uploaded %.4f from '%s'\n", sent.percentage, sent.device);
+        abort();
+      }
+      toybox.onTap(240, btnY);  // back to the book
+      if (et->hostMenu() != 0 || et->hostSpine() != spineHere) {
+        printf("SYNC FAIL: 'Back to the book' left menu %d spine %d\n", et->hostMenu(),
+               et->hostSpine());
+        abort();
+      }
+
+      // 2. Readest is further on: ask. Its place is a real xpointer in
+      // chapter 2 of this book.
+      char doc[33];
+      et->hostDocHash(doc);
+      char farXp[240];
+      et->hostXp(1, 2500, farXp, sizeof(farXp));
+      int sFar = -1;
+      uint32_t oFar = 0;
+      et->hostLocate(farXp, sFar, oFar);
+      auto storeRemote = [&](const char* xp, double pct) {
+        char body[600];
+        snprintf(body, sizeof(body),
+                 "{\"document\":\"%s\",\"progress\":\"%s\",\"percentage\":%.4f,"
+                 "\"device\":\"Readest\",\"device_id\":\"readest-1\",\"timestamp\":1787300000}",
+                 doc, xp, pct);
+        kosync::g_server.rec[doc] = body;
+      };
+      storeRemote(farXp, 0.93);
+      toybox.onButton(SideBtn::Ok);
+      const int putsBefore = kosync::g_server.puts;
+      tapSync(nullptr);
+      if (et->hostSyncOut() != 2) {
+        printf("SYNC FAIL: a reader further on gave out %d, not ASK\n", et->hostSyncOut());
+        abort();
+      }
+      g_dumpEnabled = true;
+      setScreen("tool_epub_sync_ask");
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+      // STAY: nothing moves, nothing is sent.
+      toybox.onTap(360, btnY);
+      if (et->hostMenu() != 0 || et->hostSpine() != spineHere ||
+          kosync::g_server.puts != putsBefore) {
+        printf("SYNC FAIL: STAY moved to %d or sent (%d puts)\n", et->hostSpine(),
+               kosync::g_server.puts - putsBefore);
+        abort();
+      }
+      // JUMP: on the page holding the other reader's place.
+      toybox.onButton(SideBtn::Ok);
+      tapSync(nullptr);
+      toybox.onTap(120, btnY);
+      if (et->hostMenu() != 0 || et->hostSpine() != sFar || et->hostPageOffset() > oFar) {
+        printf("SYNC FAIL: JUMP landed %d:%u, the place is %d:%u\n", et->hostSpine(),
+               et->hostPageOffset(), sFar, oFar);
+        abort();
+      }
+
+      // 3. A place this file does not have: the percentage decides.
+      storeRemote("/body/DocFragment[2]/body/table[9]/tr[1]/text()[1].0", 0.97);
+      toybox.onButton(SideBtn::Ok);
+      tapSync(nullptr);
+      toybox.onTap(120, btnY);
+      if (et->hostMenu() != 0 || et->hostSpine() < sFar) {
+        printf("SYNC FAIL: the percentage fallback went back to spine %d\n", et->hostSpine());
+        abort();
+      }
+
+      // 4. In step: their paragraph is on the page shown. Its percentage is
+      // set far off on purpose -- the paragraph decides, not the number.
+      {
+        char hereXp[240];
+        et->hostXp(et->hostSpine(), et->hostPageOffset(), hereXp, sizeof(hereXp));
+        storeRemote(hereXp, 0.5);
+      }
+      toybox.onButton(SideBtn::Ok);
+      const int putsSame = kosync::g_server.puts;
+      tapSync(nullptr);
+      if (et->hostSyncOut() != 1 || kosync::g_server.puts != putsSame) {
+        printf("SYNC FAIL: the same place gave out %d with %d puts\n", et->hostSyncOut(),
+               kosync::g_server.puts - putsSame);
+        abort();
+      }
+      toybox.onTap(240, btnY);
+
+      // 4b. Behind by paragraph, though its percentage claims further on:
+      // upload ours, ask nothing.
+      {
+        char backXp[240];
+        et->hostXp(0, 0, backXp, sizeof(backXp));
+        storeRemote(backXp, 0.99);
+        toybox.onButton(SideBtn::Ok);
+        const int putsBack = kosync::g_server.puts;
+        tapSync(nullptr);
+        if (et->hostSyncOut() != 0 || kosync::g_server.puts != putsBack + 1) {
+          printf("SYNC FAIL: a paragraph behind gave out %d with %d puts\n", et->hostSyncOut(),
+                 kosync::g_server.puts - putsBack);
+          abort();
+        }
+        toybox.onTap(240, btnY);
+      }
+
+      // 5. Failures say what failed, and the place on the card stays.
+      kosync::g_server.fail = kosync::Result::AuthFailed;
+      toybox.onButton(SideBtn::Ok);
+      tapSync(nullptr);
+      if (et->hostSyncOut() != 3) {
+        printf("SYNC FAIL: a refused account gave out %d\n", et->hostSyncOut());
+        abort();
+      }
+      g_dumpEnabled = true;
+      setScreen("tool_epub_sync_refused");
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+      toybox.onTap(240, btnY);
+      kosync::g_server.fail = kosync::Result::Ok;
+      homenet::g_hostNet = homenet::Result::NotFound;
+      toybox.onButton(SideBtn::Ok);
+      tapSync(nullptr);
+      if (et->hostSyncOut() != 3 || kosync::g_server.gets == 0) {
+        printf("SYNC FAIL: a missing router gave out %d\n", et->hostSyncOut());
+        abort();
+      }
+      toybox.onTap(240, btnY);
+      homenet::g_hostNet = homenet::Result::Ok;
+
+      // Back as the rest of this test found it: no account, the panel up,
+      // the first chapter on the page.
+      homenet::forgetWifi(stickyHost.prefs());
+      kosync::forgetAccount(stickyHost.prefs());
+      et->hostGoto(spineHere, offHere);
+      toybox.onButton(SideBtn::Ok);
+      g_dumpEnabled = false;  // as the rotation checks above left it
+      printf("kosync panel ok (upload reads back, ask/stay/jump, percentage fallback, in step, "
+             "failures, radio off each run)\n");
+    }
     // Row 6 now: "Start again" sits between the rotation buttons and the way
     // out, so a thumb reaching for one cannot land on the other.
     toybox.onTap(240, rmenu::rootRect(6, 480).y + 40);

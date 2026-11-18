@@ -106,6 +106,27 @@ class Book {
   // when a book is first opened. Off the in-memory directory, so cheap.
   void listImages(void (*fn)(void* ctx, const char* name, uint32_t usize), void* ctx);
 
+  // --- KOReader positions (xpointers) -------------------------------------
+  // KOReader, and Readest through it, name a place in a book by its path in
+  // the chapter's element tree: "/body/DocFragment[8]/body/div[2]/p[4]/
+  // text()[1].17" -- the 17th character of the first text run of the fourth
+  // <p> in the second <div> of the eighth spine item. This reader has no tree;
+  // it streams words and counts visible codepoints. So both directions replay
+  // the chapter through the SAME tokenizer that counts the reader's offsets,
+  // with a small element stack riding along, and the two can never disagree
+  // about where a character is. Indices are always written (p[1], text()[1]),
+  // as CrossPoint does; both KOReader and Readest read them.
+  //
+  // Each call opens the chapter itself, so whatever chapter was streaming is
+  // closed -- the caller reopens its own afterwards.
+  bool xpointerFor(int spineIdx, uint32_t offset, char* out, int cap);
+  // false when the path is not in this file (a different edition, or a DOM
+  // crengine built differently): the caller falls back to the percentage.
+  bool offsetFor(const char* xp, int& spineIdx, uint32_t& offset);
+  // Visible codepoints in a chapter -- for placing a bare percentage.
+  uint32_t chapterLength(int spineIdx);
+  struct Loc;  // the element stack, allocated only while one of the above runs
+
   // --- the table of contents ---------------------------------------------
   // Where the book says its chapters begin. EPUB3 keeps it in an XHTML nav
   // document, EPUB2 in an NCX file, and plenty of books carry both; either is
@@ -232,6 +253,14 @@ class Book {
   bool _outReady = false;
   bool _wordSinceBreak = false;
   int _queued = 0;              // TOK_PARA or TOK_END waiting behind the slot
+
+  Loc* _loc = nullptr;
+  void locFree();
+  void locBody();
+  void locPush(const char* name);
+  void locPop(const char* name);
+  void locText(uint32_t at, uint32_t cp);
+  bool locRun(int spineIdx);
 };
 
 // --- CrossPoint sidecar compatibility ---------------------------------------

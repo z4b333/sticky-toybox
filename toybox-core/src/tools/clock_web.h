@@ -12,6 +12,7 @@
 #pragma once
 #include "clock_set.h"
 #include "home_net.h"
+#include "kosync.h"
 #include "portal.h"
 #include "tools_ui.h"
 
@@ -51,6 +52,9 @@ class ClockServer {
     _wifiSaved = _prefs && homenet::saveWifi(*_prefs, ssid, pass);
     return _wifiSaved;
   }
+  bool hostSendAccount(const char* server, const char* user, const char* pass) {
+    return _prefs && kosync::saveAccount(*_prefs, server, user, pass);
+  }
   bool wasSet() const { return _set; }
   bool wasRefused() const { return _refused; }
   bool wifiSaved() const { return _wifiSaved; }
@@ -81,6 +85,7 @@ class ClockServer {
     _portal.serveIndex([this] { sendPage(); });
     _portal.on("/t", HTTP_POST, [this] { takeTime(); });
     _portal.on("/w", HTTP_POST, [this] { takeWifi(); });
+    _portal.on("/k", HTTP_POST, [this] { takeAccount(); });
     return true;
   }
   void stop() { _portal.end(); }
@@ -127,6 +132,16 @@ class ClockServer {
     s.send(200, "application/json", ok ? "{\"ok\":1}" : "{\"ok\":0}");
   }
 
+  // The KOReader sync account. The password is hashed on arrival
+  // (kosync::saveAccount) and never stored or sent anywhere as typed.
+  void takeAccount() {
+    WebServer& s = _portal.server();
+    const bool ok = _prefs && s.hasArg("u") && s.hasArg("p") &&
+                    kosync::saveAccount(*_prefs, s.hasArg("s") ? s.arg("s").c_str() : "",
+                                        s.arg("u").c_str(), s.arg("p").c_str());
+    s.send(200, "application/json", ok ? "{\"ok\":1}" : "{\"ok\":0}");
+  }
+
   void sendPage();
 
   portal::Portal _portal;
@@ -163,6 +178,14 @@ reading. The password stays on the device.</p>
 <form id="wf"><input id="ws" placeholder="Wi-Fi name" autocapitalize="off" autocomplete="off" maxlength="32">
 <input id="wp" type="password" placeholder="Password" autocomplete="off" maxlength="63">
 <button>Save home Wi-Fi</button></form><div id="wm"></div>
+<h2>Other sync server <span>(optional)</span></h2>
+<p>For Readest, skip this: on the device open a book, then Options &rarr;
+Sync position, and scan its code. Here only for a KOReader sync server
+(matching: Binary).</p>
+<form id="kf"><input id="ku" placeholder="User name" autocapitalize="off" autocomplete="off" maxlength="63">
+<input id="kp" type="password" placeholder="Password" autocomplete="off">
+<input id="ks" placeholder="Server (blank = sync.koreader.rocks)" autocapitalize="off" autocomplete="off" maxlength="95">
+<button>Save sync account</button></form><div id="km"></div>
 <small>Your time zone is sent with the time. If you travel, open this page
 again and send.</small>
 <script>
@@ -197,6 +220,16 @@ function send(){
 }
 document.getElementById('again').addEventListener('click',send);
 send();
+document.getElementById('kf').addEventListener('submit',function(e){
+ e.preventDefault();var m=document.getElementById('km'),u=document.getElementById('ku').value,
+ k=document.getElementById('kp').value,v=document.getElementById('ks').value.trim();
+ if(!u||!k){m.textContent='User name and password, please.';return}
+ if(v&&!/^https?:\/\//.test(v)){m.textContent='The server starts with https:// (or http://).';return}
+ fetch('/k',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
+  body:'u='+encodeURIComponent(u)+'&p='+encodeURIComponent(k)+'&s='+encodeURIComponent(v)})
+ .then(function(r){return r.json()}).then(function(j){m.textContent=j.ok?
+  'Saved. Open a book, then Options \u2192 Sync position.':'The device did not accept that.'})
+ .catch(function(){m.textContent='Could not reach the device. Still connected to its wifi?'})});
 document.getElementById('wf').addEventListener('submit',function(e){
  e.preventDefault();var m=document.getElementById('wm'),n=document.getElementById('ws').value,
  k=document.getElementById('wp').value;

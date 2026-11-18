@@ -3,6 +3,7 @@
 # preview_dbg -- a 2.7 MB compiled binary -- ended up committed.
 test/host/preview*
 test/host/test_logic
+test/host/kosync_test
 test/host/*.pgm
 __pycache__/
 

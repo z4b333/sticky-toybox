@@ -107,6 +107,25 @@ g++ -std=gnu++17 -O2 -w -DTOYBOX_HOST -I . -I mock -I ../../src \
 ./preview
 ```
 
+### Reading sync (KOReader / Readest)
+
+`kosync_test.cpp` checks the sync code that needs no screen: MD5, the book's
+KOReader "binary" id, the JSON, the upload-or-ask rule, and every xpointer in
+`fixtures/kosync.epub`, both directions, against positions computed by an
+independent Python reading of the same rules (`tools/kosync_reference.py`).
+
+```
+cd test/host
+g++ -std=gnu++17 -O2 -w -DTOYBOX_HOST -I . -I mock -I ../../src \
+  -I ../../toybox-core/src -I ../../lib/miniz/src \
+  kosync_test.cpp ../../toybox-core/src/epubcore.cpp \
+  ../../lib/miniz/src/toybox_miniz_impl.c -o kosync_test
+./kosync_test fixtures/kosync.epub fixtures/kosync_expect.txt
+```
+
+The phone's clock page (time, time zone, home Wi-Fi, sync account) is driven
+in Chromium by `test/web/test_clock_page.py` (run it from `test/web`).
+
 ## Releasing
 
 The version string comes from `git describe --tags`, and three places show it:

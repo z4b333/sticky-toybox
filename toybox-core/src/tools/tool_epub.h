@@ -20,7 +20,10 @@
 #include "epub/epubcore.h"
 #include "epub/koreader_sdr.h"
 #include "bookmarks.h"
+#include "flash_qr.h"
 #include "help.h"
+#include "home_net.h"
+#include "kosync.h"
 #include "lock_image.h"
 #include "reader_menu.h"
 #include "recents.h"
@@ -393,6 +396,21 @@ class EpubTool : public ToolApp {
   int hostSpine() const { return _spine; }
   int hostPage() const { return _page; }
   uint32_t hostPageOffset() const { return curOffset(); }
+  bool hostXp(int spine, uint32_t off, char* out, int cap) {
+    const bool r = _book.xpointerFor(spine, off, out, cap);
+    _streamLost = true;
+    return r;
+  }
+  bool hostLocate(const char* xp, int& spine, uint32_t& off) {
+    const bool r = _book.offsetFor(xp, spine, off);
+    _streamLost = true;
+    return r;
+  }
+  bool hostDocHash(char out[33]) { return kosync::docHash(_io, out); }
+  int hostSyncStage() const { return _syncStage; }
+  void hostSyncTick() { tick(); }
+  int hostSyncOut() const { return _syncOut; }
+  double hostBookFraction() const { return bookFraction(); }
   const char* hostPageImage() const { return _pageImage; }
   int hostPageImagePart() const { return _pageImagePart; }
   int hostArtParts(const char* entry) const { return artParts(entry); }
@@ -538,8 +556,22 @@ class EpubTool : public ToolApp {
     _saveDue = host().nowMs() + SAVE_DELAY_MS;
     if (_saveDue == 0) _saveDue = 1;  // 0 means "nothing pending"
   }
-  bool wantsTick() const override { return _saveDue != 0; }
+  bool wantsTick() const override {
+    return _saveDue != 0 || _syncStage == 1 || _syncStage == 3 || _syncStage == 4;
+  }
   void tick() override {
+    if (_syncStage == 3 || _syncStage == 4) {
+      if (signInStep()) paint();
+      return;
+    }
+    if (_syncStage == 1) {
+      // The "syncing" screen went up with the tap; this is the wait it
+      // promised, blocking, with every step on a deadline.
+      runSync();
+      _syncStage = 2;
+      paint();
+      return;
+    }
     if (_saveDue && (int32_t)(host().nowMs() - _saveDue) >= 0) {
       const uint32_t t0 = host().nowMs();
       saveProgress();
@@ -1744,6 +1776,253 @@ class EpubTool : public ToolApp {
   // Opened by the power button. Everything in here is about the book you are
   // in the middle of, which is why none of it lives in settings.
 
+  // --- KOReader progress sync ---------------------------------------------
+  // One row on the panel, offered once a home Wi-Fi and a sync account are
+  // both saved (the phone's clock page takes both). The rules for what to do
+  // with the answer live in kosync::decide().
+  static constexpr int SYNC_BTN_Y = 560, SYNC_BTN_H = 96;
+  enum : uint8_t { SO_SENT, SO_SAME, SO_ASK, SO_FAIL };
+
+  // A home Wi-Fi is the one thing needed; with no account yet, the row
+  // signs in with Readest first.
+  bool syncReady() { return homenet::haveWifi(prefs()); }
+
+  void syncFail(const char* why) {
+    _syncOut = SO_FAIL;
+    snprintf(_syncMsg, sizeof(_syncMsg), "%s", why);
+    char line[96];
+    snprintf(line, sizeof(line), "sync: result failed - %s", why);
+    host().perfLog(line);
+  }
+
+  // Leaving the sign-in screen any way at all switches the radio off: it is
+  // the only state in which the radio stays up between ticks.
+  void syncAbort() {
+    if (_syncStage == 4) homenet::off();
+    _syncStage = 0;
+  }
+
+  // Sign-in with Readest (stage 3 = asking for a code, 4 = showing it and
+  // polling). Returns true when the screen must change.
+  bool signInStep() {
+    if (_syncStage == 3) {
+      const homenet::Result j = homenet::connect(prefs());
+      if (j != homenet::Result::Ok) {
+        syncFail(homenet::describe(j));
+        _syncStage = 2;
+        return true;
+      }
+      const kosync::Result r = kosync::requestCode(_code);
+      if (r != kosync::Result::Ok) {
+        homenet::off();
+        syncFail("Readest did not answer");
+        _syncStage = 2;
+        return true;
+      }
+      _codeT0 = _lastPoll = host().nowMs();
+      _syncStage = 4;
+      host().perfLog("sync: readest sign-in code shown");
+      return true;
+    }
+    // stage 4: poll at the server's pace
+    const uint32_t now = host().nowMs();
+#ifndef TOYBOX_HOST
+    if (now - _lastPoll < _code.intervalS * 1000u) return false;
+#endif
+    _lastPoll = now;
+    const kosync::Poll p = kosync::pollCode(prefs(), _code);
+    if (p == kosync::Poll::Pending && now - _codeT0 < _code.expiresS * 1000u) return false;
+    homenet::off();
+    if (p == kosync::Poll::Approved) {
+      host().perfLog("sync: readest sign-in approved");
+      host().beep(1);
+      _syncStage = 1;  // straight on to the sync it was opened for
+      return true;
+    }
+    syncFail(p == kosync::Poll::Error ? "Readest refused the sign-in" : "the code expired - try again");
+    _syncStage = 2;
+    return true;
+  }
+
+  void runSync() {
+    if (_saveDue) saveProgress();  // the card first: it is the record that matters
+    _syncPct = bookFraction();
+    char doc[33];
+    if (!kosync::docHash(_io, doc)) {
+      syncFail("could not read the book");
+      return;
+    }
+    static char xp[kosync::XP_MAX];  // static: the loop task's stack is small
+    const bool haveXp = _book.xpointerFor(_spine, curOffset(), xp, sizeof(xp));
+    _streamLost = true;  // the locator replayed the chapter through the same core
+    if (!haveXp) snprintf(xp, sizeof(xp), "/body/DocFragment[%d]/body", _spine + 1);
+    static char line[kosync::XP_MAX + 64];  // static: whole xpointers, off the stack
+    snprintf(line, sizeof(line), "sync: book %s, here %d:%lu = %.4f", doc, _spine,
+             (unsigned long)curOffset(), _syncPct);
+    host().perfLog(line);
+    snprintf(line, sizeof(line), "sync: here %s", xp);
+    host().perfLog(line);
+
+    const homenet::Result j = homenet::connect(prefs());
+    if (j != homenet::Result::Ok) {  // the radio is already off on this path
+      syncFail(homenet::describe(j));
+      return;
+    }
+    char me[33];
+    kosync::deviceId(me);
+    kosync::Remote& r = _remote;  // a member, not 360 bytes of stack
+    const kosync::Result g = kosync::get(prefs(), doc, r);
+    if (g != kosync::Result::Ok && g != kosync::Result::NoRecord) {
+      homenet::off();
+      syncFail(kosync::describe(g));
+      return;
+    }
+    kosync::Decision d = kosync::decide(_syncPct, r, me);
+    if (r.have) {
+      snprintf(line, sizeof(line), "sync: %s at %.4f %s", r.device[0] ? r.device : "remote",
+               r.percentage, r.progress);
+      host().perfLog(line);
+    }
+    // Another reader's record: decide by its paragraph when this file has it.
+    // (The radio stays up for this second or so; an upload may follow.)
+    if (r.have && strcmp(r.deviceId, me) != 0) {
+      int sp = 0;
+      uint32_t o = 0;
+      if (_book.offsetFor(r.progress, sp, o)) {
+        const uint32_t start = curOffset();
+        // The next page's start; when it is not laid out yet, only the start counts.
+        const uint32_t end = _page + 1 < _lutN ? epubui::pageOff(_lut[_page + 1]) : start + 1;
+        d = kosync::decideAt(sp, o, _spine, start, end);
+        snprintf(line, sizeof(line), "sync: theirs is %d:%lu, this page %d:%lu..%lu", sp,
+                 (unsigned long)o, _spine, (unsigned long)start, (unsigned long)end);
+      } else {
+        snprintf(line, sizeof(line), "sync: theirs is not in this file - by percentage");
+      }
+      _streamLost = true;
+      host().perfLog(line);
+    }
+    switch (d) {
+      case kosync::Decision::Same:
+        homenet::off();
+        host().perfLog("sync: result in step");
+        _syncOut = SO_SAME;
+        snprintf(_syncMsg, sizeof(_syncMsg), "%s", r.device[0] ? r.device : "the other reader");
+        return;
+      case kosync::Decision::AskJump:
+        homenet::off();
+        host().perfLog("sync: result further on elsewhere - asking");
+        _syncOut = SO_ASK;
+        snprintf(_syncMsg, sizeof(_syncMsg), "%s", r.device[0] ? r.device : "another reader");
+        return;
+      case kosync::Decision::Upload: {
+        const kosync::Result p = kosync::put(prefs(), doc, xp, _syncPct);
+        homenet::off();
+        if (p != kosync::Result::Ok) {
+          syncFail(kosync::describe(p));
+          return;
+        }
+        host().perfLog("sync: result sent");
+        _syncOut = SO_SENT;
+        return;
+      }
+    }
+  }
+
+  // The other reader's place, in this file: its xpointer when the path is
+  // here, its percentage when it is not (a different edition, or markup the
+  // other reader's engine rebuilt).
+  void syncJump() {
+    int spine = 0;
+    uint32_t off = 0;
+    bool ok = _book.offsetFor(_remote.progress, spine, off);
+    if (!ok) ok = kosync::placeFraction(_book, _remote.percentage, spine, off);
+    _streamLost = true;
+    char line[96];
+    snprintf(line, sizeof(line), "sync: jump to %d:%lu (%s)", spine, (unsigned long)off,
+             ok ? "found" : "not found");
+    host().perfLog(line);
+    _syncStage = 0;
+    if (!ok) {
+      host().beep(2);
+      menuClose();
+      return;
+    }
+    applyRot(_rot);
+    jumpTo(spine, off);
+  }
+
+  void renderSync(ToolsCanvas& c) {
+    host().topBar("SYNC", false, "OPTIONS");
+    const int W = c.width();
+    char buf[96];
+    if (_syncStage == 3) {
+      c.textCentered(W / 2, 260, "SIGN IN WITH READEST", TS_MED, true, true);
+      c.textCentered(W / 2, 320, "asking Readest for a code", TS_MED, true);
+      return;
+    }
+    if (_syncStage == 4) {
+      c.textCentered(W / 2, 100, "SIGN IN WITH READEST", TS_MED, true, true);
+      fqr::draw(c, (W - 240) / 2, 140, 240, _code.uriFull);
+      c.textCentered(W / 2, 400, "scan with a phone signed in", TS_MED, true);
+      c.textCentered(W / 2, 430, "to Readest, and approve", TS_MED, true);
+      snprintf(buf, sizeof(buf), "or open %s", _code.uri);
+      c.textCentered(W / 2, 480, buf, TS_SMALL, true);
+      c.textCentered(W / 2, 520, _code.user, TS_LARGE, true, true);
+      c.textCentered(W / 2, 590, "waiting for the approval...", TS_SMALL, true);
+      c.button(40, SYNC_BTN_Y + 120, W - 80, 80, "Cancel", false);
+      return;
+    }
+    if (_syncStage == 1) {
+      char wifi[homenet::SSID_MAX];
+      homenet::wifiName(prefs(), wifi, sizeof(wifi));
+      c.textCentered(W / 2, 260, "SYNCING", TS_MED, true, true);
+      snprintf(buf, sizeof(buf), "through %s", wifi);
+      c.textCentered(W / 2, 320, buf, TS_MED, true);
+      c.textCentered(W / 2, 380, "this takes up to half a minute", TS_SMALL, true);
+      return;
+    }
+    switch (_syncOut) {
+      case SO_SENT:
+        c.textCentered(W / 2, 200, "SENT", TS_MED, true, true);
+        snprintf(buf, sizeof(buf), "%d%% through the book", (int)(_syncPct * 100 + 0.5));
+        c.textCentered(W / 2, 260, buf, TS_LARGE, true);
+        c.textCentered(W / 2, 330, "Readest and KOReader can", TS_MED, true);
+        c.textCentered(W / 2, 362, "pick up from this page", TS_MED, true);
+        break;
+      case SO_SAME:
+        c.textCentered(W / 2, 200, "IN STEP", TS_MED, true, true);
+        c.textCentered(W / 2, 260, "already at the same place", TS_LARGE, true);
+        snprintf(buf, sizeof(buf), "as %s", _syncMsg);
+        c.textCentered(W / 2, 330, buf, TS_MED, true);
+        break;
+      case SO_ASK:
+        c.textCentered(W / 2, 170, "FURTHER ON ELSEWHERE", TS_MED, true, true);
+        c.textCentered(W / 2, 230, _syncMsg, TS_LARGE, true);
+        snprintf(buf, sizeof(buf), "is at %d%%", (int)(_remote.percentage * 100 + 0.5));
+        c.textCentered(W / 2, 290, buf, TS_LARGE, true);
+        snprintf(buf, sizeof(buf), "this device is at %d%%", (int)(_syncPct * 100 + 0.5));
+        c.textCentered(W / 2, 360, buf, TS_MED, true);
+        c.textCentered(W / 2, 470, "jump there?", TS_MED, true);
+        c.drawRect(40, SYNC_BTN_Y, (W - 100) / 2, SYNC_BTN_H, 1, true);
+        c.textInBox(40, SYNC_BTN_Y, (W - 100) / 2, SYNC_BTN_H, "Jump there", TS_LARGE, true, true);
+        c.button(W / 2 + 10, SYNC_BTN_Y, (W - 100) / 2, SYNC_BTN_H, "Stay here", false);
+        return;
+      default:
+        c.textCentered(W / 2, 200, "NOT SYNCED", TS_MED, true, true);
+        c.textCentered(W / 2, 260, _syncMsg, TS_LARGE, true);
+        c.textCentered(W / 2, 330, "your place on this device is safe", TS_SMALL, true);
+        break;
+    }
+    c.textCentered(W / 2, 470, "the wifi is off again", TS_SMALL, true);
+    if (kosync::haveAccount(prefs())) {
+      char name[kosync::USER_MAX];
+      kosync::user(prefs(), name, sizeof(name));
+      snprintf(buf, sizeof(buf), "%s: %s", kosync::isReadest(prefs()) ? "Readest" : "account", name);
+      c.textCentered(W / 2, 500, buf, TS_SMALL, true);
+    }
+    c.button(40, SYNC_BTN_Y, W - 80, SYNC_BTN_H, "Back to the book", false);
+  }
+
   void menuOpen() {
     _menu = rmenu::Page::Root;
     _mpage = 0;
@@ -1802,6 +2081,8 @@ class EpubTool : public ToolApp {
   }
 
   void menuBack() {
+    if (_menu == rmenu::Page::Sync && (_syncStage == 1 || _syncStage == 3)) return;
+    syncAbort();
     _menu = rmenu::Page::Root;
     _mpage = 0;
     host().beep(0);
@@ -2088,7 +2369,7 @@ class EpubTool : public ToolApp {
   void renderMenu(ToolsCanvas& c) {
     char buf[64];
     if (_menu == rmenu::Page::Root) {
-      rmenu::Item items[7];
+      rmenu::Item items[8];
       items[0].label = "Contents";
       // The chapter's name when the contents have already been read, and the
       // spine numbers when they have not: this line is drawn on the way INTO
@@ -2136,6 +2417,13 @@ class EpubTool : public ToolApp {
       items[n].sub = _resetArmed ? "tap again to forget this book's place"
                                  : (_books[_cur].cont ? "back to the first page" : "already at the start");
       n++;
+      if (syncReady()) {
+        items[n].label = "Sync position";
+        items[n].sub = !kosync::haveAccount(prefs()) ? "sign in with Readest"
+                       : kosync::isReadest(prefs())  ? "with Readest"
+                                                     : "with KOReader sync";
+        n++;
+      }
       items[n].label = "Close the book";
       items[n].sub = _books[_cur].title;
       char clk[8];
@@ -2150,6 +2438,11 @@ class EpubTool : public ToolApp {
       // The turn itself still waits for the panel to close, so the panel is
       // never asked to draw itself sideways.
       rmenu::drawRotRow(c, rowRot, _rot);
+      return;
+    }
+
+    if (_menu == rmenu::Page::Sync) {
+      renderSync(c);
       return;
     }
 
@@ -2323,7 +2616,8 @@ class EpubTool : public ToolApp {
       const int rowFace = 3;
       const int rowRot = 4;
       const int rowReset = rowRot + 1;
-      const int rowClose = rowReset + 1;
+      const int rowSync = syncReady() ? rowReset + 1 : -1;
+      const int rowClose = (rowSync >= 0 ? rowSync : rowReset) + 1;
       const int hit = rmenu::hitRoot(x, y, rowClose + 1, W);
       // Any tap that is not the armed row itself disarms it -- the same rule
       // the settings reset follows, so a question never outlives the screen.
@@ -2376,10 +2670,41 @@ class EpubTool : public ToolApp {
         paint();
         return;
       }
+      if (hit == rowSync && rowSync >= 0) {
+        _menu = rmenu::Page::Sync;
+        // No account yet: sign in with Readest first, then sync.
+        _syncStage = kosync::haveAccount(prefs()) ? 1 : 3;
+        host().beep(1);
+        paint();  // "syncing" on the glass before the wait starts
+        return;
+      }
       if (hit == rowClose) {
         _menu = rmenu::Page::None;
         closeBook(true);
         return;
+      }
+      return;
+    }
+
+    if (_menu == rmenu::Page::Sync) {
+      if (_syncStage == 4) {
+        if (y >= SYNC_BTN_Y + 120 && y < SYNC_BTN_Y + 120 + 80) {  // CANCEL
+          syncAbort();
+          menuBack();
+        }
+        return;
+      }
+      if (_syncStage != 2) return;  // nothing to press while it works
+      const int W = host().canvas().width();
+      const bool left = x < W / 2;
+      if (y >= SYNC_BTN_Y && y < SYNC_BTN_Y + SYNC_BTN_H) {
+        if (_syncOut == SO_ASK && left) {
+          syncJump();
+          return;
+        }
+        // STAY HERE, or the one button every other answer has.
+        _syncStage = 0;
+        menuClose();
       }
       return;
     }
@@ -2649,6 +2974,14 @@ class EpubTool : public ToolApp {
   uint8_t _pendImagePart = 0;
   uint32_t _pendImageOff = 0;
   bool _pendImageValid = false;
+  uint8_t _syncStage = 0;  // 0 none, 1 working (screen up), 2 answered,
+                           // 3 asking Readest for a code, 4 showing it / polling
+  kosync::DeviceCode _code;
+  uint32_t _codeT0 = 0, _lastPoll = 0;
+  uint8_t _syncOut = 0;
+  double _syncPct = 0;
+  char _syncMsg[64] = {};
+  kosync::Remote _remote;
   bool _streamLost = false;        // a picture was read out of the same zip
   // The open chapter's name, and which spine item it belongs to. Filled when a
   // chapter opens (from the contents) or when its first page lands (from the

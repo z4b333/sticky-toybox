@@ -77,7 +77,7 @@ inline void setRefreshMode(Preferences& p, bool epub, Refresh r) {
 }
 
 // Which page of the panel is showing. `None` means the book itself.
-enum class Page : uint8_t { None, Root, Contents, Marks, Text, Keep, Font };
+enum class Page : uint8_t { None, Root, Contents, Marks, Text, Keep, Font, Sync };
 
 // Rows, generously spaced, divided by hairlines. A thumb needs the height
 // whether or not there is a box drawn around it.
@@ -87,8 +87,14 @@ enum class Page : uint8_t { None, Root, Contents, Marks, Text, Keep, Font };
 inline constexpr int ROOT_Y0 = 110, ROOT_H = 98, ROOT_GAP = 0;
 inline constexpr int ROOT_MARGIN = 24;
 
+// An eighth row (the reader's Sync, when an account is saved) squeezes all
+// eight to 85: 110 + 8*85 = 790. Set by drawRoot/hitRoot from the count they
+// are given, so a draw and the hit test after it always agree.
+inline int g_rootH = ROOT_H;
+inline void rootRows(int n) { g_rootH = n > 7 ? (796 - ROOT_Y0) / n : ROOT_H; }
+
 inline TRect rootRect(int i, int w) {
-  return {ROOT_MARGIN, ROOT_Y0 + i * (ROOT_H + ROOT_GAP), w - 2 * ROOT_MARGIN, ROOT_H};
+  return {ROOT_MARGIN, ROOT_Y0 + i * (g_rootH + ROOT_GAP), w - 2 * ROOT_MARGIN, g_rootH};
 }
 
 // A root item. `sub` is the line under the label -- the state of the thing, so
@@ -127,14 +133,18 @@ inline const char* clockCorner(ToolsHost& h, char* out, int cap) {
 
 inline void drawRoot(ToolsHost& h, ToolsCanvas& c, const char* title, const Item* items, int n,
                      const char* back = "READ", const char* corner = nullptr) {
+  rootRows(n);
   h.topBar(title, false, back, corner);
   for (int i = 0; i < n; i++) {
     const TRect r = rootRect(i, c.width());
     if (i > 0) c.fillRect(r.x, r.y, r.w, 1, true);  // hairlines between, none around
-    c.text(r.x + 8, r.y + 20, items[i].label, TS_LARGE, true);
+    // Squeezed rows lift their text, so the rotation row's buttons still
+    // clear its label.
+    const bool tight = g_rootH < ROOT_H;
+    c.text(r.x + 8, r.y + (tight ? 13 : 20), items[i].label, TS_LARGE, true);
     const int subW = r.w - 16 - (items[i].plus ? 92 : 0);
     if (items[i].sub && items[i].sub[0])
-      c.textClipped(r.x + 8, r.y + 62, subW, items[i].sub, TS_SMALL, true);
+      c.textClipped(r.x + 8, r.y + (tight ? 55 : 62), subW, items[i].sub, TS_SMALL, true);
     if (items[i].plus) {
       const TRect p = plusRect(i, c.width());
       const int cx = p.x + p.w / 2, cy = p.y + p.h / 2;
@@ -146,6 +156,7 @@ inline void drawRoot(ToolsHost& h, ToolsCanvas& c, const char* title, const Item
 }
 
 inline int hitRoot(int x, int y, int n, int w) {
+  rootRows(n);
   for (int i = 0; i < n; i++)
     if (rootRect(i, w).hit(x, y)) return i;
   return -1;
@@ -210,7 +221,9 @@ inline constexpr uint8_t ROT_BTN[3] = {1, 0, 3};
 
 inline TRect rotBtnRect(const TRect& row, int k) {
   const int bw = (row.w - 32) / 3;
-  return {row.x + 8 + k * (bw + 8), row.y + 48, bw, 42};
+  const int top = 48;
+  const int bh = row.h >= ROOT_H ? 42 : row.h - top - 3;
+  return {row.x + 8 + k * (bw + 8), row.y + top, bw, bh};
 }
 
 inline void drawRotRow(ToolsCanvas& c, int slot, uint8_t rot) {
