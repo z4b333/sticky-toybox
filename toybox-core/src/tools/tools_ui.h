@@ -54,6 +54,24 @@ class ToolsCanvas {
   virtual void fillCircle(int cx, int cy, int r, bool black) = 0;
   virtual void drawCircle(int cx, int cy, int r, int thickness, bool black) = 0;
 
+  // A one-bit picture's ink, from the top-left corner: `w` x `h`, rows of
+  // w/8 bytes, MSB first, 1 = white. Black pixels are drawn; white ones leave
+  // the canvas as it was. The default goes pixel by pixel; the device writes
+  // the framebuffer directly, which is what makes a cover, a picture page or
+  // a lock-screen picture cost a few milliseconds instead of two hundred.
+  virtual void inkBits(const uint8_t* bits, int w, int h) {
+    const int stride = w / 8;
+    for (int y = 0; y < h; y++) {
+      const uint8_t* row = bits + (size_t)y * stride;
+      for (int xb = 0; xb < stride; xb++) {
+        const uint8_t v = row[xb];
+        if (v == 0xFF) continue;
+        for (int k = 0; k < 8; k++)
+          if (!(v & (0x80 >> k))) fillRect(xb * 8 + k, y, 1, 1, true);
+      }
+    }
+  }
+
   // `ital` is the EPUB reader's alone: it is the only screen with a style run
   // inside a line. Measured and drawn through the same argument on purpose --
   // an italic is narrower than its roman, and a line measured in one face and

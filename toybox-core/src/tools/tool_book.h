@@ -919,17 +919,8 @@ class BookTool : public ToolApp {
       }
     } else {
     // The blit: same convention as the framebuffer, so this is a copy through
-    // the canvas -- rotation and the board flips still apply. Runs of white
-    // skip a byte at a time, which is most of any page.
-    for (int y = 0; y < 800; y++) {
-      const uint8_t* row = _pageBuf + (size_t)y * 60;
-      for (int xb = 0; xb < 60; xb++) {
-        const uint8_t v = row[xb];
-        if (v == 0xFF) continue;
-        for (int k = 0; k < 8; k++)
-          if (!(v & (0x80 >> k))) c.fillRect(xb * 8 + k, y, 1, 1, true);
-      }
-    }
+    // the canvas -- rotation and the board flips still apply.
+    c.inkBits(_pageBuf, 480, 800);
     }
     if (_chrome) {
       // The footer: title and where you are, on a plate the page shows through

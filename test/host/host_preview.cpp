@@ -140,6 +140,36 @@ void Epd::fillRect(int x, int y, int w, int h, uint8_t color) {
   for (int yy = y; yy < y + h; yy++)
     for (int xx = x; xx < x + w; xx++) drawPixel(xx, yy, color);
 }
+// The device's own fast path, line for line, so checkInkBits below tests the
+// code that ships against the pixel-at-a-time draw it replaced.
+void Epd::inkBits(const uint8_t* bits, int w, int h) {
+  if (w > logicalW()) w = logicalW() & ~7;
+  if (h > logicalH()) h = logicalH();
+  const int stride = w / 8;
+  int px0, py0, px1, py1, px2, py2;
+  epdMapPixel(rotation(), panelFlipX(), panelFlipY(), 0, 0, px0, py0);
+  epdMapPixel(rotation(), panelFlipX(), panelFlipY(), 1, 0, px1, py1);
+  epdMapPixel(rotation(), panelFlipX(), panelFlipY(), 0, 1, px2, py2);
+  const int dxX = px1 - px0, dyX = py1 - py0;
+  const int dxY = px2 - px0, dyY = py2 - py0;
+  for (int y = 0; y < h; y++) {
+    const uint8_t* row = bits + (size_t)y * stride;
+    int px = px0 + dxY * y, py = py0 + dyY * y;
+    for (int xb = 0; xb < stride; xb++) {
+      const uint8_t v = row[xb];
+      if (v == 0xFF) {
+        px += 8 * dxX;
+        py += 8 * dyX;
+        continue;
+      }
+      for (int k = 0; k < 8; k++) {
+        if (!(v & (0x80 >> k))) _fb[(uint32_t)py * EPD_WB + (px >> 3)] &= ~(0x80 >> (px & 7));
+        px += dxX;
+        py += dyX;
+      }
+    }
+  }
+}
 void Epd::drawRect(int x, int y, int w, int h, uint8_t color, int t) {
   fillRect(x, y, w, t, color);
   fillRect(x, y + h - t, w, t, color);
@@ -976,6 +1006,43 @@ static void checkCardBaseline() {
 // The rule is a pure function so it can be asked here without a panel or a
 // power button, and every refusal in it is a case where the frame on the glass
 // is not a page worth keeping.
+// The framebuffer blit (Epd::inkBits) must put every pixel exactly where
+// the pixel-at-a-time canvas draw it replaced did, in every rotation and with
+// either board flip -- covers, picture pages, manga pages and the lock screen
+// all go through it.
+static void checkInkBits() {
+  const int rot0 = epd.rotation();
+  const bool fx0 = epd.panelFlipX(), fy0 = epd.panelFlipY();
+  static uint8_t bits[800 * 480 / 8];
+  uint32_t r = 12345;
+  for (size_t i = 0; i < sizeof(bits); i++) {
+    r = r * 1103515245u + 12345u;
+    // Mostly white bytes with ink scattered through, like a real page, so
+    // the all-white skip is exercised as well as the per-bit path.
+    bits[i] = ((r >> 16) % 3) ? 0xFF : (uint8_t)(r >> 8);
+  }
+  static uint8_t ref[EPD_BUF_SIZE];
+  ToolsCanvas& c = stickyHost.canvas();
+  for (int rot = 0; rot < 4; rot++)
+    for (int f = 0; f < 4; f++) {
+      epd.setRotation(rot);
+      epd.setPanelFlip(f & 1, f & 2);
+      const int w = epd.logicalW(), h = epd.logicalH();
+      epd.clear();
+      c.ToolsCanvas::inkBits(bits, w, h);  // the default: pixel by pixel
+      memcpy(ref, epd.fb(), EPD_BUF_SIZE);
+      epd.clear();
+      c.inkBits(bits, w, h);
+      if (memcmp(ref, epd.fb(), EPD_BUF_SIZE) != 0) {
+        printf("INK BITS FAIL: rotation %d flips %d differs from the pixel draw\n", rot, f);
+        abort();
+      }
+    }
+  epd.setRotation(rot0);
+  epd.setPanelFlip(fx0, fy0);
+  epd.clear();
+}
+
 static void checkLockOverPage() {
   lock::Config page;
   page.empty = lock::EMPTY_PAGE;
@@ -1447,6 +1514,7 @@ int main() {
   checkPreparedFonts();
   checkCardBaseline();
   checkLockOverPage();
+  checkInkBits();
   checkHubRouting("all shown");
 
   // The three folder pages, drawn as a finger would reach them.
@@ -3052,6 +3120,22 @@ int main() {
       }
       printf("device art ok (mean level %d.%02d, %d px ink, %d/%d cells agree)\n",
              meanLevel100 / 100, meanLevel100 % 100, b1Ink, agree, cells);
+
+      // The cover goes through the same pipeline as the pictures. The
+      // fixture's cover.jpg and plate.png are the same JPEG, and a portrait
+      // picture is one upright part, so the loading-screen cover on the card
+      // must be byte for byte the picture page's one-bit version. Anything
+      // else means the cover took some other, older road.
+      {
+        char big[48];
+        static uint8_t cov[48000];
+        bthumb::bigPath(et->hostBookFile(), big, sizeof(big));
+        if (sdcard::readWhole(big, cov, sizeof(cov)) != 48000 || memcmp(cov, b1b, 48000) != 0) {
+          printf("EPUB APP FAIL: the cover (%s) is not the art pipeline's picture\n", big);
+          abort();
+        }
+        printf("epub cover ok (same pipeline as the pictures, byte for byte)\n");
+      }
 
       // The landscape picture (art2.png, 400x240): part 0 turned a quarter
       // clockwise to fill the panel, then upright slices -- 240 tall at the

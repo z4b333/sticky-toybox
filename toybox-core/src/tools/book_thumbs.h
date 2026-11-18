@@ -59,8 +59,13 @@ inline void path(const char* file, char* out, int cap) {
 }
 // On the card, in a folder of our own. Hidden, so the phone's file list and
 // the readers' book lists both walk straight past it.
+//
+// "covers2": EPUB covers have been decoded by the illustration pipeline since
+// v2 (full progressive decode, levels, sharpening, Atkinson). A new folder
+// makes every book rebuild its cover once instead of keeping the old, softer
+// one; the old /.toybox/covers folder is dead weight and safe to delete.
 inline void bigPath(const char* file, char* out, int cap) {
-  snprintf(out, (size_t)cap, "/.toybox/covers/%08lx.tbc", (unsigned long)key(file));
+  snprintf(out, (size_t)cap, "/.toybox/covers2/%08lx.tbc", (unsigned long)key(file));
 }
 // Where the full-size covers used to live, before they moved to the card.
 // Swept as books are reopened rather than in a migration nobody would test.
@@ -207,6 +212,48 @@ inline bool load(const char* file, uint8_t* dst) {
   return ok;
 }
 
+// This book's old flash cover, from before covers moved to the card. Swept
+// on the open that is rebuilding the cover anyway, rather than in a
+// migration pass nobody would test.
+inline void sweepStale(const char* file) {
+  char stale[20];
+  staleFlashPath(file, stale, sizeof(stale));
+  if (tfs::exists(stale)) tfs::remove(stale);
+  if (tfs::exists("/cv_index")) tfs::remove("/cv_index");
+}
+
+// The strip thumbnail from its W x H grey: stretched and thresholded, because
+// at 96 px a dither is speckle and a threshold is a woodcut.
+inline bool saveSmallGrey(const uint8_t* small, const char* smallPath) {
+  // Static, not local: 1 KB of histogram and 2 KB of output on the loop
+  // task's stack is most of a crash, and only one cover is ever built at a
+  // time. See SET_LOOP_TASK_STACK_SIZE in main.cpp for the other half.
+  static uint32_t hist[256];
+  memset(hist, 0, sizeof(hist));
+  for (int i = 0; i < W * H; i++) hist[small[i]]++;
+  const uint32_t clip = (uint32_t)(W * H) / 50;  // 2%
+  int lo = 0, hi = 255;
+  for (uint32_t acc = 0; lo < 255; lo++) {
+    acc += hist[lo];
+    if (acc > clip) break;
+  }
+  for (uint32_t acc = 0; hi > 0; hi--) {
+    acc += hist[hi];
+    if (acc > clip) break;
+  }
+  if (hi - lo < 32) {
+    lo = 0;
+    hi = 255;  // a flat image: leave it alone
+  }
+  const int cut = lo + (hi - lo) / 2;
+  static uint8_t out[BYTES];
+  memset(out, 0xFF, sizeof(out));
+  for (int y = 0; y < H; y++)
+    for (int x = 0; x < W; x++)
+      if (small[(size_t)y * W + x] < cut) out[(size_t)y * (W / 8) + (x >> 3)] &= ~(0x80 >> (x & 7));
+  return tfs::write(smallPath, (const char*)out, sizeof(out));
+}
+
 // --- the streaming builder ----------------------------------------------------
 // Feed it the decoded image in whatever order the decoder produces, as long
 // as blocks arrive top to bottom: rows for PNG and the progressive DC pass,
@@ -262,15 +309,7 @@ class Builder {
     memset(_small, 255, (size_t)W * H);
     bigPath(file, _bigPath, sizeof(_bigPath));
     path(file, _smallPath, sizeof(_smallPath));
-    // Sweep this book's old flash cover, from before they moved to the card.
-    // Done here rather than as a migration pass, so it costs one remove on
-    // the open that was rebuilding the cover anyway.
-    {
-      char stale[20];
-      staleFlashPath(file, stale, sizeof(stale));
-      if (tfs::exists(stale)) tfs::remove(stale);
-      if (tfs::exists("/cv_index")) tfs::remove("/cv_index");
-    }
+    sweepStale(file);
     // The card holds the picture, so this only works while something already
     // has the bus -- which, on a book's first open, something does.
     if (!_host->sdStreamOpen(_bigPath)) {
@@ -408,38 +447,7 @@ class Builder {
     memset(_cnt + (size_t)(t % BAND) * BIG_W, 0, BIG_W);
   }
 
-  // The strip thumbnail: stretched and thresholded, because at 96 px a
-  // dither is speckle and a threshold is a woodcut.
-  void saveSmall() {
-    // Static, not local: 1 KB of histogram and 2 KB of output on the loop
-    // task's stack is most of a crash, and only one cover is ever built at a
-    // time. See SET_LOOP_TASK_STACK_SIZE in main.cpp for the other half.
-    static uint32_t hist[256];
-    memset(hist, 0, sizeof(hist));
-    for (int i = 0; i < W * H; i++) hist[_small[i]]++;
-    const uint32_t clip = (uint32_t)(W * H) / 50;  // 2%
-    int lo = 0, hi = 255;
-    for (uint32_t acc = 0; lo < 255; lo++) {
-      acc += hist[lo];
-      if (acc > clip) break;
-    }
-    for (uint32_t acc = 0; hi > 0; hi--) {
-      acc += hist[hi];
-      if (acc > clip) break;
-    }
-    if (hi - lo < 32) {
-      lo = 0;
-      hi = 255;  // a flat image: leave it alone
-    }
-    const int cut = lo + (hi - lo) / 2;
-    static uint8_t out[BYTES];
-    memset(out, 0xFF, sizeof(out));
-    for (int y = 0; y < H; y++)
-      for (int x = 0; x < W; x++)
-        if (_small[(size_t)y * W + x] < cut)
-          out[(size_t)y * (W / 8) + (x >> 3)] &= ~(0x80 >> (x & 7));
-    tfs::write(_smallPath, (const char*)out, sizeof(out));
-  }
+  void saveSmall() { saveSmallGrey(_small, _smallPath); }
 
   void freeAll() {
     free(_sum);
@@ -745,11 +753,7 @@ inline void drawLoading(ToolsHost& h, ToolsCanvas& c, const char* file, const ch
   if (uint8_t* buf = (uint8_t*)malloc(BIG_BYTES)) {
     const bool got = h.sdReadWhole(p, buf, BIG_BYTES) == BIG_BYTES;
     if (got) {
-      for (int y = 0; y < BIG_H; y++) {
-        const uint8_t* row = buf + (size_t)y * (BIG_W / 8);
-        for (int x = 0; x < BIG_W; x++)
-          if (!(row[x >> 3] & (0x80 >> (x & 7)))) c.fillRect(x, y, 1, 1, true);
-      }
+      c.inkBits(buf, BIG_W, BIG_H);
       free(buf);
       return;
     }

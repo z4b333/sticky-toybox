@@ -53,18 +53,7 @@ inline bool draw(ToolsCanvas& c, const char* path) {
     return false;
   }
 
-  // Runs of white are skipped a byte at a time, which is most of a photograph's
-  // sky and most of a line drawing's page.
-  const uint8_t* bits = b + HEADER;
-  for (int y = 0; y < H; y++) {
-    const uint8_t* row = bits + (size_t)y * STRIDE;
-    for (int xb = 0; xb < STRIDE; xb++) {
-      const uint8_t v = row[xb];
-      if (v == 0xFF) continue;
-      for (int k = 0; k < 8; k++)
-        if (!(v & (0x80 >> k))) c.fillRect(xb * 8 + k, y, 1, 1, true);
-    }
-  }
+  c.inkBits(b + HEADER, W, H);
   free(buf);
   return true;
 }

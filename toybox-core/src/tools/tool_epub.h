@@ -407,6 +407,7 @@ class EpubTool : public ToolApp {
     epubart::paths(_books[_cur].file, entry, r->usize, part, g2, b1, cap);
     return true;
   }
+  const char* hostBookFile() const { return _cur >= 0 ? _books[_cur].file : ""; }
   int hostMenu() const { return (int)_menu; }
   bool hostPicking() const { return _picking; }
   const char* hostPhrase() const { return _phrase; }
@@ -1603,18 +1604,7 @@ class EpubTool : public ToolApp {
     uint8_t* bits = (uint8_t*)malloc(epubart::B1_BYTES);
     if (!bits) return false;
     const bool ok = host().sdReadSlice(b1, 0, bits, (int)epubart::B1_BYTES) == (int)epubart::B1_BYTES;
-    if (ok) {
-      constexpr int STRIDE = epubart::W / 8;
-      for (int y = 0; y < epubart::H; y++) {
-        const uint8_t* row = bits + (size_t)y * STRIDE;
-        for (int xb = 0; xb < STRIDE; xb++) {
-          const uint8_t v = row[xb];
-          if (v == 0xFF) continue;  // a run of white, which is most of most art
-          for (int k = 0; k < 8; k++)
-            if (!(v & (0x80 >> k))) c.fillRect(xb * 8 + k, y, 1, 1, true);
-        }
-      }
-    }
+    if (ok) c.inkBits(bits, epubart::W, epubart::H);
     free(bits);
     return ok;
   }

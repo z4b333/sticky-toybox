@@ -20,6 +20,13 @@
 
 #include "board_pins.h"
 #include "epd.h"
+
+// Every read-side open goes through here. Opening a path that is not there
+// makes the core print "... does not exist, no permits for creation", and
+// asking "is it there?" by opening is how most of this file finds out --
+// a book's first open printed a line per picture. exists() is silent.
+static File sdOpenR(const char* p) { return SD.exists(p) ? SD.open(p, FILE_READ) : File(); }
+static File sdOpenR(const String& p) { return sdOpenR(p.c_str()); }
 #endif
 
 namespace sdcard {
@@ -1270,7 +1277,7 @@ Report probe() {
   r.mounted = true;
   r.sizeMb = SD.cardSize() / (1024ULL * 1024ULL);
 
-  File root = SD.open("/");
+  File root = sdOpenR("/");
   if (root && root.isDirectory()) {
     for (File f = root.openNextFile(); f && r.files < 999; f = root.openNextFile()) r.files++;
   }
@@ -1279,12 +1286,12 @@ Report probe() {
   // the read this has to be fast enough for: a page turn already costs 1.7 s of
   // panel refresh, so anything under a tenth of that disappears into it.
   {
-    File f = root ? SD.open("/") : File();
+    File f = root ? sdOpenR("/") : File();
     (void)f;
   }
   File any;
   {
-    File root2 = SD.open("/");
+    File root2 = sdOpenR("/");
     for (File f = root2.openNextFile(); f; f = root2.openNextFile()) {
       if (!f.isDirectory() && f.size() >= 4096) {
         any = f;
@@ -1375,7 +1382,7 @@ int listTbi(char names[][40], int max) {
   }
   int n = 0;
   for (const char* dir : kDirs) {
-    File d = SD.open(dir);
+    File d = sdOpenR(dir);
     if (!d || !d.isDirectory()) continue;
     for (File f = d.openNextFile(); f && n < max; f = d.openNextFile()) {
       if (f.isDirectory()) continue;
@@ -1405,7 +1412,7 @@ bool takeTbi(const char* name, const char* destPath) {
   for (const char* dir : kDirs) {
     char path[64];
     snprintf(path, sizeof(path), "%s%s%s", dir, dir[1] ? "/" : "", name);
-    File src = SD.open(path, FILE_READ);
+    File src = sdOpenR(path);
     if (!src || src.isDirectory()) continue;
     if (src.size() != tbimg::FILE_SIZE) {
       src.close();
@@ -1484,7 +1491,7 @@ int bookList(BookMeta* out, int max, const char* dir) {
   const char* dirs[2] = {dir, isTopShelf(dir) ? "/" : nullptr};
   for (const char* d0 : dirs) {
     if (!d0) continue;
-    File d = SD.open(d0);
+    File d = sdOpenR(d0);
     if (!d || !d.isDirectory()) continue;
     for (File f = d.openNextFile(); f && n < max; f = d.openNextFile()) {
       if (f.isDirectory()) continue;
@@ -1517,7 +1524,7 @@ int shelfFolders(ShelfFolder* out, int max, const char* ext) {
     return -1;
   }
   int n = 0;
-  File shelf = SD.open("/books");
+  File shelf = sdOpenR("/books");
   if (shelf && shelf.isDirectory()) {
     for (File d = shelf.openNextFile(); d && n < max; d = shelf.openNextFile()) {
       if (!d.isDirectory()) continue;
@@ -1528,7 +1535,7 @@ int shelfFolders(ShelfFolder* out, int max, const char* ext) {
       char path[128];
       if (snprintf(path, sizeof(path), "/books/%s", bare) >= (int)sizeof(path)) continue;
       ShelfFolder f{};
-      File inside = SD.open(path);
+      File inside = sdOpenR(path);
       if (inside && inside.isDirectory())
         for (File b = inside.openNextFile(); b; b = inside.openNextFile())
           if (!b.isDirectory() && hasExt(b.name(), ext)) f.count++;
@@ -1546,7 +1553,7 @@ int shelfFolders(ShelfFolder* out, int max, const char* ext) {
     static const char* kRoots[2] = {"/Read", "/epub"};
     for (const char* root : kRoots) {
       if (n >= max) break;
-      File d = SD.open(root);
+      File d = sdOpenR(root);
       if (!d || !d.isDirectory()) continue;
       ShelfFolder f{};
       for (File b = d.openNextFile(); b; b = d.openNextFile())
@@ -1591,7 +1598,7 @@ namespace {
 // Does a position exist at this path? Only that: what it SAYS is in the
 // sidecar, because a spine index is not a chapter number.
 bool haveProgress(const char* path) {
-  File f = SD.open(path, FILE_READ);
+  File f = sdOpenR(path);
   if (!f || f.isDirectory()) return false;
   const bool any = f.size() > 0;
   f.close();
@@ -1601,7 +1608,7 @@ bool haveProgress(const char* path) {
 void readPlaceFile(const char* dir, EpubMeta& m) {
   char p[128];
   snprintf(p, sizeof(p), "%s%s", dir, kPlaceFile);
-  File f = SD.open(p, FILE_READ);
+  File f = sdOpenR(p);
   if (!f || f.isDirectory()) return;
   char buf[PLACE_FILE_MAX] = {};
   const int n = f.read((uint8_t*)buf, sizeof(buf) - 1);
@@ -1622,7 +1629,7 @@ int epubList(EpubMeta* out, int max, const char* dir) {
   const char* dirs[2] = {dir, isTopShelf(dir) ? "/" : nullptr};
   for (const char* d0 : dirs) {
     if (!d0) continue;
-    File d = SD.open(d0);
+    File d = sdOpenR(d0);
     if (!d || !d.isDirectory()) continue;
     for (File f = d.openNextFile(); f && n < max; f = d.openNextFile()) {
       if (f.isDirectory() || !isEpubName(f.name())) continue;
@@ -1672,7 +1679,7 @@ bool epubOpen(const char* path) {
     return false;
   }
   g_epubBusUp = !borrowed;
-  g_epub = SD.open(path, FILE_READ);
+  g_epub = sdOpenR(path);
   if (!g_epub || g_epub.isDirectory()) {
     epubClose();
     return false;
@@ -1723,7 +1730,7 @@ const char* baseName(const char* path) {
 // directory, which is a different answer from an empty one and is what lets
 // the walk try one level deeper without guessing.
 int countCpFonts(const char* path) {
-  File dir = SD.open(path);
+  File dir = sdOpenR(path);
   if (!dir || !dir.isDirectory()) {
     if (dir) dir.close();
     return -1;
@@ -1745,7 +1752,7 @@ int fontFamilies(char names[][FONT_NAME_LEN], int max) {
   if (!busHeld()) return -1;
   int n = 0;
   for (const char* root : kFontRoots) {
-    File dir = SD.open(root);
+    File dir = sdOpenR(root);
     if (!dir || !dir.isDirectory()) {
       Serial.printf("fonts: %s not there\n", root);
       if (dir) dir.close();
@@ -1817,7 +1824,7 @@ int fontFiles(const char* family, char names[][FONT_FILE_LEN], int max) {
       snprintf(path, sizeof(path), "%s/%s", root, family);
     else
       snprintf(path, sizeof(path), "%s/%s/%s", root, family, family);
-    File dir = SD.open(path);
+    File dir = sdOpenR(path);
     if (!dir || !dir.isDirectory()) {
       if (dir) dir.close();
       continue;
@@ -1834,7 +1841,7 @@ int fontFiles(const char* family, char names[][FONT_FILE_LEN], int max) {
   // Loose files in a root, named for their family.
   if (n == 0) {
     for (const char* root : kFontRoots) {
-      File dir = SD.open(root);
+      File dir = sdOpenR(root);
       if (!dir || !dir.isDirectory()) {
         if (dir) dir.close();
         continue;
@@ -1883,7 +1890,7 @@ bool fontPath(const char* family, const char* file, char* out, int cap) {
 
 int fileSize(const char* path) {
   if (!busHeld()) return -1;
-  File f = SD.open(path, FILE_READ);
+  File f = sdOpenR(path);
   if (!f) return -1;
   const int n = f.isDirectory() ? -1 : (int)f.size();
   f.close();
@@ -1898,7 +1905,7 @@ int readFileAt(const char* path, void* dst, int max) {
   // returned false and every read returned -1, silently: the owner kept a
   // bookmark, the device beeped, and nothing was ever written.
   if (!busHeld()) return -1;
-  File f = SD.open(path, FILE_READ);
+  File f = sdOpenR(path);
   if (!f || f.isDirectory()) return -1;
   const int n = f.read((uint8_t*)dst, max);
   f.close();
@@ -2022,7 +2029,7 @@ int readWhole(const char* path, void* dst, int max) {
     return -1;
   }
   int got = -1;
-  File f = SD.open(path, FILE_READ);
+  File f = sdOpenR(path);
   if (f && !f.isDirectory()) {
     got = f.read((uint8_t*)dst, max);
     f.close();
@@ -2038,7 +2045,7 @@ int readSlice(const char* path, uint32_t off, void* dst, int n) {
     return -1;
   }
   int got = -1;
-  File f = SD.open(path, FILE_READ);
+  File f = sdOpenR(path);
   if (f && !f.isDirectory() && f.seek(off)) {
     got = 0;
     while (got < n) {
@@ -2078,7 +2085,7 @@ struct FileReader {
 // go from PSRAM: a 4096-wide 32-bit row is 16 KB, which is nobody's stack
 // and not worth anyone's permanent BSS.
 bool readBmpGrayHeld(const char* path, uint8_t* gray) {
-  File f = SD.open(path, FILE_READ);
+  File f = sdOpenR(path);
   if (!f || f.isDirectory()) return false;
   FileReader r{f};
   bmpg::Header h;
@@ -2134,7 +2141,7 @@ int listJson(char names[][64], int max) {
     return -1;
   }
   int n = 0;
-  File d = SD.open("/recipes");
+  File d = sdOpenR("/recipes");
   if (d && d.isDirectory()) {
     for (File f = d.openNextFile(); f && n < max; f = d.openNextFile()) {
       if (f.isDirectory()) continue;
@@ -2160,7 +2167,7 @@ int listText(const char* dir, char names[][64], int max) {
     return -1;
   }
   int n = 0;
-  File d = SD.open(dir);
+  File d = sdOpenR(dir);
   if (d && d.isDirectory()) {
     for (File f = d.openNextFile(); f && n < max; f = d.openNextFile()) {
       if (f.isDirectory()) continue;
@@ -2194,7 +2201,7 @@ bool sleepArtGray(uint8_t* gray) {
     strcpy(pick, "/sleep.bmp");
   } else {
     for (const char* dir : kSleepDirs) {
-      File d = SD.open(dir);
+      File d = sdOpenR(dir);
       if (!d || !d.isDirectory()) continue;
       int count = 0;
       for (File f = d.openNextFile(); f; f = d.openNextFile())
@@ -2248,7 +2255,7 @@ int mgrList(FileEntry* out, int max) {
   static const char* kDirs[3] = {"/books", "/wallpapers", "/"};
   int n = 0;
   for (const char* dir : kDirs) {
-    File d = SD.open(dir);
+    File d = sdOpenR(dir);
     if (!d || !d.isDirectory()) continue;
     for (File f = d.openNextFile(); f && n < max; f = d.openNextFile()) {
       if (f.isDirectory()) continue;
@@ -2366,7 +2373,7 @@ bool bookOpen(const char* file) {
       if (snprintf(path, sizeof(path), "%s%s%s", dir, dir[1] ? "/" : "", file) >= (int)sizeof(path))
         continue;
     }
-    g_book = SD.open(path, FILE_READ);
+    g_book = sdOpenR(path);
     if (g_book && !g_book.isDirectory()) {
       BookMeta m{};
       if (parseTbkHeader(g_book, m)) {

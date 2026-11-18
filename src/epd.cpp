@@ -375,6 +375,42 @@ void Epd::fillRect(int x, int y, int w, int h, uint8_t color) {
 #endif
 }
 
+// Every rotation and flip is affine, so three mapped points give the step
+// for one logical pixel along x and along y, and the loop is two additions
+// per pixel instead of a bounds check, a switch and a virtual call each.
+void Epd::inkBits(const uint8_t* bits, int w, int h) {
+  if (w > logicalW()) w = logicalW() & ~7;
+  if (h > logicalH()) h = logicalH();
+  const int stride = w / 8;
+  int px0, py0, px1, py1, px2, py2;
+#ifdef TOYBOX_PORTRAIT
+  epdMapPixel(_rot, _flipX, _flipY, 0, 0, px0, py0);
+  epdMapPixel(_rot, _flipX, _flipY, 1, 0, px1, py1);
+  epdMapPixel(_rot, _flipX, _flipY, 0, 1, px2, py2);
+#else
+  px0 = 0, py0 = 0, px1 = 1, py1 = 0, px2 = 0, py2 = 1;
+#endif
+  const int dxX = px1 - px0, dyX = py1 - py0;  // one step right
+  const int dxY = px2 - px0, dyY = py2 - py0;  // one step down
+  for (int y = 0; y < h; y++) {
+    const uint8_t* row = bits + (size_t)y * stride;
+    int px = px0 + dxY * y, py = py0 + dyY * y;
+    for (int xb = 0; xb < stride; xb++) {
+      const uint8_t v = row[xb];
+      if (v == 0xFF) {  // eight white: most of a page
+        px += 8 * dxX;
+        py += 8 * dyX;
+        continue;
+      }
+      for (int k = 0; k < 8; k++) {
+        if (!(v & (0x80 >> k))) _fb[(uint32_t)py * EPD_WB + (px >> 3)] &= ~(0x80 >> (px & 7));
+        px += dxX;
+        py += dyX;
+      }
+    }
+  }
+}
+
 void Epd::drawRect(int x, int y, int w, int h, uint8_t color, int thickness) {
   fillRect(x, y, w, thickness, color);
   fillRect(x, y + h - thickness, w, thickness, color);

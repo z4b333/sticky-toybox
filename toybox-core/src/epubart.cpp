@@ -439,11 +439,20 @@ void infPath(const char* bookFile, const char* entry, uint32_t usize, char* inf,
   snprintf(inf, (size_t)cap, "%s.inf", st);
 }
 
-int prepare(ToolsHost& host, epubc::Book& book, const char* bookFile, const char* entry,
-            uint32_t usize, bool* transient) {
+namespace {
+// `entry` names a picture inside the zip; null means the book's declared
+// cover. Both stream through the same entry reader, so only opening differs.
+bool openPic(epubc::Book& book, const char* entry) {
+  return entry ? book.blobOpen(entry) : book.coverOpen();
+}
+
+// The whole picture, decoded to grey and levelled, into `src`. False when it
+// cannot be (not JPEG/PNG, corrupt, too big for memory); `transient` is set
+// only when memory said no, which a later try may not repeat.
+bool decodePicture(epubc::Book& book, const char* entry, Src& src, bool* transient) {
   if (transient) *transient = false;
   uint8_t sig[8] = {};
-  if (!book.blobOpen(entry)) return 0;
+  if (!openPic(book, entry)) return false;
   int got = 0;
   while (got < 8) {
     const int r = book.blobRead(sig + got, 8 - got);
@@ -453,19 +462,18 @@ int prepare(ToolsHost& host, epubc::Book& book, const char* bookFile, const char
   book.blobClose();
   const bool jpeg = got >= 3 && sig[0] == 0xFF && sig[1] == 0xD8 && sig[2] == 0xFF;
   const bool png = got == 8 && sig[0] == 0x89 && sig[1] == 'P' && sig[2] == 'N' && sig[3] == 'G';
-  if (!jpeg && !png) return 0;  // GIF, SVG, WebP: the plate, honestly
+  if (!jpeg && !png) return false;  // GIF, SVG, WebP: the plate, honestly
 
-  Src src;
   Ctx ctx{&book, &src, false};
   bool ok = false;
-  if (!book.blobOpen(entry)) return 0;
+  if (!openPic(book, entry)) return false;
   if (jpeg) {
     constexpr size_t WORK = 6500;
     void* work = malloc(WORK);
     if (!work) {
       book.blobClose();
       if (transient) *transient = true;
-      return 0;
+      return false;
     }
     JDEC jd;
     const JRESULT prep = jd_prepare(&jd, jpegIn, work, WORK, &ctx);
@@ -483,10 +491,10 @@ int prepare(ToolsHost& host, epubc::Book& book, const char* bookFile, const char
     } else {
       free(work);
       book.blobClose();
-      if (prep != JDR_FMT3) return 0;  // corrupt rather than progressive
+      if (prep != JDR_FMT3) return false;  // corrupt rather than progressive
       // Progressive -- which is most commercial art. Decoded in full for luma,
       // at the smallest IDCT size still as big as the panel will show it.
-      if (!book.blobOpen(entry)) return 0;
+      if (!openPic(book, entry)) return false;
       ejprog::In pin{&ctx, blobRead};
       ok = ejprog::decodeGray(pin, W, H, PROG_BUDGET, rowsSize, rowsRow, &ctx);
       book.blobClose();
@@ -496,7 +504,7 @@ int prepare(ToolsHost& host, epubc::Book& book, const char* bookFile, const char
         src.release();
         ctx.sized = false;
         ctx.noMemory = false;
-        if (!book.blobOpen(entry)) return 0;
+        if (!openPic(book, entry)) return false;
         ejdc::In in{&ctx, blobRead};
         ok = ejdc::decodeGray(in, rowsSize, rowsRow, &ctx);
         book.blobClose();
@@ -509,9 +517,18 @@ int prepare(ToolsHost& host, epubc::Book& book, const char* bookFile, const char
     book.blobClose();
     if (ctx.noMemory && transient) *transient = true;
   }
-  if (!ok || !src.px) return 0;
+  if (!ok || !src.px) return false;
   src.flushRow();
   levels(src);
+  return true;
+}
+}  // namespace
+
+int prepare(ToolsHost& host, epubc::Book& book, const char* bookFile, const char* entry,
+            uint32_t usize, bool* transient) {
+  if (transient) *transient = false;
+  Src src;
+  if (!decodePicture(book, entry, src, transient)) return 0;
 
   // Landscape art, turned: worth it when turning makes the picture clearly
   // bigger on the panel (a near-square gains nothing and would only make the
@@ -591,20 +608,46 @@ int prepare(ToolsHost& host, epubc::Book& book, const char* bookFile, const char
 
 namespace {
 bool writePart(ToolsHost& host, const uint8_t* g, const char* g2Path, const char* b1Path) {
-  // Tone curves. Four greys: as the picture says. One bit: deepened a little
-  // (gamma 1.15) -- Atkinson drops a quarter of the error, which lightens the
-  // light greys, and hair and fabric lines are light greys.
-  static uint8_t toneG2[256], toneB1[256];
+  // Four greys take the picture as it is; one bit goes through writeB1's
+  // deeper curve (Atkinson drops a quarter of the error, which lightens the
+  // light greys, and hair and fabric lines are light greys).
+  static uint8_t toneG2[256];
   static bool made = false;
   if (!made) {
-    for (int v = 0; v < 256; v++) {
-      toneG2[v] = (uint8_t)v;
-      toneB1[v] = (uint8_t)(255.0f * powf(v / 255.0f, 1.15f) + 0.5f);
-    }
+    for (int v = 0; v < 256; v++) toneG2[v] = (uint8_t)v;
     made = true;
   }
-  return dither(host, g, toneG2, 4, g2Path) && ditherAtkinson(host, g, toneB1, b1Path);
+  return dither(host, g, toneG2, 4, g2Path) && writeB1(host, g, b1Path);
 }
 }  // namespace
+
+bool coverGrey(epubc::Book& book, uint8_t* g, bool* transient) {
+  if (transient) *transient = false;
+  if (book.coverType() == epubc::Book::COVER_NONE) return false;
+  Src src;
+  if (!decodePicture(book, nullptr, src, transient)) return false;
+  memset(g, 255, (size_t)W * H);
+  int ox, oy, ow, oh;
+  bool shrunk;
+  if (!fit(src, 0, 0, src.w, src.h, g, W, H, ox, oy, ow, oh, shrunk)) {
+    if (transient) *transient = true;
+    return false;
+  }
+  sharpen(g, W, ox, oy, ow, oh, shrunk ? 8 : 5);
+#ifdef EPUBART_DUMP
+  EPUBART_DUMP(g, W, H);
+#endif
+  return true;
+}
+
+bool writeB1(ToolsHost& host, const uint8_t* g, const char* path) {
+  static uint8_t tone[256];
+  static bool made = false;
+  if (!made) {
+    for (int v = 0; v < 256; v++) tone[v] = (uint8_t)(255.0f * powf(v / 255.0f, 1.15f) + 0.5f);
+    made = true;
+  }
+  return ditherAtkinson(host, g, tone, path);
+}
 
 }  // namespace epubart

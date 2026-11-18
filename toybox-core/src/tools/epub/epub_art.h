@@ -57,4 +57,16 @@ void infPath(const char* bookFile, const char* entry, uint32_t usize, char* inf,
 int prepare(ToolsHost& host, epubc::Book& book, const char* bookFile, const char* entry,
             uint32_t usize, bool* transient = nullptr);
 
+// The book's declared cover, decoded the way its illustrations are (full
+// progressive decode, levels, area-weighted fit, unsharp mask) and fitted
+// upright into the 480x800 grey page `g`, letterboxed white. False as for
+// prepare(), with `transient` meaning memory rather than the picture.
+bool coverGrey(epubc::Book& book, uint8_t* g, bool* transient = nullptr);
+
+// A grey page to one bit at `path` on the card, the way a picture page's .b1
+// is made: Atkinson over a gamma 1.15 curve. On a real retail cover this kept
+// faces, hair lines and the small credit text that Floyd-Steinberg turned to
+// grain (compared side by side on the bench).
+bool writeB1(ToolsHost& host, const uint8_t* g, const char* path);
+
 }  // namespace epubart

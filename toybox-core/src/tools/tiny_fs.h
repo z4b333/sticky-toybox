@@ -142,9 +142,17 @@ inline bool begin() {
 inline void ensureDir(const char* dir) {
   if (begin() && !LittleFS.exists(dir)) LittleFS.mkdir(dir);
 }
+// Opening a file that is not there makes the core print an error line
+// ("... does not exist, no permits for creation") on every miss -- and
+// "is it there?" by opening is how most of this firmware asks. exists() asks
+// the same question silently.
+inline File openRead(const char* path) {
+  return LittleFS.exists(path) ? LittleFS.open(path, "r") : File();
+}
+
 inline bool read(const char* path, String& out) {
   if (!begin()) return false;
-  File f = LittleFS.open(path, "r");
+  File f = openRead(path);
   if (!f) return false;
   out = f.readString();
   f.close();
@@ -203,7 +211,7 @@ inline bool exists(const char* path) { return begin() && LittleFS.exists(path); 
 // only ever needs its size checked before a settings label is drawn.
 inline size_t size(const char* path) {
   if (!begin()) return 0;
-  File f = LittleFS.open(path, "r");
+  File f = openRead(path);
   if (!f) return 0;
   const size_t n = f.size();
   f.close();
@@ -215,7 +223,7 @@ inline size_t size(const char* path) {
 // RAM is what WiFi and the framebuffer live on.
 inline char* readAlloc(const char* path, size_t& len) {
   if (!begin()) return nullptr;
-  File f = LittleFS.open(path, "r");
+  File f = openRead(path);
   if (!f) return nullptr;
   len = f.size();
   char* buf = (char*)ps_malloc(len);

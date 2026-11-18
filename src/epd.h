@@ -108,6 +108,8 @@ class Epd {
   // Pixel helpers (x: 0..799, y: 0..479); color: 0 = black, 1 = white
   void drawPixel(int x, int y, uint8_t color);
   void fillRect(int x, int y, int w, int h, uint8_t color);
+  // ToolsCanvas::inkBits, straight into the framebuffer through the rotation.
+  void inkBits(const uint8_t* bits, int w, int h);
   void drawRect(int x, int y, int w, int h, uint8_t color, int thickness = 1);
   void drawHLine(int x, int y, int w, uint8_t color) { fillRect(x, y, w, 1, color); }
   void drawVLine(int x, int y, int h, uint8_t color) { fillRect(x, y, 1, h, color); }

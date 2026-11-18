@@ -26,6 +26,7 @@ class StickyCanvas : public ToolsCanvas {
   void fillRect(int x, int y, int w, int h, bool black) override {
     epd.fillRect(x, y, w, h, black ? 0 : 1);
   }
+  void inkBits(const uint8_t* bits, int w, int h) override { epd.inkBits(bits, w, h); }
   void drawRect(int x, int y, int w, int h, int t, bool black) override {
     epd.drawRect(x, y, w, h, black ? 0 : 1, t);
   }
