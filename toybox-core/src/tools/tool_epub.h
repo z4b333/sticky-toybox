@@ -627,6 +627,12 @@ class EpubTool : public ToolApp {
   void openBook(int i) {
     _cur = i;
     const uint32_t tOpen0 = host().nowMs();
+    {  // which book the timings below belong to
+      char nm[bstore::NAME_BYTES + 1], line[bstore::NAME_BYTES + 12];
+      bstore::name(_books[i].file, nm, sizeof(nm));
+      snprintf(line, sizeof(line), "open: \"%s\"", nm);
+      host().perfLog(line);
+    }
     // The owner's own cover first, BEFORE the loading paint: a sidecar put
     // beside the book (.cover.tbi or .cover.bmp) costs no decode and beats
     // anything decoded here, so even a first open leads with that face. (The
@@ -1565,7 +1571,8 @@ class EpubTool : public ToolApp {
       return;
     }
     const char* file = _books[_cur].file;
-    int missing = 0;
+    const uint32_t tArt0 = host().nowMs();
+    int missing = 0, nMoved = 0;
     bool moved = false;
     {
       epubart::Prepared* idx =
@@ -1585,6 +1592,7 @@ class EpubTool : public ToolApp {
           _art[i].parts = (uint8_t)old;
           _art[i].known = true;
           moved = true;
+          nMoved++;
         } else {
           missing++;
         }
@@ -1598,7 +1606,6 @@ class EpubTool : public ToolApp {
     if (missing) {
       _artTotal = missing;
       _artDone = 0;
-      const uint32_t t0 = host().nowMs();
       for (int i = 0; i < _artN; i++) {
         if (_art[i].known) continue;
         host().refresh(false);  // "preparing artwork 3 of 19"
@@ -1613,12 +1620,14 @@ class EpubTool : public ToolApp {
         if (_art[i].known) writeArtIndex();
         _artDone++;
       }
-      char line[64];
-      snprintf(line, sizeof(line), "art: prepared %d pictures in %lu ms", missing,
-               (unsigned long)(host().nowMs() - t0));
-      host().perfLog(line);
       _artTotal = 0;
     }
+    // One line per open: how many were already in the index, moved from the
+    // old layout, and prepared now -- and what that cost.
+    char line[96];
+    snprintf(line, sizeof(line), "art: %d pictures - %d ready, %d moved, %d prepared in %lu ms", _artN,
+             _artN - nMoved - missing, nMoved, missing, (unsigned long)(host().nowMs() - tArt0));
+    host().perfLog(line);
     free(names.name);
   }
 

@@ -2415,7 +2415,7 @@ bool writeFileAtomic(const char* path, const void* data, int n) {
     SD.remove(tmp);
     return false;
   }
-  SD.remove(path);  // FAT rename does not overwrite
+  if (SD.exists(path)) SD.remove(path);  // FAT rename does not overwrite; exists() keeps it quiet
   return SD.rename(tmp, path);
 }
 
