@@ -3,6 +3,7 @@
 // bytes come in through epubc::IO, words come out of Book::next().
 #include "tools/epub/epubcore.h"
 
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1374,6 +1375,16 @@ int Book::next(char* word, uint32_t& startOff) {
     snprintf(word, WORD_CAP, "%s", _imgName);
   }
   return r;
+}
+
+void Book::listImages(void (*fn)(void* ctx, const char* name, uint32_t usize), void* ctx) {
+  walkCD([&](const char* name, const Ent& e) {
+    const char* dot = strrchr(name, '.');
+    if (!dot) return;
+    char ext[6] = {};
+    for (int i = 0; i < 5 && dot[1 + i]; i++) ext[i] = (char)tolower((unsigned char)dot[1 + i]);
+    if (!strcmp(ext, "jpg") || !strcmp(ext, "jpeg") || !strcmp(ext, "png")) fn(ctx, name, e.usize);
+  });
 }
 
 }  // namespace epubc

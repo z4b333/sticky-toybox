@@ -2983,16 +2983,14 @@ int main() {
     setScreen("tool_epub_art");
     stickyHost.refresh(true);
     {
-      // The picture is drawn, not merely announced: the fixture's .tbi is a
-      // frame, both diagonals and a blob, so a page that fell back to the
-      // "no picture prepared" plate carries a small fraction of this ink --
-      // and a picture read a band short carries most of it, which is why the
-      // guard also asks that the bottom rows are inked.
+      // The picture is drawn, not merely announced: plate.png is a real JPEG
+      // (the fixture's portrait cover), prepared on the device when the book
+      // opened. A page that fell back to the plate carries a small fraction
+      // of this ink, and a picture read short leaves its bottom rows bare.
       int ink = 0;
       for (uint32_t i = 0; i < EPD_BUF_SIZE; i++) ink += __builtin_popcount((uint8_t)~epd.fb()[i]);
       // The panel's own buffer is 800 across by 480 down, whichever way the
-      // canvas is turned; the picture fills all but the 20-pixel margin its
-      // frame leaves, so it inks about 440 of those 480 lines.
+      // canvas is turned; a 240x400 picture fills the whole 480x800 page.
       int inkRows = 0;
       for (int y = 0; y < 480; y++)
         for (int xb = 0; xb < 100; xb++)
@@ -3000,160 +2998,125 @@ int main() {
             inkRows++;
             break;
           }
-      if (ink < 9000 || inkRows < 400) {
+      if (ink < 40000 || inkRows < 440) {
         printf("EPUB APP FAIL: the illustration drew %d px over %d rows\n", ink, inkRows);
+        abort();
+      }
+      if (!et->hostArtPrepared("OEBPS/images/plate.png") ||
+          et->hostArtParts("OEBPS/images/plate.png") != 1) {
+        printf("EPUB APP FAIL: the portrait picture is not one prepared page\n");
+        abort();
+      }
+
+      // What went onto the card, checked against the source itself, not
+      // against what the code under test believes: a real share of the page is
+      // ink and a real share paper, the 4-grey and 1-bit versions agree cell by
+      // cell on where, and the tones are the right way up -- the source's top
+      // quarter averages 80 of 255 and its bottom quarter 136, so the top must
+      // come out clearly darker. A negative swaps them; a total could not tell
+      // (the picture averages almost exactly mid-grey).
+      char g2[64], b1[64];
+      static uint8_t g2b[96000], b1b[48000];
+      if (!et->hostArtPaths("OEBPS/images/plate.png", 0, g2, b1, sizeof(g2)) ||
+          sdcard::readWhole(g2, g2b, sizeof(g2b)) != 96000 ||
+          sdcard::readWhole(b1, b1b, sizeof(b1b)) != 48000) {
+        printf("EPUB APP FAIL: prepared art missing or the wrong size (%s, %s)\n", g2, b1);
+        abort();
+      }
+      auto lvl = [&](int x, int y) { return (g2b[y * 120 + x / 4] >> (6 - 2 * (x & 3))) & 3; };
+      auto bit = [&](int x, int y) { return (b1b[y * 60 + x / 8] & (0x80 >> (x & 7))) ? 0 : 1; };
+      long greySum = 0, top = 0, bot = 0;
+      int b1Ink = 0, agree = 0, cells = 0;
+      for (int y = 0; y < 800; y += 8)
+        for (int x = 0; x < 480; x += 8) {
+          int g = 0, k = 0;
+          for (int dy = 0; dy < 8; dy++)
+            for (int dx = 0; dx < 8; dx++) {
+              g += lvl(x + dx, y + dy);
+              k += bit(x + dx, y + dy);
+            }
+          greySum += g;
+          b1Ink += k;
+          agree += (g < 64 * 3 / 2) == (k > 32);
+          cells++;
+          if (y < 200) top += g;
+          if (y >= 600) bot += g;
+        }
+      const int meanLevel100 = (int)(greySum * 100 / (480L * 800));  // 0..300
+      if (meanLevel100 < 120 || meanLevel100 > 295 || b1Ink < 4000 || b1Ink > 300000 ||
+          agree * 100 < cells * 85 || top * 10 > bot * 8) {
+        printf("EPUB APP FAIL: device art looks wrong: mean level %d.%02d, %d px ink, "
+               "%d/%d cells agree, top %ld bottom %ld\n",
+               meanLevel100 / 100, meanLevel100 % 100, b1Ink, agree, cells, top, bot);
+        abort();
+      }
+      printf("device art ok (mean level %d.%02d, %d px ink, %d/%d cells agree)\n",
+             meanLevel100 / 100, meanLevel100 % 100, b1Ink, agree, cells);
+
+      // The landscape picture (art2.png, 400x240): part 0 turned a quarter
+      // clockwise to fill the panel, then upright slices -- 240 tall at the
+      // panel's shape is 144 wide, so 400 needs three. The fixture has a dark
+      // band along its TOP and a black square near its LEFT end, so turned
+      // clockwise the band lands along the panel's RIGHT edge and the square
+      // near its TOP; the first slice holds the square, the last does not.
+      if (et->hostArtParts("OEBPS/images/art2.png") != 4) {
+        printf("EPUB APP FAIL: the landscape picture is %d parts, not 4\n",
+               et->hostArtParts("OEBPS/images/art2.png"));
+        abort();
+      }
+      auto loadPart = [&](int part) {
+        if (!et->hostArtPaths("OEBPS/images/art2.png", part, g2, b1, sizeof(g2)) ||
+            sdcard::readWhole(g2, g2b, sizeof(g2b)) != 96000) {
+          printf("EPUB APP FAIL: landscape part %d missing\n", part);
+          abort();
+        }
+      };
+      auto darkIn = [&](int x0, int y0, int x1, int y1) {  // mean darkness, 0..3
+        long d = 0, n = 0;
+        for (int y = y0; y < y1; y++)
+          for (int x = x0; x < x1; x++, n++) d += 3 - lvl(x, y);
+        return (int)(d * 100 / n);  // x100
+      };
+      loadPart(0);
+      const int bandRight = darkIn(400, 100, 470, 700), bandLeft = darkIn(10, 100, 80, 700);
+      const int sqTop = darkIn(150, 0, 330, 200), sqBot = darkIn(150, 600, 330, 800);
+      if (bandRight < 200 || bandLeft > 100 || sqTop <= sqBot) {
+        printf("EPUB APP FAIL: landscape part 0 is not turned clockwise (band R %d L %d, square "
+               "top %d bottom %d)\n", bandRight, bandLeft, sqTop, sqBot);
+        abort();
+      }
+      loadPart(1);
+      const int s1top = darkIn(0, 0, 480, 120), s1sq = darkIn(0, 250, 480, 550);
+      loadPart(3);
+      const int s3sq = darkIn(0, 250, 480, 550);
+      if (s1top < 200 || s1sq <= s3sq) {
+        printf("EPUB APP FAIL: landscape slices wrong (slice 1 top %d square %d, slice 3 %d)\n",
+               s1top, s1sq, s3sq);
+        abort();
+      }
+      printf("landscape art ok (4 parts; turned: band R %d L %d; slices %d > %d)\n", bandRight,
+             bandLeft, s1sq, s3sq);
+
+      // A picture that cannot be decoded is not prepared, and is one page.
+      if (et->hostArtPrepared("OEBPS/images/missing.png") ||
+          et->hostArtParts("OEBPS/images/missing.png") != 1) {
+        printf("EPUB APP FAIL: the broken picture was prepared, or is not one page\n");
         abort();
       }
     }
 
-    // The next picture is one the book carries no .tbi and no .bmp for -- so
-    // before CrossInk, the reader said so by name rather than showing a blank
-    // page.
+    // The next picture cannot be decoded (only a PNG signature): the reader
+    // says so by name rather than showing a blank page.
     g_dumpEnabled = false;
     toybox.onButton(SideBtn::Down);
     if (et->hostPage() != 2 || strcmp(et->hostPageImage(), "OEBPS/images/missing.png") != 0) {
-      printf("EPUB APP FAIL: the unprepared picture is p%d img '%s'\n", et->hostPage(),
+      printf("EPUB APP FAIL: the broken picture is p%d img '%s'\n", et->hostPage(),
              et->hostPageImage());
       abort();
     }
     g_dumpEnabled = true;
-    setScreen("tool_epub_art_crossink");
+    setScreen("tool_epub_art_plate");
     stickyHost.refresh(true);
-    {
-      // ...except that this book has been through CrossInk's optimizer, which
-      // left the picture in it already rendered for this panel. So the page
-      // that used to be the "no picture prepared for it" plate is the picture.
-      //
-      // The fixture is 240x400 and the panel is 480x800, so it is scaled x2 --
-      // a scaler out by a factor shows up here as half a page or a picture
-      // running off it. Two of its four levels are greys, which an ordered
-      // dither turns into patterns: a renderer that thresholded instead would
-      // draw one of them white and the other black, and the ink would come out
-      // well outside this range.
-      int ink = 0;
-      for (uint32_t i = 0; i < EPD_BUF_SIZE; i++) ink += __builtin_popcount((uint8_t)~epd.fb()[i]);
-      int inkRows = 0;
-      for (int y = 0; y < 480; y++)
-        for (int xb = 0; xb < 100; xb++)
-          if ((uint8_t)~epd.fb()[(size_t)y * 100 + xb]) {
-            inkRows++;
-            break;
-          }
-      // A plate is text on an empty page and carries a small fraction of this.
-      // The ceiling is what catches the picture coming out as its own negative:
-      // the fixture is mostly white, so inverted it fills the panel.
-      if (ink < 20000 || ink > 120000 || inkRows < 400) {
-        printf("EPUB APP FAIL: the CrossInk picture drew %d px over %d rows\n", ink, inkRows);
-        abort();
-      }
-      // And said plainly: the margin between the edge of the picture and its
-      // frame is paper. Level 3 is WHITE -- reading the levels the other way
-      // round is the mistake that shipped every picture as a negative, and a
-      // total alone can be argued with.
-      {
-        int marginInk = 0;
-        for (int y = 4; y < 16; y++)
-          for (int x = 100; x < 200; x++) {
-            int pxx, pyy;
-            epdMapPixel(epd.rotation(), epd.panelFlipX(), epd.panelFlipY(), x, y, pxx, pyy);
-            if ((epd.fb()[(uint32_t)pyy * EPD_WB + (pxx >> 3)] & (0x80 >> (pxx & 7))) == 0)
-              marginInk++;
-          }
-        if (marginInk > 20) {
-          printf("EPUB APP FAIL: %d px of ink in the picture's white margin -- inverted\n",
-                 marginInk);
-          abort();
-        }
-      }
-      // And the lookup that found it is the one the manifest states -- for the
-      // picture asked about, not the next one in the list, and not at all for
-      // a picture the optimizer left alone.
-      char pxc[224];
-      if (!et->hostPxcEntry("OEBPS/images/missing.png", pxc, sizeof(pxc)) ||
-          strcmp(pxc, "META-INF/crossink/pxc/0123456789abcdef0123.pxc") != 0) {
-        printf("EPUB APP FAIL: the manifest gave '%s' for the picture\n", pxc);
-        abort();
-      }
-      if (et->hostPxcEntry("OEBPS/images/nowhere.png", pxc, sizeof(pxc))) {
-        printf("EPUB APP FAIL: a picture with no pxc borrowed '%s'\n", pxc);
-        abort();
-      }
-      if (et->hostPxcEntry("OEBPS/images/not-in-the-book.png", pxc, sizeof(pxc))) {
-        printf("EPUB APP FAIL: a picture not in the manifest got '%s'\n", pxc);
-        abort();
-      }
-      printf("crossink art ok (%d px over %d rows, scaled x2, manifest read)\n", ink, inkRows);
-
-      // A picture nothing prepared: the device decodes the book's own JPEG
-      // (the fixture's 240x400 cover, grey, baseline) and keeps both
-      // pictures on the card. Checked against the source itself, not against
-      // what the code under test believes: the fixture is a light picture
-      // with dark type, so most of the page must be paper, a real share must
-      // be ink, and the 4-grey and 1-bit versions must agree on where.
-      {
-        char g2[64], b1[64];
-        if (!et->hostDeviceArt("OEBPS/cover.jpg", g2, b1, sizeof(g2))) {
-          printf("EPUB APP FAIL: the device could not prepare a plain JPEG\n");
-          abort();
-        }
-        static uint8_t g2b[96000], b1b[48000];
-        if (sdcard::readWhole(g2, g2b, sizeof(g2b)) != 96000 ||
-            sdcard::readWhole(b1, b1b, sizeof(b1b)) != 48000) {
-          printf("EPUB APP FAIL: prepared art has the wrong size (%s, %s)\n", g2, b1);
-          abort();
-        }
-        // 240x400 fits 480x800 exactly: no letterbox, scaled x2.
-        long greySum = 0;
-        int b1Ink = 0, agree = 0, cells = 0;
-        for (int y = 0; y < 800; y += 8)
-          for (int x = 0; x < 480; x += 8) {
-            int g = 0, k = 0;
-            for (int dy = 0; dy < 8; dy++)
-              for (int dx = 0; dx < 8; dx++) {
-                const int px = x + dx, py = y + dy;
-                g += (g2b[py * 120 + px / 4] >> (6 - 2 * (px & 3))) & 3;
-                if (!(b1b[py * 60 + px / 8] & (0x80 >> (px & 7)))) k++;
-              }
-            greySum += g;
-            b1Ink += k;
-            // dark in one is dark in the other, cell by cell
-            const bool darkG = g < 64 * 3 / 2, darkB = k > 32;
-            agree += darkG == darkB;
-            cells++;
-          }
-        const int meanLevel100 = (int)(greySum * 100 / (480L * 800));  // 0..300
-        if (meanLevel100 < 120 || meanLevel100 > 295 || b1Ink < 4000 || b1Ink > 300000 ||
-            agree * 100 < cells * 85) {
-          printf("EPUB APP FAIL: device art looks wrong: mean level %d.%02d, %d px ink, %d/%d cells agree\n",
-                 meanLevel100 / 100, meanLevel100 % 100, b1Ink, agree, cells);
-          abort();
-        }
-        // Which way up the tones are, measured from the source: the fixture's
-        // top quarter averages 80 of 255 and its bottom quarter 136, so the
-        // top must come out clearly darker. A negative swaps them; a total
-        // could not tell (the picture averages almost exactly mid-grey).
-        {
-          long top = 0, bot = 0;
-          for (int y = 0; y < 200; y++)
-            for (int x = 0; x < 480; x++) {
-              top += (g2b[y * 120 + x / 4] >> (6 - 2 * (x & 3))) & 3;
-              bot += (g2b[(799 - y) * 120 + x / 4] >> (6 - 2 * (x & 3))) & 3;
-            }
-          if (top * 10 > bot * 8) {
-            printf("EPUB APP FAIL: device art tones upside down (top %ld vs bottom %ld)\n", top, bot);
-            abort();
-          }
-        }
-        // Something it cannot decode is refused, and refused for good.
-        if (et->hostDeviceArt("OEBPS/images/missing.png", g2, b1, sizeof(g2)) ||
-            et->hostDeviceArt("OEBPS/nav.xhtml", g2, b1, sizeof(g2))) {
-          printf("EPUB APP FAIL: device art accepted something that is not a picture\n");
-          abort();
-        }
-        printf("device art ok (mean level %d.%02d, %d px ink, %d/%d cells agree)\n",
-               meanLevel100 / 100, meanLevel100 % 100, b1Ink, agree, cells);
-      }
-    }
 
     // Back one: the two pictures share an offset with each other and with the
     // word after them, so only the count of pictures already passed says which
@@ -3959,7 +3922,22 @@ int main() {
                et3->hostSpine(), et3->hostPageImage());
         abort();
       }
-      // Back out of it, into the chapter of words before it...
+      // A landscape picture is four pages (part 0 turned, three slices) at one
+      // offset, and resume takes the LAST page at the saved offset -- the last
+      // slice. Back through the parts, each a page...
+      for (int part = 3; part > 0; part--) {
+        if (et3->hostPageImagePart() != part) {
+          printf("EPUB APP FAIL: expected landscape part %d, on part %d (s%d p%d)\n", part,
+                 et3->hostPageImagePart(), et3->hostSpine(), et3->hostPage());
+          abort();
+        }
+        toybox.onButton(SideBtn::Up);
+      }
+      if (et3->hostPageImagePart() != 0 || strcmp(et3->hostPageImage(), "OEBPS/images/art2.png")) {
+        printf("EPUB APP FAIL: UP through the landscape parts did not reach part 0\n");
+        abort();
+      }
+      // ...then out of it, into the chapter of words before it...
       toybox.onButton(SideBtn::Up);
       if (et3->hostSpine() != 1 || et3->hostPageImage()[0] || et3->hostLineCount() == 0) {
         printf("EPUB APP FAIL: UP out of the picture chapter gave s%d, %d lines, img '%s'\n",
@@ -3974,6 +3952,16 @@ int main() {
         printf("EPUB APP FAIL: DOWN back into the picture chapter gave s%d img '%s'\n",
                et3->hostSpine(), et3->hostPageImage());
         abort();
+      }
+      // Forward through the parts lands on each in turn: the turned whole,
+      // then the slices left to right.
+      for (int part = 0; part < 4; part++) {
+        if (et3->hostPageImagePart() != part || et3->hostSpine() != 2) {
+          printf("EPUB APP FAIL: DOWN through the landscape parts: wanted part %d, got %d (s%d)\n",
+                 part, et3->hostPageImagePart(), et3->hostSpine());
+          abort();
+        }
+        if (part < 3) toybox.onButton(SideBtn::Down);
       }
       toybox.onButton(SideBtn::Ok);                       // the panel
       toybox.onTap(240, rmenu::rootRect(6, 480).y + 40);  // CLOSE THE BOOK
@@ -5369,70 +5357,68 @@ int main() {
     g_dumpEnabled = true;
   }
 
-  // --- artwork prepared as .bmp ---------------------------------------------
-  // The one format, inside the book too: chapter three's illustration is a
-  // 1-bit 480x800 BMP (chapter one's is still a .tbi, so both routes stay
-  // walked). The fixture builds the BMP from the .tbi's own bits, so "did it
-  // draw" is the same question, with the same answer: a frame, two diagonals
-  // and a blob. A BMP read as if it were top-down would put the picture on
-  // the panel upside down -- which the blob, sitting above the middle, is
-  // there to catch.
+  // --- landscape artwork on the panel -----------------------------------------
+  // Chapter three's picture is landscape, so its first page is the whole
+  // picture turned a quarter clockwise. Checked where it matters, in the
+  // panel's own buffer through the panel's own mapping: the fixture's dark
+  // band (the picture's TOP) must run down the page's RIGHT edge, and the
+  // left edge stay light. Drawn as the one-bit version, since the host has
+  // no grey.
   {
     g_dumpEnabled = false;
     toybox.goHub();
     toybox.open(false, 10, false);
     auto* eb = static_cast<EpubTool*>(toybox.hostActive());
     if (!eb->openDirect("/books/wind.epub")) {
-      printf("BMP ART FAIL: the book did not open\n");
+      printf("WIDE ART FAIL: the book did not open\n");
       abort();
     }
-    // Walk to chapter three, which is the picture-only one.
+    // Walk to chapter three, the picture-only one; it opens on part 0.
     for (int k = 0; k < 30 && eb->hostSpine() != 2; k++) toybox.onButton(SideBtn::Down);
-    if (eb->hostSpine() != 2 || strcmp(eb->hostPageImage(), "OEBPS/images/art2.png") != 0) {
-      printf("BMP ART FAIL: never reached the .bmp illustration (s%d img '%s')\n",
-             eb->hostSpine(), eb->hostPageImage());
+    if (eb->hostSpine() != 2 || strcmp(eb->hostPageImage(), "OEBPS/images/art2.png") != 0 ||
+        eb->hostPageImagePart() != 0) {
+      printf("WIDE ART FAIL: never reached the landscape picture (s%d img '%s' part %d)\n",
+             eb->hostSpine(), eb->hostPageImage(), eb->hostPageImagePart());
       abort();
     }
     g_dumpEnabled = true;
-    setScreen("tool_epub_art_bmp");
+    setScreen("tool_epub_art_wide");
     stickyHost.refresh(true);
     g_dumpEnabled = false;
-    int ink = 0;
-    for (uint32_t i = 0; i < EPD_BUF_SIZE; i++) ink += __builtin_popcount((uint8_t)~epd.fb()[i]);
-    int inkRows = 0;
-    for (int y = 0; y < 480; y++)
-      for (int xb = 0; xb < 100; xb++)
-        if ((uint8_t)~epd.fb()[(size_t)y * 100 + xb]) {
-          inkRows++;
-          break;
-        }
-    if (ink < 9000 || inkRows < 400) {
-      printf("BMP ART FAIL: the .bmp illustration drew %d px over %d rows\n", ink, inkRows);
-      abort();
-    }
-    // Right way up. A BMP stores its rows bottom-first, so reading one as if
-    // it were top-down flips the picture -- and the fixture's frame, X and
-    // centred blob are symmetric enough that a flip would look identical.
-    // The BMP therefore carries a solid mark near its TOP (rows 60-100), and
-    // the mirror of that band must be empty.
-    auto bandInk = [&](int y0, int y1) {
-      long n = 0;
+    auto boxInk = [&](int x0, int y0, int x1, int y1) {
+      long n = 0, all = 0;
       for (int y = y0; y < y1; y++)
-        for (int x = 40; x < 120; x++) {
+        for (int x = x0; x < x1; x++, all++) {
           int px = 0, py = 0;
           epdMapPixel(0, epd.panelFlipX(), epd.panelFlipY(), x, y, px, py);
           if (!(epd.fb()[(size_t)py * 100 + (px >> 3)] & (0x80 >> (px & 7)))) n++;
         }
-      return n;
+      return (int)(n * 100 / all);  // percent inked
     };
-    const long topBand = bandInk(60, 100), bottomBand = bandInk(700, 740);
-    if (topBand < 2000 || bottomBand > topBand / 4) {
-      printf("BMP ART FAIL: mark %ld at the top, %ld at the bottom -- rows upside down\n",
-             topBand, bottomBand);
+    const int right = boxInk(410, 100, 470, 700), left = boxInk(10, 100, 70, 700);
+    if (right < 60 || left > 20) {
+      printf("WIDE ART FAIL: turned picture: right edge %d%% inked, left %d%%\n", right, left);
+      abort();
+    }
+    // One page on: the first slice, upright, the black square in it.
+    toybox.onButton(SideBtn::Down);
+    if (eb->hostPageImagePart() != 1) {
+      printf("WIDE ART FAIL: DOWN from the turned picture gave part %d\n",
+             eb->hostPageImagePart());
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_epub_art_slice");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    const int sliceTop = boxInk(0, 0, 480, 120);
+    if (sliceTop < 60) {
+      printf("WIDE ART FAIL: the first slice's top band is %d%% inked\n", sliceTop);
       abort();
     }
     toybox.goHub();
-    printf("bmp artwork ok (%d px, %d rows, right way up)\n", ink, inkRows);
+    printf("wide artwork ok (turned: right %d%% left %d%%; slice top %d%%)\n", right, left,
+           sliceTop);
     g_dumpEnabled = true;
   }
 

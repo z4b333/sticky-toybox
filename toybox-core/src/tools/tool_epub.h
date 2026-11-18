@@ -76,10 +76,6 @@ inline constexpr int MAX_PAGES = 2048;  // per chapter; ~90x any real chapter
 // both times and the picture never.
 inline constexpr uint32_t PAGE_IMG = 0x80000000u;
 inline constexpr uint32_t pageOff(uint32_t v) { return v & ~PAGE_IMG; }
-// One band of a .tbi as it is blitted: 16 rows, so a 48 KB picture crosses the
-// bus in 50 reads and never needs 48 KB of anything.
-inline constexpr int IMG_BAND_ROWS = 16;
-inline uint8_t g_imgBand[IMG_BAND_ROWS * (480 / 8)];
 // The book's contents, read once per book. Static because it is 3 KB and one
 // book is open at a time; sized so that a light novel's chapter list fits and
 // a reference work's is truncated rather than refused.
@@ -167,6 +163,17 @@ class EpubTool : public ToolApp {
   void render(ToolsCanvas& c) override {
     if (_screen == Screen::Loading) {
       bthumb::drawLoading(host(), c, _books[_cur].file, _books[_cur].title);
+      if (_artTotal > 0) {
+        // The first open's wait, said plainly and counted, on a white band
+        // over the cover so it reads whatever the cover is.
+        const int W = c.width();
+        c.fillRect(24, 640, W - 48, 112, false);
+        c.drawRect(24, 640, W - 48, 112, 2, true);
+        char line[48];
+        snprintf(line, sizeof(line), "preparing artwork %d of %d", _artDone + 1, _artTotal);
+        c.textCentered(W / 2, 662, line, TS_MED, true);
+        c.textCentered(W / 2, 712, "first open only - later opens are quick", TS_SMALL, true);
+      }
       return;
     }
     if (_screen == Screen::Page) {
@@ -387,24 +394,18 @@ class EpubTool : public ToolApp {
   int hostPage() const { return _page; }
   uint32_t hostPageOffset() const { return curOffset(); }
   const char* hostPageImage() const { return _pageImage; }
-  // The manifest scan, for a guard: a book through CrossInk's optimizer says
-  // which of its .pxc files belongs to which picture, and getting that lookup
-  // wrong is a picture drawn from somebody else's bytes.
-  bool hostPxcEntry(const char* img, char* out, int cap) { return pxcEntryFor(img, out, cap); }
-  // The on-device picture pipeline, for a guard: prepare `entry` as if a page
-  // showed it, and say where the two pictures went. The page's own picture is
-  // put back afterwards.
-  bool hostDeviceArt(const char* entry, char* g2, char* b1, int cap) {
-    char keep[sizeof(_pageImage)];
-    memcpy(keep, _pageImage, sizeof(keep));
-    snprintf(_pageImage, sizeof(_pageImage), "%s", entry);
-    _artKey = 0;
-    const bool ok = deviceArtReady();
-    snprintf(g2, (size_t)cap, "%s", _artG2);
-    snprintf(b1, (size_t)cap, "%s", _artB1);
-    memcpy(_pageImage, keep, sizeof(keep));
-    _artKey = 0;
-    return ok;
+  int hostPageImagePart() const { return _pageImagePart; }
+  int hostArtParts(const char* entry) const { return artParts(entry); }
+  bool hostArtPrepared(const char* entry) const {
+    const ArtRec* r = artFor(entry);
+    return r && r->parts;
+  }
+  // Card paths of one part of a prepared picture, for a guard.
+  bool hostArtPaths(const char* entry, int part, char* g2, char* b1, int cap) const {
+    const ArtRec* r = artFor(entry);
+    if (!r || !r->parts || part >= r->parts) return false;
+    epubart::paths(_books[_cur].file, entry, r->usize, part, g2, b1, cap);
+    return true;
   }
   int hostMenu() const { return (int)_menu; }
   bool hostPicking() const { return _picking; }
@@ -620,8 +621,6 @@ class EpubTool : public ToolApp {
 
   void openBook(int i) {
     _cur = i;
-    _artKey = 0;  // picture decisions belong to the book they were made in
-    _artBadN = 0;
     const uint32_t tOpen0 = host().nowMs();
     // The cheap cover sources first, BEFORE the loading paint: a sidecar the
     // owner put beside the book, or a cover CrossInk already decoded. Neither
@@ -703,6 +702,11 @@ class EpubTool : public ToolApp {
     // check when the file is already there.
     if (bthumb::complete(host(), _books[i].file)) host().crossCoverPut(_books[i].file);
 
+    // Every picture in the book, prepared now if it was not before -- the
+    // loading screen counts them off. Before the layout, which asks how many
+    // pages each picture is.
+    prepareBookArt();
+
     // Where were we? The card remembers, in CrossPoint's format.
     // CrossPoint's directory FIRST. It is the shared one -- that firmware
     // writes its position there and nowhere else -- so it is also the one
@@ -747,9 +751,10 @@ class EpubTool : public ToolApp {
       host().perfLog(line);
     }
     // A book whose first page is its cover art opens portrait, whatever the
-    // reading rotation: see syncPageRot.
+    // reading rotation: see syncPageRot -- and in four greys, like every
+    // picture page with nothing over it.
     syncPageRot();
-    host().refresh(true);
+    if (!showDeviceArtGrey()) host().refresh(true);
   }
 
   // The second line of a shelf row: where the reader stopped, or nothing at
@@ -1025,6 +1030,7 @@ class EpubTool : public ToolApp {
     const int keepLines = _lineN;
     char keepImage[sizeof(_pageImage)];
     memcpy(keepImage, _pageImage, sizeof(keepImage));
+    const uint8_t keepPart = _pageImagePart;
     _lineN = 0;
     int y = epubui::TOP;
     char cur[256];
@@ -1043,10 +1049,13 @@ class EpubTool : public ToolApp {
     // paragraphs on a 480x800 panel is worth less than the paragraphs it
     // displaced, and this is how the books themselves are laid out.
     _pageImage[0] = 0;
+    _pageImagePart = 0;
     if (_pendImageValid) {
       snprintf(_pageImage, sizeof(_pageImage), "%s", _pendImage);
+      _pageImagePart = _pendImagePart;
       _pendImageValid = false;
       pageStart = _pendImageOff;
+      queueNextPart(pageStart);
       if (_lutN < epubui::MAX_PAGES) _lut[_lutN++] = pageStart | epubui::PAGE_IMG;
       return 1;
     }
@@ -1105,9 +1114,11 @@ class EpubTool : public ToolApp {
       }
       if (tok == epubc::TOK_IMAGE) {
         if (!started) {
-          // A fresh page: this one is the picture.
+          // A fresh page: this one is the picture (its first part).
           snprintf(_pageImage, sizeof(_pageImage), "%s", _book.imageName());
+          _pageImagePart = 0;
           pageStart = off;
+          queueNextPart(off);
           placed++;
           break;
         }
@@ -1115,6 +1126,7 @@ class EpubTool : public ToolApp {
         // that both pages then start at the same offset -- an image adds no
         // codepoints -- which resume handles the way it handles any tie.
         snprintf(_pendImage, sizeof(_pendImage), "%s", _book.imageName());
+        _pendImagePart = 0;
         _pendImageOff = off;
         _pendImageValid = true;
         flushLine();
@@ -1281,8 +1293,21 @@ class EpubTool : public ToolApp {
       if (_atEnd) _chapterPages = _lutN;
       _lineN = keepLines;  // nothing new: the page that was showing still is
       memcpy(_pageImage, keepImage, sizeof(_pageImage));
+      _pageImagePart = keepPart;
     }
     return placed;
+  }
+
+  // After a picture page: if the picture has another part, it opens the next
+  // page, at the same offset -- the same mechanism as a picture that follows
+  // text, so every replay breaks the pages identically.
+  void queueNextPart(uint32_t off) {
+    if (_pageImagePart + 1 < artParts(_pageImage)) {
+      snprintf(_pendImage, sizeof(_pendImage), "%s", _pageImage);
+      _pendImagePart = (uint8_t)(_pageImagePart + 1);
+      _pendImageOff = off;
+      _pendImageValid = true;
+    }
   }
 
   // Replays the chapter from the top and lays out exactly the page whose
@@ -1310,11 +1335,15 @@ class EpubTool : public ToolApp {
         break;
       }
       if (wantImage && tok == epubc::TOK_IMAGE && off >= target) {
-        if (skipImages > 0) {
-          skipImages--;
+        // A landscape picture is several pages: step over whole pictures,
+        // then land on the right part of this one.
+        const int parts = artParts(_book.imageName());
+        if (skipImages >= parts) {
+          skipImages -= parts;
           continue;
         }
         snprintf(_pendImage, sizeof(_pendImage), "%s", _book.imageName());
+        _pendImagePart = (uint8_t)skipImages;
         _pendImageOff = off;
         _pendImageValid = true;
         break;
@@ -1418,6 +1447,11 @@ class EpubTool : public ToolApp {
       // end of chapter: the next one, if there is one
       if (_spine + 1 < _book.spineCount()) {
         if (gotoPlace(_spine + 1, 0)) {
+          // Forward into a chapter starts at its FIRST page. gotoPlace takes
+          // the last page at an offset (the resume rule), and a chapter that
+          // opens with pictures has several pages at offset 0 -- a landscape
+          // picture's parts, or a picture and the text after it.
+          if (_page != 0) showPageAt(0);
           const uint32_t tPage = host().nowMs();
           saveSoon();
           perfTurn("next chapter", t0, tPage, host().nowMs());
@@ -1455,369 +1489,120 @@ class EpubTool : public ToolApp {
     paint();
   }
 
-  // The pre-rendered picture beside an image: same path inside the zip, with a
-  // "toybox/" prefix and the extension swapped. `.bmp` is what a converter
-  // should write now -- one picture format for the whole device, and a file
-  // anything can open -- and `.tbi` is what the older ones wrote.
-  void artEntryFor(const char* img, const char* ext, char* out, int cap) {
-    char stem[200];
-    snprintf(stem, sizeof(stem), "toybox/%s", img);
-    char* dot = strrchr(stem, '.');
-    const char* slash = strrchr(stem, '/');
-    if (dot && (!slash || dot > slash)) *dot = 0;  // ".jpg" goes, a dotted folder stays
-    snprintf(out, (size_t)cap, "%s%s", stem, ext);
+  // --- a book's illustrations (epub_art.h) -----------------------------------
+  // Every picture in the book is prepared on the device, all of them on the
+  // book's first open, behind the loading screen; the pictures a PC tool may
+  // have left in the book (the slicer's toybox/ .bmp, CrossInk's .pxc) are
+  // no longer read -- one decoder, one look, and the original is always in
+  // the book beside them. A landscape picture is several pages (part 0 turned
+  // to fill the panel, then upright slices), which the layout asks for here.
+  struct ArtRec {
+    uint32_t key;    // bthumb::key of the picture's zip path
+    uint32_t usize;  // its uncompressed size, part of the card key
+    uint8_t parts;   // 0 = not prepared (cannot be decoded, or not yet)
+  };
+  static constexpr int ART_MAX = 256;
+  ArtRec* _art = nullptr;  // PSRAM, ART_MAX entries
+  int _artN = 0;
+  int _artDone = 0, _artTotal = 0;  // the loading screen's progress line
+
+  const ArtRec* artFor(const char* name) const {
+    const uint32_t k = bthumb::key(name);
+    for (int i = 0; i < _artN; i++)
+      if (_art[i].key == k) return &_art[i];
+    return nullptr;
+  }
+  // How many pages a picture is: its parts once prepared, one page (the
+  // plate) when it could not be.
+  int artParts(const char* name) const {
+    const ArtRec* r = artFor(name);
+    return r && r->parts ? r->parts : 1;
   }
 
-  bool blobReadFull(uint8_t* dst, int n) {
-    int got = 0;
-    while (got < n) {
-      const int r = _book.blobRead(dst + got, n - got);
-      if (r <= 0) return false;
-      got += r;
+  // On every open: which of the book's pictures are on the card already (one
+  // byte read each), and on a first open -- or after a pipeline change --
+  // the rest prepared now, the loading screen counting them off. Slow once,
+  // by design: the owner would rather wait at the door than at every picture.
+  void prepareBookArt() {
+    if (!_art) _art = (ArtRec*)malloc(sizeof(ArtRec) * ART_MAX);
+    _artN = 0;
+    if (!_art) return;
+    struct Names {
+      EpubTool* self;
+      char (*name)[192];
+      int n;
+    } names{this, (char(*)[192])malloc((size_t)ART_MAX * 192), 0};
+    if (!names.name) return;
+    _book.listImages(
+        [](void* ctx, const char* nm, uint32_t usize) {
+          Names& N = *(Names*)ctx;
+          EpubTool& T = *N.self;
+          if (T._artN >= ART_MAX || strlen(nm) >= 192) return;
+          T._art[T._artN] = {bthumb::key(nm), usize, 0};
+          snprintf(N.name[T._artN], 192, "%s", nm);
+          T._artN++;
+        },
+        &names);
+    int missing = 0;
+    for (int i = 0; i < _artN; i++) {
+      char inf[64];
+      epubart::infPath(_books[_cur].file, names.name[i], _art[i].usize, inf, sizeof(inf));
+      // One byte: the part count, or 0 for a picture this device cannot
+      // decode -- remembered, so a GIF is not retried on every open.
+      uint8_t n = 0xFF;
+      if (host().sdReadFile(inf, &n, 1) == 1 && n <= epubart::MAX_PARTS)
+        _art[i].parts = n;
+      else
+        _art[i].parts = 0xFF, missing++;
     }
+    if (missing) {
+      _artTotal = missing;
+      _artDone = 0;
+      const uint32_t t0 = host().nowMs();
+      for (int i = 0; i < _artN; i++) {
+        if (_art[i].parts != 0xFF) continue;
+        host().refresh(false);  // "preparing artwork 3 of 19"
+        bool transient = false;
+        _art[i].parts = (uint8_t)epubart::prepare(host(), _book, _books[_cur].file, names.name[i],
+                                                  _art[i].usize, &transient);
+        if (!_art[i].parts && !transient) {
+          char inf[64];
+          epubart::infPath(_books[_cur].file, names.name[i], _art[i].usize, inf, sizeof(inf));
+          const uint8_t zero = 0;
+          if (host().sdStreamOpen(inf)) {
+            const bool w = host().sdStreamWrite(&zero, 1);
+            host().sdStreamClose(w);
+          }
+        }
+        _artDone++;
+      }
+      char line[64];
+      snprintf(line, sizeof(line), "art: prepared %d pictures in %lu ms", missing,
+               (unsigned long)(host().nowMs() - t0));
+      host().perfLog(line);
+      _artTotal = 0;
+    }
+    free(names.name);
+  }
+
+  // This page's picture, as card paths: false when it was not prepared.
+  bool artPathsHere(char* g2, char* b1, int cap) {
+    const ArtRec* r = artFor(_pageImage);
+    if (!r || !r->parts) return false;
+    epubart::paths(_books[_cur].file, _pageImage, r->usize, _pageImagePart, g2, b1, cap);
     return true;
-  }
-
-  // Blits the picture for this page, a band at a time. The whole picture is
-  // 48 KB and this device has no 48 KB to spare, so it never exists whole:
-  // 16 rows arrive, 16 rows are drawn, and the buffer is reused 50 times.
-  // --- CrossInk's own picture, already rendered for this panel ---------------
-  // An EPUB run through CrossInk's optimizer (inky) carries every illustration
-  // a second time, as a .pxc under META-INF/crossink/pxc/ -- quantised to the
-  // four greys this panel has, at the size it will be shown. Their manifest
-  // says which file belongs to which image:
-  //
-  //   META-INF/crossink/optimizer-v1.json
-  //     "images": [ { "href": "OEBPS/images/Art_ch1.jpg",
-  //                   "pxc":  "META-INF/crossink/pxc/<20 hex>.pxc",
-  //                   "width": 320, "height": 480 }, ... ]
-  //
-  // Read rather than parsed: the manifest is machine-written by one tool, and
-  // what is wanted from it is one string that follows another. The image's own
-  // path is looked for in quotes, and the "pxc" after it is taken -- which is
-  // robust to their formatting changing and costs no table in memory. A book
-  // has a handful of pictures; this runs when one is turned to.
-  bool pxcEntryFor(const char* img, char* out, int cap) {
-    if (!img || !img[0]) return false;
-    if (!_book.blobOpen("META-INF/crossink/optimizer-v1.json")) return false;
-    char needle[200];
-    const int need = snprintf(needle, sizeof(needle), "\"%s\"", img);
-    if (need <= 0 || need >= (int)sizeof(needle)) {
-      _book.blobClose();
-      return false;
-    }
-    // Two little state machines over one pass of the file: match the needle,
-    // then find "pxc" and copy the quoted string after it. `after` bounds the
-    // second so a book without a pxc for this picture does not adopt the next
-    // picture's.
-    int at = 0, after = -1, pat = 0;
-    int outN = -1;
-    bool inValue = false;
-    uint8_t buf[192];
-    static const char kPxc[] = "\"pxc\"";
-    while (true) {
-      const int got = _book.blobRead(buf, (int)sizeof(buf));
-      if (got <= 0) break;
-      for (int i = 0; i < got; i++) {
-        const char ch = (char)buf[i];
-        if (after < 0) {
-          at = (ch == needle[at]) ? at + 1 : (ch == needle[0] ? 1 : 0);
-          if (at == need) after = 0;
-          continue;
-        }
-        if (++after > 400) {  // no pxc belongs to this picture
-          _book.blobClose();
-          return false;
-        }
-        if (outN < 0) {
-          pat = (ch == kPxc[pat]) ? pat + 1 : (ch == kPxc[0] ? 1 : 0);
-          if (pat == (int)sizeof(kPxc) - 1) outN = 0;
-          continue;
-        }
-        if (!inValue) {
-          if (ch == '"') inValue = true;  // the opening quote of the value
-          continue;
-        }
-        if (ch == '"') {
-          out[outN] = 0;
-          _book.blobClose();
-          return outN > 0;
-        }
-        if (outN >= cap - 1) break;
-        out[outN++] = ch;
-      }
-    }
-    _book.blobClose();
-    return false;
-  }
-
-  // Draws one. The file is four bytes of size and then two bits a pixel, rows
-  // padded to a byte -- the same packing the card fonts use -- and the level is
-  // BRIGHTNESS: 0 is black and 3 is white, a straight ramp that lands on 0, 85,
-  // 170 and 255 against the JPEG the book still carries. Guessing that the
-  // other way round shipped every picture as its own negative.
-  //
-  // Scaled to the panel and dithered down to the one bit the page is drawn in.
-  // A 4x4 ordered dither, not a threshold: their four greys thresholded would
-  // throw away three of them, and on an illustration that is the difference
-  // between a picture and a silhouette. Nearest-neighbour on the way up, since
-  // the source was already rendered at nearly this size by a tool that knew
-  // the panel.
-  //
-  // Streamed a row at a time. A 480x720 picture is 86 KB unpacked and this
-  // device has no 86 KB to spare; one source row is eighty bytes.
-  bool drawPxcPage(ToolsCanvas& c, const char* entry) {
-    if (!_book.blobOpen(entry)) return false;
-    uint8_t head[4];
-    if (!blobReadFull(head, sizeof(head))) {
-      _book.blobClose();
-      return false;
-    }
-    const int w = head[0] | (head[1] << 8), h = head[2] | (head[3] << 8);
-    const int stride = (w + 3) / 4;
-    if (w <= 0 || h <= 0 || stride > (int)sizeof(epubui::g_imgBand)) {
-      _book.blobClose();
-      return false;
-    }
-    // Fit, keeping the shape: whichever of width and height runs out first.
-    const int cw = c.width(), chh = c.height();
-    int dw = cw, dh = (int)((int64_t)cw * h / w);
-    if (dh > chh) {
-      dh = chh;
-      dw = (int)((int64_t)chh * w / h);
-    }
-    if (dw <= 0 || dh <= 0) {
-      _book.blobClose();
-      return false;
-    }
-    const int x0 = (cw - dw) / 2, y0 = (chh - dh) / 2;
-    // The classic 4x4, as sixteenths. Compared against a coverage of 0, 4, 8
-    // or 16 sixteenths, so white stays white and black stays black and the two
-    // middle greys become patterns.
-    static const uint8_t kBayer[16] = {0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5};
-    // Ink is what is left of the light: the levels are 0, 1/3, 2/3 and 1 bright,
-    // so they are 16, 11, 5 and 0 sixteenths dark.
-    static const uint8_t kCover[4] = {16, 11, 5, 0};
-    int haveRow = -1;
-    for (int dy = 0; dy < dh; dy++) {
-      const int sy = (int)((int64_t)dy * h / dh);
-      // The source is read forward only: a row is read when it is reached and
-      // reused for as many output rows as land on it.
-      while (haveRow < sy) {
-        if (!blobReadFull(epubui::g_imgBand, stride)) {
-          _book.blobClose();
-          return haveRow >= 0;  // half a picture beats the "none prepared" plate
-        }
-        haveRow++;
-      }
-      const uint8_t* row = epubui::g_imgBand;
-      for (int dx = 0; dx < dw; dx++) {
-        const int sx = (int)((int64_t)dx * w / dw);
-        const uint8_t byte = row[sx >> 2];
-        if (byte == 0xFF) {  // four white pixels, which is most of most pictures
-          const int skip = 3 - (sx & 3);
-          dx += skip;
-          continue;
-        }
-        const uint8_t v = (uint8_t)((byte >> ((3 - (sx & 3)) * 2)) & 3);
-        if (kCover[v] > kBayer[((dy & 3) << 2) | (dx & 3)])
-          c.fillRect(x0 + dx, y0 + dy, 1, 1, true);
-      }
-    }
-    _book.blobClose();
-    return true;
-  }
-
-  // A prepared .bmp inside the book. Streamed, never buffered: a BMP written
-  // for this panel -- 1 bpp, 480 wide, 800 tall -- is the same 48 KB of bits
-  // a .tbi is, in a wrapper the rest of the world can open, and its rows can
-  // go straight to the glass as they arrive. Bottom-up storage (the usual
-  // way) is not a problem for a one-pass read: the first row off the file is
-  // simply the last row of the picture, and it is drawn there.
-  //
-  // Anything else -- another size, another depth, a top-down file -- is left
-  // to the caller's .tbi fallback rather than decoded here. The converter is
-  // told exactly what to write (docs/CONVERTER-SPEC.md); a book that ignores
-  // that gets the honest "no picture prepared" plate instead of a slow decode
-  // in the middle of a page turn.
-  bool drawBmpPage(ToolsCanvas& c, const char* entry) {
-    if (!_book.blobOpen(entry)) return false;
-    uint8_t h[62];  // file header + DIB header + two palette entries
-    if (!blobReadFull(h, sizeof(h))) {
-      _book.blobClose();
-      return false;
-    }
-    auto u16 = [&](int i) { return (uint32_t)h[i] | ((uint32_t)h[i + 1] << 8); };
-    auto u32 = [&](int i) {
-      return u16(i) | ((uint32_t)h[i + 2] << 16) | ((uint32_t)h[i + 3] << 24);
-    };
-    const uint32_t offBits = u32(10), dib = u32(14), comp = u32(30);
-    const int32_t w = (int32_t)u32(18), rawH = (int32_t)u32(22);
-    const uint32_t bpp = u16(28);
-    const bool bottomUp = rawH > 0;
-    const int32_t hh = bottomUp ? rawH : -rawH;
-    if (dib < 40 || comp != 0 || bpp != 1 || w != tbimg::W || hh != tbimg::H ||
-        offBits != sizeof(h)) {
-      _book.blobClose();
-      return false;
-    }
-    // Which bit is ink. The palette is read, never assumed: a BMP whose first
-    // entry is white is a picture in negative, and plenty of tools write one.
-    const bool zeroIsInk = (h[54] + h[55] + h[56]) < (h[58] + h[59] + h[60]);
-    for (int r = 0; r < tbimg::H; r++) {
-      if (!blobReadFull(epubui::g_imgBand, tbimg::STRIDE)) break;  // half a picture
-      const int y = bottomUp ? tbimg::H - 1 - r : r;
-      for (int xb = 0; xb < tbimg::STRIDE; xb++) {
-        uint8_t v = epubui::g_imgBand[xb];
-        if (!zeroIsInk) v = (uint8_t)~v;
-        if (v == 0xFF) continue;  // a run of white, which is most of most art
-        for (int k = 0; k < 8; k++)
-          if (!(v & (0x80 >> k))) c.fillRect(xb * 8 + k, y, 1, 1, true);
-      }
-    }
-    _book.blobClose();
-    return true;
-  }
-
-  // Ours, if the book was through the Toybox PC app. The .bmp first and the
-  // .tbi after it: a book carrying both is a book being converted, and the new
-  // picture is the one to believe.
-  bool drawOurImage(ToolsCanvas& c) {
-    char entry[224];
-    artEntryFor(_pageImage, ".bmp", entry, sizeof(entry));
-    if (drawBmpPage(c, entry)) return true;
-    artEntryFor(_pageImage, ".tbi", entry, sizeof(entry));
-    if (!_book.blobOpen(entry)) return false;
-    if (_book.blobSize() != tbimg::FILE_SIZE) {
-      _book.blobClose();
-      return false;
-    }
-    uint8_t head[tbimg::HEADER];
-    if (!blobReadFull(head, sizeof(head))) {
-      _book.blobClose();
-      return false;
-    }
-    const uint32_t magic = (uint32_t)head[0] | ((uint32_t)head[1] << 8) |
-                           ((uint32_t)head[2] << 16) | ((uint32_t)head[3] << 24);
-    const int w = head[4] | (head[5] << 8), h = head[6] | (head[7] << 8);
-    if (magic != tbimg::MAGIC || w != tbimg::W || h != tbimg::H) {
-      _book.blobClose();
-      return false;  // a .tbi that is not this panel's picture: the plate, not a guess
-    }
-    for (int y0 = 0; y0 < tbimg::H; y0 += epubui::IMG_BAND_ROWS) {
-      const int rows =
-          (tbimg::H - y0) < epubui::IMG_BAND_ROWS ? (tbimg::H - y0) : epubui::IMG_BAND_ROWS;
-      if (!blobReadFull(epubui::g_imgBand, rows * tbimg::STRIDE)) break;  // half a picture
-      for (int r = 0; r < rows; r++) {
-        const uint8_t* row = epubui::g_imgBand + (size_t)r * tbimg::STRIDE;
-        for (int xb = 0; xb < tbimg::STRIDE; xb++) {
-          const uint8_t v = row[xb];
-          if (v == 0xFF) continue;  // a run of white, which is most of most art
-          for (int k = 0; k < 8; k++)
-            if (!(v & (0x80 >> k))) c.fillRect(xb * 8 + k, y0 + r, 1, 1, true);
-        }
-      }
-    }
-    _book.blobClose();
-    return true;
-  }
-
-  bool drawImagePage(ToolsCanvas& c) {
-    // Reading another entry spends the chapter stream; ensureStream() rebuilds
-    // it when a turn next needs it.
-    _book.chapterClose();
-    _streamLost = true;
-    if (drawOurImage(c)) return true;
-    // Nothing of ours in the book. If it came through CrossInk's optimizer the
-    // picture is already in there, rendered for this panel -- which is most of
-    // the illustrated books anybody puts on this device, and the reason the
-    // "no picture prepared for it" plate was the usual outcome.
-    char pxc[224];
-    if (pxcEntryFor(_pageImage, pxc, sizeof(pxc)) && drawPxcPage(c, pxc)) return true;
-    // Nothing prepared anywhere: the device prepares it now, from the book's
-    // own JPEG or PNG, once -- later visits read the card.
-    return deviceArtReady() && drawDeviceArt(c);
-  }
-
-  // --- pictures prepared on the device (epub_art.h) ---------------------------
-  // Which kind of picture this image page shows, worked out once per picture:
-  // the grey decision in paint() comes before anything is drawn, so it cannot
-  // learn the answer from the draw.
-  enum ArtKind : uint8_t { ART_NONE, ART_BOOK, ART_DEVICE };
-  uint32_t _artKey = 0;  // which _pageImage _artKind and the paths describe
-  ArtKind _artKind = ART_NONE;
-  char _artG2[48] = "", _artB1[48] = "";
-  // Pictures that could not be decoded this session (a GIF, an SVG, a corrupt
-  // file), so a page is not re-decoded on every paint. Transient failures --
-  // memory, the card -- are not recorded, and get another go.
-  uint32_t _artBad[16] = {};
-  int _artBadN = 0;
-
-  bool entryThere(const char* entry) {
-    const bool ok = _book.blobOpen(entry);
-    _book.blobClose();
-    return ok;
-  }
-
-  ArtKind resolveArt() {
-    const uint32_t k = bthumb::key(_pageImage);
-    if (!_pageImage[0]) return ART_NONE;
-    if (k == _artKey && _artKind != ART_NONE) return _artKind;
-    _artKey = k;
-    _artKind = ART_NONE;
-    _book.chapterClose();
-    _streamLost = true;
-    char entry[224];
-    artEntryFor(_pageImage, ".bmp", entry, sizeof(entry));
-    bool book = entryThere(entry);
-    if (!book) {
-      artEntryFor(_pageImage, ".tbi", entry, sizeof(entry));
-      book = entryThere(entry);
-    }
-    if (!book) book = pxcEntryFor(_pageImage, entry, sizeof(entry));
-    if (book) {
-      _artKind = ART_BOOK;
-    } else if (deviceArtReady()) {
-      _artKind = ART_DEVICE;
-    }
-    return _artKind;
-  }
-
-  // Both prepared files on the card, decoding the picture first if need be.
-  bool deviceArtReady() {
-    const uint32_t k = bthumb::key(_pageImage);
-    for (int i = 0; i < _artBadN; i++)
-      if (_artBad[i] == k) return false;
-    if (!_book.blobOpen(_pageImage)) {
-      _book.blobClose();
-      return false;
-    }
-    const uint32_t usize = _book.blobSize();
-    _book.blobClose();
-    epubart::paths(_books[_cur].file, _pageImage, usize, _artG2, _artB1, sizeof(_artG2));
-    uint8_t probe;
-    if (host().sdReadSlice(_artB1, epubart::B1_BYTES - 1, &probe, 1) == 1 &&
-        host().sdReadSlice(_artG2, epubart::G2_BYTES - 1, &probe, 1) == 1)
-      return true;
-    const uint32_t t0 = host().nowMs();
-    bool transient = false;
-    const bool ok = epubart::prepare(host(), _book, _pageImage, _artG2, _artB1, &transient);
-    char line[96];
-    snprintf(line, sizeof(line), "art: %s %lu ms", ok ? "prepared" : (transient ? "not now" : "cannot"),
-             (unsigned long)(host().nowMs() - t0));
-    host().perfLog(line);
-    if (!ok && !transient && _artBadN < (int)(sizeof(_artBad) / sizeof(_artBad[0])))
-      _artBad[_artBadN++] = k;
-    return ok;
   }
 
   // The one-bit picture through the canvas: read whole (one card open, into
   // PSRAM), then only the ink is drawn.
-  bool drawDeviceArt(ToolsCanvas& c) {
+  bool drawImagePage(ToolsCanvas& c) {
+    char g2[64], b1[64];
+    if (!artPathsHere(g2, b1, sizeof(g2))) return false;
+    _book.chapterClose();
+    _streamLost = true;
     uint8_t* bits = (uint8_t*)malloc(epubart::B1_BYTES);
     if (!bits) return false;
-    const bool ok = host().sdReadSlice(_artB1, 0, bits, (int)epubart::B1_BYTES) ==
-                    (int)epubart::B1_BYTES;
+    const bool ok = host().sdReadSlice(b1, 0, bits, (int)epubart::B1_BYTES) == (int)epubart::B1_BYTES;
     if (ok) {
       constexpr int STRIDE = epubart::W / 8;
       for (int y = 0; y < epubart::H; y++) {
@@ -1840,10 +1625,11 @@ class EpubTool : public ToolApp {
   bool showDeviceArtGrey() {
     if (!_pageImage[0] || _chrome || _menu != rmenu::Page::None || _screen != Screen::Page)
       return false;
-    if (resolveArt() != ART_DEVICE) return false;
+    char g2[64], b1[64];
+    if (!artPathsHere(g2, b1, sizeof(g2))) return false;
     uint8_t* g = (uint8_t*)malloc(epubart::G2_BYTES);
     if (!g) return false;
-    bool ok = host().sdReadSlice(_artG2, 0, g, (int)epubart::G2_BYTES) == (int)epubart::G2_BYTES;
+    bool ok = host().sdReadSlice(g2, 0, g, (int)epubart::G2_BYTES) == (int)epubart::G2_BYTES;
     const uint32_t t0 = host().nowMs();
     ok = ok && host().bookShowGrey(g);
     free(g);
@@ -1855,17 +1641,16 @@ class EpubTool : public ToolApp {
     return ok;
   }
 
-  // What an illustration looks like when the book carries no picture for it.
-  // Named, because "there is a picture here and you cannot see it" is worth
-  // more than a blank page, and the name is what the PC app needs to hear.
+  // What an illustration looks like when it could not be decoded (a GIF, an
+  // SVG, a damaged file). Named, because "there is a picture here and you
+  // cannot see it" is worth more than a blank page.
   void drawImagePlate(ToolsCanvas& c) {
     const int W = c.width();
     c.drawRect(40, 220, W - 80, 360, 2, true);
     c.textCentered(W / 2, 320, "an illustration", TS_LARGE, true);
-    c.textCentered(W / 2, 372, "this book has no picture prepared for it", TS_SMALL, true);
+    c.textCentered(W / 2, 372, "a picture this device cannot show", TS_SMALL, true);
     const char* base = strrchr(_pageImage, '/');
     c.textClipped(60, 430, W - 120, base ? base + 1 : _pageImage, TS_SMALL, true);
-    c.textCentered(W / 2, 496, "the PC app adds one under toybox/", TS_SMALL, true);
   }
 
   // A cosmetic repaint: fast unless the owner turned that off. Never used
@@ -2813,7 +2598,9 @@ class EpubTool : public ToolApp {
   bool _help = false;       // the HOW TO READ card, once per device
   char _noteBuf[96] = {};
   char _pageImage[192] = {};       // this page IS this picture, if set
+  uint8_t _pageImagePart = 0;      // which part of it (landscape art is several)
   char _pendImage[192] = {};       // ...and this one opens the next page
+  uint8_t _pendImagePart = 0;
   uint32_t _pendImageOff = 0;
   bool _pendImageValid = false;
   bool _streamLost = false;        // a picture was read out of the same zip

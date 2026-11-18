@@ -101,6 +101,11 @@ class Book {
   // so anything that means to open it should ask here.
   const char* imageName() const { return _imgName; }
 
+  // Every picture in the book a page could show -- each .jpg, .jpeg or .png
+  // entry, by name -- with its uncompressed size. For preparing them all
+  // when a book is first opened. Off the in-memory directory, so cheap.
+  void listImages(void (*fn)(void* ctx, const char* name, uint32_t usize), void* ctx);
+
   // --- the table of contents ---------------------------------------------
   // Where the book says its chapters begin. EPUB3 keeps it in an XHTML nav
   // document, EPUB2 in an NCX file, and plenty of books carry both; either is

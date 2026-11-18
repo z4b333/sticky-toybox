@@ -6,8 +6,7 @@
 // the JPEG or PNG itself the first time the page is reached, and keeps the
 // result on the card, so every later visit is a file read.
 //
-// Two pictures come out of one decode, both 480x800 portrait, letterboxed
-// white:
+// Each part is two pictures, both 480x800 portrait, letterboxed white:
 //   .g2  96,000 B  four-level grey, 2 bpp, high pixel first, 0 = black ..
 //                  3 = white -- the .tbk grey page format, shown through the
 //                  panel's grey waveform when the page has no chrome over it
@@ -32,18 +31,30 @@ inline constexpr uint32_t B1_BYTES = W * H / 8;  // 48,000
 
 // Bump when the pipeline changes how a picture looks: the folder name carries
 // it, so a better pipeline is never hidden behind an older cached picture.
-inline constexpr int PIPELINE = 1;
+inline constexpr int PIPELINE = 2;
+
+// A picture becomes one page, or for landscape art several: part 0 is the
+// whole picture turned a quarter clockwise to fill the portrait panel (its
+// top along the panel's right edge), then parts 1..n are upright slices of
+// it, left to right, each filling the panel -- a spread read the way the
+// panel is held, at a size where its detail survives.
+inline constexpr int MAX_PARTS = 6;
 
 // Where one illustration's prepared pictures live on the card. Keyed by the
 // book's path, the picture's path inside the zip and its uncompressed size,
-// so a book replaced by a different edition does not inherit stale art.
-void paths(const char* bookFile, const char* entry, uint32_t usize, char* g2, char* b1, int cap);
+// so a book replaced by a different edition does not inherit stale art. The
+// .inf file (one byte: the part count) is written last, so its presence
+// means every part is there.
+void paths(const char* bookFile, const char* entry, uint32_t usize, int part, char* g2, char* b1,
+           int cap);
+void infPath(const char* bookFile, const char* entry, uint32_t usize, char* inf, int cap);
 
-// Decodes `entry` from the open book and writes both pictures. False when the
-// picture is not one this device can decode (not JPEG/PNG, corrupt, too big)
-// or memory/card failed; `transient` says which -- a transient failure must
-// not be remembered as "this picture cannot be shown".
-bool prepare(ToolsHost& host, epubc::Book& book, const char* entry, const char* g2Path,
-             const char* b1Path, bool* transient = nullptr);
+// Decodes `entry` from the open book and writes every part and the .inf.
+// Returns the part count, or 0 when the picture is not one this device can
+// decode (not JPEG/PNG, corrupt, too big) or memory/card failed; `transient`
+// says which -- a transient failure must not be remembered as "this picture
+// cannot be shown".
+int prepare(ToolsHost& host, epubc::Book& book, const char* bookFile, const char* entry,
+            uint32_t usize, bool* transient = nullptr);
 
 }  // namespace epubart

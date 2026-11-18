@@ -417,129 +417,13 @@ void put32(uint8_t* p, uint32_t v) {
   p[0] = v & 255; p[1] = (v >> 8) & 255; p[2] = (v >> 16) & 255; p[3] = (v >> 24) & 255;
 }
 
-// The pre-rendered artwork the reader is supposed to find: "TBI1", 480x800,
-// 1 = white, exactly what the PC app writes under toybox/. A frame, both
-// diagonals and a blob, so a picture drawn upside down or half a band out
-// looks wrong on the screenshot instead of merely dark.
-uint8_t* g_fakeTbi = nullptr;
-uint32_t fakeTbiBuild() {
-  const int W = 480, H = 800, STRIDE = W / 8;
-  const uint32_t len = 8u + (uint32_t)STRIDE * H;
-  if (g_fakeTbi) return len;
-  g_fakeTbi = (uint8_t*)malloc(len);
-  g_fakeTbi[0] = 'T'; g_fakeTbi[1] = 'B'; g_fakeTbi[2] = 'I'; g_fakeTbi[3] = '1';
-  put16(g_fakeTbi + 4, (uint32_t)W);
-  put16(g_fakeTbi + 6, (uint32_t)H);
-  uint8_t* bits = g_fakeTbi + 8;
-  memset(bits, 0xFF, (size_t)STRIDE * H);  // white
-  auto ink = [&](int x, int y) {
-    if (x < 0 || y < 0 || x >= W || y >= H) return;
-    bits[(size_t)y * STRIDE + (x >> 3)] &= (uint8_t)~(0x80 >> (x & 7));
-  };
-  for (int x = 20; x < W - 20; x++) { ink(x, 20); ink(x, 21); ink(x, H - 22); ink(x, H - 21); }
-  for (int y = 20; y < H - 20; y++) { ink(20, y); ink(21, y); ink(W - 22, y); ink(W - 21, y); }
-  for (int y = 0; y < H; y++) {
-    const int x = 20 + (y * (W - 40)) / H;
-    ink(x, y);
-    ink(W - 1 - x, y);
-  }
-  for (int y = 360; y < 440; y++)
-    for (int x = 200; x < 280; x++) ink(x, y);
-  return len;
-}
-// The same picture again, as the .bmp a converter writes now: 1 bpp, 480x800,
-// bottom-up with a black-then-white palette -- the shape the reader streams
-// straight to the glass. Built from the .tbi's bits so the two entries are the
-// same image, and a guard that measures ink can be pointed at either.
-uint8_t* g_fakeArtBmp = nullptr;
-uint32_t fakeArtBmpBuild() {
-  const int W = 480, H = 800, STRIDE = W / 8;
-  const uint32_t off = 62, len = off + (uint32_t)STRIDE * H;
-  if (g_fakeArtBmp) return len;
-  fakeTbiBuild();
-  g_fakeArtBmp = (uint8_t*)calloc(len, 1);
-  uint8_t* b = g_fakeArtBmp;
-  b[0] = 'B'; b[1] = 'M';
-  b[2] = (uint8_t)len; b[3] = (uint8_t)(len >> 8); b[4] = (uint8_t)(len >> 16);
-  b[10] = (uint8_t)off;
-  b[14] = 40;
-  b[18] = (uint8_t)(W & 255); b[19] = (uint8_t)(W >> 8);
-  b[22] = (uint8_t)(H & 255); b[23] = (uint8_t)(H >> 8);  // positive: bottom-up
-  b[26] = 1; b[28] = 1;                                   // one plane, one bit
-  b[46] = 2;                                              // two colours used
-  b[58] = b[59] = b[60] = 255;                            // 0 = black, 1 = white
-  // The .tbi's picture is very nearly symmetric top to bottom -- a frame, an
-  // X and a centred blob -- so a file read upside down would look identical.
-  // This copy gets a solid mark near the TOP, which is what makes the flip
-  // visible to a guard (and to an eye, on the screenshot).
-  static uint8_t top[(size_t)(480 / 8) * 800];
-  memcpy(top, g_fakeTbi + 8, sizeof(top));
-  for (int y = 60; y < 100; y++)
-    for (int x = 40; x < 120; x++)
-      top[(size_t)y * STRIDE + (x >> 3)] &= (uint8_t)~(0x80 >> (x & 7));
-  for (int r = 0; r < H; r++)  // the file's first row is the picture's last
-    memcpy(b + off + (size_t)r * STRIDE, top + (size_t)(H - 1 - r) * STRIDE, (size_t)STRIDE);
-  return len;
-}
-
-// A stand-in for the original image the book still carries. Nothing decodes
-// it in pass one; it is here so the entry the .tbi shadows actually exists.
-const uint8_t kFakePlatePng[] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
-
-// A book that has been through CrossInk's optimizer carries every picture a
-// second time, already rendered for this panel: a .pxc of four grey levels,
-// and a manifest saying which belongs to which image. This is one of each.
-//
-// The level is BRIGHTNESS -- 0 black, 3 white -- which is the thing that was
-// got backwards first time and shipped every picture as its own negative. So
-// the fixture is mostly 3, the way a real page is mostly paper: a renderer
-// that inverts it fills the panel and blows through the ink bound below.
-//
-// 240x400, so it is scaled x2 on the way to the panel and a scaler that got
-// its arithmetic wrong shows up as a picture that is half the page or twice
-// it. All four levels are used -- an ordered dither turns 1 and 2 into
-// patterns, and a renderer that merely thresholded would show two flat blocks
-// instead. The solid mark sits near the top left, so a picture drawn upside
-// down or mirrored is wrong on the screenshot rather than merely dark.
-const char kFakeCrossManifest[] =
-    "{\n \"format\": \"crossink-optimizer\",\n \"version\": 1,\n"
-    " \"target\": { \"device\": \"sticky\", \"width\": 800, \"height\": 480,"
-    " \"grayscaleLevels\": 4 },\n"
-    " \"features\": { \"prebuiltPxc\": true },\n"
-    " \"images\": [\n"
-    "  { \"href\": \"OEBPS/images/missing.png\","
-    " \"pxc\": \"META-INF/crossink/pxc/0123456789abcdef0123.pxc\","
-    " \"width\": 240, \"height\": 400 },\n"
-    "  { \"href\": \"OEBPS/images/nowhere.png\","
-    " \"width\": 10, \"height\": 10 }\n"
-    " ]\n}\n";
-
-uint8_t* g_fakePxc = nullptr;
-uint32_t fakePxcBuild() {
-  const int W = 240, H = 400, STRIDE = (W + 3) / 4;
-  const uint32_t len = 4u + (uint32_t)STRIDE * H;
-  if (g_fakePxc) return len;
-  g_fakePxc = (uint8_t*)malloc(len);
-  put16(g_fakePxc + 0, (uint32_t)W);
-  put16(g_fakePxc + 2, (uint32_t)H);
-  uint8_t* bits = g_fakePxc + 4;
-  memset(bits, 0xFF, (size_t)STRIDE * H);  // 3 is white, which is most of it
-  auto set = [&](int x, int y, uint8_t v) {
-    if (x < 0 || y < 0 || x >= W || y >= H) return;
-    uint8_t& b2 = bits[(size_t)y * STRIDE + (x >> 2)];
-    const int sh = (3 - (x & 3)) * 2;
-    b2 = (uint8_t)((b2 & ~(3 << sh)) | ((v & 3) << sh));
-  };
-  for (int x = 10; x < W - 10; x++) { set(x, 10, 0); set(x, H - 11, 0); }
-  for (int y = 10; y < H - 10; y++) { set(10, y, 0); set(W - 11, y, 0); }
-  for (int y = 40; y < 140; y++)
-    for (int x = 30; x < 210; x++) set(x, y, 2);   // the lighter grey
-  for (int y = 160; y < 260; y++)
-    for (int x = 30; x < 210; x++) set(x, y, 1);   // the darker one
-  for (int y = 20; y < 36; y++)
-    for (int x = 20; x < 60; x++) set(x, y, 0);    // the top-left mark, solid
-  return len;
-}
+// The book's pictures are prepared on the device now (epub_art.h), from the
+// book's own files -- so the fixture carries real ones. plate.png is the
+// portrait cover JPEG again (one page), art2.png a landscape JPEG made for
+// the guards (part 0 turned, then upright slices), and missing.png only a PNG
+// signature: a picture that cannot be decoded, which must become the plate.
+#include "fake_epub_wide.inc"
+const uint8_t kFakeBrokenPng[] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
 
 void buildFakeEpub() {
   if (g_fakeEpub) return;
@@ -550,10 +434,7 @@ void buildFakeEpub() {
     uint16_t method;
     uint32_t lho;
   };
-  const uint32_t tbiLen = fakeTbiBuild();
-  const uint32_t artBmpLen = fakeArtBmpBuild();
-  const uint32_t pxcLen = fakePxcBuild();
-  E ents[14] = {
+  E ents[10] = {
       {"META-INF/container.xml", (const uint8_t*)kFakeContainer, (uint32_t)strlen(kFakeContainer),
        (uint32_t)strlen(kFakeContainer), 0, 0},
       {"OEBPS/content.opf", (const uint8_t*)kFakeOpf, (uint32_t)strlen(kFakeOpf),
@@ -565,26 +446,14 @@ void buildFakeEpub() {
        (uint32_t)strlen(kFakeCh3), 0, 0},
       {"OEBPS/cover.jpg", kFakeCoverJpeg, (uint32_t)sizeof(kFakeCoverJpeg),
        (uint32_t)sizeof(kFakeCoverJpeg), 0, 0},
-      // The illustration, and beside it the picture the device actually draws.
-      // Both stored, which is how the PC app is asked to write the .tbi: the
-      // device seeks straight to the pixels instead of inflating 48 KB.
-      {"OEBPS/images/plate.png", kFakePlatePng, (uint32_t)sizeof(kFakePlatePng),
-       (uint32_t)sizeof(kFakePlatePng), 0, 0},
-      {"toybox/OEBPS/images/plate.tbi", g_fakeTbi, tbiLen, tbiLen, 0, 0},
-      // The second illustration is prepared the new way, as a .bmp, so both
-      // routes into drawImagePage are walked by the guards.
-      {"OEBPS/images/art2.png", kFakePlatePng, (uint32_t)sizeof(kFakePlatePng),
-       (uint32_t)sizeof(kFakePlatePng), 0, 0},
-      {"toybox/OEBPS/images/art2.bmp", g_fakeArtBmp, artBmpLen, artBmpLen, 0, 0},
-      {"OEBPS/images/missing.png", kFakePlatePng, (uint32_t)sizeof(kFakePlatePng),
-       (uint32_t)sizeof(kFakePlatePng), 0, 0},
+      {"OEBPS/images/plate.png", kFakeCoverJpeg, (uint32_t)sizeof(kFakeCoverJpeg),
+       (uint32_t)sizeof(kFakeCoverJpeg), 0, 0},
+      {"OEBPS/images/art2.png", kFakeWideJpeg, (uint32_t)sizeof(kFakeWideJpeg),
+       (uint32_t)sizeof(kFakeWideJpeg), 0, 0},
+      {"OEBPS/images/missing.png", kFakeBrokenPng, (uint32_t)sizeof(kFakeBrokenPng),
+       (uint32_t)sizeof(kFakeBrokenPng), 0, 0},
       {"OEBPS/nav.xhtml", (const uint8_t*)kFakeNav, (uint32_t)strlen(kFakeNav),
        (uint32_t)strlen(kFakeNav), 0, 0},
-      // ...and the same book seen by CrossInk's optimizer: missing.png has no
-      // picture of ours, and this is where the one it left is.
-      {"META-INF/crossink/optimizer-v1.json", (const uint8_t*)kFakeCrossManifest,
-       (uint32_t)strlen(kFakeCrossManifest), (uint32_t)strlen(kFakeCrossManifest), 0, 0},
-      {"META-INF/crossink/pxc/0123456789abcdef0123.pxc", g_fakePxc, pxcLen, pxcLen, 0, 0},
   };
   uint32_t total = 22;
   for (const E& e : ents) total += 30 + 46 + 2 * (uint32_t)strlen(e.name) + e.csize;
