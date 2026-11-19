@@ -24,6 +24,8 @@
 #include "bmp_gray.h"
 #include "cardfonts.h"
 #include "tools/cpfont_prep.h"
+#include "tools/thai_shape.h"
+#include "tools/thai_words.h"
 #include "tools/cpfont.h"
 #include "tools/lock_image.h"
 #include "tools/lockscreen.h"
@@ -719,10 +721,12 @@ namespace prepfix {
 struct Range {
   uint32_t first, last;
 };
-// Latin capitals (kept), Cyrillic (dropped), an em dash from the punctuation
-// block (kept), and a smiling face from the emoji block (dropped).
-static const Range kRanges[4] = {{0x20, 0x7E}, {0x400, 0x44F}, {0x2014, 0x2014},
-                                 {0x1F600, 0x1F600}};
+// Latin capitals (kept), Cyrillic (dropped), Thai (kept), an em dash from the
+// punctuation block (kept), a smiling face from the emoji block (dropped), and
+// the shifted Thai mark forms a Thai face keeps in the Private Use Area (kept;
+// last, so a face can be built without them).
+static const Range kRanges[6] = {{0x20, 0x7E},     {0x400, 0x44F},     {0xE01, 0xE5B},
+                                 {0x2014, 0x2014}, {0x1F600, 0x1F600}, {0xF700, 0xF71A}};
 
 // Four pixels square, so a glyph is exactly four bytes at 2 bits a pixel, and
 // its ink is derived from its codepoint -- which is what makes "the prepared
@@ -735,9 +739,10 @@ static void put32(std::vector<uint8_t>& v, size_t at, uint32_t x) { memcpy(&v[at
 static void put16(std::vector<uint8_t>& v, size_t at, uint16_t x) { memcpy(&v[at], &x, 2); }
 
 // A .cpfont with all four cuts, three of which should survive.
-static std::vector<uint8_t> build(uint8_t advanceY) {
+static std::vector<uint8_t> build(uint8_t advanceY, bool thaiForms = true) {
+  const int nRanges = thaiForms ? 6 : 5;
   uint32_t nGlyphs = 0;
-  for (const Range& r : kRanges) nGlyphs += r.last - r.first + 1;
+  for (int k = 0; k < nRanges; k++) nGlyphs += kRanges[k].last - kRanges[k].first + 1;
   const int kCuts = 4;
   std::vector<uint8_t> v(32 + kCuts * 32, 0);
   memcpy(v.data(), "CPFONT\0\0", 8);
@@ -746,7 +751,7 @@ static std::vector<uint8_t> build(uint8_t advanceY) {
   for (int c = 0; c < kCuts; c++) {
     const size_t at = v.size();
     // intervals
-    for (uint32_t gi = 0, k = 0; k < 4; k++) {
+    for (uint32_t gi = 0, k = 0; k < (uint32_t)nRanges; k++) {
       v.resize(v.size() + 12);
       put32(v, v.size() - 12, kRanges[k].first);
       put32(v, v.size() - 8, kRanges[k].last);
@@ -755,8 +760,8 @@ static std::vector<uint8_t> build(uint8_t advanceY) {
     }
     // glyphs
     uint32_t off = 0;
-    for (const Range& r : kRanges)
-      for (uint32_t cp = r.first; cp <= r.last; cp++) {
+    for (int k = 0; k < nRanges; k++)
+      for (uint32_t cp = kRanges[k].first; cp <= kRanges[k].last; cp++) {
         v.resize(v.size() + 16, 0);
         uint8_t* g = &v[v.size() - 16];
         g[0] = 4;  // w
@@ -769,15 +774,15 @@ static std::vector<uint8_t> build(uint8_t advanceY) {
         off += 4;
       }
     // bitmaps
-    for (const Range& r : kRanges)
-      for (uint32_t cp = r.first; cp <= r.last; cp++) {
+    for (int k = 0; k < nRanges; k++)
+      for (uint32_t cp = kRanges[k].first; cp <= kRanges[k].last; cp++) {
         uint8_t b[4];
         glyphBits(cp + c, b);
         v.insert(v.end(), b, b + 4);
       }
     uint8_t* t = &v[32 + (size_t)c * 32];
     t[0] = (uint8_t)c;  // cut id: 0 regular, 1 bold, 2 italic, 3 bold-italic
-    put32(v, 32 + (size_t)c * 32 + 4, 4);
+    put32(v, 32 + (size_t)c * 32 + 4, (uint32_t)nRanges);
     put32(v, 32 + (size_t)c * 32 + 8, nGlyphs);
     t[12] = advanceY;
     put16(v, 32 + (size_t)c * 32 + 13, 20);  // ascender
@@ -813,16 +818,18 @@ static void checkPreparedFonts() {
     abort();
   }
   // What a book is set in stays; what it is not, goes. A dropped codepoint is
-  // not a hole -- the baked tables answer for it, the way they already do for
-  // Thai under every Latin pack.
+  // not a hole -- the baked tables answer for it, the way they do for Thai
+  // under a Latin-only pack. Thai itself, and its shifted mark forms, stay.
   struct {
     uint32_t cp;
     bool keep;
     const char* what;
-  } want[4] = {{0x41, true, "capital A"},
+  } want[6] = {{0x41, true, "capital A"},
                {0x2014, true, "an em dash"},
                {0x410, false, "Cyrillic A"},
-               {0x1F600, false, "an emoji"}};
+               {0x1F600, false, "an emoji"},
+               {0xE01, true, "Thai ko kai"},
+               {0xF70A, true, "a lowered Thai tone mark"}};
   for (int c = 0; c < g.styles(); c++) {
     const cpfont::Style& gs = g.style(c);
     const cpfont::Style& fs = f.style(f.find(gs.cut));
@@ -1002,6 +1009,270 @@ static void checkCardBaseline() {
   gfx::cardFaceClear(true);
   printf("card baseline ok (%d px face inside a %d px line, strike at %d of %d..%d)\n", line, line,
          mid, inkT - top, inkB - top);
+}
+
+// --- Thai lines in the reader -------------------------------------------------
+// Thai has no spaces between words, so a sentence reaches the reader as one
+// long run. It used to be cut into 96-byte pieces with a space put back
+// between them -- mid-syllable, sometimes leaving a tone mark to start a line
+// -- and a run that did not fit beside a line jumped whole to the next one.
+// Now: pieces join with no space, cuts fall only where a line may break, and a
+// run fills its line. Read through the real reader, from a real book.
+static const char* const kThaiCh2[] = {
+    "เรื่องสั้นสำหรับทดสอบ",
+    "คืนนั้นฝนตกปรอยๆ ตั้งแต่หัวค่ำ น้องเล็กนั่งอยู่ริมหน้าต่าง ถือเครื่องอ่านหนังสือเครื่องเล็กไว้ในมือ หน้าจอสีเทาอ่อนสะท้อนแสงไฟจากโคมข้างเตียง ตัวหนังสือคมชัดเหมือนพิมพ์ลงบนกระดาษจริงๆ",
+    "เธอเลื่อนหน้าไปเรื่อยๆ อ่านเรื่องของนักเดินทางคนหนึ่งที่ข้ามภูเขาฝ้ายขาวไปยังหมู่บ้านริมฝั่งน้ำ ที่นั่นมีชาวบ้านปลูกข้าว ทอผ้า และเลี้ยงปลาในบ่อหลังบ้าน ทุกเช้าจะมีเสียงไก่ขันปลุกให้ตื่นก่อนฟ้าสาง",
+    "“พรุ่งนี้ไปตลาดกันไหม” พี่ชายถามจากอีกห้อง น้องเล็กตอบว่า “ไปสิ แต่ขออ่านให้จบบทนี้ก่อนนะ” แล้วก็ก้มหน้าอ่านต่อจนดึก ลืมไปเลยว่าน้ำชาในแก้วเย็นชืดไปนานแล้ว",
+    "เมื่อถึงหน้าสุดท้ายของบท เธอปิดเครื่องอย่างระมัดระวัง วางไว้ข้างหมอน แล้วหลับไปพร้อมกับภาพของหมู่บ้านริมน้ำที่ยังลอยอยู่ในความคิด",
+    "บรรทัดนี้ยาวเป็นพิเศษเพื่อทดสอบการตัดคำภาษาไทยซึ่งไม่มีช่องว่างระหว่างคำและต้องตัดบรรทัดให้ถูกตำแหน่งโดยไม่แยกสระหรือวรรณยุกต์ออกจากพยัญชนะของมันเลยแม้แต่ตัวเดียว",
+};
+
+static std::string noSpaces(const std::string& s) {
+  std::string o;
+  for (char ch : s)
+    if (ch != ' ') o += ch;
+  return o;
+}
+
+static void checkThaiLines() {
+  std::vector<uint8_t> book;
+  {
+    const char* tries[] = {"fixtures/thai_lines.epub", "test/host/fixtures/thai_lines.epub"};
+    for (const char* t : tries) {
+      FILE* f = fopen(t, "rb");
+      if (!f) continue;
+      fseek(f, 0, SEEK_END);
+      book.resize((size_t)ftell(f));
+      fseek(f, 0, SEEK_SET);
+      if (fread(book.data(), 1, book.size(), f) != book.size()) book.clear();
+      fclose(f);
+      break;
+    }
+  }
+  if (book.empty()) {
+    printf("THAI LINES FAIL: fixtures/thai_lines.epub not found (run from test/host)\n");
+    abort();
+  }
+  const char* path = "/books/thai-lines.epub";
+  sdcard::hostPutCardFile(path, book.data(), (int)book.size());
+  sdcard::hostAddBook(path);
+  toybox.goHub();
+  toybox.hostHub().goHome();
+  toybox.onTap(80 + 2 * 160, hubui::DOCK_Y + 30);  // STUDY
+  {
+    recents::Entry rr[recents::MAX];
+    const bool strip = recents::list(stickyHost.prefs(), rr) > 0;
+    const int y0 = strip ? hubui::FOLDER_TOP
+                         : hubui::FOLDER_TOP + ((hubui::FOLDER_BOTTOM - hubui::FOLDER_TOP) -
+                                                2 * hubui::ROW_STEP) / 2;
+    toybox.onTap(EPD_W / 4, y0 + hubui::TILE / 2);
+  }
+  if (!toybox.hostInApp() || strcmp(toybox.activeTitle(), "EPUB") != 0) {
+    printf("THAI LINES FAIL: the EPUB app did not open\n");
+    abort();
+  }
+  auto* et = static_cast<EpubTool*>(toybox.hostActive());
+  int idx = -1;
+  for (int i = 0; i < et->hostBookCount(); i++) {
+    char f[160];
+    et->hostFile(i, f, sizeof(f));
+    if (strstr(f, "thai-lines.epub")) idx = i;
+  }
+  if (idx < 0) {
+    printf("THAI LINES FAIL: the planted book is not on the shelf\n");
+    abort();
+  }
+  // The word list itself, on the owner's sentence: every word whole.
+  {
+    const char* s = "อ่านเรื่องของนักเดินทางคนหนึ่งที่ข้ามภูเขา";
+    const char* want = "อ่าน|เรื่อง|ของ|นัก|เดิน|ทาง|คน|หนึ่ง|ที่|ข้าม|ภูเขา";
+    uint8_t ok[epubc::WORD_CAP + 1];
+    thaiwords::breaks(s, ok);
+    std::string got;
+    for (int b = 0; s[b]; b++) {
+      if (b && ok[b]) got += '|';
+      got += s[b];
+    }
+    if (got != want) {
+      printf("THAI LINES FAIL: the words came out as %s\n", got.c_str());
+      abort();
+    }
+  }
+  et->hostOpen(idx);
+  int sizes = 0, lines = 0;
+  for (uint8_t size = 0; size < 3; size++, sizes++) {
+    et->hostSetStyle(size);
+    et->hostGoto(1, 0);
+    std::string all;
+    std::vector<size_t> seams;  // where one line ends and the next begins, in `all`
+    int spaces = 0;
+    for (int page = 0; page < 20; page++) {
+      for (int i = 0; i < et->hostLineCount(); i++, lines++) {
+        const char* t = et->hostLine(i);
+        const char* p = t;
+        const uint32_t first = uni::next(p);
+        if (uni::thaiMark(first) || uni::thaiNoLineStart(first)) {
+          printf("THAI LINES FAIL: size %d, a line starts with U+%04X: '%s'\n", size, first, t);
+          abort();
+        }
+        uint32_t last = 0;
+        for (p = t; *p;) last = uni::next(p);
+        if (uni::thaiLeading(last)) {
+          printf("THAI LINES FAIL: size %d, a line ends on leading vowel U+%04X: '%s'\n", size,
+                 last, t);
+          abort();
+        }
+        for (p = t; *p; p++) spaces += *p == ' ';
+        if (!all.empty()) seams.push_back(all.size());
+        all += t;
+      }
+      const int sp = et->hostSpine(), pg = et->hostPage();
+      toybox.onButton(SideBtn::Down);
+      if (et->hostSpine() != sp || et->hostPage() == pg) break;
+    }
+    // Nothing lost, nothing doubled, and no space the book did not have.
+    std::string want;
+    int wantSpaces = 0;
+    for (const char* para : kThaiCh2) {
+      want += para;
+      for (const char* p = para; *p; p++) wantSpaces += *p == ' ';
+    }
+    if (noSpaces(all) != noSpaces(want)) {
+      printf("THAI LINES FAIL: size %d, the chapter read back differently:\n  %s\n", size,
+             all.c_str());
+      abort();
+    }
+    // And no word torn across two lines -- the ones the owner saw split.
+    const char* whole[] = {"คน", "ของ", "บ่อ", "นั่น", "หนึ่ง", "ริม", "ระหว่าง", "หนังสือ",
+                           "เครื่อง", "ระมัดระวัง", "ภูเขา", "หมู่บ้าน", "เล็ก", "โคม"};
+    for (const char* wd : whole)
+      for (size_t at = all.find(wd); at != std::string::npos; at = all.find(wd, at + 1))
+        for (size_t seam : seams)
+          if (seam > at && seam < at + strlen(wd)) {
+            printf("THAI LINES FAIL: size %d, '%s' is split across two lines\n", size, wd);
+            abort();
+          }
+    if (spaces > wantSpaces) {
+      printf("THAI LINES FAIL: size %d, %d spaces on the page, the book has %d\n", size, spaces,
+             wantSpaces);
+      abort();
+    }
+  }
+  toybox.goHub();
+  sdcard::hostClearBooks();
+  printf("thai lines ok (%d sizes, %d lines, words whole, no mark starts a line, no space added)\n", sizes,
+         lines);
+}
+
+// --- Thai marks in a card face ------------------------------------------------
+// A card face with Thai draws its marks in the face's own shifted forms
+// (U+F700-F71A) where it carries them: left of a tall consonant's tail, down
+// where no upper vowel sits, under ฎ and ฏ, with ญ and ฐ losing their tail
+// over a lower vowel. Each fixture glyph has its own ink, so "drew the form"
+// is checked by drawing the form's codepoint directly and comparing pixels.
+static std::vector<uint8_t> inkOf(const char* s) {
+  epd.clear(true);
+  gfx::drawText(20, 100, s, 24, 0);
+  const uint8_t* fb = epd.fb();
+  return std::vector<uint8_t>(fb, fb + (size_t)EPD_WB * 800);
+}
+
+static void checkThaiCardMarks() {
+  // 1. The rule, without a font.
+  struct {
+    const char* text;
+    uint32_t want[4];
+    const char* what;
+  } rule[] = {
+      {"ป่า", {0x0E1B, 0xF705, 0x0E32}, "tone on bare tall consonant: down and left"},
+      {"ก้", {0x0E01, 0xF70B}, "tone on bare consonant: down"},
+      {"ที่", {0x0E17, 0x0E35, 0x0E48}, "tone over an upper vowel: as it is"},
+      {"ฟื้", {0x0E1F, 0xF704, 0xF714}, "vowel and tone on tall consonant: left"},
+      {"น้ำ", {0x0E19, 0x0E49, 0x0E33}, "tone over sara am: high"},
+      {"ญุ", {0xF70F, 0x0E38}, "yo ying over a lower vowel: no tail"},
+      {"ฐู", {0xF700, 0x0E39}, "tho than over a lower vowel: no tail"},
+      {"ฎุ", {0x0E0E, 0xF718}, "lower vowel under do chada: dropped"},
+      {"ป a่", {0x0E1B, 0x20, 0x61, 0x0E48}, "a mark after Latin: not stacked"},
+  };
+  for (auto& r : rule) {
+    thaishape::State st;
+    uint32_t got[8];
+    int n = 0;
+    for (const char* p = r.text; *p;) {
+      const uint32_t cp = uni::next(p);
+      const char* q = p;
+      const uint32_t nx = *q ? uni::next(q) : 0;
+      uint32_t f[2];
+      const int k = thaishape::forms(st, cp, nx, f);
+      for (int i = 0; i < k && n < 8; i++) got[n++] = f[i];
+    }
+    for (int i = 0; i < n; i++)
+      if (got[i] != r.want[i]) {
+        printf("THAI FAIL: %s -- glyph %d is U+%04X, wanted U+%04X\n", r.what, i, got[i],
+               r.want[i]);
+        abort();
+      }
+  }
+  thaishape::State st;
+  uint32_t f[2];
+  thaishape::forms(st, 0x0E1B, 0x0E33, f);
+  if (thaishape::forms(st, 0x0E33, 0, f) != 2 || f[0] != 0xF711 || f[1] != 0x0E32) {
+    printf("THAI FAIL: sara am on a tall consonant did not split with its ring moved left\n");
+    abort();
+  }
+
+  // 2. Through the panel, in a face that has the forms.
+  std::vector<uint8_t> font = prepfix::build(24, true);
+  uint8_t* blob = (uint8_t*)malloc(font.size());
+  memcpy(blob, font.data(), font.size());
+  if (!gfx::cardFaceSet(24, blob, (uint32_t)font.size(), false, true)) {
+    printf("THAI FAIL: the fixture face would not install\n");
+    abort();
+  }
+  struct {
+    const char* text;
+    const char* asDrawn;
+    const char* what;
+  } pairs[] = {
+      {"ป่า", "ปา", "pa with mai ek"},
+      {"ฟื้น", "ฟน", "fuen"},
+      {"ก้", "ก", "ko with mai tho"},
+      {"ญุ", "ุ", "yo ying with sara u"},
+      {"ปำ", "ปา", "pam"},
+  };
+  for (auto& pr : pairs) {
+    const std::vector<uint8_t> a = inkOf(pr.text), b = inkOf(pr.asDrawn);
+    if (a != b) {
+      printf("THAI FAIL: %s did not draw in the face's shifted forms\n", pr.what);
+      abort();
+    }
+    if (gfx::textWidth(pr.text, 24) != gfx::textWidth(pr.asDrawn, 24)) {
+      printf("THAI FAIL: %s measures %d, draws %d wide\n", pr.what, gfx::textWidth(pr.text, 24),
+             gfx::textWidth(pr.asDrawn, 24));
+      abort();
+    }
+  }
+  gfx::cardFaceClear(false);
+
+  // 3. A face without the forms draws the plain marks -- nothing goes missing.
+  font = prepfix::build(24, false);
+  blob = (uint8_t*)malloc(font.size());
+  memcpy(blob, font.data(), font.size());
+  if (!gfx::cardFaceSet(24, blob, (uint32_t)font.size(), false, true)) {
+    printf("THAI FAIL: the plain fixture face would not install\n");
+    abort();
+  }
+  if (inkOf("ป่า") == inkOf("ปา")) {
+    printf("THAI FAIL: a face without the shifted forms dropped the tone mark\n");
+    abort();
+  }
+  if (inkOf("ปำ") == inkOf("ป")) {
+    printf("THAI FAIL: a face without the shifted forms dropped sara am\n");
+    abort();
+  }
+  gfx::cardFaceClear(false);
+  printf("thai card marks ok (%zu rules, %zu words through the panel)\n",
+         sizeof(rule) / sizeof(rule[0]), sizeof(pairs) / sizeof(pairs[0]));
 }
 
 // --- the lock screen that keeps the page you were reading --------------------
@@ -1523,6 +1794,7 @@ int main() {
   checkCardFamily();
   checkPreparedFonts();
   checkCardBaseline();
+  checkThaiCardMarks();
   checkLockOverPage();
   checkInkBits();
   checkHubRouting("all shown");
@@ -8241,6 +8513,7 @@ int main() {
     g_dumpEnabled = true;
   }
 
+  checkThaiLines();
   screenPaintCheck();  // the last screen has nothing after it to catch it
 
   if (gfx::g_overflowCount) {

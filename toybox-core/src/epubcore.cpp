@@ -10,6 +10,8 @@
 #include <string.h>
 
 #include "tools/epub/epub_entities.h"
+#include "tools/thai_words.h"
+#include "tools/unicode.h"
 #include <toybox_miniz.h>
 
 namespace epubc {
@@ -1031,6 +1033,7 @@ bool Book::chapterOpen(int spineIdx) {
   _wordStart = 0;
   _wordStyle = 0;
   _outStyle = 0;
+  _glueNext = false;
   _boldDepth = 0;  // a chapter opens in body type, whatever the last one left
   _italDepth = 0;
   _headLevel = 0;
@@ -1073,6 +1076,45 @@ void Book::tokFlushWord() {
   _wordSinceBreak = true;
 }
 
+// The word in hand is full and `cp` is next. Emit up to a place a line may
+// break -- between two Thai words (thai_words.h), not in the last few letters,
+// whose word may well go on past the buffer -- and keep the rest in hand as the
+// start of a glued-on word. With no such place (a long URL), cut right here.
+void Book::tokSplitWord(uint32_t cp) {
+  _word[_wordLen] = 0;
+  uint8_t ok[WORD_CAP + 1];
+  thaiwords::breaks(_word, ok);
+  constexpr int TAIL = 24;  // eight Thai letters: room for the word in progress
+  int cut = 0, anyCut = 0;
+  for (int b = 1; b < _wordLen; b++) {
+    if (!ok[b]) continue;
+    anyCut = b;
+    if (b <= _wordLen - TAIL) cut = b;
+  }
+  if (!cut) cut = anyCut;
+  if (!cut) {
+    tokFlushWord();
+    _glueNext = true;
+    (void)cp;
+    return;
+  }
+  uint32_t cutCps = 0;
+  for (const char* p = _word; p < _word + cut;) {
+    uni::next(p);
+    cutCps++;
+  }
+  memcpy(_outWord, _word, (size_t)cut);
+  _outWord[cut] = 0;
+  _outStart = _wordStart;
+  _outStyle = _wordStyle;
+  _outReady = true;
+  _wordSinceBreak = true;
+  memmove(_word, _word + cut, (size_t)(_wordLen - cut));
+  _wordLen -= cut;
+  _wordStart += cutCps;
+  _wordStyle |= STYLE_GLUE;
+}
+
 void Book::tokBlockBreak() {
   tokFlushWord();
   if (_wordSinceBreak) {
@@ -1097,15 +1139,16 @@ void Book::tokEmitCp(uint32_t cp, const char* utf8, int len) {
   char sub = 0;
   if (cp == 0xA0) sub = ' ';  // NBSP: unbreakable neighbour glue, drawn as a space
   if (_wordLen + len >= WORD_CAP - 1) {
-    // Longer than the buffer: complete what there is; the rest carries on as
-    // a fresh word starting at this codepoint. The layout splits long words
-    // across lines anyway, so the seam is invisible.
-    tokFlushWord();
+    // Longer than the buffer -- a Thai or CJK sentence has no spaces to end
+    // it. Cut where a line may break and mark the rest as glued on, so the
+    // layout joins the pieces with no space and no syllable is torn in two.
+    tokSplitWord(cp);
   }
   if (_wordLen == 0) {
     _wordStart = at;
     _wordStyle = (uint8_t)((_boldDepth ? STYLE_BOLD : 0) | (_italDepth ? STYLE_ITAL : 0) |
-                           (_headLevel << 4));
+                           (_headLevel << 4) | (_glueNext ? STYLE_GLUE : 0));
+    _glueNext = false;
   }
   if (sub) {
     _word[_wordLen++] = sub;

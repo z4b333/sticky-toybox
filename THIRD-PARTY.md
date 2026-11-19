@@ -155,3 +155,18 @@ in tools/fonts/ — roman, bold and italic:
 
 The OFL permits embedding and redistribution; the font files themselves are
 carried unmodified in tools/fonts/ so the tables can be regenerated.
+
+## Thai word list (toybox-core/src/tools/thai_dict.inc)
+
+The reader breaks Thai lines between words using ICU's Thai word-break
+dictionary, `thaidict.txt` (26,383 words), packed by `tools/make_thai_dict.py`.
+Source: https://github.com/unicode-org/icu/blob/main/icu4c/source/data/brkitr/dictionaries/thaidict.txt
+
+    Copyright (C) 2016 and later: Unicode, Inc. and others.
+    Copyright (c) 2006-2015 International Business Machines Corporation,
+    Apple Inc., and others. All Rights Reserved.
+
+Distributed under the Unicode License (UNICODE LICENSE V3), the licence of
+ICU: https://www.unicode.org/license.txt — permission is granted to use, copy,
+modify and distribute, provided this copyright and permission notice appear
+with all copies.

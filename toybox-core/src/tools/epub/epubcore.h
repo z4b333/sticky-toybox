@@ -93,6 +93,10 @@ class Book {
   // CSS can say about a span is a rabbit hole with no floor.
   static constexpr uint8_t STYLE_BOLD = 1;
   static constexpr uint8_t STYLE_ITAL = 2;
+  // The word continues the one before it with no space between: a run longer
+  // than WORD_CAP (Thai and CJK have no spaces) cut into pieces. The cut falls
+  // where a line may break, and the layout joins the pieces back up.
+  static constexpr uint8_t STYLE_GLUE = 4;
   uint8_t wordStyle() const { return _outStyle; }
   int wordHeading() const { return _outStyle >> 4; }
 
@@ -245,6 +249,8 @@ class Book {
   uint32_t _wordStart = 0;
   uint8_t _wordStyle = 0;   // the style the word in hand started in
   uint8_t _outStyle = 0;    // ...and the one the caller is holding
+  bool _glueNext = false;   // the next word starts where a long run was cut
+  void tokSplitWord(uint32_t cp);
   uint8_t _boldDepth = 0;   // nested <b>/<strong>
   uint8_t _italDepth = 0;   // nested <i>/<em>/<cite>
   uint8_t _headLevel = 0;   // 1..6 while inside an <h1>..<h6>

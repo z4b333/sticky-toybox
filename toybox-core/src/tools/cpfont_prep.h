@@ -38,21 +38,30 @@ namespace cpfont {
 // What a prepared file keeps. Latin through Greek in one run -- U+0000 to
 // U+03FF is ASCII, Latin-1, both Latin Extended blocks, IPA, the combining
 // marks and Greek -- plus General Punctuation and the currency signs after it.
-inline bool prepKeep(uint32_t cp) { return cp < 0x0400 || (cp >= 0x2000 && cp <= 0x20FF); }
+// And Thai, with the shifted mark forms Thai faces keep at U+F700-F71F (see
+// thai_shape.h): cutting them sent a Thai card font's Thai back to the baked
+// face, so the face changed only the Latin around it.
+inline bool prepKeep(uint32_t cp) {
+  return cp < 0x0400 || (cp >= 0x0E00 && cp <= 0x0E7F) || (cp >= 0x2000 && cp <= 0x20FF) ||
+         (cp >= 0xF700 && cp <= 0xF71F);
+}
 inline bool prepCut(uint8_t cut) { return cut != BOLD_ITALIC; }
 
 // The mark, in the header bytes nothing else uses (the format's own fields end
 // at byte 13). A prepared file that does not match the font beside it any more
 // is not read: the owner replaced the font, and the old copy is a ghost of it.
+// The digit is the keep list's generation: '2' since Thai is kept, so a copy
+// cut by an older list is made again instead of hiding the Thai for good.
+constexpr char PREP_GEN = '2';
 inline void prepStamp(uint8_t* h, uint32_t srcLen) {
   h[14] = 'T';
   h[15] = 'B';
   h[16] = 'X';
-  h[17] = '1';
+  h[17] = PREP_GEN;
   memcpy(h + 18, &srcLen, 4);
 }
 inline bool prepStamped(const uint8_t* h, uint32_t n, uint32_t srcLen) {
-  if (n < 32 || h[14] != 'T' || h[15] != 'B' || h[16] != 'X' || h[17] != '1') return false;
+  if (n < 32 || h[14] != 'T' || h[15] != 'B' || h[16] != 'X' || h[17] != PREP_GEN) return false;
   uint32_t v;
   memcpy(&v, h + 18, 4);
   return v == srcLen;

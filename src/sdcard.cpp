@@ -537,7 +537,19 @@ int epubList(EpubMeta* out, int max, const char* dir) {
   return n;
 }
 
+// A real book (a zip) a guard planted with hostPutCardFile is served as
+// itself; every other name -- including a fake download's placeholder bytes --
+// gets the invented fixture zip.
+const std::string* g_plantedEpub = nullptr;
+
 bool epubOpen(const char* path) {
+  auto planted = fakeCard().find(path);
+  if (planted != fakeCard().end() && planted->second.compare(0, 4, "PK\x03\x04") == 0) {
+    g_plantedEpub = &planted->second;
+    g_fakeEpubOpen = true;
+    return true;
+  }
+  g_plantedEpub = nullptr;
   if (strcmp(path, "/books/wind.epub") != 0 && strcmp(path, kFakeLongPath) != 0 &&
       strcmp(path, "/books/Uketsu/strange-houses.epub") != 0 &&
       strcmp(path, "/Read/novel.epub") != 0 && !hostHasBook(path))
@@ -548,6 +560,13 @@ bool epubOpen(const char* path) {
 }
 
 int epubRead(uint32_t pos, void* dst, uint32_t n) {
+  if (g_fakeEpubOpen && g_plantedEpub) {
+    const uint32_t len = (uint32_t)g_plantedEpub->size();
+    if (pos > len) return -1;
+    const uint32_t take = len - pos < n ? len - pos : n;
+    memcpy(dst, g_plantedEpub->data() + pos, take);
+    return (int)take;
+  }
   if (!g_fakeEpubOpen || pos > g_fakeEpubLen) return -1;
   uint32_t take = g_fakeEpubLen - pos;
   if (n < take) take = n;
@@ -555,7 +574,10 @@ int epubRead(uint32_t pos, void* dst, uint32_t n) {
   return (int)take;
 }
 
-uint32_t epubSize() { return g_fakeEpubOpen ? g_fakeEpubLen : 0; }
+uint32_t epubSize() {
+  if (g_fakeEpubOpen && g_plantedEpub) return (uint32_t)g_plantedEpub->size();
+  return g_fakeEpubOpen ? g_fakeEpubLen : 0;
+}
 
 void epubClose() { g_fakeEpubOpen = false; }
 

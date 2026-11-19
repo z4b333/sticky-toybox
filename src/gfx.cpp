@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "board_pins.h"
+#include "tools/thai_shape.h"
 #include "tools/tiny_fs.h"
 
 #include <toybox_miniz.h>  // tinfl, for the compressed baked glyphs
@@ -461,6 +462,21 @@ void blitCard(const CardHit& h, int x, int baselineY, uint8_t color) {
         epd.drawPixel(x + g.left + col, baselineY - g.top + row, color);
 }
 
+// The card glyphs one codepoint draws as: the shifted Thai form thai_shape
+// picks when the face carries it, otherwise the plain codepoint. Returns how
+// many (sara am on a tall consonant is two), or 0 when the face has neither
+// and the baked tables answer. Called for every codepoint of a line, card or
+// not, so the Thai state never stacks a mark on an earlier word's consonant.
+int cardGlyphs(int px, bool bold, uint32_t cp, uint32_t next, thaishape::State& ts,
+               CardHit out[2]) {
+  uint32_t f[2];
+  const int n = thaishape::forms(ts, cp, next, f);
+  bool all = true;
+  for (int i = 0; i < n && all; i++) all = cardFind(px, bold, g_italic, f[i], out[i]);
+  if (all) return n;
+  return cardFind(px, bold, g_italic, cp, out[0]) ? 1 : 0;
+}
+
 // Advance of one codepoint past ASCII, packs included.
 int intlAdvance(int px, uint32_t cp) {
   int yAdj;
@@ -541,16 +557,22 @@ int drawText(int x, int y, const char* s, int scale, uint8_t color, bool bold, i
   const int yb = baseline - bakedBaseline(f);
   int cx = x;
   uint32_t prev = 0;
+  thaishape::State ts;
   for (const char* p = s; *p;) {
     const uint32_t cp = uni::next(p);
-    CardHit card;
-    if (cardFind(scale, bold, g_italic, cp, card)) {
-      blitCard(card, cx, baseline, color);
-      // Bold with no bold cut: the same double-strike the intl tables use.
-      if (bold && card.style->cut != cpfont::BOLD && card.style->cut != cpfont::BOLD_ITALIC)
-        blitCard(card, cx + 1, baseline, color);
-      const int adv = card.glyph.advance();
-      cx += adv + (adv > 0 ? spacing : 0);
+    const char* q = p;
+    const uint32_t nx = *q ? uni::next(q) : 0;
+    CardHit card[2];
+    if (const int nc = cardGlyphs(scale, bold, cp, nx, ts, card)) {
+      for (int i = 0; i < nc; i++) {
+        blitCard(card[i], cx, baseline, color);
+        // Bold with no bold cut: the same double-strike the intl tables use.
+        if (bold && card[i].style->cut != cpfont::BOLD &&
+            card[i].style->cut != cpfont::BOLD_ITALIC)
+          blitCard(card[i], cx + 1, baseline, color);
+        const int adv = card[i].glyph.advance();
+        cx += adv + (adv > 0 ? spacing : 0);
+      }
       prev = cp;
       continue;
     }
@@ -594,15 +616,20 @@ int drawText(int x, int y, const char* s, int scale, uint8_t color, bool bold, i
 int textWidth(const char* s, int scale, bool bold, int spacing) {
   const UiFont* f = faceFor(scale, bold);
   int w = 0;
+  thaishape::State ts;
   for (const char* p = s; *p;) {
     const uint32_t cp = uni::next(p);
     // Measured through the same door it will be drawn through. A width that
     // consults the baked tables while the drawing consults the card font is
     // how centred text drifts and how a page turn loses its last word.
-    CardHit card;
-    if (cardFind(scale, bold, g_italic, cp, card)) {
-      const int adv = card.glyph.advance();
-      w += adv + (adv > 0 ? spacing : 0);
+    const char* q = p;
+    const uint32_t nx = *q ? uni::next(q) : 0;
+    CardHit card[2];
+    if (const int nc = cardGlyphs(scale, bold, cp, nx, ts, card)) {
+      for (int i = 0; i < nc; i++) {
+        const int adv = card[i].glyph.advance();
+        w += adv + (adv > 0 ? spacing : 0);
+      }
       continue;
     }
     if (glyphIndex(cp) >= 0) {

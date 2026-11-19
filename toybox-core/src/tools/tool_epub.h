@@ -18,6 +18,7 @@
 #include "epub/epub_art.h"
 #include "epub/epub_cover.h"
 #include "epub/epubcore.h"
+#include "thai_words.h"
 #include "bookmarks.h"
 #include "flash_qr.h"
 #include "help.h"
@@ -517,6 +518,7 @@ class EpubTool : public ToolApp {
   bool hostLineBoldAt(int i, int at) const { return i < _lineN && _lines[i].boldAt(at); }
   bool hostLineItalAt(int i, int at) const { return i < _lineN && _lines[i].italAt(at); }
   int hostLineCount() const { return _lineN; }
+  void hostOpen(int i) { openBook(i); }
   const char* hostDir() const { return _dir; }
   int hostFolders() const { return _nf; }
   int hostGroups() const { return _ng; }
@@ -1392,7 +1394,6 @@ class EpubTool : public ToolApp {
       // word of a fresh page always lands (split if huge), so a word carried
       // whole to the next page only happens on a page that already has text.
       placed++;
-      const int need = curLen ? curW + wSpaceW + ww : ww;
       // Records which bytes of `cur` this word occupies, so the line can be
       // drawn in runs later.
       auto markBold = [&](int from, int len) {
@@ -1402,6 +1403,58 @@ class EpubTool : public ToolApp {
           if (wItal) curItal[i >> 3] |= (uint8_t)(1 << (i & 7));
         }
       };
+      // Puts `n` bytes of `s` on the line, `sep` px of space in front of them.
+      auto append = [&](const char* s, int n, int sep, int width) {
+        if (!curLen) curHead = wHead;
+        if (curLen && sep) {
+          markBold(curLen, 1);
+          cur[curLen++] = ' ';
+          curW += sep;
+        }
+        if (curLen + n < (int)sizeof(cur)) {
+          markBold(curLen, n);
+          memcpy(cur + curLen, s, (size_t)n);
+          curLen += n;
+          curW += width;
+        }
+      };
+      auto widthOf = [&](const char* s, int n) {
+        char probe[epubc::WORD_CAP];
+        memcpy(probe, s, (size_t)n);
+        probe[n] = 0;
+        return c.textWidth(probe, wts, wBold, wItal);
+      };
+      // The longest prefix of `s` that fits `room` and ends where a line may
+      // break: between Thai words (thai_words.h), between CJK characters.
+      // 0: none does.
+      auto fitAtBreak = [&](const char* s, int room, int bytes) {
+        uint8_t ok[epubc::WORD_CAP + 1];
+        thaiwords::breaks(s, ok);
+        int best = 0;
+        const int len = (int)strlen(s);
+        for (int n = 1; n < len; n++) {
+          if (!ok[n]) continue;
+          if (n > bytes || widthOf(s, n) > room) break;
+          best = n;
+        }
+        return best;
+      };
+      // Codepoints between the word's start and `p`: a word carried to the
+      // next page part-way through resumes at its own offset, not the word's.
+      auto offAt = [&](const char* p) {
+        uint32_t n = 0;
+        for (const char* q = w; q < p;) {
+          uni::next(q);
+          n++;
+        }
+        return off + n;
+      };
+      auto pend = [&](const char* rest) {
+        strcpy(_pend, rest);
+        _pendOff = offAt(rest);
+        _pendStyle = st;
+        _pendValid = true;
+      };
       // A line is only ever STARTED if there is room for it to land. Room
       // used to be checked when the line was flushed, a word too late: a page
       // that filled while a line was still being assembled pended the one
@@ -1409,93 +1462,62 @@ class EpubTool : public ToolApp {
       // the line. On hardware, mid-novel: "Good. Now that left the other
       // two." lost everything but "two." across a page turn.
       if (!curLen && !roomForLine(wHead)) {
-        strcpy(_pend, w);
-        _pendOff = off;
-        _pendStyle = st;
-        _pendValid = true;
+        pend(w);
         break;
       }
-      if (!curLen) curHead = wHead;
-      if (need <= lineW) {
-        if (curLen) {
-          markBold(curLen, 1);
-          cur[curLen++] = ' ';
-          curW += wSpaceW;
-        }
-        const int wl = (int)strlen(w);
-        if (curLen + wl < (int)sizeof(cur)) {
-          markBold(curLen, wl);
-          memcpy(cur + curLen, w, (size_t)wl);
-          curLen += wl;
-          curW += ww;
-        }
-        continue;
-      }
-      // Does not fit beside the current line. The flush cannot fail any more
-      // -- the line's room was reserved when its first word landed -- but the
-      // belt stays: if it somehow does, the whole unfinished line would be
-      // the loss, and the word in hand is the least of it.
-      if (!flushLine()) {
-        strcpy(_pend, w);
-        _pendOff = off;
-        _pendStyle = st;
-        _pendValid = true;
-        break;
-      }
-      if (ww <= lineW) {
-        if (!roomForLine(wHead)) {
-          strcpy(_pend, w);
-          _pendOff = off;
-          _pendStyle = st;
-          _pendValid = true;
-          break;
-        }
-        const int wl = (int)strlen(w);
-        curHead = wHead;
-        markBold(0, wl);
-        memcpy(cur, w, (size_t)wl);
-        curLen = wl;
-        curW = ww;
-        continue;
-      }
-      // Longer than a whole line (Thai and CJK runs, URLs): hard-split at the
-      // widest prefix that fits, and keep going with the remainder.
+      // A glued word continues the one before it with no space: a Thai or CJK
+      // run the parser had to cut. Anything that does not fit beside the line
+      // is split where a line may break, so a spaceless run fills its lines
+      // instead of jumping whole to the next one; a Latin word has no such
+      // place and moves to the next line as it always has.
+      // A line is bounded twice: by the panel's width and by the bytes a Line
+      // holds. Thai is three bytes a letter, so at the smallest size a full
+      // line of it is more bytes than width -- and overran the buffer.
+      const int lineCap = (int)sizeof(_lines[0].t) - 1;
       const char* rest = w;
-      curHead = wHead;
+      bool glue = (st & epubc::Book::STYLE_GLUE) != 0;
       while (*rest) {
-        if (!roomForLine(wHead)) {
-          strcpy(_pend, rest);
-          _pendOff = off;  // close enough: a back-turn lands at the word's start
-          _pendStyle = st;
-          _pendValid = true;
+        const int sep = (curLen && !glue) ? wSpaceW : 0;
+        const int rw = rest == w ? ww : c.textWidth(rest, wts, wBold, wItal);
+        const int bytesLeft = lineCap - curLen - (sep ? 1 : 0);
+        const int rl = (int)strlen(rest);
+        if (curW + sep + rw <= lineW && rl <= bytesLeft) {
+          append(rest, rl, sep, rw);
           break;
         }
-        int fitBytes = 0;
-        char probe[256];
-        while (rest[fitBytes]) {
-          int step = 1;
-          const uint8_t lead = (uint8_t)rest[fitBytes];
-          if (lead >= 0xF0) step = 4;
-          else if (lead >= 0xE0) step = 3;
-          else if (lead >= 0xC0) step = 2;
-          memcpy(probe, rest, (size_t)(fitBytes + step));
-          probe[fitBytes + step] = 0;
-          if (c.textWidth(probe, wts, wBold, wItal) > lineW) break;
-          fitBytes += step;
+        const int room = lineW - curW - sep;
+        int n = room > 0 && bytesLeft > 0 ? fitAtBreak(rest, room, bytesLeft) : 0;
+        if (n > 0) {
+          append(rest, n, sep, widthOf(rest, n));
+          rest += n;
+        } else if (!curLen) {
+          // Longer than a whole line with no break inside (a URL): the widest
+          // prefix that fits, codepoint by codepoint.
+          int fit = 0;
+          for (const char* p = rest; *p;) {
+            const char* at = p;
+            uni::next(p);
+            const int k = (int)(p - rest);
+            if (k > lineCap || widthOf(rest, k) > lineW) break;
+            fit = k;
+            (void)at;
+          }
+          if (fit == 0) {  // a glyph wider than the line still moves on
+            const char* p = rest;
+            uni::next(p);
+            fit = (int)(p - rest);
+          }
+          append(rest, fit, 0, widthOf(rest, fit));
+          rest += fit;
         }
-        if (fitBytes == 0) fitBytes = 1;  // a glyph wider than the line still moves on
-        memcpy(cur, rest, (size_t)fitBytes);
-        curLen = fitBytes;
-        markBold(0, fitBytes);
-        memcpy(probe, rest, (size_t)fitBytes);
-        probe[fitBytes] = 0;
-        curW = c.textWidth(probe, wts, wBold, wItal);
-        rest += fitBytes;
-        if (*rest && !flushLine()) {
-          strcpy(_pend, rest);
-          _pendOff = off;
-          _pendStyle = st;
-          _pendValid = true;
+        // The line is done; the rest starts the next one.
+        if (!flushLine()) {
+          pend(rest);
+          break;
+        }
+        glue = true;
+        if (*rest && !roomForLine(wHead)) {
+          pend(rest);
           break;
         }
       }

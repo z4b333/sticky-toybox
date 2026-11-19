@@ -107,19 +107,26 @@ inline bool noLineStart(uint32_t cp) {
 // Thai characters a line must not start with, even though they have advances:
 // sara am and the repetition/abbreviation signs read as part of what precedes.
 inline bool thaiNoLineStart(uint32_t cp) {
-  return cp == 0x0E33 || cp == 0x0E45 || cp == 0x0E46 || cp == 0x0E2F;
+  return cp == 0x0E33 || cp == 0x0E45 || cp == 0x0E46 || cp == 0x0E2F ||
+         cp == 0x0E30 || cp == 0x0E32;  // sara a and sara aa follow their consonant
 }
+
+// Leading vowels (เ แ โ ใ ไ) are written before the consonant they are
+// pronounced after, so a line must not END on one: it belongs to what follows.
+inline bool thaiLeading(uint32_t cp) { return cp >= 0x0E40 && cp <= 0x0E44; }
 
 // May a line break fall between prev and cp? Spaces are handled by the caller;
 // this is the spaceless-script rule. CJK breaks at any boundary that does not
-// strand a closing mark; Thai breaks before any non-mark character. (True Thai
+// strand a closing mark; Thai breaks between character clusters -- never before
+// a mark or a following vowel, never after a leading vowel. (True Thai
 // segmentation needs a dictionary; breaking at cluster boundaries is the
 // standard embedded fallback, and reads acceptably if not perfectly.)
 inline bool breakBefore(uint32_t prev, uint32_t cp) {
   if (prev == 0) return false;
   if (cjk(cp)) return !noLineStart(cp);
   if (cjk(prev)) return true;  // between an ideograph and anything latin
-  if (thai(cp) && thai(prev)) return !thaiMark(cp) && !thaiNoLineStart(cp);
+  if (thai(cp) && thai(prev))
+    return !thaiMark(cp) && !thaiNoLineStart(cp) && !thaiLeading(prev);
   return false;
 }
 
