@@ -584,7 +584,7 @@ void SettingsScreen::renderFontWho(ToolsHost& host, ToolsCanvas& c) {
     const char* fam = host.fontFor(kFontWho[i].slot);
     c.text(r.x + 12, r.y + 6, kFontWho[i].name, TS_MED, true);
     c.textClipped(r.x + 12, r.y + 40, r.w - 160, kFontWho[i].what, TS_SMALL, true);
-    const char* value = fam[0] ? fam : "built-in";
+    const char* value = fam[0] ? fam : host.typefaceName(0);
     const int vw = c.textWidth(value, TS_MED, true);
     c.text(r.x + r.w - 34 - vw, r.y + 6, value, TS_MED, true, true);
     const int cy = r.y + 18;
@@ -627,23 +627,21 @@ void SettingsScreen::renderFont(ToolsHost& host, ToolsCanvas& c) {
   c.fillRect(16, 78, SCREEN_W - 32, 1, true);
   c.textCentered(SCREEN_W / 2, 92, who.what, TS_SMALL, true);
 
-  if (_fontN < 0) {
-    c.textCentered(SCREEN_W / 2, 320, "no card found", TS_LARGE, true);
-    c.textCentered(SCREEN_W / 2, 364, "is one in the slot?", TS_MED, true);
-    return;
-  }
-
-  // Row 0 is the built-in face, then whatever the card has.
-  const int total = _fontN + 1;
+  // The built-in faces first, by name -- they are always there, card or not
+  // -- then whatever the card has. The first built-in is the default, stored
+  // as "", so it is the one ticked when nothing has been chosen.
+  const int builtIns = host.typefaceCount();
+  const int cardN = _fontN > 0 ? _fontN : 0;
+  const int total = builtIns + cardN;
   const int pages = (total + FONT_PER - 1) / FONT_PER;
   const char* chosen = host.fontFor(_fontSlot);
   for (int k = 0; k < FONT_PER; k++) {
     const int idx = _fontPage * FONT_PER + k;
     if (idx >= total) break;
     const TRect r = fontRect(k);
-    const bool builtIn = idx == 0;
-    const char* name = builtIn ? "The built-in face" : _fontNames[idx - 1];
-    const bool on = builtIn ? !chosen[0] : strcmp(chosen, name) == 0;
+    const bool builtIn = idx < builtIns;
+    const char* name = builtIn ? host.typefaceName(idx) : _fontNames[idx - builtIns];
+    const bool on = idx == 0 ? !chosen[0] : strcmp(chosen, name) == 0;
     c.text(r.x + 12, r.y + (r.h - c.textHeight(TS_MED)) / 2, name, TS_MED, true, on);
     if (on) {
       // The same tick the app list uses, so "this is the one" reads the same
@@ -669,14 +667,20 @@ void SettingsScreen::renderFont(ToolsHost& host, ToolsCanvas& c) {
     }
   }
 
-  if (_fontN == 0) {
-    c.textCentered(SCREEN_W / 2, 300, "no fonts on the card", TS_LARGE, true);
-    c.textCentered(SCREEN_W / 2, 360, "A family is a folder of .cpfont files:", TS_SMALL, true);
-    c.textCentered(SCREEN_W / 2, 392, "/.fonts/Bitter/Bitter_12.cpfont", TS_SMALL, true, true);
-    c.textCentered(SCREEN_W / 2, 432, "/fonts works too, and so do the files", TS_SMALL, true);
-    c.textCentered(SCREEN_W / 2, 464, "lying loose in either folder.", TS_SMALL, true);
-    c.textCentered(SCREEN_W / 2, 520, "Downloads are at", TS_SMALL, true);
-    c.textCentered(SCREEN_W / 2, 552, "github.com/uxjulia/crossink-fonts", TS_SMALL, true, true);
+  if (_fontN <= 0) {
+    // Below the built-in rows, which are always there.
+    const int y0 = fontRect(builtIns).y + 24;
+    c.textCentered(SCREEN_W / 2, y0, _fontN < 0 ? "no card found" : "no fonts on the card",
+                   TS_MED, true);
+    c.textCentered(SCREEN_W / 2, y0 + 44, "A family is a folder of .cpfont files:", TS_SMALL,
+                   true);
+    c.textCentered(SCREEN_W / 2, y0 + 76, "/.fonts/Bitter/Bitter_12.cpfont", TS_SMALL, true,
+                   true);
+    c.textCentered(SCREEN_W / 2, y0 + 116, "/fonts works too, and so do the files", TS_SMALL,
+                   true);
+    c.textCentered(SCREEN_W / 2, y0 + 148, "lying loose in either folder.", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, y0 + 196, "github.com/uxjulia/crossink-fonts", TS_SMALL, true,
+                   true);
   }
   else
     c.textCentered(SCREEN_W / 2, 776, "apps can each be given their own face", TS_SMALL, true);
@@ -684,8 +688,8 @@ void SettingsScreen::renderFont(ToolsHost& host, ToolsCanvas& c) {
 
 bool SettingsScreen::tapFont(ToolsHost& host, int x, int y) {
   using namespace setui;
-  if (_fontN < 0) return false;
-  const int total = _fontN + 1;
+  const int builtIns = host.typefaceCount();
+  const int total = builtIns + (_fontN > 0 ? _fontN : 0);
   const int pages = (total + FONT_PER - 1) / FONT_PER;
   if (pages > 1 && y >= fontPagerY()) {
     if (_fontPage > 0 && fontPagerPrev().hit(x, y)) {
@@ -705,7 +709,10 @@ bool SettingsScreen::tapFont(ToolsHost& host, int x, int y) {
     if (idx >= total) break;
     if (!fontRect(k).hit(x, y)) continue;
     host.beep(1);
-    if (!host.fontSet(_fontSlot, idx == 0 ? "" : _fontNames[idx - 1])) {
+    const char* pick = idx == 0          ? ""
+                       : idx < builtIns ? host.typefaceName(idx)
+                                        : _fontNames[idx - builtIns];
+    if (!host.fontSet(_fontSlot, pick)) {
       _note = "that family could not be read";
       return true;
     }
@@ -957,7 +964,7 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
       {ACT_LOCK, "Lock screen", emptyLabelSmall(lock::config().empty), true},
       {ACT_FONT, "Font", host.fontFor(ToolsHost::FONT_DEVICE)[0]
                              ? host.fontFor(ToolsHost::FONT_DEVICE)
-                             : "built-in",
+                             : host.typefaceName(0),
        true},
       {ACT_APPS, "Apps on the hub", apps, true},
       {ACT_FILES, "Files over WiFi", "", true},

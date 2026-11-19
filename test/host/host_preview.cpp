@@ -677,7 +677,7 @@ static void checkCardFace() {
   {
     epd.clear(true);
     gfx::cardFaceClear(false);
-    gfx::drawText(20, 40, "The baked face, DejaVu Sans", 18, 0);
+    gfx::drawText(20, 40, "The baked face, Noto Sans", 18, 0);
     gfx::drawText(20, 70, kLine, 18, 0);
     gfx::drawText(20, 100, kThai, 18, 0);
     uint8_t* again = (uint8_t*)malloc(blob.size());
@@ -1144,7 +1144,7 @@ static void checkThaiLines() {
     }
     // And no word torn across two lines -- the ones the owner saw split.
     const char* whole[] = {"คน", "ของ", "บ่อ", "นั่น", "หนึ่ง", "ริม", "ระหว่าง", "หนังสือ",
-                           "เครื่อง", "ระมัดระวัง", "ภูเขา", "หมู่บ้าน", "เล็ก", "โคม"};
+                           "เครื่อง", "ระมัดระวัง", "ภูเขา", "หมู่บ้าน", "เล็ก", "โคม", "จริงๆ"};
     for (const char* wd : whole)
       for (size_t at = all.find(wd); at != std::string::npos; at = all.find(wd, at + 1))
         for (size_t seam : seams)
@@ -6659,8 +6659,34 @@ int main() {
     stickyHost.refresh(true);
     g_dumpEnabled = false;
 
-    // Row 0 is the built-in face; the card's families follow it.
-    tapRect(setui::fontRect(1));
+    // The built-in faces come first, by name; the default is ticked.
+    // Choosing IBM Plex Sans dresses the device at once -- no card involved --
+    // and is remembered by name.
+    tapRect(setui::fontRect(2));
+    {
+      char plex[32] = "";
+      prefs.getString("font_uni", plex, sizeof(plex));
+      if (gfx::typeface() != 2 || strcmp(plex, "IBM Plex Sans") != 0 ||
+          gfx::cardFaceLive(false)) {
+        printf("FONT PAGE FAIL: IBM Plex Sans did not take (face %d, kept '%s')\n",
+               gfx::typeface(), plex);
+        abort();
+      }
+      g_dumpEnabled = true;
+      setScreen("settings_font_plex");
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+      // v1 called the default DejaVu; a device that chose it by name wakes up
+      // in Noto Sans rather than looking for a card family called DejaVu.
+      tapRect(setui::fontRect(0));
+      if (gfx::typeface() != 0 || stickyHost.fontFor(ToolsHost::FONT_DEVICE)[0]) {
+        printf("FONT PAGE FAIL: the default did not come back from Plex\n");
+        abort();
+      }
+    }
+
+    // Then the card's families, after the built-ins.
+    tapRect(setui::fontRect(stickyHost.typefaceCount()));
     if (!gfx::cardFaceLive(false) || !stickyHost.fontFor(ToolsHost::FONT_DEVICE)[0]) {
       printf("FONT PAGE FAIL: choosing a family did not take\n");
       abort();
@@ -6691,7 +6717,7 @@ int main() {
     // must NOT become the device's face -- the whole point of the split.
     toybox.hostSettings().back();  // back to the five rows
     tapRect(setui::fontWhoRect(ToolsHost::FONT_READER));
-    tapRect(setui::fontRect(1));
+    tapRect(setui::fontRect(stickyHost.typefaceCount()));
     char forBooks[32] = "";
     prefs.getString("font_ep", forBooks, sizeof(forBooks));
     if (!forBooks[0] || stickyHost.fontFor(ToolsHost::FONT_DEVICE)[0] ||

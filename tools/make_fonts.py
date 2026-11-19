@@ -1,5 +1,16 @@
 #!/usr/bin/env python3
-"""Bakes DejaVu Sans into 1-bit proportional bitmap fonts for the panel.
+"""Bakes the UI typefaces into 1-bit proportional bitmap fonts for the panel.
+
+Two families, chosen on the device (Settings -> Font): Noto Sans (the default)
+and IBM Plex Sans, both under the SIL Open Font License (tools/fonts/). They
+replaced DejaVu Sans in v2: narrower, and paired with Thai faces drawn to
+match (tools/make_fonts_script.py), where DejaVu stood beside a much smaller
+Loma.
+
+Glyphs are rendered grid-fitted for monochrome (FreeType hinting, no
+antialiasing) rather than thresholded from greys: a stem that straddles two
+pixel columns otherwise comes out a pixel wider than its neighbours, which the
+owner saw on glass in a card font rendered the old way.
 
 The device used to draw everything with one 8x8 pixel font scaled 2x, 3x and 4x,
 which meant every large glyph was a grid of fat squares. These tables are drawn
@@ -44,14 +55,24 @@ EXTRAS = sorted(set(EXTRAS))
 # go before the counters in a, e and o start to close at 12 px.
 THRESH = 176
 
-# ITAL is DejaVu's own oblique, drawn by the type designer rather than sheared
-# from the roman by the renderer. On a 1-bit panel at 16 px a shear closes the
-# counters and reads as a printing fault; the drawn face keeps its stems.
-FACES = {
-    'REG': '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
-    'BOLD': '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
-    'ITAL': '/usr/share/fonts/truetype/dejavu/DejaVuSans-Oblique.ttf',
-}
+# ITAL is each family's own italic, drawn by the type designer rather than
+# sheared from the roman by the renderer. BOLD is the SemiBold cut: one step
+# heavier, which on a 1-bit panel reads as bold without filling the counters.
+HERE = __import__('os').path.join(__import__('os').path.dirname(__import__('os').path.abspath(__file__)), 'fonts')
+FAMILIES = [
+    # (table prefix, faces) -- Noto keeps the plain FONT_<size>_<style> names,
+    # which the CrossPoint stand-in tables (test/host/fonts_cp.h) also define.
+    ('', {
+        'REG': HERE + '/NotoSans-Regular.ttf',
+        'BOLD': HERE + '/NotoSans-SemiBold.ttf',
+        'ITAL': HERE + '/NotoSans-Italic.ttf',
+    }),
+    ('PLX_', {
+        'REG': HERE + '/IBMPlexSans-Regular.ttf',
+        'BOLD': HERE + '/IBMPlexSans-SemiBold.ttf',
+        'ITAL': HERE + '/IBMPlexSans-Italic.ttf',
+    }),
+]
 # name -> pixel height of the line box, one per TSize.
 #
 # The first set of these was 12/16/24/32, chosen by counting pixels on a
@@ -69,35 +90,51 @@ FACES = {
 SIZES = [('18', 18), ('24', 24), ('32', 32), ('44', 44)]
 
 
-def fit(path, px):
-    """The largest point size whose ascender-to-descender fits the line box.
+# What a line box has to hold: the tallest accented capitals Western text uses
+# and the deepest descenders. Fitting the INK of these, not the font's declared
+# ascender and descender: Noto declares room for stacked Vietnamese accents, and
+# fitting that drew every UI word a sixth smaller than the DejaVu it replaced,
+# on layouts drawn for DejaVu's size. A stacked Vietnamese capital may now reach
+# a pixel or two into the gap above its line, which every layout leaves.
+SAMPLE = 'ÅÉÀÊÖgjpqy|()'
 
-    Asking for `px` directly overflows: DejaVu at 24 needs 29 rows to hold both,
-    so every p, q and y came out with its tail cut off. The box is the line, and
-    the whole face has to live inside it.
-    """
+
+def ink_rows(font):
+    _, t, _, b = font.getbbox(SAMPLE)
+    return t, b
+
+
+def fit(path, px):
+    """The largest point size whose sample ink fits the line box."""
     best = 6
     for size in range(6, px * 2):
-        f = ImageFont.truetype(path, size)
-        asc, desc = f.getmetrics()
-        if asc + desc <= px:
+        t, b = ink_rows(ImageFont.truetype(path, size))
+        if b - t <= px:
             best = size
     return best
+
+
+def place(font, px):
+    """Where to put the ascender top so the sample ink is centred in the box."""
+    t, b = ink_rows(font)
+    return (px - (b - t)) // 2 - t
 
 
 def build(path, px):
     """Every glyph rasterised into the line box, sharing one baseline."""
     size = fit(path, px)
     font = ImageFont.truetype(path, size)
-    asc, desc = font.getmetrics()
-    top = (px - (asc + desc)) // 2  # centre whatever slack is left over
+    top = place(font, px)
     glyphs = []
     for code in list(range(FIRST, LAST + 1)) + EXTRAS:
         ch = chr(code)
         adv = max(int(round(font.getlength(ch))), 1)
         im = Image.new('L', (adv + px, px + px), 255)
         # PIL's default anchor puts the ascender top at the y it is given.
-        ImageDraw.Draw(im).text((0, top), ch, font=font, fill=0)
+        # fontmode '1': hinted, monochrome -- every stem on whole pixels.
+        d = ImageDraw.Draw(im)
+        d.fontmode = '1'
+        d.text((0, top), ch, font=font, fill=0)
         mask = im.point(lambda v: 255 if v < THRESH else 0)
         rows = []
         for y in range(px):
@@ -143,9 +180,9 @@ def emit(name, path, px):
 def main():
     print('// GENERATED by tools/make_fonts.py -- do not edit by hand.')
     print('//')
-    print('// DejaVu Sans, rasterised to 1 bit at the three sizes the UI uses, with')
-    print('// real per-glyph widths. Replaces scaling one 8x8 pixel font up to 32 px,')
-    print('// which turned every large letter into a grid of squares.')
+    print('// Noto Sans (FONT_*) and IBM Plex Sans (FONT_PLX_*), SIL OFL 1.1, rasterised')
+    print('// to 1 bit, grid-fitted, at the four sizes the UI uses, with real per-glyph')
+    print('// widths. Regular, SemiBold (as bold) and Italic.')
     print('#pragma once')
     print('#include <pgmspace.h>')
     print('#include <stdint.h>')
@@ -165,6 +202,7 @@ def main():
     # The CrossPoint stand-in family in test/host/fonts_cp.h has no italic, so
     # the renderer asks whether one was baked rather than assuming it.
     print('#define UI_HAS_ITALIC 1')
+    print('#define UI_HAS_PLEX 1')
     print('// Codepoints appended after ASCII index 94, same order in every face.')
     print('constexpr int UI_EXTRA_COUNT = %d;' % len(EXTRAS))
     print('const uint16_t UI_EXTRA_CPS[UI_EXTRA_COUNT] PROGMEM = {')
@@ -172,9 +210,10 @@ def main():
     print('};')
     print()
     total = 0
-    for label, px in SIZES:
-        for face, path in FACES.items():
-            total += emit('%s_%s' % (label, face), path, px)
+    for prefix, faces in FAMILIES:
+        for label, px in SIZES:
+            for face, path in faces.items():
+                total += emit('%s%s_%s' % (prefix, label, face), path, px)
     print('// %d bytes of glyph data.' % total, file=sys.stderr)
 
 

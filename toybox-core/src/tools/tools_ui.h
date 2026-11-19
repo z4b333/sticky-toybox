@@ -22,19 +22,20 @@ enum TSize : uint8_t { TS_SMALL = 0, TS_MED = 1, TS_LARGE = 2, TS_HUGE = 3 };
 
 // The smallest size a string is still readable at, given its script.
 //
-// Thai floors one step above whatever it was asked for. This is not about the
-// line box -- it is about what fills the box. A Thai line has to leave room for
-// two storeys of marks above the letters and one below, so the base letters
-// occupy maybe half the height that Latin does in the same box, and Thai set at
-// the same nominal size reads visibly smaller beside it. Standing it a step
-// taller is what makes the two look the same size.
+// Thai never sits at the smallest size: in an 18 px box its two storeys of
+// marks above the letters and one below leave the letters themselves too
+// small to read. Above that it stays where it was asked to be. (Up to v1.4 it
+// went a step up at every size, because Loma, the Thai face then, drew a good
+// deal smaller than the DejaVu beside it. The v2 faces are drawn as pairs --
+// Noto Sans with Noto Sans Thai Looped, IBM Plex Sans with its Thai -- and a
+// step up made the Thai the bigger of the two.)
 //
 // Han and hangul fill their box the way Latin does, so they only need the box
 // not to be tiny -- which, since the scale moved up, TS_SMALL no longer is.
 inline TSize scriptFloor(const char* s, TSize sz) {
-  if (sz >= TS_LARGE || !s) return sz;
+  if (sz != TS_SMALL || !s) return sz;
   for (const char* p = s; *p;) {
-    if (uni::thai(uni::next(p))) return sz < TS_MED ? TS_MED : TS_LARGE;
+    if (uni::thai(uni::next(p))) return TS_MED;
   }
   return sz;
 }
@@ -376,7 +377,7 @@ class ToolsHost {
   // the device's face so that leaving an app never leaves the firmware
   // wearing its clothes.
   //
-  // Anything not chosen is the built-in DejaVu, which is also what every
+  // Anything not chosen is the built-in Noto Sans, which is also what every
   // face falls back to per character: the card packs are Latin, Cyrillic and
   // punctuation, so Thai and CJK come off the baked tables underneath
   // whatever is on top.

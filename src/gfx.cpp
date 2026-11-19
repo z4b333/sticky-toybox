@@ -51,6 +51,7 @@ void noteOverflow(int x, int w, int scale, const char* s) {
 #endif
 
 #include "fonts_intl.h"
+#include "fonts_script.h"
 #include "tools/cpfont.h"
 #include "tools/unicode.h"
 
@@ -61,11 +62,11 @@ namespace {
 // bold cut (see tools/make_fonts.py). The 8x8 pixel font this replaced was
 // scaled 2x, 3x and 4x, which turned every large letter into a grid of squares
 // -- and its bold was the same glyph smeared one pixel sideways.
-// Which family answers: 0 is DejaVu (the UI's face, and the default), 1 and 2
-// are the two reading faces the EPUB reader can choose. The reader sets this
-// around its own text and puts it back; nothing else touches it, so the UI
-// never changes clothes by accident. The CrossPoint pass has one stand-in
-// family and ignores the knob, faithfully to that firmware.
+// Which family answers: 0 is Noto Sans (the default), 1 Literata (the reading
+// face), 2 IBM Plex Sans. A slot's choice (Settings -> Font) sets it while that
+// slot draws -- the device's for every firmware screen, a book's for the page
+// -- and puts it back. The CrossPoint pass has one stand-in family and ignores
+// the knob, faithfully to that firmware.
 int g_typeface = 0;
 
 // Italic, set the same way and for the same reason as the typeface: the reader
@@ -94,6 +95,24 @@ const UiFont* faceFor(int px, bool bold) {
       case 32: return bold ? &FONT_LIT_32_BOLD : &FONT_LIT_32_REG;
       case 44: return bold ? &FONT_LIT_44_BOLD : &FONT_LIT_44_REG;
       default: return bold ? &FONT_LIT_18_BOLD : &FONT_LIT_18_REG;
+    }
+  }
+#endif
+#ifdef UI_HAS_PLEX
+  if (g_typeface == 2) {
+    if (g_italic && !bold) {
+      switch (px) {
+        case 24: return &FONT_PLX_24_ITAL;
+        case 32: return &FONT_PLX_32_ITAL;
+        case 44: return &FONT_PLX_44_ITAL;
+        default: return &FONT_PLX_18_ITAL;
+      }
+    }
+    switch (px) {
+      case 24: return bold ? &FONT_PLX_24_BOLD : &FONT_PLX_24_REG;
+      case 32: return bold ? &FONT_PLX_32_BOLD : &FONT_PLX_32_REG;
+      case 44: return bold ? &FONT_PLX_44_BOLD : &FONT_PLX_44_REG;
+      default: return bold ? &FONT_PLX_18_BOLD : &FONT_PLX_18_REG;
     }
   }
 #endif
@@ -219,7 +238,23 @@ struct Hit {
   const IntlGlyph* g;
 };
 
+// The family's own Latin-past-ASCII and Thai (fonts_script.cpp), at the UI's
+// four sizes: the largest that is not taller than the line. Plex falls back to
+// Noto for the few letters it does not draw; Literata uses Noto's.
+const IntlFace* scriptFor(int px, bool plex) {
+  static const IntlFace* const noto[4] = {&SCRIPT_NOTO_18, &SCRIPT_NOTO_24, &SCRIPT_NOTO_32,
+                                          &SCRIPT_NOTO_44};
+  static const IntlFace* const plx[4] = {&SCRIPT_PLX_18, &SCRIPT_PLX_24, &SCRIPT_PLX_32,
+                                         &SCRIPT_PLX_44};
+  const int i = px >= 44 ? 3 : px >= 32 ? 2 : px >= 24 ? 1 : 0;
+  return plex ? plx[i] : noto[i];
+}
+
 Hit intlFind(int px, int& yAdjust, uint32_t cp) {
+  yAdjust = 0;
+  if (g_typeface == 2)
+    if (const IntlGlyph* g = intlGlyph(scriptFor(px, true), cp)) return {scriptFor(px, true), g};
+  if (const IntlGlyph* g = intlGlyph(scriptFor(px, false), cp)) return {scriptFor(px, false), g};
   const IntlFace* baked = intlFor(px, yAdjust);
   if (const IntlGlyph* g = intlGlyph(baked, cp)) return {baked, g};
   for (int i = 0; i < g_packFaceCount; i++) {
@@ -528,7 +563,7 @@ int cardFaceLine(int px, bool content) {
 void contentFace(bool on) { g_contentOn = on; }
 bool contentFaceOn() { return g_contentOn; }
 
-void setTypeface(int n) { g_typeface = (n < 0 || n > 1) ? 0 : n; }
+void setTypeface(int n) { g_typeface = (n < 0 || n > 2) ? 0 : n; }
 int typeface() { return g_typeface; }
 void setItalic(bool on) { g_italic = on; }
 bool italic() { return g_italic; }
@@ -597,10 +632,19 @@ int drawText(int x, int y, const char* s, int scale, uint8_t color, bool bold, i
     const IntlFace* F = hit.f;
     const IntlGlyph* g = hit.g;
     int gy = yb + yAdj;
-    // A tone mark is baked at second-storey height (where it sits over an upper
-    // vowel); over a bare consonant it comes down by the measured drop.
-    if (uni::thaiTone(cp) && !uni::thaiUpper(prev)) gy += F->toneDrop;
-    const int gx = cx + (int8_t)pgm_read_byte(&g->left);
+    // Thai marks, placed by three numbers each face measured against its own
+    // shaping (tools/make_fonts_script.py): a tone mark comes DOWN over a bare
+    // consonant (faces that bake it high, like Loma), goes UP over an upper
+    // vowel or sara am's ring (faces that bake it low, like Noto and Plex), and
+    // any mark over a tall consonant (ป ฝ ฟ ฬ) moves LEFT, clear of its tail.
+    const uint16_t td = F->toneDrop;
+    if (uni::thaiTone(cp)) {
+      const bool high = uni::thaiUpper(prev) || nx == 0x0E33;
+      gy += high ? -((td >> 5) & 31) : (td & 31);
+    }
+    int gx = cx + (int8_t)pgm_read_byte(&g->left);
+    if ((td >> 10) && thaishape::tall(ts.base) && (uni::thaiUpper(cp) || uni::thaiTone(cp)))
+      gx -= td >> 10;
     const int gt = gy + (int8_t)pgm_read_byte(&g->top);
     blitIntl(F, g, gx, gt, color);
     // Bold has no second cut past ASCII (it would double the tables); a one

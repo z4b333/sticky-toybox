@@ -129,8 +129,12 @@ class StickyHost : public ToolsHost {
     touch.setRotation(r);
   }
   int canvasRotation() const override { return epd.rotation(); }
-  int typefaceCount() const override { return 2; }
-  const char* typefaceName(int n) const override { return n == 1 ? "Literata" : "DejaVu"; }
+  // 0 is the default and what "" means; the order is stored nowhere (choices
+  // are kept by name), so a face can be added without moving anyone's.
+  int typefaceCount() const override { return 3; }
+  const char* typefaceName(int n) const override {
+    return n == 1 ? "Literata" : n == 2 ? "IBM Plex Sans" : "Noto Sans";
+  }
   int typeface() const override { return gfx::typeface(); }
   void setTypeface(int n) override { gfx::setTypeface(n); }
   int deviceOrientation() override {

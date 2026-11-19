@@ -1125,13 +1125,12 @@ class EpubTool : public ToolApp {
 
   // Lays out the next page from the stream into _lines. Returns the number of
   // words placed (0 means the chapter had nothing left).
-  static const char* faceName(int f) { return f == 1 ? "Literata" : "DejaVu"; }
 
   // A stored face name means one of the built-ins, or a family on the card --
   // in which case the baked cut underneath it is the plain one, since the card
   // face answers first for everything it carries.
   static uint8_t faceIndexOf(ToolsHost& h, const char* name) {
-    if (!name || !name[0]) return 0;
+    if (!name || !name[0] || strcmp(name, "DejaVu") == 0) return 0;  // v1's name for 0
     for (int i = 0; i < h.typefaceCount(); i++)
       if (strcmp(h.typefaceName(i), name) == 0) return (uint8_t)i;
     return 0;

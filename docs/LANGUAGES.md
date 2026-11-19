@@ -7,17 +7,24 @@ your content.
 
 ## Included in the firmware
 
-The firmware ships with 8,290 glyphs at three sizes (16, 24 and 32 px),
-about 2.1 MB of flash:
+The UI face comes in two families, chosen on the device (Settings -> Font):
+**Noto Sans** (the default) and **IBM Plex Sans**. Each carries its own Latin,
+Vietnamese and Thai at the four UI sizes (18, 24, 32 and 44 px), so Thai sits
+at the size and on the baseline of the Latin beside it. Chinese, Japanese and
+Korean are shared, at three sizes (16, 24 and 32 px):
 
 | script | coverage | font |
 |---|---|---|
-| Thai | complete (87 characters) | Loma |
+| Thai | complete (87 characters) | Noto Sans Thai Looped / IBM Plex Sans Thai Looped |
+| Vietnamese | complete | Noto Sans / IBM Plex Sans (Noto where Plex has no glyph) |
+| European languages | Latin-1 and Latin Extended-A | Noto Sans / IBM Plex Sans |
 | Chinese | GB2312 level 1, the 3,755 most common simplified characters | Noto Sans CJK SC |
 | Japanese | all kana, plus JIS level 1 kanji | Noto Sans CJK |
 | Korean | KS X 1001, the 2,350 syllables used in practice | Noto Sans CJK KR |
-| Vietnamese | complete | DejaVu Sans |
-| European languages | Latin-1 and Latin Extended-A | DejaVu Sans |
+
+All of it is rendered grid-fitted for the 1-bit panel, so equal strokes come
+out equal widths. Thai lines break between words, using ICU's Thai word list
+(26,383 words, about 135 KB).
 
 These sets cover normal everyday text. A character outside them is drawn as
 a small empty box.
@@ -72,21 +79,19 @@ rule doesn't work. The wrap code breaks:
 
 - Chinese, Japanese and Korean at any character, except before closing
   punctuation like 。、！？
-- Thai between letter clusters, but never before a vowel or tone mark
+- Thai between words, found with ICU's Thai word list; a stretch the list
+  does not know (a name) breaks between letter clusters, never before a vowel
+  or tone mark and never after เ แ โ ใ ไ
 - everything else on spaces, as usual
-
-Thai breaking is approximate. Proper Thai word breaking needs a dictionary,
-which the firmware doesn't carry, so a line can break mid-word.
 
 ## Minimum sizes
 
 Small text that's readable in English can be unreadable in other scripts.
-Thai floors one step above whatever size it was asked for, and it is worth
-saying why, because it is not the obvious reason. A Thai line has to leave room
-for two storeys of marks above the letters and one below. The letters therefore
-occupy roughly half the height Latin does in the same line box, so Thai set at
-the same nominal size reads visibly smaller beside it. Standing it a step taller
-is what makes the two look like the same size.
+Thai never sits at the smallest size (18 px): a Thai line has to leave room
+for two storeys of marks above the letters and one below, which leaves the
+letters too small to read in that box. At every other size it matches the
+Latin beside it -- the v2 faces are drawn as pairs. (Up to v1.4 Thai went a
+step up at every size, because Loma drew a good deal smaller than DejaVu.)
 
 Han and hangul fill their box the way Latin does. They only need the box not to
 be tiny — which, since the whole scale moved up, `TS_SMALL` no longer is, so
@@ -104,16 +109,23 @@ File names also keep their original script. A note named รายการ stay
 
 ```
 python3 tools/make_fonts.py > src/fonts_ui.h
+python3 tools/make_fonts_script.py
 python3 tools/make_fonts_intl.py
 python3 tools/make_font_pack.py /tmp/packs
 ```
 
-The scripts need Python with Pillow and fontTools, plus the DejaVu, Loma and
-Noto Sans CJK fonts installed.
+The scripts need Python with Pillow (with raqm, for the Thai mark
+measurements) and fontTools. The Noto, IBM Plex and Literata files are in
+`tools/fonts/`; Noto Sans CJK has to be installed
+(`/usr/share/fonts/opentype/noto/`).
 
 ## Current limitations
 
-- Thai line breaks can fall mid-word (see above).
+- Thai lines break between words the word list knows; an unknown word (a
+  name) can still break between syllables.
+- With the built-in faces, ญ and ฐ keep their tail over a lower vowel
+  (กตัญญู): the tailless form needs shaping the firmware does not do. Card
+  fonts that carry the shifted forms (TLWG faces) draw it right.
 - No characters above U+FFFF, so no emoji.
 - The CrossPoint Reader port uses that firmware's own fonts, which have no
   Thai. Thai text shows as boxes there.

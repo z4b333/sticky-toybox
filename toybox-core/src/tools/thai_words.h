@@ -96,12 +96,14 @@ inline void segment(const uint32_t* cps, int n, bool* start) {
     int best = 10 + cost[i + cl], bl = cl;
     for (int L = 1; L <= THAI_DICT_LONGEST && i + L <= n; L++) {
       const Probe pr = probe(key + i, L);
-      // A word has to end where a line may: not before a mark or a vowel that
-      // belongs to its last letter.
-      if (pr.word && (i + L == n || uni::breakBefore(cps[i + L - 1], cps[i + L])) &&
-          1 + cost[i + L] < best) {
-        best = 1 + cost[i + L];
-        bl = L;
+      // A word takes a repetition or abbreviation sign after it with it
+      // (จริงๆ, กรุงเทพฯ): neither may start a line. Then it has to end where
+      // a line may: not before a mark or a vowel that belongs to its last letter.
+      int e = i + L;
+      while (e < n && (cps[e] == 0x0E46 || cps[e] == 0x0E2F)) e++;
+      if (pr.word && (e == n || uni::breakBefore(cps[e - 1], cps[e])) && 1 + cost[e] < best) {
+        best = 1 + cost[e];
+        bl = e - i;
       }
       if (!pr.prefix) break;
     }

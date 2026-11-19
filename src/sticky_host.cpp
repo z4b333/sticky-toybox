@@ -278,6 +278,9 @@ int StickyHost::fontFamilies(char names[][FONT_FAMILY_LEN], int max) {
 // one, which is the face this firmware has always drawn in.
 static int builtInIndex(const StickyHost& h, const char* name) {
   if (!name || !name[0]) return 0;
+  // v1 called the default face DejaVu. Anyone who picked it by name gets the
+  // face that replaced it, not a card family called "DejaVu" that is not there.
+  if (strcmp(name, "DejaVu") == 0) return 0;
   for (int i = 0; i < h.typefaceCount(); i++)
     if (strcmp(h.typefaceName(i), name) == 0) return i;
   return -1;
@@ -291,6 +294,8 @@ const char* StickyHost::fontFor(int slot) const {
     g_fontRead[slot] = true;
     const_cast<StickyHost*>(this)->prefs().getString(kFontKey[slot], g_fontName[slot],
                                                      FONT_FAMILY_LEN);
+    // v1's default face was called DejaVu; Noto Sans took its place as "".
+    if (strcmp(g_fontName[slot], "DejaVu") == 0) g_fontName[slot][0] = 0;
   }
   return g_fontName[slot];
 }
@@ -396,7 +401,8 @@ void StickyHost::fontContent(bool on) {
   // the device's own face back, which is the state every firmware screen draws
   // in.
   if (!on) {
-    gfx::setTypeface(builtInIndex(*this, fontFor(FONT_DEVICE)) > 0 ? 1 : 0);
+    const int dev = builtInIndex(*this, fontFor(FONT_DEVICE));
+    gfx::setTypeface(dev > 0 ? dev : 0);
     return;
   }
   const int built = g_fontSlotOpen >= 0 ? builtInIndex(*this, fontFor(g_fontSlotOpen)) : 0;

@@ -96,7 +96,7 @@ cd test/host
 g++ -std=gnu++17 -O2 -w -DTOYBOX_HOST -I . -I mock -I ../../src \
   -I ../../toybox-core/src -I ../../lib/QRCode/src -I ../../lib/miniz/src -I ../../lib/tjpgd/src \
   host_preview.cpp ../../lib/QRCode/src/qrcode.c ../../src/gfx.cpp \
-  ../../src/fonts_intl.cpp ../../src/sensors.cpp ../../src/sticky_host.cpp ../../src/sdcard.cpp \
+  ../../src/fonts_intl.cpp ../../src/fonts_script.cpp ../../src/sensors.cpp ../../src/sticky_host.cpp ../../src/sdcard.cpp \
   ../../src/cardfonts.cpp \
   ../../toybox-core/src/toybox.cpp ../../toybox-core/src/hub.cpp ../../toybox-core/src/epubcore.cpp \
   ../../toybox-core/src/epubcover.cpp ../../toybox-core/src/epubart.cpp -x c ../../lib/tjpgd/src/tjpgd.c -x none \
