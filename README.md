@@ -2,7 +2,7 @@
 
 Custom firmware for the [Seeed reTerminal Sticky](https://www.seeedstudio.com)
 (ESP32-S3, 3.97" e-paper touch screen, magnetic back). It turns the device
-into a small toy box: 6 games, 2 book readers, a recipe reader, everyday
+into a small toy box: 6 games, an ebook reader, a recipe reader, everyday
 tools, and notes you can pin to the fridge.
 
 **Install it from your browser, no tools needed:
@@ -32,24 +32,25 @@ and Vietnamese.
 
 ## Reading
 
-- **Books** — `.tbk` volumes on the microSD card, black-and-white or
-  four-level grey. Make them on a PC from CBZ files with
-  `tools/make_tbk.py`. Manga can read right-to-left. The power button opens
-  options: go to page, bookmarks, page-turn speed, close.
 - **EPUB** — real ebooks laid out on the device, with three reading
   typefaces, text size and spacing, screen rotation, table of contents, and
   bookmarks that keep a chosen phrase. Illustrations prepared by a PC tool
-  show as full pages.
+  show as full pages. Volumes of one series ("One Piece v01", "v02"...)
+  are gathered into a single row, in volume order.
+- **From Readest** — once signed in to Readest, the shelf lists the books
+  in your Readest cloud. Tap one to download it into `/books/Readest`
+  (books already there show a tick); SEARCH shows a QR code so a phone on
+  the same Wi-Fi can search and ask for downloads.
 - **Recipes** — reads the standard recipe data (schema.org JSON) that most
   recipe websites embed. Paste a link on the
   [recipe grabber](https://z4b333.github.io/sticky-toybox/recipe.html) to
   get a `.json` file for `/recipes` on the card, or paste the page to the
   device over WiFi. Ingredients have tick boxes; COOK mode shows one step
   per page in large type.
-- Your reading position is saved on the card in the same format CrossPoint
-  and CrossInk use (a KOReader sidecar is written too), and their `/Read`
-  and `/epub` folders are read. Move the card between firmwares and the
-  book opens at the same page. Covers are shared the same way.
+- Your reading position is saved on the card, in each book's own folder,
+  and can sync with Readest and KOReader (Options → Sync position; sign in
+  by scanning a QR code with your phone). Books in `/Read` and `/epub` are
+  shelved too.
 - Page turns are fast partial refreshes with a full clean every so often —
   fast, normal or best, set per reader.
 

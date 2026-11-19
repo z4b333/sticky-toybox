@@ -114,21 +114,7 @@ inline void sudoku(ToolsCanvas& c, int cx, int cy, int s) {
   }
 }
 
-// A closed book: cover, spine, and a bookmark ribbon over the edge.
-inline void books(ToolsCanvas& c, int cx, int cy, int s) {
-  const int w = (s * 70) / 100, h = s;
-  const int x = cx - w / 2, y = cy - h / 2;
-  c.drawRect(x, y, w, h, 3, true);
-  c.fillRect(x, y, s / 8, h, true);                      // the spine
-  const int bx = x + w - s / 4 - 4;                      // bookmark
-  c.fillRect(bx, y, s / 8, s / 3, true);
-  decor::triangle(c, bx, y + s / 3, bx + s / 8, y + s / 3, bx + s / 16, y + s / 4, false);
-  c.fillRect(x + s / 8 + 8, cy + 2, w - s / 8 - 16, 3, true);   // title lines
-  c.fillRect(x + s / 8 + 8, cy + 12, w - s / 4 - 8, 3, true);
-}
-
-// An open book, pages of text: the closed book with the bookmark is the .tbk
-// shelf, so the ebook shelf reads as the same object opened.
+// An open book, pages of text.
 inline void epub(ToolsCanvas& c, int cx, int cy, int s) {
   const int w = s / 2 - 2, h = (s * 3) / 4;
   const int y = cy - h / 2;
@@ -168,7 +154,6 @@ inline void draw(ToolsCanvas& c, int idx, int cx, int cy, int s) {
     case 6: notes(c, cx, cy, s); break;
     case 7: battleship(c, cx, cy, s); break;
     case 8: sudoku(c, cx, cy, s); break;
-    case 9: books(c, cx, cy, s); break;
     case 10: epub(c, cx, cy, s); break;
     default: recipes(c, cx, cy, s); break;
   }

@@ -177,6 +177,8 @@ bool SettingsScreen::tick(ToolsHost& host) {
       // The "connecting" screen went up with the tap; this is the wait it
       // promised. The portal is already down -- one radio job at a time.
       _netResult = homenet::syncClock(host.prefs());
+      if (homenet::g_joined[0])  // the backup may have answered instead
+        snprintf(_netName, sizeof(_netName), "%s", homenet::g_joined);
       _netStage = 2;
       host.beep(_netResult == homenet::Result::Ok ? 1 : 2);
       return true;

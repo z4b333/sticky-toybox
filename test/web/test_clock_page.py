@@ -16,10 +16,18 @@ from playwright.sync_api import sync_playwright
 SRC = open('../../toybox-core/src/tools/clock_web.h').read()
 PAGE = re.search(r'R"HTML\((.*?)\)HTML"', SRC, re.S).group(1)
 posts = []
+scans = []
+NETS = [{'s': 'Somchai 2.4G', 'r': -48, 'l': 1}, {'s': 'Cafe <"free">', 'r': -80, 'l': 0}]
 
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a): pass
     def do_GET(self):
+        if self.path.startswith('/s'):
+            scans.append(self.path)
+            # busy once, then the list (as the device does while its scan runs)
+            body = {'busy': 1} if len(scans) == 1 or self.path.endswith('r=1') else {'nets': NETS}
+            self.send_response(200); self.send_header('Content-Type', 'application/json'); self.end_headers()
+            self.wfile.write(json.dumps(body).encode()); return
         self.send_response(200); self.send_header('Content-Type', 'text/html'); self.end_headers()
         self.wfile.write(PAGE.encode())
     def do_POST(self):
@@ -71,6 +79,12 @@ with sync_playwright() as p:
     pg.get_by_role('button', name='Save home Wi-Fi').click()
     pg.wait_for_function("document.getElementById('wm').textContent.indexOf('Saved')>=0")
     check(posts and posts[-1] == ('/w', {'s': 'Somchai 5G', 'p': 'correct horse'}), f"Wi-Fi posted: {posts[-1] if posts else None}")
+    # Backup network: same rules, flagged b=1
+    posts.clear()
+    pg.fill('#bs', 'Phone hotspot'); pg.fill('#bp', 'hotspot123')
+    pg.get_by_role('button', name='Save backup Wi-Fi').click()
+    pg.wait_for_function("document.getElementById('bm').textContent.indexOf('Saved')>=0")
+    check(posts and posts[-1] == ('/w', {'s': 'Phone hotspot', 'p': 'hotspot123', 'b': '1'}), f"backup posted with b=1: {posts[-1] if posts else None}")
     # Account
     posts.clear()
     pg.fill('#ku', 'reader'); pg.fill('#kp', 'pw&=?x'); pg.fill('#ks', 'ftp://bad')
@@ -82,6 +96,23 @@ with sync_playwright() as p:
     pg.wait_for_function("document.getElementById('km').textContent.indexOf('Saved')>=0")
     check(posts and posts[-1] == ('/k', {'u': 'reader', 'p': 'pw&=?x', 's': ''}), f"account posted intact: {posts[-1] if posts else None}")
     check('Sync position' in pg.inner_text('#km'), "tells you where Sync lives")
+    # The pick list: filled from the device's scan (after one "busy"),
+    # names shown as text, choosing one fills the name and moves to the password.
+    pg.wait_for_function("document.querySelectorAll('#wl option').length>=4", timeout=8000)
+    opts = pg.eval_on_selector_all('#wl option', 'e=>e.map(o=>[o.value,o.textContent])')
+    check(len(opts) == 5 and opts[1][0] == 'Somchai 2.4G' and opts[2][0] == 'Cafe <"free">',
+          f"scan listed: {opts}")
+    check('2 found' in opts[0][1], "the count is said")
+    pg.select_option('#wl', 'Somchai 2.4G')
+    check(pg.input_value('#ws') == 'Somchai 2.4G', "choosing fills the name")
+    check(pg.evaluate("document.activeElement.id") == 'wp', "then the password field")
+    pg.select_option('#bl', 'Cafe <"free">')
+    check(pg.input_value('#bs') == 'Cafe <"free">', "the backup list too, quotes intact")
+    check('2.4' in pg.inner_text('.band') and '5' in pg.inner_text('.band'), "the 2.4 GHz-only note is shown")
+    n0 = len(scans)
+    pg.select_option('#wl', '\u0001')
+    pg.wait_for_timeout(2500)
+    check(any(x.endswith('r=1') for x in scans[n0:]), "Scan again asks for a fresh scan")
     pg.screenshot(path='/tmp/clock_page.png', full_page=True)
     b.close()
 

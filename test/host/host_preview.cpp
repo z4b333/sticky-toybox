@@ -29,7 +29,6 @@
 #include "tools/lockscreen.h"
 #include "nonogram.h"
 #include "tools/note_store.h"
-#include "tools/tool_book.h"
 #include "tools/tool_dice.h"
 #include "tools/bookmarks.h"
 #include "tools/book_store.h"
@@ -38,7 +37,6 @@
 #include "tools/reader_menu.h"
 #include "tools/tool_epub.h"
 #include "tools/epub/epubcore.h"
-#include "tools/epub/koreader_sdr.h"
 #include "tools/recents.h"
 #include "tools/book_thumbs.h"
 #include "tools/epub/epub_png.h"
@@ -55,6 +53,13 @@
 #include "touch.h"
 #include "tools/help.h"
 #include "tools/decor.h"
+
+// Where a book's position lives since v2: its own folder.
+static const char* posOf(const char* book) {
+  static char p[bstore::PATH_CAP];
+  bstore::file(book, "position.bin", p, sizeof(p));
+  return p;
+}
 #include "wordle.h"
 #include "xo.h"
 
@@ -318,7 +323,7 @@ static void checkHubRouting(const char* label) {
   const Grp ALL[3] = {
       {{{true, 0}, {true, 1}, {true, 2}, {true, 3}, {false, 7}, {false, 8}}, 6},
       {{{false, 0}, {false, 1}, {false, 3}, {false, 4}, {false, 2}, {false, 11}}, 6},
-      {{{false, 9}, {false, 10}, {false, 5}, {false, 6}}, 4},
+      {{{false, 10}, {false, 5}, {false, 6}}, 3},  // 9 was the manga reader (removed in v2)
   };
   // The Study drawer wears the recently-read strip once any book has been
   // opened; its tiles are then top-anchored rather than centred.
@@ -354,7 +359,7 @@ static void checkHubRouting(const char* label) {
     const bool ok = toybox.hostInApp() && toybox.hostIsGame() == w.game &&
                     toybox.hostIdx() == w.idx;
     if (!ok) {
-      printf("HUB ROUTING FAIL group %d item %d (%s) at (%d,%d)\n", gi, ii, what, x, y);
+      printf("HUB ROUTING FAIL group %d item %d (%s) at (%d,%d) inApp %d game %d idx %d want %d\n", gi, ii, what, x, y, toybox.hostInApp(), toybox.hostIsGame(), toybox.hostIdx(), w.idx);
       abort();
     }
     toybox.goHub();  // back to the folder page the app was opened from
@@ -1457,6 +1462,8 @@ static void quietTap(int x, int y) {
   g_dumpEnabled = true;
 }
 
+static std::string g_syncedBook;  // the book the sync guard synced
+
 int main() {
   epd.begin();
   prefs.begin("toybox", false);
@@ -1899,7 +1906,7 @@ int main() {
       printf("FILES FAIL: upload refused\n");
       abort();
     }
-    if (!fs.hostRename("/books/one-piece-v1.tbk", "one-piece-01.tbk")) {
+    if (!fs.hostRename("/books/one-piece-v1.epub", "one-piece-01.epub")) {
       printf("FILES FAIL: rename refused\n");
       abort();
     }
@@ -1929,7 +1936,7 @@ int main() {
     for (int i = 0; i < nAfter; i++) {
       if (strcmp(after[i].path, "/books/walden.epub") == 0 && after[i].size == 812000)
         sawNew = true;
-      if (strcmp(after[i].path, "/books/one-piece-01.tbk") == 0) sawRenamed = true;
+      if (strcmp(after[i].path, "/books/one-piece-01.epub") == 0) sawRenamed = true;
       if (strcmp(after[i].path, "/wallpapers/mountains.tbi") == 0) sawDeleted = false;
     }
     if (nAfter != nBefore || !sawNew || !sawRenamed || !sawDeleted) {
@@ -2205,373 +2212,65 @@ int main() {
         abort();
       }
     }
+    // The backup network: tried only when the first is not there or refuses;
+    // its name is the one reported; when both fail the radio is still off.
+    {
+      if (!cs.hostSendWifi("Phone hotspot", "hotspot123", 1) ||
+          !homenet::haveWifiSlot(prefs, 1)) {
+        printf("NET FAIL: the backup wifi was not stored\n");
+        abort();
+      }
+      homenet::g_hostNet = homenet::Result::NotFound;
+      homenet::g_hostNet2 = homenet::Result::Ok;
+      homenet::g_hostOffs = 0;
+      g_clockSetMs = 0;
+      if (homenet::syncClock(prefs) != homenet::Result::Ok || g_clockSetMs == 0 ||
+          strcmp(homenet::g_joined, "Phone hotspot") != 0 || homenet::g_hostOffs != 2) {
+        printf("NET FAIL: backup: joined '%s', clock %lld, offs %d\n", homenet::g_joined,
+               (long long)g_clockSetMs, homenet::g_hostOffs);
+        abort();
+      }
+      homenet::g_hostNet = homenet::Result::Ok;  // the first answers: the backup is not tried
+      if (homenet::syncClock(prefs) != homenet::Result::Ok ||
+          strcmp(homenet::g_joined, "Somchai 5G") != 0) {
+        printf("NET FAIL: with the first network up, '%s' was joined\n", homenet::g_joined);
+        abort();
+      }
+      homenet::g_hostNet = homenet::Result::Refused;
+      homenet::g_hostNet2 = homenet::Result::NotFound;
+      homenet::g_hostOffs = 0;
+      if (homenet::syncClock(prefs) != homenet::Result::NotFound || homenet::g_hostOffs != 2) {
+        printf("NET FAIL: both down should report the backup's answer, radio off\n");
+        abort();
+      }
+      // Only a backup saved: it is used, and named.
+      homenet::forgetWifiSlot(prefs, 0);
+      homenet::g_hostNet = homenet::Result::Ok;
+      homenet::g_hostNet2 = homenet::Result::NoWifiSaved;
+      char nm[homenet::SSID_MAX];
+      homenet::wifiName(prefs, nm, sizeof(nm));
+      if (!homenet::haveWifi(prefs) || strcmp(nm, "Phone hotspot") != 0 ||
+          homenet::syncClock(prefs) != homenet::Result::Ok) {
+        printf("NET FAIL: a backup alone did not work (name '%s')\n", nm);
+        abort();
+      }
+    }
     homenet::g_hostNet = homenet::Result::Ok;
+    homenet::g_hostNet2 = homenet::Result::NoWifiSaved;
     homenet::forgetWifi(prefs);
+    if (homenet::haveWifi(prefs)) {
+      printf("NET FAIL: forgetWifi left a network behind\n");
+      abort();
+    }
     toybox.goHub();
     toybox.hostHub().goHome();
     sensors::hostSetClock(true);
     g_dumpEnabled = true;
-    printf("clock from the internet ok (zone stored, 6 zones converted, 4 network outcomes, radio off each time)\n");
+    printf("clock from the internet ok (zone stored, 6 zones converted, 4 network outcomes, backup network, radio off each time)\n");
   }
 
-  // --- the book reader ------------------------------------------------------
-  // The .tbk reader against the host's two invented volumes: the list, a page,
-  // the turn zones (including the right-to-left swap), the side buttons, the
-  // ends of the book, and the position surviving a trip out and back in.
   {
     g_dumpEnabled = false;
-    toybox.goHub();
-    toybox.hostHub().goHome();
-    toybox.onTap(80 + 2 * 160, hubui::DOCK_Y + 30);  // STUDY
-    {
-      // BOOKS is the drawer's first cell.
-      const int rows = (4 + 1) / 2;
-      int y0 = hubui::FOLDER_TOP +
-               ((hubui::FOLDER_BOTTOM - hubui::FOLDER_TOP) - rows * hubui::ROW_STEP) / 2;
-      g_dumpEnabled = true;
-      setScreen("tool_books_list");
-      toybox.onTap(EPD_W / 4, y0 + hubui::TILE / 2);
-    }
-    BookTool* bt = static_cast<BookTool*>(toybox.hostActive());
-    if (!toybox.hostInApp() || toybox.hostIdx() != 9 || bt->hostScreen() != 0) {
-      printf("BOOK FAIL: the STUDY drawer's first cell did not open the list\n");
-      abort();
-    }
-
-    // First open shows the HOW TO READ card -- the page view has no chrome,
-    // so nothing else ever says what the power button does. GOT IT dismisses
-    // it for this run without suppressing it for the next.
-    setScreen("tool_books_help");
-    epd.clear();
-    toybox.render(stickyHost.sharedCanvas());
-    epd.displayFull();
-    toybox.onTap(help::OK_BTN.x + 10, help::OK_BTN.y + 10);
-    if (help::suppressed(stickyHost.prefs(), "bk")) {
-      printf("BOOK FAIL: GOT IT suppressed the card for ever\n");
-      abort();
-    }
-
-    // The top shelf is a series folder and the two loose books; the folder
-    // opens onto its own list, which needs two pages.
-    if (bt->hostFolders() != 1 || bt->hostItems() != 3) {
-      printf("BOOK FAIL: the top shelf is %d folders and %d rows\n", bt->hostFolders(),
-             bt->hostItems());
-      abort();
-    }
-    setScreen("tool_books_series");
-    toybox.onTap(240, shelf::Y0 + 10);  // the series row
-    if (strcmp(bt->hostDir(), "/books/One Piece") != 0 || bt->hostFolders() != 0 ||
-        bt->hostItems() != 9) {
-      printf("BOOK FAIL: the series opened as '%s' with %d rows\n", bt->hostDir(),
-             bt->hostItems());
-      abort();
-    }
-    // MORE goes to the second page, BACK returns; nine books over seven rows.
-    setScreen("tool_books_series_p2");
-    toybox.onTap(EPD_W - 16 - shelf::PAGER_W / 2, shelf::PAGER_Y + shelf::PAGER_H / 2);
-    if (bt->hostListPage() != 1) {
-      printf("BOOK FAIL: MORE did not turn the list page\n");
-      abort();
-    }
-    g_dumpEnabled = false;
-    toybox.onTap(16 + shelf::PAGER_W / 2, shelf::PAGER_Y + shelf::PAGER_H / 2);
-    if (bt->hostListPage() != 0) {
-      printf("BOOK FAIL: BACK did not return to the first list page\n");
-      abort();
-    }
-
-    // Open the manga (right-to-left, 12 pages) and read a few pages.
-    g_dumpEnabled = true;
-    setScreen("tool_books_page");
-    toybox.onTap(240, bookui::LIST_Y0 + 10);
-    if (bt->hostScreen() != 1 || bt->hostPage() != 0) {
-      printf("BOOK FAIL: opening a book did not land on its first page\n");
-      abort();
-    }
-    // A first open builds the cover mid-open but no longer repaints for it:
-    // the loading face stays as painted and the page is the next thing the
-    // panel shows. The cover must still exist afterwards.
-    if (!bthumb::have("/books/One Piece/one-piece-v1.tbk")) {
-      printf("BOOK FAIL: the first open did not build the cover\n");
-      abort();
-    }
-    // A 1-bit page still arrives whole -- 48 KB is a block this device can
-    // find, and the blit wants it contiguous.
-    if (bt->hostPageBufBytes() != 48000) {
-      printf("BOOK FAIL: a 1-bit book holds %u bytes, not one page\n",
-             (unsigned)bt->hostPageBufBytes());
-      abort();
-    }
-    g_dumpEnabled = false;
-
-    // This volume carries a cover made on a PC, and that is what the card's
-    // full-size cover must be -- byte for byte, because a 480x800 one-bit
-    // source neither scales nor dithers on the way through. Page 0 would
-    // differ in every band, which is exactly the bug this guards.
-    {
-      uint8_t* want = (uint8_t*)malloc(48000);
-      uint8_t* got = (uint8_t*)malloc(48000);
-      char bp[bstore::PATH_CAP];
-      bthumb::bigPath("/books/One Piece/one-piece-v1.tbk", bp, sizeof(bp));
-      if (!want || !got || !stickyHost.bookCover(want)) {
-        printf("TBKCOVER FAIL: the book did not hand back its embedded cover\n");
-        abort();
-      }
-      if (stickyHost.sdReadWhole(bp, got, 48000) != 48000 || memcmp(want, got, 48000) != 0) {
-        printf("TBKCOVER FAIL: the stored cover is not the embedded one\n");
-        abort();
-      }
-      // ...and a book with no embedded cover still gets one from page 0.
-      uint8_t* p0 = (uint8_t*)malloc(48000);
-      char wp[bstore::PATH_CAP];
-      bthumb::bigPath("/books/walden.tbk", wp, sizeof(wp));
-      if (p0 && stickyHost.sdReadWhole(wp, p0, 48000) == 48000 &&
-          memcmp(want, p0, 48000) == 0) {
-        printf("TBKCOVER FAIL: a book with no cover borrowed another book's\n");
-        abort();
-      }
-      free(p0);
-      free(want);
-      free(got);
-    }
-
-    // A build that fails must leave nothing behind: no thumbnail standing in
-    // front of a cover that was never written, and no permanent marker either.
-    // Nothing in this reader decodes, so a failure is the card or the heap
-    // having a bad moment, and the right answer is to try again next time.
-    {
-      const char* victim = "/books/walden.tbk";
-      char sp[24];
-      bthumb::path(victim, sp, sizeof(sp));
-      tfs::remove(sp);
-      uint8_t* page = (uint8_t*)malloc(48000);
-      memset(page, 0xFF, 48000);
-      sdcard::hostFailNextStreamClose();
-      if (bthumb::makeAndSave(stickyHost, victim, page, 1)) {
-        printf("TBKCOVER FAIL: a failed stream close was reported as success\n");
-        abort();
-      }
-      if (bthumb::have(victim)) {
-        printf("TBKCOVER FAIL: a thumbnail survived a cover that was never written\n");
-        abort();
-      }
-      if (bthumb::failed(victim)) {
-        printf("TBKCOVER FAIL: a passing failure was marked permanent\n");
-        abort();
-      }
-      // And the retry works, which is the whole point of not marking it.
-      if (!bthumb::makeAndSave(stickyHost, victim, page, 1) || !bthumb::have(victim)) {
-        printf("TBKCOVER FAIL: the retry did not make the cover\n");
-        abort();
-      }
-      free(page);
-    }
-    // RTL: forward is the LEFT third; the right third must go nowhere at the
-    // cover.
-    toybox.onTap(EPD_W - 20, 400);
-    if (bt->hostPage() != 0) {
-      printf("BOOK FAIL: an rtl book paged forward off the right edge\n");
-      abort();
-    }
-    toybox.onTap(20, 400);   // forward
-    toybox.onTap(20, 400);   // forward
-    if (bt->hostPage() != 2) {
-      printf("BOOK FAIL: two left taps should stand on page 3 of a manga\n");
-      abort();
-    }
-    toybox.onButton(SideBtn::Down);  // DOWN is always forward
-    if (bt->hostPage() != 3) {
-      printf("BOOK FAIL: DOWN did not page forward\n");
-      abort();
-    }
-    toybox.onButton(SideBtn::Up);
-    if (bt->hostPage() != 2) {
-      printf("BOOK FAIL: UP did not page back\n");
-      abort();
-    }
-    // The middle toggles the footer chrome; capture it once.
-    g_dumpEnabled = true;
-    setScreen("tool_books_footer");
-    toybox.onTap(240, 400);
-    g_dumpEnabled = false;
-    toybox.onTap(240, 400);  // and away again
-
-    // Leave through the corner, reopen: the book must remember page 3.
-    toybox.onTap(20, 20);
-    if (bt->hostScreen() != 0) {
-      printf("BOOK FAIL: the corner did not leave the page view\n");
-      abort();
-    }
-    toybox.onTap(240, bookui::LIST_Y0 + 10);
-    if (bt->hostPage() != 2) {
-      printf("BOOK FAIL: the book forgot its page across a close\n");
-      abort();
-    }
-    toybox.onTap(20, 20);
-    // The back arrow on a series list climbs out of the folder rather than
-    // out of the app.
-    toybox.onTap(20, 20);
-    if (!toybox.hostInApp() || strcmp(bt->hostDir(), "/books") != 0) {
-      printf("BOOK FAIL: back did not climb out of the series\n");
-      abort();
-    }
-
-    // The grey volume: the host build has no grey waveform, so opening it must
-    // land on the 1-bit fallback dither -- which is also the render captured.
-    g_dumpEnabled = true;
-    setScreen("tool_books_grey");
-    toybox.onTap(240, bookui::LIST_Y0 + 2 * bookui::LIST_ROW_H + 10);
-    if (bt->hostScreen() != 1) {
-      printf("BOOK FAIL: the grey book did not open\n");
-      abort();
-    }
-    // And it holds NOTHING. A grey page is 96,000 bytes; asking for that in
-    // one run is what stopped every grey book on the owner's card from
-    // opening at all, so the page goes to the panel -- and to the canvas --
-    // a band at a time and is never assembled. If this ever goes non-zero
-    // again, grey books are one fragmented heap away from being unopenable.
-    if (bt->hostPageBufBytes() != 0) {
-      printf("BOOK FAIL: a grey book allocated %u bytes of page buffer\n",
-             (unsigned)bt->hostPageBufBytes());
-      abort();
-    }
-    g_dumpEnabled = false;
-    toybox.onButton(SideBtn::Down);
-    if (bt->hostPage() != 1) {
-      printf("BOOK FAIL: the grey book did not turn\n");
-      abort();
-    }
-    // --- the panel behind the power button ----------------------------------
-    // The same panel the EPUB reader carries, minus the two things a .tbk has
-    // no opinion about: no chapters to list, no type to set.
-    g_dumpEnabled = true;
-    if (!toybox.onButton(SideBtn::Ok) || bt->hostMenu() == 0) {
-      printf("BOOK FAIL: OK did not open the panel\n");
-      abort();
-    }
-    setScreen("tool_books_options");
-    stickyHost.refresh(true);
-    checkCornerClock("tbk");
-
-    // Keep this page, from the + on the bookmarks row, and prove it reached
-    // the card rather than a variable.
-    g_dumpEnabled = false;
-    toybox.onTap(rmenu::plusRect(1, 480).x + 40, rmenu::plusRect(1, 480).y + 40);
-    if (bt->hostMarkCount() != 1) {
-      printf("BOOK FAIL: keeping a page gave %d marks\n", bt->hostMarkCount());
-      abort();
-    }
-    {
-      char mp[bstore::PATH_CAP];
-      marks::path("/books/grey-test.tbk", mp, sizeof(mp));
-      uint8_t raw[marks::FILE_BYTES];
-      if (stickyHost.sdReadFile(mp, raw, sizeof(raw)) != marks::FILE_BYTES ||
-          memcmp(raw, "TBM3", 4) != 0 || raw[4] != 1) {
-        printf("BOOK FAIL: no bookmark file on the card at %s\n", mp);
-        abort();
-      }
-    }
-
-    // The jump dial: fifties, tens and ones, and the side buttons do ones.
-    toybox.onTap(240, rmenu::rootRect(0, 480).y + 40);
-    if (bt->hostMenu() != (int)rmenu::Page::Contents) {
-      printf("BOOK FAIL: the jump screen did not open\n");
-      abort();
-    }
-    g_dumpEnabled = true;
-    setScreen("tool_books_jump");
-    stickyHost.refresh(true);
-    g_dumpEnabled = false;
-    {
-      // The keypad. The grey book is three pages, so a 9 is a typo and must be
-      // refused rather than clamped -- clamping a mis-key lands you somewhere
-      // you did not ask for and looks like the device deciding for itself.
-      auto key = [&](int i) {
-        const TRect r = BookTool::hostKeyRect(i, 480);
-        toybox.onTap(r.x + r.w / 2, r.y + r.h / 2);
-      };
-      const uint32_t before = bt->hostDialled();
-      key(8);  // "9", a typo in a three-page book
-      if (bt->hostDialled() != before) {
-        printf("BOOK FAIL: 9 was accepted in a 3-page book (%lu -> %lu)\n",
-               (unsigned long)before, (unsigned long)bt->hostDialled());
-        abort();
-      }
-      key(2);  // "3", the last page
-      if (bt->hostDialled() != 2) {
-        printf("BOOK FAIL: keying 3 dialled %lu\n", (unsigned long)bt->hostDialled());
-        abort();
-      }
-      key(11);  // BACK, clearing it
-      key(1);   // "2"
-      if (bt->hostDialled() != 1) {
-        printf("BOOK FAIL: BACK then 2 dialled %lu\n", (unsigned long)bt->hostDialled());
-        abort();
-      }
-      toybox.onTap(240, 680);  // GO
-      if (bt->hostMenu() != 0 || bt->hostPage() != 1) {
-        printf("BOOK FAIL: GO landed on page %lu (menu %d)\n", (unsigned long)bt->hostPage(),
-               bt->hostMenu());
-        abort();
-      }
-    }
-
-    // Page turns is a row that cycles in place: three taps must come back to
-    // where it started, and none of them may leave the panel.
-    toybox.onButton(SideBtn::Ok);
-    {
-      const rmenu::Refresh was = rmenu::refreshMode(stickyHost.prefs(), false);
-      for (int i = 0; i < 3; i++) {
-        toybox.onTap(240, rmenu::rootRect(2, 480).y + 40);
-        if (bt->hostMenu() == 0) {
-          printf("BOOK FAIL: the page turns row left the panel\n");
-          abort();
-        }
-      }
-      if (rmenu::refreshMode(stickyHost.prefs(), false) != was) {
-        printf("BOOK FAIL: three taps on page turns did not come back to %s\n",
-               rmenu::refreshLabel(was));
-        abort();
-      }
-    }
-
-    // And the way out is the row under it -- row 4 now, with "Start again"
-    // between the settings and the exit.
-    toybox.onTap(240, rmenu::rootRect(4, 480).y + 40);
-    if (bt->hostScreen() != 0) {
-      printf("BOOK FAIL: CLOSE THE BOOK did not close it\n");
-      abort();
-    }
-
-    // Now REOPEN it. A mark that is only in RAM looks identical to a mark on
-    // the card until the book is closed, which is how a bookmark that was
-    // never written once got all the way to hardware: the panel said "1 kept",
-    // the beep sounded, and the card had nothing on it.
-    toybox.onTap(240, bookui::LIST_Y0 + 2 * bookui::LIST_ROW_H + 10);
-    if (bt->hostScreen() != 1) {
-      printf("BOOK FAIL: the book did not reopen\n");
-      abort();
-    }
-    toybox.onButton(SideBtn::Ok);
-    if (bt->hostMarkCount() != 1) {
-      printf("BOOK FAIL: the kept page did not survive closing the book (%d marks)\n",
-             bt->hostMarkCount());
-      abort();
-    }
-    toybox.onTap(240, rmenu::rootRect(4, 480).y + 40);  // close it again
-    printf("tbk panel ok (keypad refuses a typo, marks survive the book closing)\n");
-    // ...and means nothing on the list, so main.cpp falls through to its own
-    // uses of the button.
-    if (toybox.onButton(SideBtn::Ok)) {
-      printf("BOOK FAIL: OK was swallowed on the book list\n");
-      abort();
-    }
-    toybox.goHub();
-    toybox.hostHub().goHome();
-    g_dumpEnabled = true;
-    printf("book reader ok (list, rtl turns, buttons, ends, position, grey fallback)\n");
-    printf("tbk covers ok (embedded beats page 0, a failed build retries cleanly)\n");
-
     // --- a cover the owner put beside the book ------------------------------
     // This path shipped in beta.26 with no guard at all and crashed the device
     // on the first book that used it: it ran the finished picture through the
@@ -2581,7 +2280,7 @@ int main() {
     // builder cannot produce that: it re-dithers, and a re-dither of a dithered
     // picture is never bit-identical.
     {
-      const char* kBook = "/books/walden.tbk";
+      const char* kBook = "/books/walden.epub";
       uint8_t side[tbimg::FILE_SIZE];
       auto paint = [&](int seed) {
         side[0] = 'T'; side[1] = 'B'; side[2] = 'I'; side[3] = '1';
@@ -2637,80 +2336,7 @@ int main() {
       }
       printf("sidecar covers ok (copied byte for byte, replaced when it changes)\n");
     }
-  }
-
-  // --- the .tbk header ---------------------------------------------------------
-  // The rules a PC-side converter has to match, tested on bytes rather than
-  // through a card. dataOffset was in the format from the start but assumed
-  // rather than read until covers arrived, so its edge cases are the ones a
-  // file in the wild is most likely to land on.
-  {
-    g_dumpEnabled = false;
-    auto header = [](uint8_t bpp, uint8_t flags, uint32_t pages, uint32_t dataOff,
-                     uint8_t* h) {
-      memset(h, 0, 64);
-      memcpy(h, "TBK1", 4);
-      h[4] = 480 & 255; h[5] = 480 >> 8;
-      h[6] = 800 & 255; h[7] = 800 >> 8;
-      h[8] = bpp;
-      h[9] = flags;
-      h[12] = (uint8_t)(pages & 255); h[13] = (uint8_t)(pages >> 8);
-      const uint32_t pb = 48000u * bpp;
-      h[16] = (uint8_t)(pb & 255); h[17] = (uint8_t)((pb >> 8) & 255);
-      h[18] = (uint8_t)((pb >> 16) & 255); h[19] = (uint8_t)((pb >> 24) & 255);
-      h[20] = (uint8_t)(dataOff & 255); h[21] = (uint8_t)((dataOff >> 8) & 255);
-      h[22] = (uint8_t)((dataOff >> 16) & 255); h[23] = (uint8_t)((dataOff >> 24) & 255);
-      strcpy((char*)h + 24, "A Title");
-    };
-    uint8_t h[64];
-    sdcard::BookMeta m;
-
-    // The ordinary file every converter has written until now.
-    header(1, 0, 12, 64, h);
-    if (!sdcard::parseTbkBytes(h, m) || m.cover || m.dataOffset != 64 || m.rtl) {
-      printf("TBKHDR FAIL: a plain header parsed as cover=%d off=%u\n", (int)m.cover,
-             (unsigned)m.dataOffset);
-      abort();
-    }
-    // One with a cover: flag set, pages pushed past it.
-    header(1, 2, 12, 64 + 48000, h);
-    if (!sdcard::parseTbkBytes(h, m) || !m.cover || m.dataOffset != 64 + 48000) {
-      printf("TBKHDR FAIL: a cover header parsed as cover=%d off=%u\n", (int)m.cover,
-             (unsigned)m.dataOffset);
-      abort();
-    }
-    // Both flags together: rtl and a cover are independent bits.
-    header(1, 1 | 2, 12, 64 + 48000, h);
-    if (!sdcard::parseTbkBytes(h, m) || !m.cover || !m.rtl) {
-      printf("TBKHDR FAIL: rtl and cover did not survive together\n");
-      abort();
-    }
-    // Claims a cover but leaves no room for one: the flag is dropped rather
-    // than believed, because believing it reads page 0 out of the middle of
-    // the cover.
-    header(1, 2, 12, 64, h);
-    if (!sdcard::parseTbkBytes(h, m) || m.cover || m.dataOffset != 64) {
-      printf("TBKHDR FAIL: an impossible cover claim was believed\n");
-      abort();
-    }
-    // A converter that never filled the field in. Treated as 64, not refused.
-    header(1, 0, 12, 0, h);
-    if (!sdcard::parseTbkBytes(h, m) || m.dataOffset != 64) {
-      printf("TBKHDR FAIL: a zero dataOffset was not read as 64\n");
-      abort();
-    }
-    // Still refused: wrong magic, a page size that contradicts the depth, and
-    // a book with no pages.
-    header(1, 0, 12, 64, h);
-    h[0] = 'X';
-    if (sdcard::parseTbkBytes(h, m)) { printf("TBKHDR FAIL: bad magic accepted\n"); abort(); }
-    header(2, 0, 12, 64, h);
-    h[16] = 0x80; h[17] = 0xBB;  // 48,000 on a 2-bpp file, which needs 96,000
-    if (sdcard::parseTbkBytes(h, m)) { printf("TBKHDR FAIL: a lying page size was accepted\n"); abort(); }
-    header(1, 0, 0, 64, h);
-    if (sdcard::parseTbkBytes(h, m)) { printf("TBKHDR FAIL: an empty book was accepted\n"); abort(); }
     g_dumpEnabled = true;
-    printf("tbk header ok (dataOffset honoured, cover flag checked against it)\n");
   }
 
   // --- the EPUB core: CrossPoint parity --------------------------------------
@@ -2735,54 +2361,10 @@ int main() {
         abort();
       }
     }
-    // The KOReader sidecar's path derivation, which is a different rule from
-    // CrossPoint's hash: strip the last suffix, add .sdr, and keep the suffix
-    // in the file name exactly as the card spells it.
-    {
-      struct MP { const char* book; const char* want; };
-      static const MP CASES[] = {
-          {"/books/wind.epub", "/books/wind.sdr/metadata.epub.lua"},
-          {"/books/Uketsu/strange-houses.epub",
-           "/books/Uketsu/strange-houses.sdr/metadata.epub.lua"},
-          // Case is carried through: KOReader derives its name from the same
-          // string, so lower-casing here is the one way to disagree.
-          {"/books/Loud.EPUB", "/books/Loud.sdr/metadata.EPUB.lua"},
-          // Dots in the title must not be mistaken for the suffix.
-          {"/books/Vol.1 - Title.epub", "/books/Vol.1 - Title.sdr/metadata.epub.lua"},
-      };
-      char got[160];
-      for (const MP& c : CASES) {
-        if (!ksdr::metaPath(c.book, got, sizeof(got)) || strcmp(got, c.want) != 0) {
-          printf("KSDR FAIL: %s -> %s, wanted %s\n", c.book, got, c.want);
-          abort();
-        }
-      }
-      // No suffix means no name KOReader would ever look for.
-      if (ksdr::metaPath("/books/noext", got, sizeof(got))) {
-        printf("KSDR FAIL: a suffixless book got a sidecar path\n");
-        abort();
-      }
-      // The percentage is clamped, and a clamped value still has to be Lua a
-      // dofile() will accept -- no "nan", no exponent.
-      ksdr::State st;
-      st.percent = 1.7;
-      char lua[256];
-      if (ksdr::render(st, lua, sizeof(lua)) <= 0 || !strstr(lua, "= 1.000000,") ||
-          strstr(lua, "e-") || strstr(lua, "nan")) {
-        printf("KSDR FAIL: an out-of-range percentage rendered as:\n%s\n", lua);
-        abort();
-      }
-      st.percent = 0.0 / 0.0;  // NaN: would render as "nan" and break dofile
-      if (ksdr::render(st, lua, sizeof(lua)) <= 0 || strstr(lua, "nan")) {
-        printf("KSDR FAIL: NaN reached the sidecar\n");
-        abort();
-      }
-    }
-
-    // Both hash generations, pinned against independent references. The FNV
-    // vector is CrossInk's current directory name (fnvHash64, decimal); the
-    // Murmur one is the 32-bit libstdc++ std::hash older CrossPoint used, kept
-    // for reading old cards.
+    // Both hash generations of the OLD position folders, pinned against
+    // independent references -- still needed to find a pre-v2 position and
+    // move it into the book's folder. FNV is the one older Toybox wrote;
+    // Murmur the 32-bit one CrossPoint used.
     char dir[96];
     epubc::cacheDir("/books/wind.epub", dir, sizeof(dir));
     if (strcmp(dir, "/.crosspoint/epub_1175141337288249041") != 0) {
@@ -3108,12 +2690,19 @@ int main() {
     toybox.goHub();
     toybox.hostHub().goHome();
     toybox.onTap(80 + 2 * 160, hubui::DOCK_Y + 30);  // the STUDY drawer
-    // EPUB is the drawer's second cell (row 0, right column). The book test
-    // already put entries in recents, so Study is wearing the strip and its
-    // tiles are top-anchored.
-    toybox.onTap(3 * EPD_W / 4, hubui::FOLDER_TOP + hubui::TILE / 2);
+    // EPUB is the drawer's first cell (row 0, left column) since the manga
+    // reader left. Two rows of tiles, centred -- or top-anchored when the
+    // drawer is wearing the recently-read strip.
+    {
+      recents::Entry rr[recents::MAX];
+      const bool strip = recents::list(stickyHost.prefs(), rr) > 0;
+      const int y0 = strip ? hubui::FOLDER_TOP
+                           : hubui::FOLDER_TOP + ((hubui::FOLDER_BOTTOM - hubui::FOLDER_TOP) -
+                                                  2 * hubui::ROW_STEP) / 2;
+      toybox.onTap(EPD_W / 4, y0 + hubui::TILE / 2);
+    }
     if (!toybox.hostInApp() || strcmp(toybox.activeTitle(), "EPUB") != 0) {
-      printf("EPUB APP FAIL: the STUDY drawer's second cell did not open EPUB\n");
+      printf("EPUB APP FAIL: the STUDY drawer's first cell did not open EPUB\n");
       abort();
     }
     auto* et = static_cast<EpubTool*>(toybox.hostActive());
@@ -3399,56 +2988,28 @@ int main() {
       abort();
     }
 
-    // What did that write to the card? Exactly what CrossPoint reads.
+    // What did that write to the card? The position, in the book's own
+    // folder -- and nothing in CrossPoint's folders or beside the book.
     {
       uint8_t buf[16];
-      const int n = stickyHost.sdReadFile("/.crosspoint/epub_1175141337288249041/progress.bin", buf, 16);
+      char pos[bstore::PATH_CAP];
+      bstore::file("/books/wind.epub", "position.bin", pos, sizeof(pos));
+      const int n = stickyHost.sdReadFile(pos, buf, 16);
       epubc::Progress p;
       if (n != 10 || !epubc::decodeProgress(buf, n, p) || p.spine != 1 || !p.hasOffset ||
           p.offset != page1Off) {
-        printf("EPUB APP FAIL: progress.bin says n=%d spine=%d off=%u, reader is at %u\n", n,
+        printf("EPUB APP FAIL: %s says n=%d spine=%d off=%u, reader is at %u\n", pos, n,
                n == 10 ? p.spine : -1, n == 10 ? p.offset : 0, page1Off);
         abort();
       }
-    }
-
-    // And beside the book, KOReader's own sidecar: a card carried to a
-    // KOReader device should open near here without a sync server.
-    {
-      char mp[160];
-      if (!ksdr::metaPath("/books/wind.epub", mp, sizeof(mp)) ||
-          strcmp(mp, "/books/wind.sdr/metadata.epub.lua") != 0) {
-        printf("KSDR FAIL: metaPath gave '%s'\n", mp);
-        abort();
-      }
-      char lua[512];
-      const int n = stickyHost.sdReadFile(mp, lua, sizeof(lua) - 1);
-      if (n <= 0) {
-        printf("KSDR FAIL: no sidecar written beside the book\n");
-        abort();
-      }
-      lua[n] = 0;
-      // Reading chapter two of two: past the start of the book, short of its
-      // end. The exact number is the first chapter's share of the bytes, and
-      // pinning it would pin the fixture's whitespace, so the guard is the
-      // shape -- which is what a wrong percentage gets wrong.
-      const char* key = strstr(lua, "[\"last_percent\"] = ");
-      if (!key) {
-        printf("KSDR FAIL: no last_percent in:\n%s\n", lua);
-        abort();
-      }
-      const double pct = atof(key + strlen("[\"last_percent\"] = "));
-      if (!(pct > 0.0 && pct < 1.0)) {
-        printf("KSDR FAIL: mid-book percentage came out %f\n", pct);
-        abort();
-      }
-      // percent_finished drives KOReader's footer and must agree with the
-      // position it actually restores from.
-      const char* disp = strstr(lua, "[\"percent_finished\"] = ");
-      if (!disp || atof(disp + strlen("[\"percent_finished\"] = ")) != pct) {
-        printf("KSDR FAIL: the two percentages disagree\n");
-        abort();
-      }
+      const char* gone[] = {"/.crosspoint/epub_1175141337288249041/progress.bin",
+                            "/.crosspoint/epub_836526750/progress.bin",
+                            "/books/wind.sdr/metadata.epub.lua"};
+      for (const char* g : gone)
+        if (stickyHost.sdReadFile(g, buf, 16) > 0) {
+          printf("EPUB APP FAIL: %s was written; v2 keeps nothing there\n", g);
+          abort();
+        }
     }
 
     // UP goes back to page 1 of the chapter, and the replayed page starts
@@ -4179,6 +3740,15 @@ int main() {
       setScreen("tool_epub_sync_sent");
       stickyHost.refresh(true);
       g_dumpEnabled = false;
+      {  // the shelf's sync mark: a "synced" marker in the book's folder
+        char mk[bstore::PATH_CAP];
+        bstore::file(et->hostCurFile(), "synced", mk, sizeof(mk));
+        if (!sdcard::hostCardHasPrefix(mk)) {
+          printf("SYNC FAIL: no synced marker at %s after a sync\n", mk);
+          abort();
+        }
+        g_syncedBook = et->hostCurFile();
+      }
       kosync::Remote sent;
       kosync::parseRemote(kosync::g_server.lastPut.c_str(), sent);
       int s1 = -1;
@@ -4349,12 +3919,8 @@ int main() {
       // device does. This is the harness standing in for another firmware
       // having left the file behind, so it plants it directly.
       //
-      // Into CROSSPOINT's directory: the 32-bit hash of the book's path, which
-      // is where that firmware keeps its cache and its position, and the only
-      // place it looks (confirmed against a real card). Toybox's own 64-bit
-      // directory already holds a position by now -- which is exactly the
-      // situation the owner hit, and the reason CrossPoint's file has to win.
-      sdcard::hostPlantSide("/.crosspoint/epub_836526750/progress.bin", buf, n);
+      // Into the book's own folder, over the position it already holds.
+      sdcard::hostPlantSide(posOf("/books/wind.epub"), buf, n);
       toybox.open(false, 10);  // EPUB, fresh
       auto* et2 = static_cast<EpubTool*>(toybox.hostActive());
       toybox.onTap(240, epubui::LIST_Y0 + epubui::LIST_ROW_H + 10);
@@ -4395,7 +3961,7 @@ int main() {
       cp.hasOffset = true;
       uint8_t buf[10];
       const int n = epubc::encodeProgress(cp, buf);
-      sdcard::hostPlantSide("/.crosspoint/epub_836526750/progress.bin", buf, n);
+      sdcard::hostPlantSide(posOf("/books/wind.epub"), buf, n);
       toybox.open(false, 10);
       auto* et3 = static_cast<EpubTool*>(toybox.hostActive());
       toybox.onTap(240, epubui::LIST_Y0 + epubui::LIST_ROW_H + 10);
@@ -4457,20 +4023,18 @@ int main() {
   }
 
   // --- the recently-read strip -----------------------------------------------
-  // The book tests above opened real books, so the Study drawer now carries
-  // covers: the epub most recently, a .tbk (with a stored page-0 thumbnail)
-  // before it. Tapping a cover reopens that book directly.
+  // The book tests above opened a real book, so the Study drawer now carries
+  // its cover. A .tbk entry left by the manga reader (removed in v2) is
+  // dropped rather than shown as a cover nothing can open. Tapping a cover
+  // reopens that book directly.
   {
     g_dumpEnabled = false;
+    recents::note(stickyHost.prefs(), recents::KIND_TBK, "/books/old-manga.tbk", "Old manga");
+    recents::note(stickyHost.prefs(), recents::KIND_EPUB, "/books/wind.epub", "wind");
     recents::Entry rec[recents::MAX];
     const int n = recents::list(stickyHost.prefs(), rec);
-    if (n != 2 || rec[0].kind != recents::KIND_EPUB || strcmp(rec[0].file, "/books/wind.epub") != 0 ||
-        rec[1].kind != recents::KIND_TBK) {
+    if (n != 1 || rec[0].kind != recents::KIND_EPUB || strcmp(rec[0].file, "/books/wind.epub") != 0) {
       printf("RECENTS FAIL: %d entries, front '%s'\n", n, n ? rec[0].file : "");
-      abort();
-    }
-    if (!bthumb::have(rec[1].file)) {
-      printf("RECENTS FAIL: no thumbnail stored for %s\n", rec[1].file);
       abort();
     }
     // ...and the epub's cover decoded into the same store when it was opened.
@@ -4506,22 +4070,12 @@ int main() {
     }
     toybox.onButton(SideBtn::Ok);  // close the book
     toybox.goHub();
-    toybox.onTap(EPD_W / 2, rowY + hubui::REC_ROW_H + 10);  // row 1: the .tbk
-    if (!toybox.hostInApp() || toybox.hostIdx() != 9 ||
-        static_cast<BookTool*>(toybox.hostActive())->hostScreen() != 1) {
-      printf("RECENTS FAIL: the tbk cover did not reopen the book\n");
-      abort();
-    }
-    toybox.onButton(SideBtn::Ok);
-    toybox.goHub();
     toybox.hostHub().goHome();
 
     // The DOWN hold's new job: carry on READING. With recents present it
-    // lands inside the last book at its saved page, not on any list. The
-    // last book opened was the .tbk cover a moment ago, which is now the
-    // front of recents -- exactly the point.
-    if (!toybox.carryOnReading() || toybox.hostIdx() != 9 ||
-        static_cast<BookTool*>(toybox.hostActive())->hostScreen() != 1) {
+    // lands inside the last book at its saved page, not on any list.
+    if (!toybox.carryOnReading() || toybox.hostIdx() != 10 ||
+        static_cast<EpubTool*>(toybox.hostActive())->hostScreen() != 1) {
       printf("RECENTS FAIL: carry on reading did not land inside the book\n");
       abort();
     }
@@ -4531,10 +4085,13 @@ int main() {
   // Relocated below the recents guard: both of these open books, and the
   // strip above pins an exact order.
   {
-    // --- a card from an older firmware migrates its position ----------------
-    // Older CrossPoint (and Toybox until now) kept the cache under the Murmur
-    // hash. When the FNV directory has nothing, the Murmur one is read -- and
-    // the next save writes FNV, so the position has moved house.
+    // --- a pre-v2 position moves into the book's folder ---------------------
+    // Before v2 the place lived in /.crosspoint/epub_<murmur32> (CrossPoint's,
+    // read first) and epub_<fnv64> (older Toybox), with the chapter note
+    // toybox.pos beside the second. A book with nothing in its folder brings
+    // the place across once -- opened where it was, the note copied, the old
+    // files deleted and the old folders removed when that empties them -- and
+    // a CrossPoint cache file sharing the folder is left alone.
     {
       epubc::Progress cp;
       cp.spine = 1;
@@ -4544,35 +4101,356 @@ int main() {
       cp.hasOffset = true;
       uint8_t buf[10];
       const int n = epubc::encodeProgress(cp, buf);
-      sdcard::hostPlantSide("/.crosspoint/epub_1175141337288249041/progress.bin", buf, 0);
-      sdcard::hostPlantSide("/.crosspoint/epub_836526750/progress.bin", buf, n);
+      static const char kMur[] = "/.crosspoint/epub_836526750";
+      static const char kFnv[] = "/.crosspoint/epub_1175141337288249041";
+      char pth[128];
+      sdcard::hostPlantSide(posOf("/books/wind.epub"), buf, 0);  // nothing in the folder
+      char place[bstore::PATH_CAP];
+      bstore::file("/books/wind.epub", "place.txt", place, sizeof(place));
+      sdcard::hostPlantSide(place, buf, 0);
+      snprintf(pth, sizeof(pth), "%s/progress.bin", kMur);
+      sdcard::hostPlantSide(pth, buf, n);
+      snprintf(pth, sizeof(pth), "%s/progress.bin", kFnv);
+      epubc::Progress older = cp;
+      older.spine = 0;  // the stale copy: CrossPoint's folder must win
+      uint8_t ob[10];
+      sdcard::hostPlantSide(pth, ob, epubc::encodeProgress(older, ob));
+      const char kNote[] = "3\t2\t9\tThe Moved Chapter\n";
+      snprintf(pth, sizeof(pth), "%s/toybox.pos", kFnv);
+      sdcard::hostPlantSide(pth, kNote, (int)strlen(kNote));
+      snprintf(pth, sizeof(pth), "%s/book.bin", kMur);  // CrossPoint's own cache
+      sdcard::hostPlantSide(pth, "cp", 2);
       toybox.open(false, 10);
       auto* etm = static_cast<EpubTool*>(toybox.hostActive());
       toybox.onTap(240, epubui::LIST_Y0 + epubui::LIST_ROW_H + 10);
-      if (etm->hostScreen() != 1 || etm->hostSpine() != 1) {
-        printf("EPUB APP FAIL: the legacy-hash position was not read\n");
+      if (etm->hostScreen() != 1 || etm->hostSpine() != 1 || etm->hostPageOffset() > 2500) {
+        printf("EPUB APP FAIL: the old position was not taken (s%d off %u)\n", etm->hostSpine(),
+               etm->hostPageOffset());
         abort();
       }
-      toybox.onButton(SideBtn::Down);  // a turn: the save lands in the FNV dir
-      delay(3001);                     // ...once the reader pauses
-      toybox.tick();
-      uint8_t back[16];
+      uint8_t back[64];
       epubc::Progress q;
-      const int m =
-          sdcard::hostReadSide("/.crosspoint/epub_1175141337288249041/progress.bin", back, 16);
-      if (m != 10 || !epubc::decodeProgress(back, m, q) || q.spine != 1) {
-        printf("EPUB APP FAIL: the migrated position did not land in the FNV dir (n=%d)\n", m);
+      int m = sdcard::hostReadSide(posOf("/books/wind.epub"), back, 16);
+      if (m != 10 || !epubc::decodeProgress(back, m, q) || q.spine != 1 || q.offset != 2500) {
+        printf("EPUB APP FAIL: the position did not move into the book folder (n=%d)\n", m);
+        abort();
+      }
+      m = sdcard::hostReadSide(place, back, sizeof(back));
+      if (m != (int)strlen(kNote) || memcmp(back, kNote, (size_t)m) != 0) {
+        printf("EPUB APP FAIL: the chapter note did not move (n=%d)\n", m);
+        abort();
+      }
+      const char* gone[] = {"/progress.bin", "/toybox.pos"};
+      for (const char* g : gone)
+        for (const char* d : {kMur, kFnv}) {
+          snprintf(pth, sizeof(pth), "%s%s", d, g);
+          if (sdcard::hostReadSide(pth, back, 16) > 0) {
+            printf("EPUB APP FAIL: %s survived the move\n", pth);
+            abort();
+          }
+        }
+      snprintf(pth, sizeof(pth), "%s/book.bin", kMur);
+      if (sdcard::hostReadSide(pth, back, 16) != 2) {
+        printf("EPUB APP FAIL: CrossPoint's own cache file was touched\n");
+        abort();
+      }
+      sdcard::hostPlantSide(pth, back, 0);
+      toybox.onButton(SideBtn::Ok);
+      toybox.onTap(240, rmenu::rootRect(6, 480).y + 40);  // CLOSE THE BOOK
+      printf("position move ok (old folders read once, note moved, old files gone)\n");
+    }
+
+    // --- the Readest library ---------------------------------------------
+    // Signed in to Readest with a home Wi-Fi saved, the top shelf opens with
+    // "From Readest". Guarded: pages of the cloud library; a download lands in
+    // /books/Readest under a FAT-safe name and opens; a book already there
+    // shows its tick and opens without a download; the phone's search and
+    // download requests are carried out; Cancel leaves no file; a failure
+    // says so; the radio is off once the screen is left.
+    {
+      homenet::saveWifi(stickyHost.prefs(), "Somchai 5G", "correct horse");
+      kosync::saveAccount(stickyHost.prefs(), kosync::READEST_URL, "reader@example.com", "devkey-123");
+      kosync::g_hostLibBooks = 11;
+      kosync::g_hostLibFail = kosync::Result::Ok;
+      kosync::g_hostBookBytes = 50000;
+      homenet::g_hostOffs = 0;
+      toybox.open(false, 10);
+      auto* el = static_cast<EpubTool*>(toybox.hostActive());
+      g_dumpEnabled = true;
+      setScreen("tool_epub_shelf_readest");
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+      toybox.onTap(240, shelf::Y0 + 10);  // row 0: From Readest
+      if (el->hostLibStage() != 1) {
+        printf("LIB FAIL: the Readest row did not open the library (stage %d)\n", el->hostLibStage());
+        abort();
+      }
+      toybox.tick();
+      if (el->hostLibStage() != 2 || el->hostLibCount() != kosync::LIB_PER_PAGE || !el->hostLibMore() ||
+          !el->hostLibWifi()) {
+        printf("LIB FAIL: page one: stage %d, %d books, more %d\n", el->hostLibStage(),
+               el->hostLibCount(), el->hostLibMore());
+        abort();
+      }
+      g_dumpEnabled = true;
+      setScreen("tool_epub_readest_list");
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+      const int btnY = 690 + 35;
+      toybox.onTap(400, btnY);  // page 2 >
+      toybox.tick();
+      if (el->hostLibCount() != 3 || el->hostLibMore()) {
+        printf("LIB FAIL: page two had %d books, more %d\n", el->hostLibCount(), el->hostLibMore());
+        abort();
+      }
+      toybox.onTap(60, btnY);  // < page 1
+      toybox.tick();
+      // Book 03's title carries a slash and quotes: its file name must not.
+      kosync::LibBook b3;
+      snprintf(b3.title, sizeof(b3.title), "%s", el->hostLibTitle(2));
+      char p3[160];
+      kosync::libPath(b3, p3, sizeof(p3));
+      if (strncmp(p3, "/books/Readest/Book 03_ A_B ", 28) != 0 || strchr(p3 + 15, '"') ||
+          strchr(p3 + 15, ':')) {
+        printf("LIB FAIL: an unsafe title became '%s'\n", p3);
+        abort();
+      }
+      // Download Book 01: progress, then the book itself.
+      toybox.onTap(240, 64 + 10);
+      if (el->hostLibStage() != 3) {
+        printf("LIB FAIL: tapping a book did not start a download (stage %d)\n", el->hostLibStage());
+        abort();
+      }
+      toybox.tick();
+      g_dumpEnabled = true;
+      setScreen("tool_epub_readest_download");
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+      for (int i = 0; i < 40 && el->hostScreen() != 1; i++) toybox.tick();
+      if (el->hostScreen() != 1 || !sdcard::hostHasBook("/books/Readest/Book 01.epub") ||
+          el->hostLibWifi()) {
+        printf("LIB FAIL: the download did not open as a book (screen %d, on card %d, wifi %d)\n",
+               el->hostScreen(), sdcard::hostHasBook("/books/Readest/Book 01.epub"), el->hostLibWifi());
+        abort();
+      }
+      if (sdcard::hostCardFileSize("/books/Readest/Book 01.epub.part") > 0) {
+        printf("LIB FAIL: the .part file was left behind\n");
+        abort();
+      }
+      toybox.onButton(SideBtn::Ok);
+      toybox.onTap(240, rmenu::rootRect(7, 480).y + 30);  // CLOSE (8 rows: Sync is there)
+      toybox.onTap(20, 20);  // out of /books/Readest to the top shelf
+      // Again: Book 01 is now on the card -- a tick, and a tap opens it.
+      toybox.onTap(240, shelf::Y0 + 10);
+      toybox.tick();
+      if (!el->hostLibLocal(0) || el->hostLibLocal(1)) {
+        printf("LIB FAIL: the tick marks are %d %d\n", el->hostLibLocal(0), el->hostLibLocal(1));
+        abort();
+      }
+      g_dumpEnabled = true;
+      setScreen("tool_epub_readest_local");
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+      toybox.onTap(240, 64 + 10);
+      if (el->hostScreen() != 1 || el->hostLibStage() != 0) {
+        printf("LIB FAIL: a book already on the card did not open directly\n");
+        abort();
+      }
+      toybox.onButton(SideBtn::Ok);
+      toybox.onTap(240, rmenu::rootRect(7, 480).y + 30);
+      toybox.onTap(20, 20);
+
+      // The phone: SEARCH puts up the QR; a search from the page filters the
+      // list here and publishes it there; a download asked from the page runs.
+      toybox.onTap(240, shelf::Y0 + 10);
+      toybox.tick();
+      toybox.onTap(240, btnY);  // SEARCH
+      if (el->hostLibStage() != 5 || !el->hostWeb().running()) {
+        printf("LIB FAIL: SEARCH did not put up the phone page (stage %d)\n", el->hostLibStage());
+        abort();
+      }
+      g_dumpEnabled = true;
+      setScreen("tool_epub_readest_phone");
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+      el->hostWeb().hostSearch("Book 1");
+      toybox.tick();
+      if (el->hostLibStage() != 2 || el->hostLibCount() != 2 ||
+          kosync::g_hostLastQuery != "Book 1" || !strstr(el->hostWeb().hostResults().c_str(), "Book 11")) {
+        printf("LIB FAIL: the phone's search gave stage %d, %d books, query '%s'\n",
+               el->hostLibStage(), el->hostLibCount(), kosync::g_hostLastQuery.c_str());
+        abort();
+      }
+      g_dumpEnabled = true;
+      setScreen("tool_epub_readest_search");
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+      char id10[33];
+      md5t::hex("Book 10", id10);
+      el->hostWeb().hostDownload(id10);
+      toybox.tick();
+      if (el->hostLibStage() != 3) {
+        printf("LIB FAIL: the phone's download did not start (stage %d)\n", el->hostLibStage());
+        abort();
+      }
+      for (int i = 0; i < 40 && el->hostScreen() != 1; i++) toybox.tick();
+      if (el->hostScreen() != 1 || !sdcard::hostHasBook("/books/Readest/Book 10.epub")) {
+        printf("LIB FAIL: the phone's download did not open\n");
+        abort();
+      }
+      toybox.onButton(SideBtn::Ok);
+      toybox.onTap(240, rmenu::rootRect(7, 480).y + 30);
+      toybox.onTap(20, 20);
+
+      // Cancel part-way: no book, no .part.
+      kosync::g_hostBookBytes = 400000;
+      toybox.onTap(240, shelf::Y0 + 10);
+      toybox.tick();
+      toybox.onTap(240, 64 + 76 + 10);  // Book 02
+      toybox.tick();
+      toybox.onTap(240, btnY);  // CANCEL
+      if (el->hostLibStage() != 2 || sdcard::hostHasBook("/books/Readest/Book 02.epub") ||
+          sdcard::hostCardFileSize("/books/Readest/Book 02.epub.part") > 0) {
+        printf("LIB FAIL: cancel left stage %d / a file behind\n", el->hostLibStage());
+        abort();
+      }
+      // A failure says so, and TRY AGAIN tries again.
+      kosync::g_hostLibFail = kosync::Result::NetworkError;
+      toybox.onTap(400, btnY);  // page 2: fails
+      toybox.tick();
+      if (el->hostLibStage() != 4) {
+        printf("LIB FAIL: a failed list did not show the error (stage %d)\n", el->hostLibStage());
+        abort();
+      }
+      g_dumpEnabled = true;
+      setScreen("tool_epub_readest_error");
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+      kosync::g_hostLibFail = kosync::Result::Ok;
+      toybox.onTap(240, btnY);
+      toybox.tick();
+      if (el->hostLibStage() != 2) {
+        printf("LIB FAIL: TRY AGAIN did not recover\n");
+        abort();
+      }
+      const int offsBefore = homenet::g_hostOffs;
+      toybox.onTap(20, 20);  // leave: radio off, phone page down
+      if (el->hostLibStage() != 0 || el->hostLibWifi() || el->hostWeb().running() ||
+          homenet::g_hostOffs != offsBefore + 1) {
+        printf("LIB FAIL: leaving left the radio %d / web %d\n", el->hostLibWifi(),
+               el->hostWeb().running());
+        abort();
+      }
+      kosync::forgetAccount(stickyHost.prefs());
+      homenet::forgetWifi(stickyHost.prefs());
+      sdcard::hostClearBooks();
+      // The three books' folders (position, place) and the downloads: the fake
+      // card has two dozen small-file slots, and later guards need them.
+      sdcard::hostCardRemovePrefix("/.toybox/books/Book ");
+      sdcard::hostCardRemovePrefix(kosync::LIB_DIR);
+      kosync::g_hostBookBytes = 50000;
+      toybox.goHub();
+      printf("readest library ok (pages, download opens, ticks, phone search + download, cancel, error, radio off)\n");
+    }
+
+    // --- series rows: volumes grouped by their names ---------------------
+    // Three volumes of one series (spelled three ways, out of order) become
+    // one row named after the series; a single "Part 2" and a "1984" stay
+    // books. Inside the row: volume order, the volume as the name, and back
+    // returns to the level it came from. Closing a book keeps the row open.
+    {
+      sdcard::hostAddBook("/books/That Time I Got Reincarnated as a Slime - Volume 10.epub");
+      sdcard::hostAddBook("/books/That Time I Got Reincarnated as a Slime - Volume 02.epub");
+      sdcard::hostAddBook("/books/that time i got reincarnated as a slime vol 1.epub");
+      sdcard::hostAddBook("/books/Dune Part 2.epub");
+      sdcard::hostAddBook("/books/1984.epub");
+      toybox.open(false, 10);  // fresh enter: the shelf re-lists
+      auto* es = static_cast<EpubTool*>(toybox.hostActive());
+      if (es->hostGroups() != 1 || strcmp(es->hostGroupName(0), "That Time I Got Reincarnated as a Slime") != 0 ||
+          es->hostViewCount() != 4) {
+        printf("SERIES FAIL: %d groups ('%s'), %d loose books\n", es->hostGroups(),
+               es->hostGroupName(0), es->hostViewCount());
+        abort();
+      }
+      g_dumpEnabled = true;
+      setScreen("tool_epub_series_shelf");
+      stickyHost.refresh(true);
+      const int groupRow = es->hostFolders();  // right after the real folders
+      setScreen("tool_epub_series_open");
+      toybox.onTap(240, shelf::Y0 + groupRow * shelf::ROW_H + 10);
+      g_dumpEnabled = false;
+      if (es->hostInGroup() != 0 || es->hostViewCount() != 3) {
+        printf("SERIES FAIL: the series row opened as group %d with %d books\n",
+               es->hostInGroup(), es->hostViewCount());
+        abort();
+      }
+      char f0[128], f1[128], f2[128];
+      es->hostFile(es->hostViewBook(0), f0, sizeof(f0));
+      es->hostFile(es->hostViewBook(1), f1, sizeof(f1));
+      es->hostFile(es->hostViewBook(2), f2, sizeof(f2));
+      if (!strstr(f0, "vol 1") || !strstr(f1, "Volume 02") || !strstr(f2, "Volume 10")) {
+        printf("SERIES FAIL: volume order %s | %s | %s\n", f0, f1, f2);
+        abort();
+      }
+      toybox.onTap(240, shelf::Y0 + 1 * shelf::ROW_H + 10);  // Volume 02
+      if (es->hostScreen() != 1) {
+        printf("SERIES FAIL: a volume in the row did not open\n");
         abort();
       }
       toybox.onButton(SideBtn::Ok);
       toybox.onTap(240, rmenu::rootRect(6, 480).y + 40);  // CLOSE THE BOOK
-      printf("hash migration ok (reads Murmur, writes FNV)\n");
+      if (es->hostScreen() != 0 || es->hostInGroup() != 0) {
+        printf("SERIES FAIL: closing a volume left the row (group %d)\n", es->hostInGroup());
+        abort();
+      }
+      toybox.onTap(20, 20);  // back: out of the row, not out of the app
+      if (!toybox.hostInApp() || es->hostInGroup() != -1 || es->hostGroups() != 1) {
+        printf("SERIES FAIL: back from the row went to group %d\n", es->hostInGroup());
+        abort();
+      }
+      sdcard::hostClearBooks();
+      toybox.goHub();
+      printf("series rows ok (three spellings grouped, volume order, back to the shelf)\n");
+    }
+
+    // --- whole names and the sync mark on the shelf ------------------------
+    // A release name longer than the 40-byte title field is drawn whole over
+    // two lines; a started book with a "synced" marker shows the mark; one
+    // without it does not.
+    {
+      const char* kLong = "/books/Classroom of the Elite - Volume 01 [Seven Seas][Kobo].epub";
+      const char* kPlain = "/books/Plain Book.epub";
+      sdcard::hostAddBook(kLong);
+      sdcard::hostAddBook(kPlain);
+      char p[bstore::PATH_CAP];
+      for (const char* f : {kLong, kPlain}) {
+        bstore::file(f, "position.bin", p, sizeof(p));
+        sdcard::hostPutCardFile(p, "\x01\x00\x00\x00\x00\x00", 6);
+      }
+      bstore::file(kLong, "synced", p, sizeof(p));
+      sdcard::hostPutCardFile(p, "1", 1);
+      toybox.open(false, 10);
+      auto* es = static_cast<EpubTool*>(toybox.hostActive());
+      if (!es->hostBookSynced(kLong) || es->hostBookSynced(kPlain)) {
+        printf("SHELF FAIL: synced flags %d %d (want 1 0)\n", es->hostBookSynced(kLong),
+               es->hostBookSynced(kPlain));
+        abort();
+      }
+      g_dumpEnabled = true;
+      setScreen("tool_epub_shelf_names_sync");
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+      sdcard::hostCardRemovePrefix("/.toybox/books/Classroom");
+      sdcard::hostCardRemovePrefix("/.toybox/books/Plain");
+      sdcard::hostClearBooks();
+      toybox.goHub();
+      printf("shelf names ok (whole names, sync mark only where synced)\n");
     }
 
     // --- the CrossInk shelf ---------------------------------------------------
     // /Read (and /epub) appear as folders beside the series, named by their
     // absolute path; opening one lists and opens its books, and the position
-    // lands under the FNV hash of the /Read path, where CrossInk will look.
+    // lands in that book's own folder.
     {
       sdcard::hostSetCrossRoots(true);
       toybox.open(false, 10);  // fresh enter: the shelf re-lists
@@ -4596,10 +4474,9 @@ int main() {
       toybox.onButton(SideBtn::Ok);                // the panel
       toybox.onTap(240, rmenu::rootRect(6, 480).y + 40);  // CLOSE: the save lands
       uint8_t pb[16];
-      if (sdcard::hostReadSide("/.crosspoint/epub_16433272010175318797/progress.bin", pb, 16) !=
-          10) {
+      if (sdcard::hostReadSide(posOf("/Read/novel.epub"), pb, 16) != 10) {
         sdcard::hostDumpSides();
-        printf("EPUB APP FAIL: /Read progress not under the FNV of its own path\n");
+        printf("EPUB APP FAIL: /Read progress not in its book folder\n");
         abort();
       }
       toybox.onTap(20, 20);                               // back out of /Read
@@ -4882,80 +4759,15 @@ int main() {
     }
     printf("bmp art ok (list, wallpaper, grey lock, sleep pick)\n");
 
-    // --- covers traded with CrossInk -----------------------------------------
-    // Put: opening wind.epub earlier left OUR cover as their cover.bmp, in
-    // their cache dir, in their format -- prove it parses back to the very
-    // pixels of the big cover it came from.
+    // --- no covers traded with CrossInk any more ---------------------------
+    // v2 dropped the CrossPoint cover cache (owner, 18 Nov): opening
+    // wind.epub earlier must not have left a cover.bmp in its old folder.
     {
       char dir[64], p[112];
       epubc::cacheDir("/books/wind.epub", dir, sizeof(dir));
       snprintf(p, sizeof(p), "%s/cover.bmp", dir);
-      const int sz = sdcard::hostCardFileSize(p);
-      if (sz != 62 + 60 * 800) {
-        printf("BMP FAIL: cover.bmp for wind.epub is %d bytes (want 48062)\n", sz);
-        abort();
-      }
-      if (!sdcard::readBmpGray(p, gray)) {
-        printf("BMP FAIL: our own cover.bmp did not parse\n");
-        abort();
-      }
-      char big[bstore::PATH_CAP];
-      bthumb::bigPath("/books/wind.epub", big, sizeof(big));
-      static uint8_t tbc[48000];
-      if (sdcard::readWhole(big, tbc, sizeof(tbc)) != (int)sizeof(tbc)) {
-        printf("BMP FAIL: wind's big cover went missing\n");
-        abort();
-      }
-      for (int i = 0; i < 480 * 800; i += 997) {
-        const int want = (tbc[i >> 3] & (0x80 >> (i & 7))) ? 255 : 0;
-        if (gray[i] != want) {
-          printf("BMP FAIL: cover.bmp pixel %d is %d, the cover says %d\n", i, gray[i], want);
-          abort();
-        }
-      }
-    }
-    // Grab: a cover.bmp another firmware left becomes our cover art without
-    // any decode -- for a book that does not even exist, which is the proof
-    // no decoder was involved.
-    {
-      auto [b, n] = quad8(false);
-      char dir[64], p[112];
-      epubc::cacheDir("/books/fake-cross.epub", dir, sizeof(dir));
-      snprintf(p, sizeof(p), "%s/cover.bmp", dir);
-      sdcard::hostPutCardFile(p, b, (int)n);
-      if (!stickyHost.crossCoverGrab("/books/fake-cross.epub") ||
-          !bthumb::have("/books/fake-cross.epub")) {
-        printf("BMP FAIL: a waiting cover.bmp was not grabbed\n");
-        abort();
-      }
-      static uint8_t small[bthumb::BYTES];
-      if (!bthumb::load("/books/fake-cross.epub", small)) {
-        printf("BMP FAIL: the grabbed cover made no thumbnail\n");
-        abort();
-      }
-      // Top-left of the quadrant card is black, top-right white; the strip
-      // thumbnail (96x160) must agree. Sampled clear of the halfway seam:
-      // bytes 0-3 are columns 0-31 (deep in the black half), bytes 8-11
-      // columns 64-95 (deep in the white).
-      int tlBlack = 0, trBlack = 0;
-      for (int y = 20; y < 40; y++)
-        for (int x = 0; x < 12; x++) {
-          if (x >= 4 && x < 8) continue;
-          for (int k = 0; k < 8; k++) {
-            const bool black = !(small[y * 12 + x] & (0x80 >> k));
-            if (x < 4) tlBlack += black; else trBlack += black;
-          }
-        }
-      if (tlBlack < 500 || trBlack > 140) {
-        printf("BMP FAIL: grabbed thumbnail halves %d/%d black\n", tlBlack, trBlack);
-        abort();
-      }
-      // ...and the legacy Murmur directory is honoured when FNV has nothing.
-      epubc::cacheDirLegacy("/books/old-cross.epub", dir, sizeof(dir));
-      snprintf(p, sizeof(p), "%s/cover.bmp", dir);
-      sdcard::hostPutCardFile(p, b, (int)n);
-      if (!stickyHost.crossCoverGrab("/books/old-cross.epub")) {
-        printf("BMP FAIL: a legacy-dir cover.bmp was not grabbed\n");
+      if (sdcard::hostCardFileSize(p) > 0) {
+        printf("BMP FAIL: a cover.bmp was left in %s\n", dir);
         abort();
       }
     }
@@ -5259,8 +5071,8 @@ int main() {
       }
     }
 
-    // The cover: decoded from the book, NOT CrossPoint's cached cover.bmp --
-    // which on a real card is often the soft cover an older Toybox left there.
+    // The cover: decoded from the book. A cover.bmp sitting in the old
+    // CrossPoint folder is never read (v2 dropped that cache).
     // The long-named book: no sidecar of the owner's, and opened just above.
     static const char kBook[] =
         "/books/A Book With The Kind Of Very Long Release Filename Publishers Actually Use Vol "
@@ -5631,70 +5443,7 @@ int main() {
     g_dumpEnabled = true;
   }
 
-  // --- a card that has been to CrossPoint and back ----------------------------
-  // The bug the owner found by doing it: read a book in Toybox, flash
-  // CrossPoint, read further, flash back -- and Toybox opened at the place it
-  // had last seen, while CrossPoint had opened at page one. Two halves of one
-  // wrong preference: Toybox wrote its position under a 64-bit hash of the
-  // path and read that first, and CrossPoint keeps its whole cache (and its
-  // progress.bin) under a 32-bit hash and looks nowhere else.
-  //
-  // So: CrossPoint's directory is read FIRST, and every save writes both.
-  // Both halves are checked here, because fixing one without the other still
-  // leaves a reader losing their place.
-  {
-    g_dumpEnabled = false;
-    static const char kCross[] = "/.crosspoint/epub_836526750/progress.bin";      // 32-bit
-    static const char kOurs[] = "/.crosspoint/epub_1175141337288249041/progress.bin";  // 64-bit
-    // Toybox's own file says chapter one; CrossPoint's says chapter two,
-    // which is where the reader actually stopped.
-    {
-      epubc::Progress mine{};
-      mine.spine = 0; mine.page = 0; mine.pageCount = 1; mine.offset = 0; mine.hasOffset = true;
-      uint8_t b[10];
-      sdcard::hostPlantSide(kOurs, b, epubc::encodeProgress(mine, b));
-      epubc::Progress theirs{};
-      theirs.spine = 1; theirs.page = 0; theirs.pageCount = 9; theirs.offset = 2500;
-      theirs.hasOffset = true;
-      uint8_t c[10];
-      sdcard::hostPlantSide(kCross, c, epubc::encodeProgress(theirs, c));
-    }
-    toybox.goHub();
-    toybox.open(false, 10, false);
-    auto* ec = static_cast<EpubTool*>(toybox.hostActive());
-    if (!ec->openDirect("/books/wind.epub")) {
-      printf("CROSSPOINT FAIL: the book did not open\n");
-      abort();
-    }
-    if (ec->hostSpine() != 1) {
-      printf("CROSSPOINT FAIL: opened chapter %d -- ours won over CrossPoint's\n",
-             ec->hostSpine());
-      abort();
-    }
-    // ...and reading on writes BOTH, so flashing back the other way finds it.
-    toybox.onButton(SideBtn::Down);
-    const int spineNow = ec->hostSpine();
-    const uint32_t offNow = ec->hostPageOffset();
-    toybox.goHub();  // closing the book saves
-    uint8_t back[10];
-    if (sdcard::hostReadSide(kCross, back, sizeof(back)) != 10) {
-      printf("CROSSPOINT FAIL: nothing was written where CrossPoint reads\n");
-      abort();
-    }
-    epubc::Progress got{};
-    if (!epubc::decodeProgress(back, 10, got) || got.spine != spineNow ||
-        got.offset != offNow) {
-      printf("CROSSPOINT FAIL: their file says s%u off %u, the reader was at s%d off %u\n",
-             got.spine, got.offset, spineNow, offNow);
-      abort();
-    }
-    if (sdcard::hostReadSide(kOurs, back, sizeof(back)) != 10) {
-      printf("CROSSPOINT FAIL: our own directory stopped being written\n");
-      abort();
-    }
-    printf("crosspoint round trip ok (their place wins, both files kept current)\n");
-    g_dumpEnabled = true;
-  }
+
 
   // --- a cover from an older firmware is rebuilt ------------------------------
   // Books covered before full-size covers moved to the card have the strip
@@ -5939,9 +5688,8 @@ int main() {
         auto* ec = static_cast<EpubTool*>(toybox.hostActive());
         char file[128];
         ec->hostFile(0, file, sizeof(file));
-        char dir[96], path[128];
-        epubc::cacheDir(file, dir, sizeof(dir));
-        snprintf(path, sizeof(path), "%s/toybox.pos", dir);
+        char path[bstore::PATH_CAP];
+        bstore::file(file, "place.txt", path, sizeof(path));
         // 40 bytes, the longest a chapter name may be.
         const char* kLong = "Chapter 12: The Longest Name In This Boo";
         char note[96];
@@ -6010,44 +5758,7 @@ int main() {
       }
     }
 
-    // The same row in the .tbk reader, where a position is a setting rather
-    // than a file on the card. Row 3 there: Go to page, Bookmarks, Page
-    // turns, Start again, Close.
-    toybox.open(false, 9, false);
-    auto* br = static_cast<BookTool*>(toybox.hostActive());
-    // Straight to a book: the top of this shelf is a series folder, so a tap
-    // at the first row would open the folder rather than anything to read.
-    if (!br->openDirect("/books/One Piece/one-piece-v1.tbk")) {
-      printf("RESET FAIL: the .tbk book did not open\n");
-      abort();
-    }
-    for (int k = 0; k < 3; k++) toybox.onButton(SideBtn::Down);
-    if (br->hostPage() == 0) {
-      printf("RESET FAIL: the .tbk reader would not leave page one\n");
-      abort();
-    }
-    toybox.onButton(SideBtn::Ok);                     // the panel
-    toybox.onTap(240, rmenu::rootRect(3, W).y + 40);  // asks
-    if (br->hostPage() == 0) {
-      printf("RESET FAIL: the .tbk first tap reset it\n");
-      abort();
-    }
-    toybox.onTap(240, rmenu::rootRect(3, W).y + 40);  // confirms
-    if (br->hostMenu() != 0 || br->hostPage() != 0) {
-      printf("RESET FAIL: the .tbk book is at page %lu (menu %d)\n",
-             (unsigned long)br->hostPage(), br->hostMenu());
-      abort();
-    }
-    // Closing and reopening still starts at page one.
-    toybox.onButton(SideBtn::Ok);
-    toybox.onTap(240, rmenu::rootRect(4, W).y + 40);  // close
-    br->openDirect("/books/One Piece/one-piece-v1.tbk");  // and open it again
-    if (br->hostPage() != 0) {
-      printf("RESET FAIL: the .tbk book reopened at page %lu\n", (unsigned long)br->hostPage());
-      abort();
-    }
     toybox.goHub();
-    printf("tbk start again ok (asks first, page one, and it sticks)\n");
     g_dumpEnabled = true;
   }
 
@@ -6545,15 +6256,11 @@ int main() {
     g_dumpEnabled = false;
     toybox.onTap(240, 400);  // and away again
 
-    char dir[96];
-    epubc::cacheDir(
-        "/books/A Book With The Kind Of Very Long Release Filename Publishers Actually Use Vol 01.epub",
-        dir, sizeof(dir));
-    char pp[128];
-    snprintf(pp, sizeof(pp), "%s/progress.bin", dir);
+    const char* pp = posOf(
+        "/books/A Book With The Kind Of Very Long Release Filename Publishers Actually Use Vol 01.epub");
     uint8_t buf[16];
     if (stickyHost.sdReadFile(pp, buf, sizeof(buf)) != 10) {
-      printf("LONGPATH FAIL: progress not written under the full-path hash\n");
+      printf("LONGPATH FAIL: progress not written in the book's folder\n");
       abort();
     }
     toybox.onButton(SideBtn::Ok);
@@ -6732,7 +6439,7 @@ int main() {
     toybox.goHub();
     toybox.hostHub().goHome();
     toybox.onTap(80 + 2 * 160, hubui::DOCK_Y + 30);  // the STUDY drawer
-    toybox.onTap(3 * EPD_W / 4, hubui::FOLDER_TOP + hubui::TILE / 2);  // EPUB
+    toybox.onTap(EPD_W / 4, hubui::FOLDER_TOP + hubui::TILE / 2);  // EPUB, first cell (strip up)
     if (!toybox.hostInApp() || strcmp(toybox.activeTitle(), "EPUB") != 0) {
       printf("FONT PAGE FAIL: could not open the reader to check its face\n");
       abort();

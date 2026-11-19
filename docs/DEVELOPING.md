@@ -124,7 +124,8 @@ g++ -std=gnu++17 -O2 -w -DTOYBOX_HOST -I . -I mock -I ../../src \
 ```
 
 The phone's clock page (time, time zone, home Wi-Fi, sync account) is driven
-in Chromium by `test/web/test_clock_page.py` (run it from `test/web`).
+in Chromium by `test/web/test_clock_page.py`, and the Readest library's phone
+search page by `test/web/test_lib_page.py` (run both from `test/web`).
 
 ## Releasing
 

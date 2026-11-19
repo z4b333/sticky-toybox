@@ -2,10 +2,10 @@
 //
 // Two entries in NVS as one blob: a reader notes a book every time one is
 // opened, the hub lists them under the Study tiles, and tapping one reopens
-// the book directly at its saved position. The file field is whatever the
-// owning reader lists books by -- a bare .tbk name, an absolute .epub path --
-// so handing it back to the same reader's openDirect() always means the same
-// book.
+// the book directly at its saved position. The file field is the absolute
+// .epub path the reader lists books by, so handing it back to its
+// openDirect() always means the same book. (KIND_TBK entries are left over
+// from the manga reader, removed in v2; list() drops them.)
 #pragma once
 #include <string.h>
 
@@ -26,10 +26,12 @@ struct Entry {
 // an old-layout blob must read as empty rather than as garbage titles.
 inline int list(Preferences& p, Entry* out) {
   Entry e[MAX];
-  const size_t got = p.getBytes("recents2", e, sizeof(e));
+  const size_t got = p.isKey("recents2") ? p.getBytes("recents2", e, sizeof(e)) : 0;
   const int n = (int)(got / sizeof(Entry));
-  for (int i = 0; i < n && i < MAX; i++) out[i] = e[i];
-  return n > MAX ? MAX : n;
+  int w = 0;
+  for (int i = 0; i < n && i < MAX; i++)
+    if (e[i].kind == KIND_EPUB) out[w++] = e[i];
+  return w;
 }
 
 inline void note(Preferences& p, uint8_t kind, const char* file, const char* title) {

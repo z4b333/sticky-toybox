@@ -489,8 +489,6 @@ class Builder {
   bool _live = false;
 };
 
-// A .tbk cover: the book's first page, which is already exactly panel-sized,
-// so this is the same pipeline with nothing to scale.
 // --- a cover the owner supplied ----------------------------------------------
 // "<book stem>.cover.tbi", beside the book on the card, in the same 480x800
 // one-bit format as a wallpaper or a lock screen picture.
@@ -643,39 +641,6 @@ inline bool coverFromSidecar(ToolsHost& h, const char* file) {
   return true;
 }
 
-// True when both pictures were written. The caller is expected to look: a
-// cover that did not get made leaves `have()` false, and the next open of the
-// book tries again.
-//
-// Deliberately no failure marker here, unlike the EPUB side. There the marker
-// exists because a cover that will not DECODE will never decode -- it is a
-// property of the file, and retrying it costs seconds on every open forever.
-// A .tbk cover decodes nothing: it is already the framebuffer's own bytes, so
-// every way this can fail (no heap for the bands, a card that stopped
-// answering, a full card) is a passing condition. Marking those permanently
-// would deny a book its cover for the rest of its life because the device was
-// briefly short of memory once.
-inline bool makeAndSave(ToolsHost& h, const char* file, const uint8_t* page, int bpp) {
-  Builder b;
-  if (!b.begin(h, file, 480, 800)) return false;
-  uint8_t line[480];
-  for (int y = 0; y < 800; y++) {
-    for (int x = 0; x < 480; x++) {
-      if (bpp == 2) {
-        const uint32_t i = (uint32_t)y * 480 + x;
-        const int lv = (page[i >> 2] >> (6 - 2 * (i & 3))) & 3;  // 0 black .. 3 white
-        line[x] = (uint8_t)(lv * 85);
-      } else {
-        line[x] = (page[(size_t)y * 60 + (x >> 3)] & (0x80 >> (x & 7))) ? 255 : 0;
-      }
-    }
-    b.row(y, line, 480);
-  }
-  // finish() writes the small picture only if the big one closed, so a failure
-  // here leaves neither -- not a thumbnail with no cover behind it.
-  return b.finish();
-}
-
 // Breaks `s` into lines that fit `maxW`, whole words wherever it can, and
 // says whether it ran out of lines before it ran out of text. Measuring is
 // the canvas's job, so this works for any face the caller has set.
@@ -723,8 +688,17 @@ inline int wrapLines(ToolsCanvas& c, const char* s, TSize sz, bool bold, int max
 // cannot happen would be a lie the second time round.
 inline void drawPlate(ToolsCanvas& c, const char* file, const char* title) {
   const int maxW = c.width() - 48;
-  char cap[64];
-  snprintf(cap, sizeof(cap), "%s", title ? title : "");
+  // The whole name, from the file: the shelf keeps only 40 bytes of it, and
+  // a series' volume number is usually what got cut ("...Reincarnation Vo").
+  char cap[96];
+  const char* slash = file ? strrchr(file, '/') : nullptr;
+  if (slash && slash[1]) {
+    snprintf(cap, sizeof(cap), "%s", slash + 1);
+    char* dot = strrchr(cap, '.');
+    if (dot && dot != cap) *dot = 0;
+  } else {
+    snprintf(cap, sizeof(cap), "%s", title ? title : "");
+  }
 
   // As large as it fits: the biggest face if the name lands in two lines,
   // one step down if it needs more. A name is what the person is waiting to

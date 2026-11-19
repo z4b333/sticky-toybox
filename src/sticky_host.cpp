@@ -94,19 +94,13 @@ bool StickyHost::sdLockTake(const char* name) {
   return true;
 }
 
-// --- covers shared with CrossInk ----------------------------------------------
-// CrossInk keeps a finished cover as cover.bmp inside the book's cache
-// directory (/.crosspoint/epub_<hash>/) and decodes one only when it is
-// missing. Reading theirs and leaving ours means a card moved between the
-// two firmwares decodes each cover exactly once, in whichever device the
-// book is opened first.
+// --- covers from a BMP ---------------------------------------------------------
 
 namespace {
 // Any BMP on the card becomes this book's cover art: parsed to grey, then
 // through the cover builder, which dithers, files both sizes and sweeps the
 // stale flash copy -- exactly as if the JPEG decoder had produced these
-// rows. One pipeline, whoever decoded; shared by the .cover.bmp sidecar and
-// the CrossInk cache.
+// rows. One pipeline, whoever decoded.
 bool bmpToCover(StickyHost& h, const char* bmpPath, const char* file) {
   uint8_t* gray = (uint8_t*)ps_malloc((size_t)480 * 800);
   if (!gray) return false;
@@ -135,79 +129,6 @@ bool StickyHost::coverFromBmp(const char* file) {
   return bmpToCover(*this, p, file);
 }
 
-bool StickyHost::crossCoverGrab(const char* file) {
-  char p[112];
-  {
-    char dir[64];
-    epubc::cacheDir(file, dir, sizeof(dir));
-    snprintf(p, sizeof(p), "%s/cover.bmp", dir);
-    if (!sdcard::exists(p)) {
-      epubc::cacheDirLegacy(file, dir, sizeof(dir));
-      snprintf(p, sizeof(p), "%s/cover.bmp", dir);
-      if (!sdcard::exists(p)) return false;
-    }
-  }
-  return bmpToCover(*this, p, file);
-}
-
-bool StickyHost::crossCoverPut(const char* file) {
-  // Mid-open only: the card is awake because a reader holds it. Never over a
-  // cover that already exists -- theirs is as good as ours.
-  if (!sdcard::busHeld()) return false;
-  char p[112];
-  {
-    char dir[64];
-    epubc::cacheDir(file, dir, sizeof(dir));
-    snprintf(p, sizeof(p), "%s/cover.bmp", dir);
-  }
-  if (sdcard::exists(p)) return true;
-  char big[bstore::PATH_CAP];
-  bthumb::bigPath(file, big, sizeof(big));
-  // A 1-bit BMP, the shape their converter writes: 62-byte header (file
-  // header, BITMAPINFOHEADER, a black-then-white palette), then bottom-up
-  // rows. At 480 wide a row is exactly 60 bytes -- already 4-aligned -- and
-  // our bit sense IS the palette's: index 1 is white. So the pixel bytes are
-  // the big cover's own, written back to front.
-  constexpr uint32_t ROWB = 60, ROWS = 800, HDR = 62;
-  constexpr uint32_t BAND_ROWS = 80, BAND = ROWB * BAND_ROWS;
-  uint8_t* band = (uint8_t*)malloc(BAND);
-  if (!band) return false;
-  // Probe the big cover before opening the stream: a book whose full-size
-  // cover was never written (or was dropped) should not leave a header-only
-  // cover.bmp behind.
-  if (sdcard::readSlice(big, 0, band, (int)ROWB) != (int)ROWB) {
-    free(band);
-    return false;
-  }
-  bool ok = sdcard::streamOpen(p);
-  if (ok) {
-    uint8_t h[HDR] = {0};
-    h[0] = 'B'; h[1] = 'M';
-    const uint32_t fileSize = HDR + ROWB * ROWS;
-    h[2] = (uint8_t)fileSize; h[3] = (uint8_t)(fileSize >> 8);
-    h[4] = (uint8_t)(fileSize >> 16); h[5] = (uint8_t)(fileSize >> 24);
-    h[10] = HDR;              // offBits
-    h[14] = 40;               // BITMAPINFOHEADER
-    h[18] = (uint8_t)(480 & 255); h[19] = 480 >> 8;   // width
-    h[22] = (uint8_t)(ROWS & 255); h[23] = ROWS >> 8;  // height, bottom-up
-    h[26] = 1;                // planes
-    h[28] = 1;                // bits per pixel
-    const uint32_t img = ROWB * ROWS;
-    h[34] = (uint8_t)img; h[35] = (uint8_t)(img >> 8); h[36] = (uint8_t)(img >> 16);
-    h[46] = 2;                // colours used
-    // palette: 0 = black (already zeroed), 1 = white
-    h[58] = h[59] = h[60] = 255;
-    ok = sdcard::streamWrite(h, HDR);
-  }
-  for (int b = (int)(ROWS / BAND_ROWS) - 1; ok && b >= 0; b--) {
-    ok = sdcard::readSlice(big, (uint32_t)b * BAND, band, (int)BAND) == (int)BAND;
-    for (int r = (int)BAND_ROWS - 1; ok && r >= 0; r--)
-      ok = sdcard::streamWrite(band + (uint32_t)r * ROWB, ROWB);
-  }
-  free(band);
-  return sdcard::streamClose(ok) && ok;
-}
-
 int StickyHost::shelfFolders(ShelfFolder* out, int max, const char* ext) {
   // Same shape on both sides, so one small buffer and a copy; folders are
   // few enough that this stays on the stack.
@@ -230,7 +151,6 @@ namespace {
 // contiguous run. It lives in BSS instead. Only one reader exists at a time,
 // and neither of these calls is re-entrant.
 constexpr int LIST_MAX = 32;
-sdcard::BookMeta g_bookScratch[LIST_MAX];
 sdcard::EpubMeta g_epubScratch[LIST_MAX];
 
 // And the phone's file list, for a blunter reason. sdcard::FileEntry is 132
@@ -249,53 +169,7 @@ static_assert(sizeof(g_mgrScratch) > 8192,
               "kept as a reminder: this array is bigger than the loop task's stack");
 }  // namespace
 
-int StickyHost::bookList(BookInfo* out, int max, const char* dir) {
-  if (max < 1) return 0;
-  if (max > LIST_MAX) max = LIST_MAX;
-  sdcard::BookMeta* metas = g_bookScratch;
-  const int n = sdcard::bookList(metas, max, dir);
-  for (int i = 0; i < (n < 0 ? 0 : n); i++) {
-    strncpy(out[i].file, metas[i].file, sizeof(out[i].file) - 1);
-    out[i].file[sizeof(out[i].file) - 1] = 0;
-    strncpy(out[i].title, metas[i].title, sizeof(out[i].title) - 1);
-    out[i].title[sizeof(out[i].title) - 1] = 0;
-    out[i].pages = metas[i].pages;
-    out[i].rtl = metas[i].rtl;
-    out[i].bpp = metas[i].bpp;
-    out[i].cover = metas[i].cover;
-  }
-  return n;
-}
 
-#ifndef TOYBOX_HOST
-namespace {
-// The open book, wearing the panel's GreySource interface. The card is
-// already powered and mounted for the reading session, so a band is a seek
-// and a read -- three passes over 96 KB is about a third of a second against
-// a grey refresh that takes three.
-struct CardGrey : Epd::GreySource {
-  uint32_t page;
-  explicit CardGrey(uint32_t p) : page(p) {}
-  bool read(uint32_t off, uint8_t* dst, uint32_t n) override {
-    return sdcard::bookReadPageSlice(page, off, dst, n);
-  }
-};
-}  // namespace
-
-bool StickyHost::bookShowGreyPaged(uint32_t idx) {
-  CardGrey src(idx);
-  return epd.displayGrey2bpp(src);
-}
-#else
-bool StickyHost::bookShowGreyPaged(uint32_t idx) {
-  (void)idx;
-  return false;  // the preview harness has no waveform to drive
-}
-#endif
-
-bool StickyHost::bookOpen(const char* file) { return sdcard::bookOpen(file); }
-bool StickyHost::bookPage(uint32_t idx, uint8_t* dst) { return sdcard::bookReadPage(idx, dst); }
-void StickyHost::bookClose() { sdcard::bookClose(); }
 
 int StickyHost::epubList(EpubInfo* out, int max, const char* dir) {
   if (max < 1) return 0;
@@ -308,6 +182,7 @@ int StickyHost::epubList(EpubInfo* out, int max, const char* dir) {
     strncpy(out[i].title, metas[i].title, sizeof(out[i].title) - 1);
     out[i].title[sizeof(out[i].title) - 1] = 0;
     out[i].cont = metas[i].cont;
+    out[i].synced = metas[i].synced;
     strncpy(out[i].place, metas[i].place, sizeof(out[i].place) - 1);
     out[i].place[sizeof(out[i].place) - 1] = 0;
     out[i].page = metas[i].page;

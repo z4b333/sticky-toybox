@@ -232,8 +232,9 @@ the spine, and chapters are streamed and laid out live with the device fonts.
 
 ### Text, and one hard compatibility rule
 
-The reading position is stored **on the card in CrossPoint Reader's format**,
-as a spine index plus a **visible-codepoint offset**: zero-based Unicode
+The reading position is stored **on the card, in the book's own folder**
+(`/.toybox/books/<book> ~<4 hex>/position.bin`), as a spine index plus a
+**visible-codepoint offset**: zero-based Unicode
 codepoints of every character-data run inside `<body>`, whitespace text nodes
 included, with the non-visible subtrees above excluded, XML and numeric
 entities expanded, and unknown named entities passed through literally.
@@ -480,9 +481,7 @@ Show the result before you write it. The device cannot.
 
 | path | what it is |
 |---|---|
-| `/.crosspoint/epub_<hash64>/progress.bin` | reading position, CrossPoint's format. `<hash64>` is FNV-1a **64** of the absolute path, decimal — the hash current CrossInk uses. A legacy directory named by 32-bit libstdc++ `std::hash` is read once for migration, never written |
-| `/.crosspoint/epub_<hash64>/cover.bmp` | the finished cover, left where CrossInk looks for one: 480×800, **1-bit BMP**, 62-byte header, black-then-white palette, bottom-up, 48,062 bytes. Written only if absent; a cover.bmp found here (either hash dir) is **read** instead of decoding the EPUB's cover |
-| `<book>.sdr/metadata.epub.lua` | a KOReader sidecar, written for cards carried to KOReader. One-way; never read back |
+| `/.toybox/books/<book> ~<4 hex>/position.bin` | reading position (spine + visible-codepoint offset, 10 bytes); `place.txt` beside it is the shelf's chapter note. Before v2 these lived in `/.crosspoint/epub_<hash>/` (progress.bin, toybox.pos); a book opened on v2 moves them across once and deletes the old files |
 | `/.toybox/covers/<hash>.tbc` | the built 480×800 cover. `<hash>` is FNV-1a 32 of the absolute path |
 | `/.toybox/marks/<hash>.tbm` | bookmarks, 774 bytes, magic `TBM2` |
 | `/.toybox/` | the device's own folder — hidden from the shelf and the file manager |

@@ -2,11 +2,11 @@
 // device fonts, one chapter streaming at a time.
 //
 // The design promise is the reading position. It is stored on the CARD, in
-// CrossPoint Reader's own format (/.crosspoint/epub_<hash>/progress.bin, a
-// spine index plus a visible-codepoint offset), so the same card moved to a
-// CrossPoint device -- or this device reflashed to CrossPoint -- opens the
-// same book on the same page. Everything else is deliberately plain: text
-// only, no images, no CSS, the layout re-derived on this device every time.
+// the book's own folder (/.toybox/books/<book>/position.bin: a spine index
+// plus a visible-codepoint offset, so it survives any change of font, size or
+// rotation), and shared with Readest and KOReader through progress sync
+// (kosync.h). Everything else is deliberately plain: no CSS, the layout
+// re-derived on this device every time.
 //
 // Paging works on a stream. A page is laid out by pulling words until the
 // glass is full; turning forward continues the stream, turning back replays
@@ -18,12 +18,13 @@
 #include "epub/epub_art.h"
 #include "epub/epub_cover.h"
 #include "epub/epubcore.h"
-#include "epub/koreader_sdr.h"
 #include "bookmarks.h"
 #include "flash_qr.h"
 #include "help.h"
+#include "series.h"
 #include "home_net.h"
 #include "kosync.h"
+#include "lib_web.h"
 #include "lock_image.h"
 #include "reader_menu.h"
 #include "recents.h"
@@ -119,6 +120,7 @@ class EpubTool : public ToolApp {
   }
 
   ~EpubTool() override {
+    if (_host) libLeave(false);
     if (_open && _host) closeBook(false);
     // The shelf's own card session, if it is still up. Nothing above this app
     // may inherit a powered card: the hub draws with no session at all.
@@ -179,6 +181,10 @@ class EpubTool : public ToolApp {
       }
       return;
     }
+    if (_screen == Screen::Library) {
+      renderLibrary(c);
+      return;
+    }
     if (_screen == Screen::Page) {
       if (_picking) {
         renderPick(c);
@@ -193,7 +199,10 @@ class EpubTool : public ToolApp {
     }
     // Inside a series the bar carries the series name, because that is the
     // only thing on the screen that says where you are.
-    host().topBar(inFolder() ? seriesName() : title(), true, inFolder() ? title() : "HUB");
+    if (_inGroup >= 0)
+      host().topBar(_groups[_inGroup].name, true, inFolder() ? seriesName() : title());
+    else
+      host().topBar(inFolder() ? seriesName() : title(), true, inFolder() ? title() : "HUB");
     if (_help) {
       help::render(c, help::EPUB, "HOW TO READ");
       return;
@@ -212,30 +221,63 @@ class EpubTool : public ToolApp {
     for (int k = 0; k < shelf::PER_PAGE; k++) {
       const int idx = _lpage * shelf::PER_PAGE + k;
       if (idx >= total) break;
-      if (idx < _nf) {
-        const char* nm = _folders[idx].name;
-        shelf::drawFolderRow(c, k, nm[0] == '/' ? nm + 1 : nm, _folders[idx].count,
+      const Row r = rowAt(idx);
+      if (r.kind == Row::Library) {
+        shelf::drawBookRow(c, k, "From Readest", "your Readest library - download a book",
+                           shelf::rowSep(k, idx, total));
+        continue;
+      }
+      if (r.kind == Row::Folder) {
+        const char* nm = _folders[r.i].name;
+        shelf::drawFolderRow(c, k, nm[0] == '/' ? nm + 1 : nm, _folders[r.i].count,
                              shelf::rowSep(k, idx, total));
         continue;
       }
-      const int b = idx - _nf;
+      if (r.kind == Row::Group) {
+        shelf::drawFolderRow(c, k, _groups[r.i].name, _groups[r.i].count,
+                             shelf::rowSep(k, idx, total));
+        continue;
+      }
+      const int b = r.i;
       char sub[ToolsHost::PLACE_LEN + 24];
-      shelf::drawBookRow(c, k, _books[b].title, placeLine(_books[b], sub, sizeof(sub)),
-                         shelf::rowSep(k, idx, total));
+      // Inside a series the volume is the name worth reading: "Volume 02",
+      // not forty bytes of the series title cut off before the number.
+      // The whole name, from the file: the title field keeps only 40 bytes,
+      // which cut "Classroom of the Elite - Volume 01 [Seven Seas]" at
+      // "[Seve". The row wraps it over two lines and ends it with "..." only
+      // when even that is not enough.
+      char full[128];
+      const char* bare = strrchr(_books[b].file, '/');
+      snprintf(full, sizeof(full), "%s", bare ? bare + 1 : _books[b].file);
+      if (char* dot = strrchr(full, '.')) *dot = 0;
+      const char* name = full[0] ? full : _books[b].title;
+      series::Parsed sp;
+      if (_inGroup >= 0 && series::parse(_books[b].file, sp)) name = sp.label;
+      shelf::drawBookRow(c, k, name, placeLine(_books[b], sub, sizeof(sub)),
+                         shelf::rowSep(k, idx, total), _books[b].synced);
     }
     shelf::drawPager(c, _lpage, total);
     c.textCentered(c.width() / 2, 770,
-                   _note ? _note : "positions are kept on the card, as CrossPoint keeps them",
+                   _note ? _note : "positions are kept on the card, with each book",
                    TS_SMALL, true);
   }
 
   void onTap(int x, int y) override {
+    if (_screen == Screen::Library) {
+      libTap(x, y);
+      return;
+    }
     if (_screen == Screen::List) {
       if (host().isBackTap(x, y)) {
         // The back arrow climbs one level at a time: out of the series
         // first, out of the app second. One arrow, no second control.
         host().beep(1);
-        if (inFolder()) {
+        if (_inGroup >= 0) {  // out of the series row, back to its level
+          _inGroup = -1;
+          buildView();
+          _lpage = _groupPage;
+          host().refresh(!_browsing);
+        } else if (inFolder()) {
           snprintf(_dir, sizeof(_dir), "%s", shelf::TOP);
           _note = nullptr;
           reload();
@@ -277,11 +319,25 @@ class EpubTool : public ToolApp {
       }
       const int idx = shelf::hitRow(x, y, total, _lpage);
       if (idx < 0) return;
-      if (idx < _nf) {
-        openFolder(idx);
+      const Row r = rowAt(idx);
+      if (r.kind == Row::Library) {
+        libEnter();
         return;
       }
-      openBook(idx - _nf);
+      if (r.kind == Row::Folder) {
+        openFolder(r.i);
+        return;
+      }
+      if (r.kind == Row::Group) {
+        _groupPage = _lpage;
+        _inGroup = r.i;
+        buildView();
+        _lpage = 0;
+        host().beep(0);
+        host().refresh(!_browsing);
+        return;
+      }
+      openBook(r.i);
       return;
     }
     if (_picking) {
@@ -408,8 +464,21 @@ class EpubTool : public ToolApp {
   }
   bool hostDocHash(char out[33]) { return kosync::docHash(_io, out); }
   int hostSyncStage() const { return _syncStage; }
+  int hostLibStage() const { return _libStage; }
+  int hostLibCount() const { return _libN; }
+  bool hostLibLocal(int i) const { return i >= 0 && i < _libN && _libLocal[i]; }
+  const char* hostLibTitle(int i) const { return i >= 0 && i < _libN ? _lib[i].title : ""; }
+  bool hostLibMore() const { return _libMore; }
+  libweb::Server& hostWeb() { return _web; }
+  bool hostLibWifi() const { return _libWifi; }
   void hostSyncTick() { tick(); }
   int hostSyncOut() const { return _syncOut; }
+  const char* hostCurFile() const { return _cur >= 0 ? _books[_cur].file : ""; }
+  bool hostBookSynced(const char* file) const {
+    for (int i = 0; i < (_n < 0 ? 0 : _n); i++)
+      if (!strcmp(_books[i].file, file)) return _books[i].synced;
+    return false;
+  }
   double hostBookFraction() const { return bookFraction(); }
   const char* hostPageImage() const { return _pageImage; }
   int hostPageImagePart() const { return _pageImagePart; }
@@ -450,12 +519,17 @@ class EpubTool : public ToolApp {
   int hostLineCount() const { return _lineN; }
   const char* hostDir() const { return _dir; }
   int hostFolders() const { return _nf; }
+  int hostGroups() const { return _ng; }
+  int hostInGroup() const { return _inGroup; }
+  const char* hostGroupName(int g) const { return g >= 0 && g < _ng ? _groups[g].name : ""; }
+  int hostViewBook(int i) const { return i >= 0 && i < _nv ? _view[i] : -1; }
+  int hostViewCount() const { return _nv; }
   int hostItems() const { return items(); }
   int hostListPage() const { return _lpage; }
 #endif
 
  private:
-  enum class Screen : uint8_t { List, Loading, Page };
+  enum class Screen : uint8_t { List, Loading, Page, Library };
 
   // Any failure that might be about memory carries the numbers. Guessing at
   // this cost two round trips already; the allocator knows and it is free to
@@ -477,15 +551,111 @@ class EpubTool : public ToolApp {
     const char* s = strrchr(_dir, '/');
     return s ? s + 1 : _dir;
   }
-  int items() const { return (_nf < 0 ? 0 : _nf) + (_n < 0 ? 0 : _n); }
+  // What a level of the shelf shows, in order: real folders, then series
+  // rows (books grouped by their names, series.h), then the books that
+  // belong to no series. Inside a series row: its books, in volume order.
+  int items() const {
+    if (_n < 0) return 0;
+    if (_inGroup >= 0) return _nv;
+    return libRow() + (_nf < 0 ? 0 : _nf) + _ng + _nv;
+  }
+  // The Readest library's door: first row of the top shelf, once signed in
+  // to Readest and a home Wi-Fi is saved.
+  int libRow() const {
+    return (!inFolder() && _inGroup < 0 && _host && kosync::isReadest(_host->prefs()) &&
+            homenet::haveWifi(_host->prefs()))
+               ? 1
+               : 0;
+  }
+  struct Row {
+    enum Kind : uint8_t { Folder, Group, Book, Library } kind;
+    int i;
+  };
+  Row rowAt(int idx) const {
+    if (_inGroup >= 0) return {Row::Book, _view[idx]};
+    if (libRow()) {
+      if (idx == 0) return {Row::Library, 0};
+      idx--;
+    }
+    if (idx < _nf) return {Row::Folder, idx};
+    if (idx < _nf + _ng) return {Row::Group, idx - _nf};
+    return {Row::Book, _view[idx - _nf - _ng]};
+  }
 
   // One listing call per level. Folders only exist at the top: a series of a
-  // series is a filing system, not a shelf.
+  // series is a filing system, not a shelf. Series rows exist at any level.
   void reload() {
     _nf = inFolder() ? 0 : host().shelfFolders(_folders, shelf::MAX_FOLDERS, ".epub");
     if (_nf < 0) _nf = 0;
     _n = host().epubList(_books, epubui::MAX_BOOKS, _dir);
     _lpage = 0;
+    regroup();
+  }
+
+  // Which books are volumes of one series. A group needs two members; the
+  // series row is named as the first file spells it. The open series row
+  // survives a re-list (closing a book re-lists) when it is still there.
+  void regroup() {
+    char keep[series::NAME];
+    snprintf(keep, sizeof(keep), "%s", _inGroup >= 0 ? _groups[_inGroup].name : "");
+    _ng = 0;
+    _inGroup = -1;
+    static series::Parsed parsed[epubui::MAX_BOOKS];  // static: the loop task's stack
+    bool has[epubui::MAX_BOOKS];
+    const int n = _n < 0 ? 0 : _n;
+    for (int i = 0; i < n; i++) {
+      has[i] = series::parse(_books[i].file, parsed[i]);
+      _bookGroup[i] = -1;
+    }
+    for (int i = 0; i < n; i++) {
+      if (!has[i] || _bookGroup[i] >= 0) continue;
+      int members = 0;
+      for (int j = i; j < n; j++)
+        if (has[j] && _bookGroup[j] < 0 && series::sameKey(parsed[i].key, parsed[j].key)) members++;
+      if (members < 2 || _ng >= shelf::MAX_FOLDERS) continue;
+      Group& g = _groups[_ng];
+      snprintf(g.name, sizeof(g.name), "%s", parsed[i].key);
+      g.count = 0;
+      for (int j = i; j < n; j++)
+        if (has[j] && _bookGroup[j] < 0 && series::sameKey(parsed[i].key, parsed[j].key)) {
+          _bookGroup[j] = (int8_t)_ng;
+          _volume[j] = parsed[j].volume;
+          g.count++;
+        }
+      _ng++;
+    }
+    // Series rows in name order, like folders on a shelf.
+    for (int a = 1; a < _ng; a++)
+      for (int b = a; b > 0 && strcasecmp(_groups[b - 1].name, _groups[b].name) > 0; b--) {
+        const Group t = _groups[b];
+        _groups[b] = _groups[b - 1];
+        _groups[b - 1] = t;
+        for (int k = 0; k < n; k++)
+          if (_bookGroup[k] == b) _bookGroup[k] = -2;
+        for (int k = 0; k < n; k++)
+          if (_bookGroup[k] == b - 1) _bookGroup[k] = (int8_t)b;
+        for (int k = 0; k < n; k++)
+          if (_bookGroup[k] == -2) _bookGroup[k] = (int8_t)(b - 1);
+      }
+    for (int g = 0; keep[0] && g < _ng; g++)
+      if (!strcmp(_groups[g].name, keep)) _inGroup = g;
+    buildView();
+  }
+
+  // The books listed at this level: ungrouped ones in card order, or -- inside
+  // a series row -- that row's books by volume.
+  void buildView() {
+    _nv = 0;
+    const int n = _n < 0 ? 0 : _n;
+    for (int i = 0; i < n; i++)
+      if (_bookGroup[i] == (_inGroup >= 0 ? _inGroup : -1)) _view[_nv++] = (int16_t)i;
+    if (_inGroup >= 0)
+      for (int a = 1; a < _nv; a++)
+        for (int b = a; b > 0 && _volume[_view[b - 1]] > _volume[_view[b]]; b--) {
+          const int16_t t = _view[b];
+          _view[b] = _view[b - 1];
+          _view[b - 1] = t;
+        }
   }
 
   void openFolder(int i) {
@@ -497,6 +667,7 @@ class EpubTool : public ToolApp {
     else
       snprintf(_dir, sizeof(_dir), "%s/%s", shelf::TOP, _folders[i].name);
     _note = nullptr;
+    _inGroup = -1;
     reload();
     host().beep(0);
     // A list replacing a list is text on white, the kindest thing a partial
@@ -529,20 +700,51 @@ class EpubTool : public ToolApp {
     void setBold(int i) { bold[i >> 3] |= (uint8_t)(1 << (i & 7)); }
   };
 
-  // Two directories hold a position for the same book, and both matter.
-  //
-  // `crossPoint` is the 32-bit-hash one -- confirmed against a real
-  // CrossPoint card: it keeps its whole parsed cache there (book.bin,
-  // sections/, html/) and its progress.bin beside it, and it looks nowhere
-  // else. The 64-bit FNV one is Toybox's own, and older builds of this
-  // firmware read only that. So: read CrossPoint's first, write both.
-  void progressPath(char* out, int cap, bool crossPoint = false) {
-    char dir[96];
-    if (crossPoint)
-      epubc::cacheDirLegacy(_books[_cur].file, dir, sizeof(dir));
-    else
-      epubc::cacheDir(_books[_cur].file, dir, sizeof(dir));
-    snprintf(out, (size_t)cap, "%s/progress.bin", dir);
+  // Where this book's position lives: its own folder, beside its cover,
+  // pictures and bookmarks (book_store.h).
+  void progressPath(char* out, int cap) { bstore::file(_books[_cur].file, "position.bin", out, cap); }
+
+  // Before v2 the position lived in CrossPoint's folders -- written to both
+  // /.crosspoint/epub_<murmur32> (CrossPoint's own) and epub_<fnv64> (older
+  // Toybox), with the shelf's chapter note (toybox.pos) beside the second.
+  // Toybox no longer shares a card with CrossPoint (owner, 18 Nov), so a book
+  // opened for the first time on this build moves its place across once:
+  // read (CrossPoint's folder first -- it was the fresher of the two), write
+  // here, then delete the old files and the folders if that leaves them
+  // empty. CrossPoint's own cache files, if any, are never touched.
+  // Returns the bytes read into `buf`, or 0.
+  int adoptOldPosition(uint8_t* buf, int cap) {
+    char murmur[96], fnv[96], path[128];
+    epubc::cacheDirLegacy(_books[_cur].file, murmur, sizeof(murmur));
+    epubc::cacheDir(_books[_cur].file, fnv, sizeof(fnv));
+    snprintf(path, sizeof(path), "%s/progress.bin", murmur);
+    int n = host().sdReadFile(path, buf, cap);
+    if (n <= 0) {
+      snprintf(path, sizeof(path), "%s/progress.bin", fnv);
+      n = host().sdReadFile(path, buf, cap);
+    }
+    if (n <= 0) return 0;
+    char to[bstore::PATH_CAP];
+    progressPath(to, sizeof(to));
+    if (!host().sdWriteFileAtomic(to, buf, n)) return n;  // keep the old ones: nothing lost
+    char note[16 + ToolsHost::PLACE_LEN];
+    snprintf(path, sizeof(path), "%s/toybox.pos", fnv);
+    const int m = host().sdReadFile(path, note, sizeof(note));
+    if (m > 0) {
+      bstore::file(_books[_cur].file, "place.txt", to, sizeof(to));
+      host().sdWriteFileAtomic(to, note, m);
+    }
+    snprintf(path, sizeof(path), "%s/progress.bin", murmur);
+    host().sdRemove(path);
+    snprintf(path, sizeof(path), "%s/progress.bin", fnv);
+    host().sdRemove(path);
+    snprintf(path, sizeof(path), "%s/toybox.pos", fnv);
+    host().sdRemove(path);
+    host().sdRmdir(murmur);  // empty only
+    host().sdRmdir(fnv);
+    host().sdRmdir("/.crosspoint");
+    host().perfLog("position: moved from .crosspoint into the book folder");
+    return n;
   }
 
   // A page turn does not save on the spot: the place goes to the card once
@@ -557,9 +759,14 @@ class EpubTool : public ToolApp {
     if (_saveDue == 0) _saveDue = 1;  // 0 means "nothing pending"
   }
   bool wantsTick() const override {
-    return _saveDue != 0 || _syncStage == 1 || _syncStage == 3 || _syncStage == 4;
+    return _saveDue != 0 || _syncStage == 1 || _syncStage == 3 || _syncStage == 4 ||
+           _screen == Screen::Library;
   }
   void tick() override {
+    if (_screen == Screen::Library) {
+      libTick();
+      return;
+    }
     if (_syncStage == 3 || _syncStage == 4) {
       if (signInStep()) paint();
       return;
@@ -595,16 +802,9 @@ class EpubTool : public ToolApp {
     p.hasOffset = true;
     uint8_t buf[10];
     const int n = epubc::encodeProgress(p, buf);
-    // BOTH directories, every time. CrossPoint keeps its cache under a
-    // 32-bit hash of the book's path and reads its position from there; older
-    // Toybox builds read the 64-bit one. Ten bytes twice is nothing, and it
-    // means whichever firmware the card is carried to finds the place.
-    char path[128];
-    progressPath(path, sizeof(path), true);  // CrossPoint's
+    char path[bstore::PATH_CAP];
+    progressPath(path, sizeof(path));
     host().sdWriteFileAtomic(path, buf, n);
-    progressPath(path, sizeof(path));  // ours
-    host().sdWriteFileAtomic(path, buf, n);
-    saveKoreader();
   }
 
   // How long a chapter is, in minutes, from the size the zip's central
@@ -623,7 +823,8 @@ class EpubTool : public ToolApp {
       snprintf(out, (size_t)cap, "%d min", mins);
   }
 
-  // How far through the whole book we are, as KOReader wants it: 0..1.
+  // How far through the whole book we are, 0..1 (what sync sends beside the
+  // xpointer).
   //
   // Chapter boundaries are exact -- the zip said how big every chapter is --
   // and within a chapter we only claim a fraction once the chapter has been
@@ -646,16 +847,6 @@ class EpubTool : public ToolApp {
     return pct < 0 ? 0 : (pct > 1 ? 1 : pct);
   }
 
-  void saveKoreader() {
-    char path[160];
-    if (!ksdr::metaPath(_books[_cur].file, path, sizeof(path))) return;
-    ksdr::State st;
-    st.percent = bookFraction();
-    char lua[256];
-    const int n = ksdr::render(st, lua, sizeof(lua));
-    if (n > 0) host().sdWriteFileAtomic(path, lua, n);
-  }
-
   void openBook(int i) {
     _cur = i;
     const uint32_t tOpen0 = host().nowMs();
@@ -669,12 +860,6 @@ class EpubTool : public ToolApp {
     // beside the book (.cover.tbi or .cover.bmp) costs no decode and beats
     // anything decoded here, so even a first open leads with that face. (The
     // sidecar check runs every open -- that is how a replaced one is noticed.)
-    //
-    // CrossPoint's cached cover.bmp is NOT taken here any more. Toybox used to
-    // leave its own cover there as a favour (crossCoverPut), so on a card that
-    // has seen older builds that cache is often our old, soft 1/8-scan cover
-    // -- and taking it back would hide the decode below for ever. It is now a
-    // last resort, for a cover this device cannot decode.
     if (!bthumb::coverFromSidecar(host(), _books[i].file) &&
         !bthumb::complete(host(), _books[i].file) && !bthumb::failed(_books[i].file)) {
       host().coverFromBmp(_books[i].file);
@@ -682,7 +867,7 @@ class EpubTool : public ToolApp {
     // The cover as the loading screen. An EPUB spends real seconds opening
     // (zip walk, cover decode on the first open, the chapter replayed to the
     // saved page); they pass behind the book's own face. Only a first open
-    // with no sidecar and no CrossInk cache still shows the plate.
+    // with no sidecar still shows the plate.
     //
     // Portrait, whatever the page's own angle is: a cover is a portrait
     // object -- turned on its side it is cropped, not rotated -- and the
@@ -724,16 +909,13 @@ class EpubTool : public ToolApp {
 
     // The decode: every book with no cover of the owner's (tried above,
     // before the loading paint) pays for it -- once, and a cover that will
-    // not decode, with no CrossPoint cover to fall back on, is marked so it
-    // is not retried.
+    // not decode (a GIF or WebP, say) is marked so it is not retried; the
+    // plain plate stands in for it.
     bool unwrapped = false;
     if (!bthumb::complete(host(), _books[i].file) && !bthumb::failed(_books[i].file)) {
       bool transient = false;
-      if (!epubcov::makeThumb(host(), _book, _books[i].file, &transient) && !transient) {
-        // Not decodable here (a GIF or WebP cover, say): CrossPoint's cached
-        // cover is better than none, if it has one.
-        if (!host().crossCoverGrab(_books[i].file)) bthumb::markFailed(_books[i].file);
-      }
+      if (!epubcov::makeThumb(host(), _book, _books[i].file, &transient) && !transient)
+        bthumb::markFailed(_books[i].file);
       unwrapped = bthumb::complete(host(), _books[i].file);
     }
     // The unwrapping finishes where it promised: the cover that was just
@@ -749,34 +931,21 @@ class EpubTool : public ToolApp {
     // into flash now. After the decode above, so the very first open of a
     // book still gets one.
     bthumb::noteForLock(host(), _books[i].file);
-    // The favour returned: leave the finished cover where CrossInk looks for
-    // one, so ITS first open of this book skips the decode too. One exists()
-    // check when the file is already there.
-    if (bthumb::complete(host(), _books[i].file)) host().crossCoverPut(_books[i].file);
 
     // Every picture in the book, prepared now if it was not before -- the
     // loading screen counts them off. Before the layout, which asks how many
     // pages each picture is.
     prepareBookArt();
 
-    // Where were we? The card remembers, in CrossPoint's format.
-    // CrossPoint's directory FIRST. It is the shared one -- that firmware
-    // writes its position there and nowhere else -- so it is also the one
-    // that is fresh when a card has just come back from it. Reading ours
-    // first is what made a book flashed to CrossPoint and back resume at the
-    // place Toybox last saw rather than the place the reader actually
-    // stopped, while CrossPoint, which never looks at ours, opened the same
-    // book at page one. Both halves of that were one wrong preference.
+    // Where were we? The book's folder remembers; a book last read before
+    // v2 brings its place across from the old folders, once.
     const uint32_t tCover = host().nowMs();
     epubc::Progress p;
     uint8_t buf[10];
-    char path[128];
-    progressPath(path, sizeof(path), true);
+    char path[bstore::PATH_CAP];
+    progressPath(path, sizeof(path));
     int n = host().sdReadFile(path, buf, sizeof(buf));
-    if (n <= 0) {
-      progressPath(path, sizeof(path));  // ours, for a card no CrossPoint has touched
-      n = host().sdReadFile(path, buf, sizeof(buf));
-    }
+    if (n <= 0) n = adoptOldPosition(buf, sizeof(buf));
     int spine = 0;
     uint32_t off = 0;
     if (n > 0 && epubc::decodeProgress(buf, n, p)) {
@@ -826,8 +995,8 @@ class EpubTool : public ToolApp {
     // the one thing that is true by construction, because it is the same
     // string the contents screen shows.
     //
-    // No sidecar, no line: a position left by CrossPoint says nothing until
-    // the book has been closed here once.
+    // No note, no line: a position with no chapter note (one written before
+    // the note existed) says nothing until the book has been closed here once.
     if (!b.cont || !b.place[0]) return "";
     if (b.pageCount > 0)
       snprintf(buf, (size_t)cap, "%s - page %u of %u", b.place, (unsigned)b.page,
@@ -883,9 +1052,8 @@ class EpubTool : public ToolApp {
     char body[16 + ToolsHost::PLACE_LEN];
     const int n = snprintf(body, sizeof(body), "3\t%d\t%d\t%s\n", _page + 1,
                            _chapterPages > 0 ? _chapterPages : 0, name);
-    char dir[96], path[128];
-    epubc::cacheDir(_books[_cur].file, dir, sizeof(dir));
-    snprintf(path, sizeof(path), "%s/toybox.pos", dir);
+    char path[bstore::PATH_CAP];
+    bstore::file(_books[_cur].file, "place.txt", path, sizeof(path));
     host().sdWriteFileAtomic(path, body, n);
     // ...and the row this book came from, so the shelf is right the moment it
     // is drawn rather than the next time the app is entered.
@@ -927,7 +1095,7 @@ class EpubTool : public ToolApp {
   // --- layout ---------------------------------------------------------------
   // One page: pull words until the glass is full. Every page records its
   // first word's offset in _lut, which is both the back-turn index and the
-  // number CrossPoint needs.
+  // number the saved position holds.
 
   bool chapterStart(int spineIdx) {
     if (!_book.chapterOpen(spineIdx)) return false;
@@ -1419,7 +1587,7 @@ class EpubTool : public ToolApp {
   }
 
   // Opens spine chapter `spineIdx` and shows the page containing `off` -- the
-  // last page that starts at or before it, which is CrossPoint's own rule.
+  // last page that starts at or before it.
   bool gotoPlace(int spineIdx, uint32_t off) {
     if (!chapterStart(spineIdx)) return false;
     // The layout runs to the END of the chapter, not just far enough to find
@@ -1776,6 +1944,385 @@ class EpubTool : public ToolApp {
   // Opened by the power button. Everything in here is about the book you are
   // in the middle of, which is why none of it lives in settings.
 
+  // --- the Readest library ------------------------------------------------
+  // The books in the owner's Readest cloud, a page at a time, most recently
+  // read first; tap one to download it into /books/Readest (a ✓ marks the
+  // ones already there, and tapping those opens them). SEARCH puts a QR code
+  // up: the phone, on the same home Wi-Fi, opens a page that searches and can
+  // ask for a download (lib_web.h). The radio stays up while this screen is
+  // open -- each page would otherwise cost a join -- and goes off on the way
+  // out, whichever way out.
+  enum : uint8_t { LIB_LOADING = 1, LIB_LIST, LIB_DOWNLOAD, LIB_ERROR, LIB_PHONE };
+  static constexpr int LIB_ROW_Y0 = 64, LIB_ROW_H = 76, LIB_BTN_Y = 690, LIB_BTN_H = 70;
+
+  void libEnter() {
+    _screen = Screen::Library;
+    _libPage = 1;
+    _libQuery[0] = 0;
+    _libStage = LIB_LOADING;
+    host().beep(0);
+    paint();  // "loading" up before the wait
+  }
+
+  // Out of the library: the phone page down, the radio off, back to the
+  // shelf (re-listed: there may be new books). `paintShelf` false when the
+  // app itself is going.
+  void libLeave(bool paintShelf) {
+    if (_libDl) {
+      _dl.cancel();
+      _libDl = false;
+    }
+    _web.stop();
+    if (_libWifi) homenet::off();
+    _libWifi = false;
+    if (_screen != Screen::Library) return;
+    _screen = Screen::List;
+    _libStage = 0;
+    if (!paintShelf) return;
+    reload();
+    host().refresh(!_browsing);
+  }
+
+  bool libRadio() {
+    if (_libWifi) return true;
+    const homenet::Result j = homenet::connect(prefs());
+    if (j != homenet::Result::Ok) {
+      snprintf(_libMsg, sizeof(_libMsg), "%s", homenet::describe(j));
+      return false;
+    }
+    _libWifi = true;
+    return true;
+  }
+
+  void libMarkLocal() {
+    for (int i = 0; i < _libN; i++) {
+      char path[160];
+      kosync::libPath(_lib[i], path, sizeof(path));
+      _libLocal[i] = host().sdReadSlice(path, 0, path, 1) == 1;
+    }
+  }
+
+  // The list again, from Readest.
+  void libFetch() {
+    if (!libRadio()) {
+      _libStage = LIB_ERROR;
+      return;
+    }
+    bool more = false;
+    int n = 0;
+    const kosync::Result r =
+        kosync::listLibrary(prefs(), _libPage, _libQuery, _lib, kosync::LIB_PER_PAGE, n, more);
+    if (r != kosync::Result::Ok) {
+      snprintf(_libMsg, sizeof(_libMsg), "%s", kosync::describe(r));
+      _libStage = LIB_ERROR;
+      libPublish("");
+      return;
+    }
+    _libN = n;
+    _libMore = more;
+    libMarkLocal();
+    _libStage = (_web.running() && _libShowQr) ? LIB_PHONE : LIB_LIST;
+    libPublish("");
+  }
+
+  // What the phone page shows: this page of results, which are on the card.
+  void libPublish(const char* busy) {
+    if (!_web.running()) return;
+    String j = "{\"v\":";
+    j += (int)(_web.version() + 1);
+    j += ",\"q\":\"";
+    auto esc = [&](const char* t) {
+      for (; *t; t++) {
+        if (*t == '"' || *t == '\\') j += '\\';
+        if ((unsigned char)*t >= 0x20) j += *t;
+      }
+    };
+    esc(_libQuery);
+    j += "\",\"busy\":\"";
+    esc(busy);
+    j += "\",\"items\":[";
+    for (int i = 0; i < _libN; i++) {
+      if (i) j += ",";
+      j += "{\"id\":\"";
+      esc(_lib[i].id);
+      j += "\",\"title\":\"";
+      esc(_lib[i].title);
+      j += "\",\"author\":\"";
+      esc(_lib[i].author);
+      j += "\",\"local\":";
+      j += _libLocal[i] ? "true}" : "false}";
+    }
+    j += "]}";
+    _web.publish(j);
+  }
+
+  // The bytes to the card: a .part file, renamed when whole, so a cut-off
+  // download never looks like a book.
+  struct LibSink : kosync::Sink {
+    ToolsHost* h = nullptr;
+    char part[168] = {}, final_[160] = {};
+    bool open() override { return h->sdStreamOpen(part); }
+    bool write(const uint8_t* d, uint32_t n) override { return h->sdStreamWrite(d, n); }
+    bool close(bool keep) override {
+      if (!h->sdStreamClose(keep)) return false;
+      if (!keep) return true;
+      h->sdRemove(final_);  // a stale copy of the same title
+      return h->sdMove(part, final_);
+    }
+    bool progress(uint32_t, uint32_t) override { return true; }
+  };
+
+  void libStartDownload(int i) {
+    if (!libRadio()) {
+      _libStage = LIB_ERROR;
+      return;
+    }
+    _libSink.h = _host;
+    kosync::libPath(_lib[i], _libSink.final_, sizeof(_libSink.final_));
+    snprintf(_libSink.part, sizeof(_libSink.part), "%s.part", _libSink.final_);
+    _libDlIdx = i;
+    const kosync::Result r = _dl.begin(prefs(), _lib[i], _libSink);
+    if (r != kosync::Result::Ok) {
+      snprintf(_libMsg, sizeof(_libMsg), "%s", kosync::describe(r));
+      _libStage = LIB_ERROR;
+      return;
+    }
+    _libDl = true;
+    _libStage = LIB_DOWNLOAD;
+    _libPainted = 0;
+    char line[140];
+    snprintf(line, sizeof(line), "library: downloading \"%s\" (%lu bytes)", _lib[i].title,
+             (unsigned long)_dl.total);
+    host().perfLog(line);
+    libPublish("Downloading on the Sticky...");
+  }
+
+  void libTick() {
+    _web.loop();
+    char q[libweb::QUERY_MAX], id[libweb::ID_MAX];
+    if (_libStage != LIB_DOWNLOAD && _web.takeQuery(q, sizeof(q))) {
+      snprintf(_libQuery, sizeof(_libQuery), "%s", q);
+      _libPage = 1;
+      _libShowQr = false;  // the results go on the panel; the phone has them too
+      libFetch();
+      paint();
+      return;
+    }
+    if (_libStage != LIB_DOWNLOAD && _web.takeDownload(id, sizeof(id))) {
+      for (int i = 0; i < _libN; i++)
+        if (!strcmp(_lib[i].id, id) && !_libLocal[i]) {
+          libStartDownload(i);
+          paint();
+          return;
+        }
+    }
+    if (_libStage == LIB_LOADING) {
+      libFetch();
+      paint();
+      return;
+    }
+    if (_libStage == LIB_DOWNLOAD && _libDl) {
+      kosync::Result r;
+      if (!_dl.step(r)) {
+        // A partial repaint every tenth of the book: the bar moves, and the
+        // panel is not refreshed faster than it can draw.
+        const uint32_t tenth = _dl.total ? (uint32_t)((uint64_t)_dl.got * 10 / _dl.total) : 0;
+        if (tenth != _libPainted) {
+          _libPainted = tenth;
+          host().refresh(false);
+        }
+        return;
+      }
+      _libDl = false;
+      char line[96];
+      snprintf(line, sizeof(line), "library: download %s, %lu bytes", kosync::describe(r),
+               (unsigned long)_dl.got);
+      host().perfLog(line);
+      if (r != kosync::Result::Ok) {
+        snprintf(_libMsg, sizeof(_libMsg), "the download stopped: %s", kosync::describe(r));
+        _libStage = LIB_ERROR;
+        libPublish("The download stopped.");
+        paint();
+        return;
+      }
+      // Downloaded: straight into the book, which is what the tap was for.
+      // Readest's position for it is one Sync position away.
+      char path[160];
+      snprintf(path, sizeof(path), "%s", _libSink.final_);
+      host().beep(1);
+      libPublish("");
+      libLeave(false);
+      snprintf(_dir, sizeof(_dir), "%s", kosync::LIB_DIR);
+      reload();
+      if (!openDirect(path)) host().refresh(true);
+    }
+  }
+
+  void libTap(int x, int y) {
+    const int W = host().canvas().width();
+    if (host().isBackTap(x, y)) {
+      host().beep(1);
+      if (_libStage == LIB_PHONE && _libN > 0) {  // the QR away, the list back
+        _libShowQr = false;
+        _libStage = LIB_LIST;
+        paint();
+        return;
+      }
+      libLeave(true);
+      return;
+    }
+    const bool inBtn = y >= LIB_BTN_Y && y < LIB_BTN_Y + LIB_BTN_H;
+    switch (_libStage) {
+      case LIB_DOWNLOAD:
+        if (inBtn) {  // CANCEL
+          _dl.cancel();
+          _libDl = false;
+          host().beep(2);
+          _libStage = LIB_LIST;
+          libPublish("");
+          paint();
+        }
+        return;
+      case LIB_ERROR:
+        if (inBtn) {  // TRY AGAIN
+          host().beep(0);
+          _libStage = LIB_LOADING;
+          paint();
+        }
+        return;
+      case LIB_PHONE:
+        if (inBtn) {  // DONE
+          host().beep(0);
+          _libShowQr = false;
+          _libStage = LIB_LIST;
+          paint();
+        }
+        return;
+      case LIB_LIST: {
+        if (inBtn) {
+          const int third = (W - 32) / 3;
+          if (x < 16 + third) {  // < PAGE
+            if (_libPage > 1) {
+              _libPage--;
+              _libStage = LIB_LOADING;
+              host().beep(0);
+              paint();
+            }
+          } else if (x < 16 + 2 * third) {  // SEARCH (or clear it)
+            host().beep(0);
+            if (_libQuery[0]) {
+              _libQuery[0] = 0;
+              _libPage = 1;
+              _libStage = LIB_LOADING;
+            } else if (_web.start()) {
+              _libShowQr = true;
+              _libStage = LIB_PHONE;
+              libPublish("");
+            }
+            paint();
+          } else if (_libMore) {  // PAGE >
+            _libPage++;
+            _libStage = LIB_LOADING;
+            host().beep(0);
+            paint();
+          }
+          return;
+        }
+        const int row = (y - LIB_ROW_Y0) / LIB_ROW_H;
+        if (y < LIB_ROW_Y0 || row < 0 || row >= _libN) return;
+        if (_libLocal[row]) {  // on the card already: read it
+          char path[160];
+          kosync::libPath(_lib[row], path, sizeof(path));
+          host().beep(1);
+          libLeave(false);
+          snprintf(_dir, sizeof(_dir), "%s", kosync::LIB_DIR);
+          reload();
+          if (!openDirect(path)) host().refresh(true);
+          return;
+        }
+        host().beep(1);
+        libStartDownload(row);
+        paint();
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  void renderLibrary(ToolsCanvas& c) {
+    const int W = c.width();
+    host().topBar(_libQuery[0] ? _libQuery : "Readest", false, "EPUB");
+    char buf[96];
+    switch (_libStage) {
+      case LIB_LOADING:
+        c.textCentered(W / 2, 300, "READEST", TS_MED, true, true);
+        c.textCentered(W / 2, 350, _libWifi ? "asking for your books" : "joining the wifi", TS_MED, true);
+        return;
+      case LIB_ERROR:
+        c.textCentered(W / 2, 260, "NOT NOW", TS_MED, true, true);
+        c.textCentered(W / 2, 320, _libMsg, TS_MED, true);
+        c.button(16, LIB_BTN_Y, W - 32, LIB_BTN_H, "Try again", false);
+        return;
+      case LIB_DOWNLOAD: {
+        const kosync::LibBook& b = _lib[_libDlIdx];
+        c.textCentered(W / 2, 200, "DOWNLOADING", TS_MED, true, true);
+        c.textCentered(W / 2, 260, b.title, TS_MED, true);
+        const int bx = 40, by = 340, bw = W - 80, bh = 36;
+        c.drawRect(bx, by, bw, bh, 2, true);
+        const uint32_t got = _dl.got, total = _dl.total;
+        if (total) c.fillRect(bx + 4, by + 4, (int)((uint64_t)(bw - 8) * got / total), bh - 8, true);
+        // KB below a megabyte: a small book would otherwise read "0.0 of 0.0".
+        const bool mb = (total ? total : got) >= 1048576;
+        const double unit = mb ? 1048576.0 : 1024.0;
+        const char* u = mb ? "MB" : "KB";
+        if (total)
+          snprintf(buf, sizeof(buf), mb ? "%.1f of %.1f %s" : "%.0f of %.0f %s", got / unit,
+                   total / unit, u);
+        else
+          snprintf(buf, sizeof(buf), mb ? "%.1f %s" : "%.0f %s", got / unit, u);
+        c.textCentered(W / 2, 400, buf, TS_SMALL, true);
+        c.textCentered(W / 2, 450, "into /books/Readest", TS_SMALL, true);
+        c.button(16, LIB_BTN_Y, W - 32, LIB_BTN_H, "Cancel", false);
+        return;
+      }
+      case LIB_PHONE:
+        c.textCentered(W / 2, 90, "SEARCH FROM YOUR PHONE", TS_MED, true, true);
+        fqr::draw(c, (W - 240) / 2, 130, 240, _web.url());
+        c.textCentered(W / 2, 400, "scan with a phone on the same wifi", TS_MED, true);
+        c.textCentered(W / 2, 436, _web.url(), TS_SMALL, true);
+        c.textCentered(W / 2, 480, "results show here and on the phone;", TS_SMALL, true);
+        c.textCentered(W / 2, 506, "the phone can ask for a download too", TS_SMALL, true);
+        c.button(16, LIB_BTN_Y, W - 32, LIB_BTN_H, "Done", false);
+        return;
+      default:
+        break;
+    }
+    if (_libN == 0)
+      c.textCentered(W / 2, 300, _libQuery[0] ? "nothing matches" : "no books in your Readest cloud",
+                     TS_MED, true);
+    for (int i = 0; i < _libN; i++) {
+      const int y = LIB_ROW_Y0 + i * LIB_ROW_H;
+      const int textW = W - 32 - (_libLocal[i] ? 44 : 0);
+      c.textClipped(16, y + 10, textW, _lib[i].title, TS_MED, true, true);
+      c.textClipped(16, y + 44, textW, _lib[i].author[0] ? _lib[i].author : "-", TS_SMALL, true);
+      if (_libLocal[i]) {  // on the card: a tick in a circle
+        const int cx = W - 34, cy = y + LIB_ROW_H / 2;
+        c.drawCircle(cx, cy, 16, 2, true);
+        c.drawLine(cx - 8, cy, cx - 2, cy + 7, 3, true);
+        c.drawLine(cx - 2, cy + 7, cx + 9, cy - 7, 3, true);
+      }
+      if (i + 1 < _libN) c.fillRect(16, y + LIB_ROW_H - 1, W - 32, 1, true);
+    }
+    const int third = (W - 32) / 3;
+    // Only the pager buttons that go somewhere are drawn.
+    snprintf(buf, sizeof(buf), "< %d", _libPage - 1);
+    if (_libPage > 1) c.button(16, LIB_BTN_Y, third - 8, LIB_BTN_H, buf, false);
+    c.button(16 + third, LIB_BTN_Y, third - 8, LIB_BTN_H, _libQuery[0] ? "Clear" : "Search", false);
+    snprintf(buf, sizeof(buf), "%d >", _libPage + 1);
+    if (_libMore) c.button(16 + 2 * third, LIB_BTN_Y, third - 8, LIB_BTN_H, buf, false);
+  }
+
   // --- KOReader progress sync ---------------------------------------------
   // One row on the panel, offered once a home Wi-Fi and a sync account are
   // both saved (the phone's clock page takes both). The rules for what to do
@@ -1844,6 +2391,19 @@ class EpubTool : public ToolApp {
     return true;
   }
 
+  // The shelf's sync mark: a one-byte "synced" in the book's folder, left
+  // once a sync has reached the server (whatever it decided). Never removed;
+  // a book that synced once is a book the owner reads in two places.
+  void markSynced() {
+    if (_cur < 0) return;
+    if (!_books[_cur].synced) {
+      char path[bstore::PATH_CAP];
+      bstore::file(_books[_cur].file, "synced", path, sizeof(path));
+      host().sdWriteFileAtomic(path, "1", 1);
+    }
+    _books[_cur].synced = true;
+  }
+
   void runSync() {
     if (_saveDue) saveProgress();  // the card first: it is the record that matters
     _syncPct = bookFraction();
@@ -1904,12 +2464,14 @@ class EpubTool : public ToolApp {
     switch (d) {
       case kosync::Decision::Same:
         homenet::off();
+        markSynced();
         host().perfLog("sync: result in step");
         _syncOut = SO_SAME;
         snprintf(_syncMsg, sizeof(_syncMsg), "%s", r.device[0] ? r.device : "the other reader");
         return;
       case kosync::Decision::AskJump:
         homenet::off();
+        markSynced();
         host().perfLog("sync: result further on elsewhere - asking");
         _syncOut = SO_ASK;
         snprintf(_syncMsg, sizeof(_syncMsg), "%s", r.device[0] ? r.device : "another reader");
@@ -1921,6 +2483,7 @@ class EpubTool : public ToolApp {
           syncFail(kosync::describe(p));
           return;
         }
+        markSynced();
         host().perfLog("sync: result sent");
         _syncOut = SO_SENT;
         return;
@@ -2042,9 +2605,8 @@ class EpubTool : public ToolApp {
   // Forget where this book was being read, and go back to its first page.
   //
   // Nothing is deleted: the position is SET to the beginning and saved the
-  // ordinary way, which leaves a valid record on the card (and a 0% KOReader
-  // sidecar beside it) instead of a hole that the legacy-directory fallback
-  // would happily fill with an older position. Bookmarks are left alone --
+  // ordinary way, which leaves a valid record on the card instead of a hole
+  // that the move from the old folders would fill with an older position. Bookmarks are left alone --
   // they are phrases the reader chose to keep, not a place it happened to
   // stop, and losing them here would be a surprise nobody asked for.
   void startAgain() {
@@ -2956,6 +3518,19 @@ class EpubTool : public ToolApp {
 
   Screen _screen = Screen::List;
   char _dir[128] = "/books";
+  // Series rows at this level (series.h) and which books they hold.
+  struct Group {
+    char name[series::NAME];
+    uint16_t count;
+  };
+  Group _groups[shelf::MAX_FOLDERS];
+  int _ng = 0;
+  int _inGroup = -1;    // the series row open, or -1
+  int _groupPage = 0;   // the page that row was on, to return to
+  int8_t _bookGroup[epubui::MAX_BOOKS] = {};
+  int32_t _volume[epubui::MAX_BOOKS] = {};
+  int16_t _view[epubui::MAX_BOOKS] = {};
+  int _nv = 0;
   ToolsHost::ShelfFolder _folders[shelf::MAX_FOLDERS];
   int _nf = 0;
   int _lpage = 0;
@@ -2974,6 +3549,18 @@ class EpubTool : public ToolApp {
   uint8_t _pendImagePart = 0;
   uint32_t _pendImageOff = 0;
   bool _pendImageValid = false;
+  // The Readest library screen.
+  kosync::LibBook _lib[kosync::LIB_PER_PAGE];
+  bool _libLocal[kosync::LIB_PER_PAGE] = {};
+  int _libN = 0, _libPage = 1, _libDlIdx = 0;
+  bool _libMore = false, _libWifi = false, _libDl = false, _libShowQr = false;
+  uint8_t _libStage = 0;
+  uint32_t _libPainted = 0;
+  char _libQuery[libweb::QUERY_MAX] = {};
+  char _libMsg[64] = {};
+  kosync::Download _dl;
+  LibSink _libSink;
+  libweb::Server _web;
   uint8_t _syncStage = 0;  // 0 none, 1 working (screen up), 2 answered,
                            // 3 asking Readest for a code, 4 showing it / polling
   kosync::DeviceCode _code;

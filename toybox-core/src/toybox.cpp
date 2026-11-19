@@ -4,7 +4,6 @@
 
 #include "game2048.h"
 #include "nonogram.h"
-#include "tools/tool_book.h"
 #include "tools/tool_coin.h"
 #include "tools/tool_epub.h"
 #include "tools/recents.h"
@@ -46,7 +45,7 @@ bool Toybox::build(bool game, int idx) {
       case 6: _active = new NoteTool(); break;
       case 7: _active = new SeaTool(); break;
       case 8: _active = new SudokuTool(); break;
-      case 9: _active = new BookTool(); break;
+      case 9: return false;  // the manga reader, removed in v2
       case 11: _active = new RecipeTool(); break;
       default: _active = new EpubTool(); break;
     }

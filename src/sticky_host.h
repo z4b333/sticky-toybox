@@ -1,6 +1,6 @@
 // The standalone firmware's half of the seam: it draws with Epd + gfx, keeps
 // its settings in its own NVS namespace, and beeps with the on-board buzzer.
-// Everything above this file is shared with the CrossPoint port.
+// Everything above this file is the shared core (toybox-core).
 #pragma once
 #include <Preferences.h>
 
@@ -186,19 +186,8 @@ class StickyHost : public ToolsHost {
   int sdRecipes(char names[][RECIPE_NAME_LEN], int max) override;
   int sdTextFiles(const char* dir, char names[][RECIPE_NAME_LEN], int max) override;
   bool coverFromBmp(const char* file) override;
-  bool crossCoverGrab(const char* file) override;
-  bool crossCoverPut(const char* file) override;
   int shelfFolders(ShelfFolder* out, int max, const char* ext) override;
-  int bookList(BookInfo* out, int max, const char* dir) override;
-  bool bookOpen(const char* file) override;
-  bool bookPage(uint32_t idx, uint8_t* dst) override;
-  bool bookCover(uint8_t* dst) override { return sdcard::bookReadCover(dst); }
-  void bookClose() override;
   bool bookShowGrey(const uint8_t* packed2bpp) override { return epd.displayGrey2bpp(packed2bpp); }
-  bool bookShowGreyPaged(uint32_t idx) override;
-  bool bookPageSlice(uint32_t idx, uint32_t off, uint8_t* dst, uint32_t n) override {
-    return sdcard::bookReadPageSlice(idx, off, dst, n);
-  }
   int epubList(EpubInfo* out, int max, const char* dir) override;
   bool epubOpen(const char* path) override;
   int epubRead(uint32_t pos, void* dst, uint32_t n) override;

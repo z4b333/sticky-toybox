@@ -48,9 +48,10 @@ class ClockServer {
       _refused = true;
   }
   // The page's home-Wi-Fi form, through the same rules the device applies.
-  bool hostSendWifi(const char* ssid, const char* pass) {
-    _wifiSaved = _prefs && homenet::saveWifi(*_prefs, ssid, pass);
-    return _wifiSaved;
+  bool hostSendWifi(const char* ssid, const char* pass, int slot = 0) {
+    const bool ok = _prefs && homenet::saveWifi(*_prefs, ssid, pass, slot);
+    if (ok) _wifiSaved = true;
+    return ok;
   }
   bool hostSendAccount(const char* server, const char* user, const char* pass) {
     return _prefs && kosync::saveAccount(*_prefs, server, user, pass);
@@ -86,6 +87,12 @@ class ClockServer {
     _portal.on("/t", HTTP_POST, [this] { takeTime(); });
     _portal.on("/w", HTTP_POST, [this] { takeWifi(); });
     _portal.on("/k", HTTP_POST, [this] { takeAccount(); });
+    _portal.on("/s", HTTP_GET, [this] { sendScan(); });
+    // The networks around, for the page's pick list: the station half of the
+    // radio scans while the access point keeps serving. Started now, so the
+    // list is usually ready by the time the page asks.
+    WiFi.mode(WIFI_AP_STA);
+    WiFi.scanNetworks(true);
     return true;
   }
   void stop() { _portal.end(); }
@@ -125,9 +132,10 @@ class ClockServer {
   // on its own. Kept until replaced; the device never shows the password.
   void takeWifi() {
     WebServer& s = _portal.server();
+    const int slot = s.hasArg("b") && s.arg("b") == "1" ? 1 : 0;  // the backup
     const bool ok = _prefs && s.hasArg("s") &&
                     homenet::saveWifi(*_prefs, s.arg("s").c_str(),
-                                      s.hasArg("p") ? s.arg("p").c_str() : "");
+                                      s.hasArg("p") ? s.arg("p").c_str() : "", slot);
     if (ok) _wifiSaved = true;
     s.send(200, "application/json", ok ? "{\"ok\":1}" : "{\"ok\":0}");
   }
@@ -140,6 +148,65 @@ class ClockServer {
                     kosync::saveAccount(*_prefs, s.hasArg("s") ? s.arg("s").c_str() : "",
                                         s.arg("u").c_str(), s.arg("p").c_str());
     s.send(200, "application/json", ok ? "{\"ok\":1}" : "{\"ok\":0}");
+  }
+
+  // The scan as JSON: {"busy":1} while it runs, else the networks heard,
+  // strongest first, one row per name (a mesh repeats its name on every
+  // node), hidden ones left out. Only 2.4 GHz is ever heard: the ESP32-S3's
+  // radio has no 5 GHz band, so the list is also the list it can join.
+  // GET /s?r=1 asks for a fresh scan.
+  void sendScan() {
+    WebServer& s = _portal.server();
+    const int16_t n = WiFi.scanComplete();
+    if (s.hasArg("r") || n == WIFI_SCAN_FAILED) {
+      if (n != WIFI_SCAN_RUNNING) {
+        WiFi.scanDelete();
+        WiFi.scanNetworks(true);
+      }
+      s.send(200, "application/json", "{\"busy\":1}");
+      return;
+    }
+    if (n == WIFI_SCAN_RUNNING) {
+      s.send(200, "application/json", "{\"busy\":1}");
+      return;
+    }
+    // Strongest first: an index sort over at most the first 40 heard.
+    int idx[40], m = 0;
+    for (int i = 0; i < n && m < 40; i++) {
+      const String id = WiFi.SSID(i);
+      if (!id.length()) continue;
+      int same = -1;
+      for (int k = 0; k < m && same < 0; k++)
+        if (WiFi.SSID(idx[k]) == id) same = k;
+      if (same >= 0) {  // the same name again: keep whichever node is louder
+        if (WiFi.RSSI(i) > WiFi.RSSI(idx[same])) idx[same] = i;
+        continue;
+      }
+      idx[m++] = i;
+    }
+    for (int a = 1; a < m; a++)
+      for (int b = a; b > 0 && WiFi.RSSI(idx[b]) > WiFi.RSSI(idx[b - 1]); b--) {
+        const int t = idx[b];
+        idx[b] = idx[b - 1];
+        idx[b - 1] = t;
+      }
+    String j = "{\"nets\":[";
+    for (int k = 0; k < m && k < 20; k++) {
+      if (k) j += ",";
+      j += "{\"s\":\"";
+      const String id = WiFi.SSID(idx[k]);
+      for (size_t c = 0; c < id.length(); c++) {
+        const char ch = id[c];
+        if (ch == '"' || ch == '\\') j += '\\';
+        if ((unsigned char)ch >= 0x20) j += ch;
+      }
+      j += "\",\"r\":";
+      j += (int)WiFi.RSSI(idx[k]);
+      j += ",\"l\":";
+      j += WiFi.encryptionType(idx[k]) == WIFI_AUTH_OPEN ? "0}" : "1}";
+    }
+    j += "]}";
+    s.send(200, "application/json", j);
   }
 
   void sendPage();
@@ -166,6 +233,8 @@ small{color:#666;display:block;margin-top:20px}
 h2{font-size:17px;margin:28px 0 4px}h2 span{font-weight:400;color:#666}
 input{font-size:17px;padding:10px;width:100%;box-sizing:border-box;border:1px solid #999;
 border-radius:8px;margin-bottom:10px}#wm{margin-top:8px;color:#444}
+select{font-size:17px;padding:10px;width:100%;box-sizing:border-box;border:1px solid #999;
+border-radius:8px;margin-bottom:10px;background:#fff;color:#111}.band{font-size:14px}
 </style></head><body>
 <h1>Set the device clock</h1>
 <p>Toybox takes the time and time zone from this phone.</p>
@@ -175,9 +244,19 @@ border-radius:8px;margin-bottom:10px}#wm{margin-top:8px;color:#444}
 <h2>Home Wi-Fi <span>(optional)</span></h2>
 <p>Lets the device set its own clock from the internet later, and sync your
 reading. The password stays on the device.</p>
-<form id="wf"><input id="ws" placeholder="Wi-Fi name" autocapitalize="off" autocomplete="off" maxlength="32">
+<p class="band">This device uses <b>2.4&nbsp;GHz</b> Wi-Fi only &mdash; it cannot join a
+5&nbsp;GHz network. A router that gives both bands one name is fine. Only networks it
+can join are listed.</p>
+<form id="wf"><select id="wl"><option value="">Looking for networks&hellip;</option></select>
+<input id="ws" placeholder="Wi-Fi name" autocapitalize="off" autocomplete="off" maxlength="32">
 <input id="wp" type="password" placeholder="Password" autocomplete="off" maxlength="63">
 <button>Save home Wi-Fi</button></form><div id="wm"></div>
+<h2>Backup Wi-Fi <span>(optional)</span></h2>
+<p>Tried when the home Wi-Fi is not there: a phone hotspot, a second router.</p>
+<form id="bf"><select id="bl"><option value="">Looking for networks&hellip;</option></select>
+<input id="bs" placeholder="Wi-Fi name" autocapitalize="off" autocomplete="off" maxlength="32">
+<input id="bp" type="password" placeholder="Password" autocomplete="off" maxlength="63">
+<button>Save backup Wi-Fi</button></form><div id="bm"></div>
 <h2>Other sync server <span>(optional)</span></h2>
 <p>For Readest, skip this: on the device open a book, then Options &rarr;
 Sync position, and scan its code. Here only for a KOReader sync server
@@ -230,16 +309,35 @@ document.getElementById('kf').addEventListener('submit',function(e){
  .then(function(r){return r.json()}).then(function(j){m.textContent=j.ok?
   'Saved. Open a book, then Options \u2192 Sync position.':'The device did not accept that.'})
  .catch(function(){m.textContent='Could not reach the device. Still connected to its wifi?'})});
-document.getElementById('wf').addEventListener('submit',function(e){
- e.preventDefault();var m=document.getElementById('wm'),n=document.getElementById('ws').value,
- k=document.getElementById('wp').value;
+function wifiForm(f,ns,ps,ms,b){
+document.getElementById(f).addEventListener('submit',function(e){
+ e.preventDefault();var m=document.getElementById(ms),n=document.getElementById(ns).value,
+ k=document.getElementById(ps).value;
  if(!n){m.textContent='Type the Wi-Fi name first.';return}
  if(k&&k.length<8){m.textContent='A Wi-Fi password has at least 8 characters.';return}
  fetch('/w',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
-  body:'s='+encodeURIComponent(n)+'&p='+encodeURIComponent(k)})
+  body:'s='+encodeURIComponent(n)+'&p='+encodeURIComponent(k)+(b?'&b=1':'')})
  .then(function(r){return r.json()}).then(function(j){m.textContent=j.ok?
-  'Saved. The device will use '+n+' when it goes online.':'The device did not accept that.'})
- .catch(function(){m.textContent='Could not reach the device. Still connected to its wifi?'})});
+  (b?'Saved. The device tries '+n+' when the home Wi-Fi is not there.':
+  'Saved. The device will use '+n+' when it goes online.'):'The device did not accept that.'})
+ .catch(function(){m.textContent='Could not reach the device. Still connected to its wifi?'})})}
+wifiForm('wf','ws','wp','wm',0);wifiForm('bf','bs','bp','bm',1);
+function bars(r){return r>=-60?'\u2582\u2584\u2586':r>=-72?'\u2582\u2584':'\u2582'}
+function fill(nets){['wl','bl'].forEach(function(id){var sel=document.getElementById(id),
+ o='<option value="">'+(nets.length?'Choose a network ('+nets.length+' found)':'No 2.4 GHz networks heard')+'</option>';
+ nets.forEach(function(n){var t=document.createElement('span');t.textContent=n.s;
+  o+='<option value="'+t.innerHTML.replace(/"/g,'&quot;')+'">'+t.innerHTML+' '+bars(n.r)+(n.l?' \ud83d\udd12':'')+'</option>'});
+ o+='<option value="\u0001">Scan again</option><option value="\u0002">Type the name myself</option>';
+ sel.innerHTML=o})}
+var tries=0;
+function scan(again){if(again)tries=0;fetch('/s'+(again?'?r=1':'')).then(function(r){return r.json()}).then(function(j){
+ if(j.busy&&++tries<20){setTimeout(scan,1500);return}fill(j.nets||[])}).catch(function(){
+ if(++tries<5)setTimeout(scan,2000);else fill([])})}
+[['wl','ws','wp'],['bl','bs','bp']].forEach(function(a){document.getElementById(a[0]).addEventListener('change',
+ function(){var v=this.value;if(v==='\u0001'){this.innerHTML='<option>Looking for networks\u2026</option>';scan(1);return}
+ if(v==='\u0002'){document.getElementById(a[1]).focus();this.value='';return}
+ if(v){document.getElementById(a[1]).value=v;document.getElementById(a[2]).focus()}})});
+scan(0);
 </script></body></html>)HTML";
   _portal.server().send_P(200, "text/html", kPage);
 }

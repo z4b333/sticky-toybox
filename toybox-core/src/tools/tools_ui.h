@@ -9,9 +9,8 @@
 // second firmware is being maintained -- but the seam stays, because the
 // preview harness is the other host: every screen in this file is rendered on
 // a PC through a ToolsCanvas that writes .pgm files, which is how a layout bug
-// is caught before it reaches glass. Card compatibility with CrossPoint is a
-// separate thing entirely and still holds -- see claude/crosspoint-compatibility
-// or docs/PORTING.md's note.
+// is caught before it reaches glass. (Card compatibility with CrossPoint ended
+// in v2 too: positions live in each book's folder -- docs/PORTING.md.)
 #pragma once
 #include <Arduino.h>
 #include <Preferences.h>
@@ -506,50 +505,13 @@ class ToolsHost {
     return false;
   }
 
-  // Covers shared with the CrossPoint/CrossInk family, which caches a
-  // finished cover.bmp beside its reading position. Grab: if one is waiting
-  // in the book's cache directory, file it as this device's cover art and
-  // skip the decode -- true means the cover exists now. Put: leave OUR
-  // finished cover there for them, never clobbering one that exists. Both
-  // are called mid-open, with the card already awake; a host with no card
-  // declines and the decoder does what it always did.
-  virtual bool crossCoverGrab(const char* file) {
-    (void)file;
-    return false;
-  }
-  virtual bool crossCoverPut(const char* file) {
-    (void)file;
-    return false;
-  }
-
-  // Books: pre-converted .tbk volumes on the SD card (tools/make_tbk.py).
-  // A page is 48,000 bytes in the framebuffer's own layout, so the reader
-  // copies rather than decodes. While a book is open the card stays powered
-  // and mounted -- that is the whole experiment this API exists to run --
-  // and bookClose() must be called before anything else wants the panel,
-  // because it re-initialises the controller on the way out.
-  struct BookInfo {
-    // Absolute, and 128 for the same reason as EpubInfo: a book inside a
-    // series folder carries the folder in its path, and two series can both
-    // hold a "vol01.tbk".
-    char file[128];
-    char title[41];
-    uint32_t pages = 0;
-    bool rtl = false;
-    uint8_t bpp = 1;  // 1 = B/W, 2 = four-level grey
-    // The file carries a cover made on a PC. Page 0 is only ever the cover by
-    // accident -- a trimmed scan starts at the story -- so when a book says it
-    // has a real one, that is what the strip and the loading screen show.
-    bool cover = false;
-  };
-  // A series folder under /books, and how many books of ONE kind it holds --
-  // the .tbk reader and the EPUB reader each see only their own, so neither
-  // offers a door onto an empty room.
+  // A series folder under /books, and how many books of one kind it holds,
+  // so the shelf never offers a door onto an empty room.
   struct ShelfFolder {
     char name[64];
     uint16_t count = 0;
   };
-  // `ext` is ".tbk" or ".epub", lowercase with the dot.
+  // `ext` is ".epub", lowercase with the dot.
   virtual int shelfFolders(ShelfFolder* out, int max, const char* ext) {
     (void)out;
     (void)max;
@@ -563,57 +525,12 @@ class ToolsHost {
   virtual uint32_t heapFree() const { return 0; }
   virtual uint32_t heapLargest() const { return 0; }
 
-  static constexpr uint32_t BOOK_PAGE_BYTES = 48000;
-  // `dir` is "/books" for the top level (which also picks up books loose in
-  // the card's root), or "/books/<series>" inside a folder.
-  virtual int bookList(BookInfo* out, int max, const char* dir) {
-    (void)out;
-    (void)max;
-    (void)dir;
-    return -1;  // no card, or no host support
-  }
-  virtual bool bookOpen(const char* file) {
-    (void)file;
-    return false;
-  }
-  virtual bool bookPage(uint32_t idx, uint8_t* dst) {
-    (void)idx;
-    (void)dst;
-    return false;
-  }
-  // The embedded cover: 48,000 bytes, 480x800 one bit, the framebuffer's own
-  // convention. Only valid while the book is open, and only when BookInfo::
-  // cover said there is one.
-  virtual bool bookCover(uint8_t* dst) {
-    (void)dst;
-    return false;
-  }
-  virtual void bookClose() {}
   // Show a 2-bit page in true four-level grey, bypassing the canvas: grey is
   // a hardware waveform, not a drawing primitive. False means the host cannot
   // (guest hosts, the preview harness), and the reader dithers the page down
   // to 1-bit instead -- readable everywhere, grey where the glass allows it.
-  static constexpr uint32_t BOOK_PAGE_BYTES_GREY = 96000;
   virtual bool bookShowGrey(const uint8_t* packed2bpp) {
     (void)packed2bpp;
-    return false;
-  }
-  // The same, straight off the card: the host streams the page through the
-  // waveform a band at a time and the reader never holds one. A grey page is
-  // 96,000 bytes, and 96 KB of contiguous heap is not something this device
-  // reliably has once the UI has been running -- which is why every grey book
-  // refused to open before this existed.
-  virtual bool bookShowGreyPaged(uint32_t idx) {
-    (void)idx;
-    return false;
-  }
-  // A slice of a page, for drawing a grey one through the canvas when the
-  // waveform cannot be used (the footer is up, or the host has no grey).
-  virtual bool bookPageSlice(uint32_t idx, uint32_t off, uint8_t* dst, uint32_t n) {
-    (void)idx;
-    (void)off;
-    (void)dst;
-    (void)n;
     return false;
   }
 
@@ -631,6 +548,7 @@ class ToolsHost {
     char file[128];  // absolute card path; real release filenames run long
     char title[41];
     bool cont = false;  // a reading position already exists on the card
+    bool synced = false;  // its position has synced with Readest at least once
     // Where that position is, in the book's own words: the name of the chapter
     // as its contents row spells it, out of the sidecar the reader writes when
     // it closes a book. Empty means no sidecar, and the shelf says nothing --
@@ -657,8 +575,8 @@ class ToolsHost {
   }
   virtual uint32_t epubSize() { return 0; }
   virtual void epubClose() {}
-  // Sidecar files beside the book (CrossPoint's progress.bin). Only valid
-  // while an EPUB session holds the bus.
+  // Small files the reader keeps about a book (its position, its chapter
+  // note, bookmarks). Only valid while an EPUB session holds the bus.
   virtual int sdReadFile(const char* path, void* dst, int max) {
     (void)path;
     (void)dst;

@@ -270,18 +270,18 @@ class Book {
 // against a real 32-bit libstdc++. Both firmwares run 32-bit toolchains, so
 // both derive the same directory from the same path string.
 uint32_t cpHash(const char* s, size_t len);
-// CrossPoint/CrossInk moved their book-cache hash from 32-bit std::hash
-// (MurmurHashUnaligned2 -- cpHash above) to FNV-1a 64. Current builds write
-// the FNV directory and keep the Murmur one only to migrate old cards, so a
-// firmware that still writes Murmur is invisible to them. Toybox now does as
-// they do: write FNV, read FNV first and Murmur second.
+// The pre-v2 position folders: FNV-1a 64 (older Toybox) and the Murmur 32
+// one (CrossPoint's). v2 keeps positions in each book's own folder
+// (book_store.h); these are only read, once per book, to move an old
+// position across (EpubTool::adoptOldPosition) and to show it on the shelf
+// until then.
 uint64_t fnvHash64(const char* s, size_t len);
 void cacheDir(const char* bookPath, char* out, int cap);        // FNV: "/.crosspoint/epub_<u64>"
-void cacheDirLegacy(const char* bookPath, char* out, int cap);  // Murmur32, read-only fallback
+void cacheDirLegacy(const char* bookPath, char* out, int cap);  // Murmur32
 
 struct Progress {
   uint16_t spine = 0;
-  uint16_t page = 0;        // advisory: CrossPoint re-derives the page from offset
+  uint16_t page = 0;        // advisory: the reader re-derives the page from offset
   uint16_t pageCount = 0;   // advisory
   uint32_t offset = 0;      // the portable position
   bool hasOffset = false;

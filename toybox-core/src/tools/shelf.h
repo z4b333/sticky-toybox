@@ -13,6 +13,7 @@
 // the card remembers your place, and a shared row drawer would end up taking
 // both as arguments and satisfying neither.
 #pragma once
+#include <math.h>
 #include "tools_ui.h"
 
 namespace shelf {
@@ -90,18 +91,36 @@ inline void drawPager(ToolsCanvas& c, int page, int items) {
 // long title takes a second line and the row tightens to fit it; a short one
 // keeps the roomier single-line layout. Three lines will not fit a row, so
 // the second is clipped in the rare case a title outruns both.
+// The sync mark: a ring broken at two corners, each break led by a solid
+// arrowhead going clockwise -- the shape every reader uses for "kept in step
+// elsewhere". 24 px, drawn rather than a glyph.
+inline void drawSyncMark(ToolsCanvas& c, int cx, int cy) {
+  const int r = 9;
+  c.drawCircle(cx, cy, r, 2, true);
+  // the breaks: on the right just below the middle, on the left just above
+  c.fillRect(cx + r - 3, cy + 1, 6, 6, false);
+  c.fillRect(cx - r - 3, cy - 6, 6, 6, false);
+  // heads: the top arc ends on the right pointing down, the bottom arc on
+  // the left pointing up -- both clockwise
+  for (int k = 0; k < 5; k++) {
+    c.fillRect(cx + r - 4 + k, cy - 2 + k, 9 - 2 * k, 1, true);
+    c.fillRect(cx - r - 4 + k, cy + 2 - k, 9 - 2 * k, 1, true);
+  }
+}
+
 inline void drawBookRow(ToolsCanvas& c, int rowOnPage, const char* title, const char* sub,
-                        bool sep = true) {
+                        bool sep = true, bool synced = false) {
   const int y = Y0 + rowOnPage * ROW_H;
   const int maxW = SCREEN_W - 48;
+  // The sub line gives up the room the mark needs; the name keeps its width.
+  const int subW = synced ? maxW - 34 : maxW;
+  int subY;
   if (c.textWidth(title, TS_MED, true) <= maxW) {
     c.text(24, y + 10, title, TS_MED, true, true);
-    // Clipped, not drawn straight: the second line carries a chapter's own
-    // name now, and publishers write chapter names as long as they like.
-    c.textClipped(24, y + 44, maxW, sub, TS_SMALL, true);
+    subY = y + 44;
   } else {
     // The longest run of whole words that fits, measured forward.
-    char buf[48];
+    char buf[128];
     int fit = 0, brk = 0;
     for (int i = 0; title[i] && i < (int)sizeof(buf) - 1; i++) {
       buf[i] = title[i];
@@ -117,8 +136,12 @@ inline void drawBookRow(ToolsCanvas& c, int rowOnPage, const char* title, const 
     while (*rest == ' ') rest++;
     c.text(24, y + 4, buf, TS_MED, true, true);
     c.textClipped(24, y + 32, maxW, rest, TS_MED, true, true);
-    c.textClipped(24, y + 62, maxW, sub, TS_SMALL, true);
+    subY = y + 62;
   }
+  // Clipped, not drawn straight: the second line carries a chapter's own
+  // name now, and publishers write chapter names as long as they like.
+  c.textClipped(24, subY, subW, sub, TS_SMALL, true);
+  if (synced) drawSyncMark(c, SCREEN_W - 24 - 12, subY + c.textHeight(TS_SMALL) / 2);
   if (sep) c.fillRect(16, y + ROW_H - 6, SCREEN_W - 32, 1, true);
 }
 

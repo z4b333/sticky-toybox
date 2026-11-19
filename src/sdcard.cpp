@@ -5,10 +5,12 @@
 
 #ifdef TOYBOX_HOST
 #include <map>
+#include <vector>
 #include <string>
 #endif
 
 #include "bmp_gray.h"
+#include "tools/book_store.h"
 #include "tools/epub/epubcore.h"
 #include "tools/lock_image.h"
 #include "tools/tiny_fs.h"
@@ -31,49 +33,15 @@ static File sdOpenR(const String& p) { return sdOpenR(p.c_str()); }
 
 namespace sdcard {
 
-// --- the .tbk header, shared by both builds -----------------------------------
-// A PC-side converter has to agree with every rule in here, so it lives in one
-// place and the preview harness tests it directly rather than through a card.
-bool parseTbkBytes(const uint8_t h[64], BookMeta& out) {
-  constexpr uint32_t HDR = 64, COVER_BYTES = 48000;
-  constexpr uint8_t FLAG_RTL = 1, FLAG_COVER = 2;
-  if (memcmp(h, "TBK1", 4) != 0) return false;
-  const int w = h[4] | (h[5] << 8), ht = h[6] | (h[7] << 8);
-  const int bpp = h[8];
-  if (w != 480 || ht != 800 || (bpp != 1 && bpp != 2)) return false;
-  const uint32_t pageBytes = (uint32_t)h[16] | ((uint32_t)h[17] << 8) |
-                             ((uint32_t)h[18] << 16) | ((uint32_t)h[19] << 24);
-  if (pageBytes != 48000u * (uint32_t)bpp) return false;  // header lying about itself
-  out.bpp = (uint8_t)bpp;
-  out.rtl = (h[9] & FLAG_RTL) != 0;
-  out.cover = (h[9] & FLAG_COVER) != 0;
-  // dataOffset. Every file written before covers existed says 64, and the
-  // firmware used to assume it rather than read it, so a zero or a nonsense
-  // value is treated as 64 rather than refused -- there may be files out there
-  // whose converter never filled it in. A file that CLAIMS a cover, though,
-  // must leave room for one: otherwise page 0 would be read from inside it,
-  // and a book that opens on garbage is worse than one that opens plainly.
-  uint32_t data = (uint32_t)h[20] | ((uint32_t)h[21] << 8) | ((uint32_t)h[22] << 16) |
-                  ((uint32_t)h[23] << 24);
-  if (data < HDR) data = HDR;
-  if (out.cover && data < HDR + COVER_BYTES) out.cover = false;
-  out.dataOffset = data;
-  out.pages = (uint32_t)h[12] | ((uint32_t)h[13] << 8) | ((uint32_t)h[14] << 16) |
-              ((uint32_t)h[15] << 24);
-  memcpy(out.title, h + 24, 40);
-  out.title[40] = 0;
-  if (!out.title[0]) strncpy(out.title, "untitled", sizeof(out.title) - 1);
-  return out.pages > 0;
-}
-
 // The reader's own note of where it stopped, written when it closes a book:
 //
 //     3<TAB>page<TAB>pageCount<TAB>chapter name<NEWLINE>
 //
 // Text, tab-separated, because it is the kind of file somebody will open on a
 // laptop while wondering why a shelf says what it says. It lives beside the
-// position, in the FNV directory (Toybox's own, and what current CrossPoint
-// builds also use); CrossPoint ignores files it does not know.
+// position, in the book's folder (book_store.h) as place.txt. Before v2 both
+// sat in /.crosspoint/epub_<hash>/ (progress.bin, toybox.pos); a book not
+// opened since still shows its old place here until the reader moves it.
 //
 // The leading 3 is a version. The first shape of this file held a chapter
 // NUMBER, which turned out to be unfixable -- a contents list that opens with
@@ -81,7 +49,7 @@ bool parseTbkBytes(const uint8_t h[64], BookMeta& out) {
 // those files right now. A reader that cannot tell which shape it is looking
 // at has to either guess or lie, so anything that is not a 3 is ignored and
 // the row stays blank until the book is closed here again.
-const char* const kPlaceFile = "/toybox.pos";
+const char* const kPlaceFile = "/toybox.pos";  // the old name, in the old folder
 
 // How much of that file is worth reading: a version, two numbers, three tabs,
 // the name, a newline, and the NUL. Tied to the field it fills rather than
@@ -159,6 +127,20 @@ Report probe() {
 // rendered and its taps walked without a slot to put a card in.
 bool g_crossRoots = false;
 void hostSetCrossRoots(bool on) { g_crossRoots = on; }
+// More books on the invented card, each served from the same fixture zip:
+// series volumes for the shelf's grouping, downloads from Readest.
+std::vector<std::string> g_extraBooks;
+void hostAddBook(const char* path) {
+  for (const auto& b : g_extraBooks)
+    if (b == path) return;
+  g_extraBooks.push_back(path);
+}
+void hostClearBooks() { g_extraBooks.clear(); }
+bool hostHasBook(const char* path) {
+  for (const auto& b : g_extraBooks)
+    if (b == path) return true;
+  return false;
+}
 
 // The card's own little filesystem, for everything written by path rather
 // than by name: cover art, planted pictures, and whatever else learns to
@@ -250,61 +232,9 @@ void fakePageGrey(uint32_t idx, uint8_t* dst) {
 uint8_t g_fakeBpp = 1;
 }  // namespace
 
-// The invented shelf: two loose books at the top level, and a series folder
-// with enough volumes to need a second page.
-namespace {
-struct FakeBook {
-  const char* dir;
-  const char* file;
-  const char* title;
-  uint32_t pages;
-  bool rtl;
-  uint8_t bpp;
-  bool cover;  // carries a PC-made cover inside the file
-};
-const FakeBook kFakeBooks[] = {
-    {"/books", "walden.tbk", "Walden", 8, false, 1, false},
-    {"/books", "grey-test.tbk", "Grey test card", 3, false, 2, false},
-    // The one with a cover made on a PC: its thumbnail must come from that
-    // rather than from page 0, which is how every other book gets one.
-    {"/books/One Piece", "one-piece-v1.tbk", "One Piece vol 1", 12, true, 1, true},
-    {"/books/One Piece", "one-piece-v2.tbk", "One Piece vol 2", 10, true, 1, false},
-    {"/books/One Piece", "one-piece-v3.tbk", "One Piece vol 3", 11, true, 1, false},
-    {"/books/One Piece", "one-piece-v4.tbk", "One Piece vol 4", 9, true, 1, false},
-    {"/books/One Piece", "one-piece-v5.tbk", "One Piece vol 5", 12, true, 1, false},
-    {"/books/One Piece", "one-piece-v6.tbk", "One Piece vol 6", 10, true, 1, false},
-    {"/books/One Piece", "one-piece-v7.tbk", "One Piece vol 7", 11, true, 1, false},
-    {"/books/One Piece", "one-piece-v8.tbk", "One Piece vol 8", 13, true, 1, false},
-    {"/books/One Piece", "one-piece-v9.tbk", "One Piece vol 9", 12, true, 1, false},
-};
-}  // namespace
-
-int bookList(BookMeta* out, int max, const char* dir) {
-  int n = 0;
-  for (const FakeBook& b : kFakeBooks) {
-    if (n >= max || strcmp(b.dir, dir) != 0) continue;
-    BookMeta m{};
-    snprintf(m.file, sizeof(m.file), "%s/%s", b.dir, b.file);
-    strncpy(m.title, b.title, sizeof(m.title) - 1);
-    m.pages = b.pages;
-    m.rtl = b.rtl;
-    m.bpp = b.bpp;
-    m.cover = b.cover;
-    m.dataOffset = b.cover ? 64 + 48000 : 64;
-    out[n++] = m;
-  }
-  return n;
-}
 
 int shelfFolders(ShelfFolder* out, int max, const char* ext) {
   int n = 0;
-  if (strcasecmp(ext, ".tbk") == 0 && max > 0) {
-    ShelfFolder f{};
-    strncpy(f.name, "One Piece", sizeof(f.name) - 1);
-    for (const FakeBook& b : kFakeBooks)
-      if (strcmp(b.dir, "/books/One Piece") == 0) f.count++;
-    out[n++] = f;
-  }
   if (strcasecmp(ext, ".epub") == 0 && max > 0) {
     ShelfFolder f{};
     strncpy(f.name, "Uketsu", sizeof(f.name) - 1);
@@ -503,23 +433,19 @@ void buildFakeEpub() {
   g_fakeEpubLen = (uint32_t)(p - g_fakeEpub);
 }
 
-// The sidecar store: enough of a filesystem for progress files. The harness
-// reads it back through readFileAt to check what a CrossPoint device would
-// find on the card.
+// The sidecar store: enough of a filesystem for the small files the reader
+// keeps about a book. The harness reads it back through readFileAt.
 struct FakeSide {
   char path[160];
-  // Big enough for the largest thing written beside a book: CrossPoint's
-  // progress.bin is ten bytes, the KOReader sidecar a couple of hundred, and
-  // the bookmarks file 1,670 -- sixteen marks carrying the sentences they
+  // Big enough for the largest thing kept about a book: the position is ten
+  // bytes, the chapter note under a hundred, and the bookmarks file 1,670 -- sixteen marks carrying the sentences they
   // were made from, at the 96-byte labels of TBM3.
   uint8_t data[2048];
   int n = 0;
 };
-// Ten, not six: a book now carries a CrossPoint position, a KOReader sidecar
-// and a bookmarks file, and the harness opens more than one book.
-// Grew with the guards: each book leaves progress.bin twice (both hashes), a
-// KOReader sidecar, a bookmarks file and now the chapter note -- five slots per
-// book that gets read, and the walk reads four.
+// Each book leaves a position, a chapter note and a bookmarks file, the
+// guards plant old-layout files to watch them move, and the harness opens
+// several books.
 FakeSide g_side[24];
 }  // namespace
 
@@ -552,17 +478,27 @@ int epubList(EpubMeta* out, int max, const char* dir) {
     EpubMeta m{};
     strncpy(m.file, files[i], sizeof(m.file) - 1);
     strncpy(m.title, titles[i], sizeof(m.title) - 1);
-    char cache[96];
-    epubc::cacheDir(m.file, cache, sizeof(cache));
-    strncat(cache, "/progress.bin", sizeof(cache) - strlen(cache) - 1);
+    // The book's folder first; the old folders for a book not moved yet.
+    char pos[bstore::PATH_CAP], place[160];
+    bstore::file(m.file, "position.bin", pos, sizeof(pos));
+    bstore::file(m.file, "place.txt", place, sizeof(place));
     m.cont = false;
+    {
+      char syn[bstore::PATH_CAP];
+      bstore::file(m.file, "synced", syn, sizeof(syn));
+      m.synced = hostCardHasPrefix(syn);
+    }
     for (const FakeSide& s : g_side)
-      if (s.n > 0 && strcmp(s.path, cache) == 0) m.cont = true;
+      if (s.n > 0 && strcmp(s.path, pos) == 0) m.cont = true;
+    if (!m.cont) {
+      char cache[96];
+      epubc::cacheDir(m.file, cache, sizeof(cache));
+      snprintf(place, sizeof(place), "%s%s", cache, kPlaceFile);
+      strncat(cache, "/progress.bin", sizeof(cache) - strlen(cache) - 1);
+      for (const FakeSide& s : g_side)
+        if (s.n > 0 && strcmp(s.path, cache) == 0) m.cont = true;
+    }
     if (m.cont) {
-      char place[128];
-      char dir[96];
-      epubc::cacheDir(m.file, dir, sizeof(dir));
-      snprintf(place, sizeof(place), "%s%s", dir, kPlaceFile);
       for (const FakeSide& s : g_side)
         if (s.n > 0 && strcmp(s.path, place) == 0) {
           // Through the same ceiling the card read uses. The device reads this
@@ -576,13 +512,35 @@ int epubList(EpubMeta* out, int max, const char* dir) {
     }
     out[n++] = m;
   }
+  for (const auto& b : g_extraBooks) {
+    if (n >= max) break;
+    char d[128];
+    snprintf(d, sizeof(d), "%s", b.c_str());
+    char* sl = strrchr(d, '/');
+    if (!sl) continue;
+    *sl = 0;
+    if (strcmp(d, dir) != 0) continue;
+    EpubMeta m{};
+    strncpy(m.file, b.c_str(), sizeof(m.file) - 1);
+    const char* bare = sl + 1;
+    snprintf(m.title, sizeof(m.title), "%.*s", (int)(strrchr(bare, '.') - bare), bare);
+    char pos[bstore::PATH_CAP];
+    bstore::file(m.file, "position.bin", pos, sizeof(pos));
+    for (const FakeSide& s : g_side)
+      if (s.n > 0 && strcmp(s.path, pos) == 0) m.cont = true;
+    for (const auto& kv : fakeCard())  // the cont check above sees only g_side
+      if (kv.first == pos) m.cont = true;
+    bstore::file(m.file, "synced", pos, sizeof(pos));
+    m.synced = hostCardHasPrefix(pos);
+    out[n++] = m;
+  }
   return n;
 }
 
 bool epubOpen(const char* path) {
   if (strcmp(path, "/books/wind.epub") != 0 && strcmp(path, kFakeLongPath) != 0 &&
       strcmp(path, "/books/Uketsu/strange-houses.epub") != 0 &&
-      strcmp(path, "/Read/novel.epub") != 0)
+      strcmp(path, "/Read/novel.epub") != 0 && !hostHasBook(path))
     return false;
   buildFakeEpub();
   g_fakeEpubOpen = true;
@@ -647,63 +605,8 @@ bool writeFileAtomic(const char* path, const void* data, int n) {
   return true;
 }
 
-bool g_fakeCover = false;
-
-bool bookOpen(const char* file) {
-  g_fakeBpp = strstr(file, "grey") ? 2 : 1;
-  g_fakeOpenPages = strstr(file, "walden") ? 8 : (g_fakeBpp == 2 ? 3 : 12);
-  g_fakeCover = strstr(file, "one-piece-v1") != nullptr;
-  return true;
-}
-
-// The invented embedded cover: a bordered plate with a big diagonal cross, so
-// a render makes it obvious at a glance that this is NOT page 0 (a frame, a
-// diagonal, and tally bars).
-bool bookReadCover(uint8_t* dst) {
-  if (!g_fakeCover) return false;
-  memset(dst, 0xFF, 48000);
-  auto setBlack = [&](int x, int y) {
-    if (x < 0 || x >= 480 || y < 0 || y >= 800) return;
-    dst[(size_t)y * 60 + (x >> 3)] &= ~(0x80 >> (x & 7));
-  };
-  for (int t = 0; t < 24; t++) {
-    for (int x = 40; x < 440; x++) { setBlack(x, 100 + t); setBlack(x, 676 + t); }
-    for (int y = 100; y < 700; y++) { setBlack(40 + t, y); setBlack(416 + t, y); }
-  }
-  for (int t = 0; t < 560; t++)
-    for (int w = 0; w < 10; w++) {
-      setBlack(80 + (t * 320) / 560 + w, 120 + t);
-      setBlack(400 - (t * 320) / 560 + w, 120 + t);
-    }
-  return true;
-}
 
 
-
-bool bookReadPage(uint32_t idx, uint8_t* dst) {
-  if (idx >= g_fakeOpenPages) return false;
-  if (g_fakeBpp == 2)
-    fakePageGrey(idx, dst);
-  else
-    fakePage(idx, dst);
-  return true;
-}
-
-bool bookReadPageSlice(uint32_t idx, uint32_t off, uint8_t* dst, uint32_t n) {
-  const uint32_t bytes = 48000u * g_fakeBpp;
-  if (idx >= g_fakeOpenPages || off + n > bytes) return false;
-  // The invented pages are cheap to draw, so the slice is cut from a freshly
-  // drawn one rather than cached -- the point is the seam, not the speed.
-  static uint8_t whole[96000];
-  if (g_fakeBpp == 2)
-    fakePageGrey(idx, whole);
-  else
-    fakePage(idx, whole);
-  memcpy(dst, whole + off, n);
-  return true;
-}
-
-void bookClose() { g_fakeOpenPages = 0; }
 
 // The invented card, for the file-manager harness: a handful of files the
 // phone can list, rename, delete and add to, with the same path rules the
@@ -716,7 +619,7 @@ struct FakeFile {
 };
 FakeFile g_card[16] = {
     {"/books/wind.epub", 19443403, true},
-    {"/books/one-piece-v1.tbk", 640064, true},
+    {"/books/one-piece-v1.epub", 640064, true},
     {"/wallpapers/mountains.tbi", 48008, true},
 };
 bool g_mgrUp = false;
@@ -849,7 +752,7 @@ bool g_streaming = false;
 // guards care that it is OPEN, because that is what decides whether a folder
 // move costs a partial or a full refresh.
 bool g_browseUp = false;
-bool busHeld() { return g_mgrUp || g_fakeEpubOpen || g_fakeOpenPages > 0 || g_browseUp; }
+bool busHeld() { return g_mgrUp || g_fakeEpubOpen || g_browseUp; }
 
 bool browsing() { return g_browseUp; }
 
@@ -916,11 +819,34 @@ static bool removeAny(const char* path) {
     if (s.n > 0 && strcmp(s.path, path) == 0) s.n = 0, gone = true;
   return gone;
 }
-bool moveFile(const char* from, const char* to) { return busHeld() && moveAny(from, to); }
+bool moveFile(const char* from, const char* to) {
+  if (!busHeld() || !moveAny(from, to)) return false;
+  // A finished download landing as an .epub joins the invented shelf.
+  const size_t n = strlen(to);
+  if (n > 5 && strcasecmp(to + n - 5, ".epub") == 0) hostAddBook(to);
+  return true;
+}
 bool removeFile(const char* path) { return busHeld() && removeAny(path); }
 // The guards' back doors: the card as another build left it, with no session.
 bool hostCardMove(const char* from, const char* to) { return moveAny(from, to); }
 bool hostCardRemove(const char* path) { return removeAny(path); }
+int hostCardRemovePrefix(const char* prefix) {
+  const size_t n = strlen(prefix);
+  int gone = 0;
+  for (FakeSide& s : g_side)
+    if (s.n > 0 && strncmp(s.path, prefix, n) == 0) {
+      s.n = 0;
+      gone++;
+    }
+  for (auto it = fakeCard().begin(); it != fakeCard().end();)
+    if (it->first.compare(0, n, prefix) == 0) {
+      it = fakeCard().erase(it);
+      gone++;
+    } else {
+      ++it;
+    }
+  return gone;
+}
 bool hostCardHasPrefix(const char* prefix) {
   const size_t n = strlen(prefix);
   for (const auto& kv : fakeCard())
@@ -1495,22 +1421,6 @@ bool takeTbi(const char* name, const char* destPath) {
 }
 
 namespace {
-// The open book: its file handle, and whether the bus is currently claimed.
-// One at a time is all the UI can show, so one is all this holds.
-File g_book;
-bool g_bookBusUp = false;
-uint32_t g_bookPageBytes = 48000;
-// Where page 0 starts, from the header rather than assumed. The field was
-// always in the format and always written as 64; honouring it is what lets a
-// cover sit between the header and the pages.
-uint32_t g_bookDataOffset = 64;
-bool g_bookHasCover = false;
-
-constexpr uint32_t TBK_HEADER = 64;
-constexpr uint32_t TBK_COVER_BYTES = 48000;  // 480x800, 1 bit, like a page
-constexpr uint8_t TBK_FLAG_RTL = 1, TBK_FLAG_COVER = 2;
-
-const char* kBookDirs[2] = {"/books", "/"};
 
 // The shelf's top level is /books itself; anything deeper is one series.
 bool isTopShelf(const char* dir) { return dir && strcmp(dir, "/books") == 0; }
@@ -1520,47 +1430,7 @@ bool hasExt(const char* name, const char* ext) {
   return n > e && strcasecmp(name + n - e, ext) == 0;
 }
 
-bool parseTbkHeader(File& f, BookMeta& out) {
-  uint8_t h[TBK_HEADER];
-  if (f.read(h, sizeof(h)) != sizeof(h)) return false;
-  return parseTbkBytes(h, out);
-}
 }  // namespace
-
-int bookList(BookMeta* out, int max, const char* dir) {
-  // Borrowed when a browsing session (or a reader) already has the card: the
-  // release is what costs a full refresh, so it must not happen mid-shelf.
-  const bool mine = !busHeld();
-  if (mine && !busClaim()) {
-    busRelease();
-    return -1;
-  }
-  int n = 0;
-  // The top level also shows books sitting loose in the card's root, which is
-  // where a card that has never been organised keeps them.
-  const char* dirs[2] = {dir, isTopShelf(dir) ? "/" : nullptr};
-  for (const char* d0 : dirs) {
-    if (!d0) continue;
-    File d = sdOpenR(d0);
-    if (!d || !d.isDirectory()) continue;
-    for (File f = d.openNextFile(); f && n < max; f = d.openNextFile()) {
-      if (f.isDirectory()) continue;
-      const char* nm = f.name();
-      const size_t len = strlen(nm);
-      if (len < 5 || strcasecmp(nm + len - 4, ".tbk") != 0) continue;
-      BookMeta m{};
-      if (!parseTbkHeader(f, m)) continue;
-      const char* bare = strrchr(nm, '/');
-      bare = bare ? bare + 1 : nm;
-      if (snprintf(m.file, sizeof(m.file), "%s%s%s", d0, d0[1] ? "/" : "", bare) >=
-          (int)sizeof(m.file))
-        continue;
-      out[n++] = m;
-    }
-  }
-  if (mine) busRelease();
-  return n;
-}
 
 // The card's folders under /books, each with how many books of one kind it
 // holds. Counting means opening every folder, which is one directory listing
@@ -1655,15 +1525,20 @@ bool haveProgress(const char* path) {
   return any;
 }
 
-void readPlaceFile(const char* dir, EpubMeta& m) {
-  char p[128];
-  snprintf(p, sizeof(p), "%s%s", dir, kPlaceFile);
+void readPlacePath(const char* p, EpubMeta& m) {
   File f = sdOpenR(p);
   if (!f || f.isDirectory()) return;
   char buf[PLACE_FILE_MAX] = {};
   const int n = f.read((uint8_t*)buf, sizeof(buf) - 1);
   f.close();
   if (n > 0) parsePlace(buf, n, m);
+}
+
+// The old note, in the old FNV folder (a book not opened since v2).
+void readPlaceFile(const char* dir, EpubMeta& m) {
+  char p[128];
+  snprintf(p, sizeof(p), "%s%s", dir, kPlaceFile);
+  readPlacePath(p, m);
 }
 }  // namespace
 
@@ -1694,22 +1569,31 @@ int epubList(EpubMeta* out, int max, const char* dir) {
       strncpy(m.title, bare, sizeof(m.title) - 1);
       char* dot = strrchr(m.title, '.');
       if (dot) *dot = 0;
-      // Whether CrossPoint (or a previous Toybox session) left a position.
-      char cache[96];
-      epubc::cacheDir(m.file, cache, sizeof(cache));
-      strncat(cache, "/progress.bin", sizeof(cache) - strlen(cache) - 1);
-      char dir[96];
-      epubc::cacheDir(m.file, dir, sizeof(dir));
-      m.cont = haveProgress(cache);
-      if (!m.cont) {
-        epubc::cacheDirLegacy(m.file, cache, sizeof(cache));
-        strncat(cache, "/progress.bin", sizeof(cache) - strlen(cache) - 1);
+      // Whether this book was started: its folder's position, or -- for a
+      // book not opened since v2 moved it there -- one of the old folders.
+      char pos[bstore::PATH_CAP];
+      bstore::file(m.file, "position.bin", pos, sizeof(pos));
+      m.cont = haveProgress(pos);
+      if (m.cont) {
+        bstore::file(m.file, "place.txt", pos, sizeof(pos));
+        readPlacePath(pos, m);
+        // Synced at least once: a one-byte marker the reader leaves after a
+        // sync that reached the server. Only looked for on started books --
+        // a book never opened cannot have synced.
+        bstore::file(m.file, "synced", pos, sizeof(pos));
+        m.synced = haveProgress(pos);
+      } else {
+        char cache[96], dir[96];
+        epubc::cacheDir(m.file, dir, sizeof(dir));
+        snprintf(cache, sizeof(cache), "%s/progress.bin", dir);
         m.cont = haveProgress(cache);
+        if (!m.cont) {
+          epubc::cacheDirLegacy(m.file, cache, sizeof(cache));
+          strncat(cache, "/progress.bin", sizeof(cache) - strlen(cache) - 1);
+          m.cont = haveProgress(cache);
+        }
+        if (m.cont) readPlaceFile(dir, m);
       }
-      // The sidecar always lives in OUR directory, whichever one the position
-      // came from -- a card read on CrossPoint and then here has its position
-      // in one and its chapter note in the other.
-      if (m.cont) readPlaceFile(dir, m);
       out[n++] = m;
     }
   }
@@ -2020,7 +1904,7 @@ bool mgrSafePath(const char* p) {
 // The card stays powered while the shelf is up, which is the cost.
 bool g_browseUp = false;
 
-bool busHeld() { return g_epubBusUp || g_bookBusUp || g_mgrUp || g_browseUp; }
+bool busHeld() { return g_epubBusUp || g_mgrUp || g_browseUp; }
 
 bool browsing() { return g_browseUp; }
 
@@ -2417,91 +2301,6 @@ bool writeFileAtomic(const char* path, const void* data, int n) {
   }
   if (SD.exists(path)) SD.remove(path);  // FAT rename does not overwrite; exists() keeps it quiet
   return SD.rename(tmp, path);
-}
-
-bool bookOpen(const char* file) {
-  bookClose();
-  const bool borrowed = busHeld();  // see epubOpen: a shelf session lends it
-  if (!borrowed && !busClaim()) {
-    busRelease();
-    return false;
-  }
-  g_bookBusUp = !borrowed;
-  // bookList hands out absolute paths now that books can sit in series
-  // folders, so the first candidate is the name itself; the /books and root
-  // guesses stay for anything still passing a bare name.
-  for (int attempt = 0; attempt < 3; attempt++) {
-    char path[128];
-    if (attempt == 0) {
-      if (file[0] != '/') continue;
-      snprintf(path, sizeof(path), "%s", file);
-    } else {
-      if (file[0] == '/') continue;
-      const char* dir = kBookDirs[attempt - 1];
-      if (snprintf(path, sizeof(path), "%s%s%s", dir, dir[1] ? "/" : "", file) >= (int)sizeof(path))
-        continue;
-    }
-    g_book = sdOpenR(path);
-    if (g_book && !g_book.isDirectory()) {
-      BookMeta m{};
-      if (parseTbkHeader(g_book, m)) {
-        g_bookPageBytes = 48000u * m.bpp;
-        g_bookDataOffset = m.dataOffset;
-        g_bookHasCover = m.cover;
-        return true;  // bus stays up: reading now
-      }
-      g_book.close();
-    }
-  }
-  bookClose();
-  return false;
-}
-
-bool bookReadCover(uint8_t* dst) {
-  if (!g_book || !g_bookHasCover) return false;
-  if (!g_book.seek(TBK_HEADER)) return false;
-  uint32_t got = 0;
-  while (got < TBK_COVER_BYTES) {
-    const int n = g_book.read(dst + got, TBK_COVER_BYTES - got);
-    if (n <= 0) break;
-    got += (uint32_t)n;
-  }
-  return got == TBK_COVER_BYTES;
-}
-
-bool bookReadPageSlice(uint32_t idx, uint32_t off, uint8_t* dst, uint32_t n) {
-  if (!g_book || off + n > g_bookPageBytes) return false;
-  if (!g_book.seek((uint64_t)g_bookDataOffset + (uint64_t)idx * g_bookPageBytes + off))
-    return false;
-  uint32_t got = 0;
-  while (got < n) {
-    const int r = g_book.read(dst + got, n - got);
-    if (r <= 0) break;
-    got += (uint32_t)r;
-  }
-  return got == n;
-}
-
-bool bookReadPage(uint32_t idx, uint8_t* dst) {
-  if (!g_book) return false;
-  if (!g_book.seek((uint64_t)g_bookDataOffset + (uint64_t)idx * g_bookPageBytes)) return false;
-  uint32_t got = 0;
-  while (got < g_bookPageBytes) {
-    const int n = g_book.read(dst + got, g_bookPageBytes - got);
-    if (n <= 0) break;
-    got += (uint32_t)n;
-  }
-  return got == g_bookPageBytes;
-}
-
-void bookClose() {
-  g_bookDataOffset = TBK_HEADER;
-  g_bookHasCover = false;
-  if (g_book) g_book.close();
-  if (g_bookBusUp) {
-    busRelease();
-    g_bookBusUp = false;
-  }
 }
 
 #endif

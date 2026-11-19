@@ -25,7 +25,8 @@ namespace marks {
 inline constexpr int MAX = 16;
 inline constexpr uint16_t TBK_SPINE = 0xFFFF;  // a .tbk has no chapters
 
-// spine + offset is an EPUB position in CrossPoint's own terms; `page` is what
+// spine + offset is an EPUB position (a visible-codepoint offset, so it
+// survives any change of layout); `page` is what
 // the .tbk reader uses and what an EPUB shows in its list, remembering that a
 // page number is only true for the layout that made it.
 //

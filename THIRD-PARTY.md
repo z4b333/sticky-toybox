@@ -96,43 +96,39 @@ vendoring notes in the CrossPoint Reader project. miniz is public domain
 
 - https://github.com/richgel999/miniz (public domain)
 
-## CrossPoint progress compatibility
+## CrossPoint-derived parts
 
-The EPUB reader reads and writes CrossPoint Reader's on-card progress format
-(`/.crosspoint/epub_<hash>/progress.bin`, and the visible-codepoint offset
-convention inside it) so a card moved between the two firmwares keeps its
-reading position. The format itself was learned from the CrossPoint source
-and reimplemented: the hash, the record layout, the invisible-tag list and
-the offset counting in `toybox-core/src/epubcore.cpp` are Toybox's own code.
+The EPUB reader's position record (spine index plus a visible-codepoint
+offset) and its counting rules were learned from CrossPoint Reader and
+reimplemented: the hashes, the record layout, the invisible-tag list and the
+offset counting in `toybox-core/src/epubcore.cpp` are Toybox's own code. Since
+v2 the position lives in the book's own folder; CrossPoint's directory is
+read only to move a pre-v2 position across.
 
 One piece is **not** reimplemented. `toybox-core/src/tools/epub/epub_entities.h`
 is the HTML named-entity table from CrossPoint's `htmlEntities.cpp` (MIT,
 Copyright (c) 2025 Dave Allie), itself derived from atomic14's
 diy-esp32-epub-reader (MIT), copied verbatim and compiled into the firmware.
-Verbatim on purpose: the offsets the two firmwares exchange count codepoints
-of the rendered text, so an entity one firmware expands and the other does
-not shifts every bookmark after it. Matching the table exactly is the only
-way to match the counting exactly, and a rewritten table that happened to
-differ by one entry would fail silently, on one book, at one paragraph.
+Kept verbatim: saved positions and bookmarks count codepoints of the
+rendered text, so a table that expanded one entity differently would move
+every saved place after it -- silently, on one book, at one paragraph.
 
 - https://github.com/crosspoint-reader/crosspoint-reader (MIT, Copyright (c) 2025 Dave Allie)
 - https://github.com/atomic14/diy-esp32-epub-reader (MIT)
 
-## KOReader sidecar compatibility
+## KOReader / Readest progress sync
 
-The reader also writes KOReader's own local sidecar next to each book
-(`<book>.sdr/metadata.epub.lua`), so a card carried to a KOReader device
-shows the right progress without a sync server or an account. The sidecar is
-a small Lua table; the field names and the file layout were learned from the
-KOReader source (AGPL-3.0), and the writer in
-`toybox-core/src/tools/epub/koreader_sdr.h` is Toybox's own code. No KOReader
-code is compiled into Toybox.
-
-Writing a file another program reads is interoperability, not derivation, so
-the AGPL of the program that also reads it does not reach this firmware --
-the same reasoning that lets an MIT-licensed tool write a `.docx`.
+Reading-position sync speaks the KOReader sync protocol, by default to
+Readest's server, which offers it for e-ink readers. The protocol (endpoints,
+headers, the partial-MD5 document id, the xpointer form, the device sign-in)
+was learned from the KOReader and Readest sources (both AGPL-3.0) and from
+their public behaviour; `toybox-core/src/tools/kosync.h`, `md5_tiny.h` and the
+xpointer code in `epubcore.cpp` are Toybox's own code. No KOReader or Readest
+code is compiled into Toybox. Talking to a server over its protocol is
+interoperability, not derivation.
 
 - https://github.com/koreader/koreader (AGPL-3.0)
+- https://github.com/readest/readest (AGPL-3.0)
 
 ## TJpgDec (lib/tjpgd/)
 

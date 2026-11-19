@@ -40,6 +40,10 @@ namespace homenet {
 
 inline constexpr const char* K_SSID = "hn_ssid";
 inline constexpr const char* K_PASS = "hn_pass";
+// A backup network (owner, 18 Nov): tried when the first is not found or
+// refuses -- a phone hotspot, a second router, the office.
+inline constexpr const char* K_SSID2 = "hn_ssid2";
+inline constexpr const char* K_PASS2 = "hn_pass2";
 inline constexpr const char* K_TZ = "tz";
 
 // 32 bytes of SSID and 63 of WPA2 passphrase, per the standard, plus the end.
@@ -49,30 +53,45 @@ inline constexpr size_t SSID_MAX = 33, PASS_MAX = 64, TZ_MAX = 64;
 // isKey first, everywhere: reading a key that is not there prints an NVS
 // error line, and "no home Wi-Fi yet" is the normal state, not an error.
 
-inline bool haveWifi(Preferences& p) { return p.isKey(K_SSID); }
+inline const char* ssidKey(int slot) { return slot ? K_SSID2 : K_SSID; }
+inline const char* passKey(int slot) { return slot ? K_PASS2 : K_PASS; }
 
-inline void wifiName(Preferences& p, char* out, size_t n) {
+inline bool haveWifiSlot(Preferences& p, int slot) { return p.isKey(ssidKey(slot)); }
+// Either network will do.
+inline bool haveWifi(Preferences& p) { return haveWifiSlot(p, 0) || haveWifiSlot(p, 1); }
+
+inline void wifiName(Preferences& p, char* out, size_t n, int slot = 0) {
   out[0] = 0;
-  if (p.isKey(K_SSID)) p.getString(K_SSID, out, n);
+  if (p.isKey(ssidKey(slot))) p.getString(ssidKey(slot), out, n);
+  // No first network but a backup: the backup is the one to name.
+  if (!out[0] && slot == 0 && p.isKey(K_SSID2)) p.getString(K_SSID2, out, n);
 }
 
 // An empty name is not a network; an open network has an empty password.
-inline bool saveWifi(Preferences& p, const char* ssid, const char* pass) {
+inline bool saveWifi(Preferences& p, const char* ssid, const char* pass, int slot = 0) {
   if (!ssid || !ssid[0] || strlen(ssid) >= SSID_MAX) return false;
   if (!pass) pass = "";
   if (strlen(pass) >= PASS_MAX) return false;
   // WPA2 refuses 1..7 characters; storing one would only fail later, at the
   // router, where the reason is much harder to show.
   if (pass[0] && strlen(pass) < 8) return false;
-  p.putString(K_SSID, ssid);
-  p.putString(K_PASS, pass);
+  p.putString(ssidKey(slot), ssid);
+  p.putString(passKey(slot), pass);
   return true;
 }
 
-inline void forgetWifi(Preferences& p) {
-  if (p.isKey(K_SSID)) p.remove(K_SSID);
-  if (p.isKey(K_PASS)) p.remove(K_PASS);
+inline void forgetWifiSlot(Preferences& p, int slot) {
+  if (p.isKey(ssidKey(slot))) p.remove(ssidKey(slot));
+  if (p.isKey(passKey(slot))) p.remove(passKey(slot));
 }
+// Both networks.
+inline void forgetWifi(Preferences& p) {
+  forgetWifiSlot(p, 0);
+  forgetWifiSlot(p, 1);
+}
+
+// The network the last successful connect() joined, for "through <name>".
+inline char g_joined[SSID_MAX] = {};
 
 inline bool haveTz(Preferences& p) { return p.isKey(K_TZ); }
 
@@ -159,16 +178,18 @@ inline constexpr uint32_t JOIN_MS = 15000, TIME_MS = 10000;
 // The harness decides what the network does; the rest of the path -- the
 // saved keys, the zone, the arithmetic, the clock hook -- is the real code.
 inline Result g_hostNet = Result::Ok;
+// What the BACKUP network does; NoWifiSaved here means "the same as the first".
+inline Result g_hostNet2 = Result::NoWifiSaved;
 inline time_t g_hostUtc = 1787300000;  // 2026-08-21 08:13 UTC
 inline int g_hostJoins = 0, g_hostOffs = 0;
 
-inline Result connect(Preferences& p, uint32_t = JOIN_MS) {
-  g_hostJoins++;
-  if (!haveWifi(p)) return Result::NoWifiSaved;
-  if (g_hostNet == Result::NotFound || g_hostNet == Result::Refused) {
+inline Result joinOne(Preferences& p, int slot) {
+  const Result r = slot && g_hostNet2 != Result::NoWifiSaved ? g_hostNet2 : g_hostNet;
+  if (r == Result::NotFound || r == Result::Refused) {
     g_hostOffs++;  // the device switches the radio off on this path too
-    return g_hostNet;
+    return r;
   }
+  wifiName(p, g_joined, sizeof(g_joined), slot);
   return Result::Ok;
 }
 inline void off() { g_hostOffs++; }
@@ -180,13 +201,12 @@ inline bool fetchUtc(time_t& utc, uint32_t = TIME_MS) {
 
 #else
 
-// Joins the saved network. On anything but Ok the radio is already off.
-inline Result connect(Preferences& p, uint32_t timeoutMs = JOIN_MS) {
-  if (!haveWifi(p)) return Result::NoWifiSaved;
+// Joins one saved network. On anything but Ok the radio is already off.
+inline Result joinOne(Preferences& p, int slot, uint32_t timeoutMs = JOIN_MS) {
   char ssid[SSID_MAX], pass[PASS_MAX];
-  p.getString(K_SSID, ssid, sizeof(ssid));
+  p.getString(ssidKey(slot), ssid, sizeof(ssid));
   pass[0] = 0;
-  if (p.isKey(K_PASS)) p.getString(K_PASS, pass, sizeof(pass));
+  if (p.isKey(passKey(slot))) p.getString(passKey(slot), pass, sizeof(pass));
 
   WiFi.persistent(false);  // ours are in NVS already; no second copy in the driver's
   WiFi.mode(WIFI_STA);
@@ -198,7 +218,10 @@ inline Result connect(Preferences& p, uint32_t timeoutMs = JOIN_MS) {
     delay(100);
     st = WiFi.status();
   }
-  if (st == WL_CONNECTED) return Result::Ok;
+  if (st == WL_CONNECTED) {
+    snprintf(g_joined, sizeof(g_joined), "%s", ssid);
+    return Result::Ok;
+  }
   const Result r = (st == WL_NO_SSID_AVAIL) ? Result::NotFound : Result::Refused;
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
@@ -229,6 +252,23 @@ inline bool fetchUtc(time_t& utc, uint32_t timeoutMs = TIME_MS) {
 }
 
 #endif
+
+// The first network, then the backup if the first is not there or refuses.
+// The answer is the LAST attempt's; on anything but Ok the radio is off.
+inline Result connect(Preferences& p) {
+  if (!haveWifi(p)) return Result::NoWifiSaved;
+#ifdef TOYBOX_HOST
+  g_hostJoins++;
+#endif
+  g_joined[0] = 0;
+  Result r = Result::NotFound;
+  if (haveWifiSlot(p, 0)) {
+    r = joinOne(p, 0);
+    if (r == Result::Ok) return r;
+  }
+  if (haveWifiSlot(p, 1)) r = joinOne(p, 1);
+  return r;
+}
 
 // Join, ask, write the chip, radio off. Blocks for up to JOIN_MS + TIME_MS;
 // the caller paints a "connecting" screen first.

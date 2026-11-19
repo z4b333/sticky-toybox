@@ -7,8 +7,8 @@
 > every screen on a PC -- and because somebody may want to embed the apps
 > elsewhere. Nothing here is kept working on their behalf.
 >
-> Reading CrossPoint's cards is a *card format* promise and is unaffected: see
-> the note at the end of this file.
+> Card compatibility with CrossPoint was dropped in v2 (18 November 2026):
+> see the note at the end of this file.
 
 All apps and screens live in `toybox-core/`, which has no display, touch or
 board code. It draws through two small interfaces. To embed Toybox in another
@@ -87,10 +87,10 @@ If your host's fonts differ a lot, bake them into the harness format
 (`tools/make_fonts_cp.py` shows how) and review the rendered screens before
 flashing.
 
-## Card compatibility with CrossPoint is separate, and stays
+## Card compatibility with CrossPoint ended in v2
 
-Nothing above affects it. Toybox reads and writes reading positions in
-CrossPoint's own format, in CrossPoint's own directory, and shares covers with
-it -- so one microSD card can move between the two firmwares and a book opens
-where it was left. That is a promise about bytes on a card, not about shared
-code, and it is unaffected by this page.
+Until v2 Toybox kept its reading positions in CrossPoint's own directory and
+format and traded covers with it, so one card could move between the two
+firmwares. v2 (18 November 2026) keeps each position in the book's own folder
+and shares positions with Readest and KOReader through progress sync instead.
+Old positions are moved across the first time each book is opened.

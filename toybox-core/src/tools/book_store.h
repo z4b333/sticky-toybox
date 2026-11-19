@@ -6,6 +6,8 @@
 //       <8 hex>.<part>.g2    a prepared picture, four greys   (epub_art.h)
 //       <8 hex>.<part>.b1    the same, one bit
 //       marks.tbm            bookmarks (bookmarks.h)
+//       position.bin         where the reader stopped (tool_epub.h)
+//       place.txt            the shelf's note of it: chapter name, page
 //
 // Named after the book so a person looking at the card can tell which folder
 // is whose, and clear one book by deleting one folder. The four hex digits
@@ -14,8 +16,11 @@
 // hidden /.toybox, so neither the shelf nor a phone's file list shows it, and
 // it works for a book anywhere on the card, not only under /books.
 //
-// The reading position is NOT here: it lives in CrossPoint's own folder
-// (/.crosspoint/epub_<hash>/progress.bin) because CrossPoint reads it there.
+// The reading position joined them in v2. Before, it lived in CrossPoint's
+// folders (/.crosspoint/epub_<hash>/progress.bin and toybox.pos) so a card
+// could move between the two firmwares; that is no longer a goal (owner,
+// 18 Nov 2026), and an old position moves here the first time its book is
+// opened.
 //
 // Before v2 these were spread by kind -- /.toybox/covers(2)/<hash>.tbc,
 // /.toybox/art2/<hash>/..., /.toybox/marks/<hash>.tbm -- under names nobody

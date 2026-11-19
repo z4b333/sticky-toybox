@@ -602,7 +602,10 @@ void Epd::buildGreyPlane(GreySource& src, uint8_t* dst, int which) {
         bool bit;
         switch (which) {
           case 0: bit = (lv == 3); break;             // the B/W pass: white
-          case 1: bit = (lv == 1); break;             // BW plane: dark grey
+          // BW plane: dark grey, per the row names below. Swapping this
+          // (11 for light grey) was tried on 19 Nov 2026 and put the mids
+          // the wrong way round on an SSD1677: the names are right.
+          case 1: bit = (lv == 1); break;
           default: bit = (lv == 1 || lv == 2); break; // RED plane: both mids
         }
         if (!bit) continue;
@@ -757,11 +760,12 @@ namespace {
 constexpr uint32_t S2_TIMEOUT = 30000;  // Seeed's busy timeout for this chip
 constexpr int S2_ROW = PANEL_W / 4;     // 200 bytes a panel row at two bits a pixel
 constexpr int S2_ROWS_PER_WRITE = 5;    // 1,000 bytes a transaction
-// Toybox's grey levels (0 black .. 3 white) as the SSD2677 codes them. Seeed's
-// reference swaps the middle two when it maps a 4-bit level, so a dark grey is
-// 10 and a light grey 01. If the two mid-greys come out the wrong way round on
-// the glass, this is the line to change: {0, 1, 2, 3}.
-constexpr uint8_t S2_GREY[4] = {0x0, 0x2, 0x1, 0x3};
+// Toybox's grey levels (0 black .. 3 white) as the SSD2677 codes them: in
+// order. Seeed's reference swaps the middle two when it maps a 4-bit level, and
+// this table used to follow it ({0, 2, 1, 3}); on glass the grey test pattern
+// then read black, light, dark, white, and every grey picture came out
+// posterised with halos. Photographed on an SSD2677 unit, 19 Nov 2026.
+constexpr uint8_t S2_GREY[4] = {0x0, 0x1, 0x2, 0x3};
 
 // Eight 1-bit pixels to eight 2-bit ones: each set bit (white) becomes 11.
 inline void s2Widen(uint8_t mono, uint8_t* out) {

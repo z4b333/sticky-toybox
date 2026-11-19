@@ -30,11 +30,11 @@ inline constexpr Group GROUPS[] = {
     // answered the same way. (STUDY's drawer is full: a fifth tile there
     // would push the recently-read covers off the panel.)
     {"UTILITY", {{false, 0}, {false, 1}, {false, 3}, {false, 4}, {false, 2}, {false, 11}}, 6},
-    // The readers first: the drawer was drawn around "the thing you were
-    // reading on top", and the readers are that thing. BOOKS is the .tbk
-    // shelf, EPUB the ebook shelf. Four apps on top keeps the bottom of the
+    // The reader first: the drawer was drawn around "the thing you were
+    // reading on top". (Index 9 was the .tbk manga reader, removed in v2;
+    // the number is not reused.) Few apps on top keeps the bottom of the
     // drawer free for the recently-read covers.
-    {"STUDY", {{false, 9}, {false, 10}, {false, 5}, {false, 6}}, 4},
+    {"STUDY", {{false, 10}, {false, 5}, {false, 6}}, 3},
 };
 inline constexpr int NGROUPS = (int)(sizeof(GROUPS) / sizeof(GROUPS[0]));
 

@@ -70,7 +70,12 @@ inline void drawTopBar(ToolsCanvas& c, const char* title, bool withHelp = false,
     sz = TS_SMALL;
     sp = 1;
   }
-  c.textTrackedCentered(w / 2, (TOPBAR_H - c.textHeight(sz)) / 2, title, sz, true, false, sp);
+  // Still too wide (a long series name): cut with an ellipsis inside its
+  // room rather than run over the back label.
+  if (c.textTrackedWidth(title, sz, false, sp) > room)
+    c.textClipped(BACK_W + 4, (TOPBAR_H - c.textHeight(sz)) / 2, room, title, sz, true, false);
+  else
+    c.textTrackedCentered(w / 2, (TOPBAR_H - c.textHeight(sz)) / 2, title, sz, true, false, sp);
   // No ornaments beside the title. There used to be a diamond either side, but
   // they squeezed out on long titles, so some bars had them and some did not --
   // a uniform nothing beats an occasional something.

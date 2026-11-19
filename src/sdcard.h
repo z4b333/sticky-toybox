@@ -43,59 +43,11 @@ Report probe();
 int listTbi(char names[][40], int max);
 bool takeTbi(const char* name, const char* destPath);
 
-// Books. A .tbk (tools/make_tbk.py) is a 64-byte header and then fixed-size
-// pages in the framebuffer's own layout; page N is a seek and a 48,000-byte
-// read, nothing else. Unlike everything above, an open book HOLDS the bus:
-// the card stays powered and mounted between page turns, with panel refreshes
-// interleaved -- which is exactly the sharing experiment the reader exists to
-// run. bookClose() powers the card down and re-initialises the panel, so the
-// next paint after it must be full.
-struct BookMeta {
-  // Absolute, like the EPUB side: with series folders two books can be called
-  // "vol01.tbk" and only the whole path tells them apart. The reading
-  // position and the cover are both keyed off this string, so books read
-  // before folders existed start again once -- worth it for not silently
-  // showing one book's page inside another.
-  char file[128];
-  char title[41];
-  uint32_t pages = 0;
-  bool rtl = false;
-  uint8_t bpp = 1;       // 1 = B/W (48,000-byte pages), 2 = grey (96,000)
-  // A cover made on the PC and carried inside the file (flags bit 1). It
-  // beats page 0, which is only ever the cover by accident, and unlike a
-  // cover kept beside the book it survives the book being renamed.
-  bool cover = false;
-  // Where page 0 begins. 64 for every file written before covers existed,
-  // 64 + 48,000 for one carrying a cover. The field was always in the format;
-  // it just used to be assumed rather than read.
-  uint32_t dataOffset = 64;
-};
-// The 64-byte header, decided in one place so both sides of the card agree
-// and the harness can test the rules a PC-side converter has to match.
-// False means the file is not a .tbk this firmware will open.
-bool parseTbkBytes(const uint8_t h[64], BookMeta& out);
-
-// Books of one kind inside one directory. `dir` is "/books" for the top
-// level, or "/books/<series>" inside a folder.
-int bookList(BookMeta* out, int max, const char* dir);  // -1: no card
-// The module remembers the open book's page size (48,000 or 96,000 bytes),
-// so a read is just an index and a buffer big enough for either.
-bool bookOpen(const char* file);
-bool bookReadPage(uint32_t idx, uint8_t* dst);
-// A slice of a page, for anything that would rather not hold a whole one. A
-// grey page is 96,000 bytes and the panel reads it three times in order, so
-// it streams through this instead of sitting in the heap.
-bool bookReadPageSlice(uint32_t idx, uint32_t off, uint8_t* dst, uint32_t n);
-// The embedded cover, 48,000 bytes of 480x800 1-bit, valid while the book is
-// open. False when the file carries none.
-bool bookReadCover(uint8_t* dst);
-void bookClose();
-
-// EPUBs. Same bus discipline as .tbk books: listing borrows the bus for one
+// EPUBs. Listing borrows the bus for one
 // call, an open EPUB holds it for the whole reading session, and epubClose()
 // powers the card down and re-initialises the panel. The file field is the
-// book's ABSOLUTE card path ("/books/x.epub") because that exact string is
-// what CrossPoint hashes to find its progress directory -- see epubcore.h.
+// book's ABSOLUTE card path ("/books/x.epub") because that exact string names
+// the book's folder (book_store.h) and the pre-v2 position folders.
 struct EpubMeta {
   // 128, not 64: real release filenames run long ("Classroom of the Elite
   // Volume 01 Seven Seas..." is 60 bytes WITH the /books/ prefix), and a
@@ -103,6 +55,7 @@ struct EpubMeta {
   char file[128];
   char title[41];
   bool cont = false;  // a progress file exists for it
+  bool synced = false;  // synced with Readest/KOReader at least once (book folder's "synced")
   // Where the reader stopped, in the book's own terms -- read from the small
   // sidecar Toybox writes beside the position when it closes a book. It is
   // written rather than derived because neither number can be worked out
@@ -112,8 +65,8 @@ struct EpubMeta {
   // contents can say which chapter that is, and the reader is holding it at
   // exactly the moment it closes.
   //
-  // An empty name means no usable sidecar: a position left by CrossPoint, or
-  // by a Toybox older than this. The shelf says nothing rather than guessing.
+  // An empty name means no chapter note: a position written by a Toybox older
+  // than the note. The shelf says nothing rather than guessing.
   //
   // A NAME and not a number, because the number cannot be made true: the
   // contents list of a real release opens with "Cover", so its second row is
@@ -140,7 +93,7 @@ struct ShelfFolder {
 };
 int shelfFolders(ShelfFolder* out, int max, const char* ext);
 
-// Small sidecar files (CrossPoint's progress.bin), valid only while an EPUB
+// Small files the reader keeps about a book, valid only while an EPUB
 // session holds the bus. writeFileAtomic makes the directories, writes a
 // .tmp, and renames over -- an interrupted write leaves the old file whole.
 int readFileAt(const char* path, void* dst, int max);
@@ -241,6 +194,9 @@ void hostPutCardFile(const char* path, const void* data, int n);
 // this here". Bypasses the bus rule the real calls now obey.
 void hostPlantSide(const char* path, const void* data, int n);
 void hostSetCrossRoots(bool on);  // the fake card grows a /Read shelf
+void hostAddBook(const char* path);  // one more book (the fixture zip) on the fake card
+void hostClearBooks();
+bool hostHasBook(const char* path);
 void hostDumpSides();
 int hostReadSide(const char* path, void* dst, int max);
 int hostCardFileSize(const char* path);
@@ -249,6 +205,8 @@ int hostCardFileSize(const char* path);
 bool hostCardMove(const char* from, const char* to);
 bool hostCardRemove(const char* path);
 bool hostCardHasPrefix(const char* prefix);
+// Every file under `prefix`, from both stores; how many went.
+int hostCardRemovePrefix(const char* prefix);
 // What readFileAt has handed back since the last reset, so a guard can measure
 // what opening something costs the card.
 uint32_t hostBytesRead();

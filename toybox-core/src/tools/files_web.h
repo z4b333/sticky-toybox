@@ -50,7 +50,7 @@ class FilesServer {
   void loop() {
     _ticks++;
     if (_ticks >= 1) _portal.hostSetClient(true);
-    if (_ticks == 3) hostUpload("books", "ships-log.tbk", 640000);
+    if (_ticks == 3) hostUpload("books", "ships-log.epub", 640000);
     if (_busy && _ticks >= 5) settle();
   }
 
@@ -318,7 +318,7 @@ select{font:inherit;padding:8px;border-radius:8px;border:1px solid #bbb;backgrou
       <option value="wallpapers">/wallpapers</option>
       <option value="root">card root</option>
     </select>
-    <span class="sz">.epub &middot; .tbk &middot; .tbi</span>
+    <span class="sz">.epub &middot; .tbi</span>
   </div>
   <div id="drop">Choose books or drop them here</div>
   <input type="file" id="pick" multiple hidden>
@@ -372,11 +372,11 @@ async function remove(p){
 async function rename(p){
   if(busy)return;
   const bare=p.split('/').pop();
-  // The device finds a book's saved page by its file name -- an epub through
-  // the hash of its path, a tbk through the hash of its name -- so a rename
-  // starts that book from the beginning again. The warning belongs here, in
+  // The device finds a book's saved page by its file name (its folder is
+  // named after the book), so a rename starts that book from the beginning
+  // again. The warning belongs here, in
   // the same dialog as the decision, not in a paragraph nobody reads.
-  const book=/\.(epub|tbk)$/i.test(bare);
+  const book=/\.epub$/i.test(bare);
   const msg=book
     ?'New name\n\nHeads up: the device finds your place by the file name, so renaming this book forgets which page you were on.'
     :'New name';

@@ -27,6 +27,7 @@
 #pragma once
 #include <Arduino.h>
 #include <Preferences.h>
+#include <ctype.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -347,6 +348,95 @@ inline Poll takeToken(Preferences& p, int status, const char* body) {
   return Poll::Error;
 }
 
+// --- Readest's library ------------------------------------------------------
+// The EPUBs the owner has uploaded to Readest's cloud, as Readest offers them
+// to e-ink readers: GET /books?page=&per_page=&q= (most recently read first;
+// per_page + 1 rows come back, the extra one meaning "there is more"), then
+// GET /books/<hash> for a short-lived download link. The hash is the same
+// partial MD5 docHash() makes, so a downloaded book syncs from its first open.
+
+struct LibBook {
+  char id[33] = {};
+  char title[96] = {};
+  char author[64] = {};
+};
+inline constexpr int LIB_PER_PAGE = 8;  // one shelf page, with one row spare
+inline constexpr const char* LIB_DIR = "/books/Readest";
+
+// One "items" array into `out`. Returns how many; `more` says a next page exists.
+inline int parseLibrary(const char* body, LibBook* out, int max, bool& more) {
+  more = false;
+  const char* p = body ? strstr(body, "\"items\"") : nullptr;
+  if (!p) return 0;
+  p = strchr(p, '[');
+  if (!p) return 0;
+  p++;
+  int n = 0, seen = 0;
+  char obj[640];
+  while (*p) {
+    while (*p && *p != '{' && *p != ']') p++;
+    if (*p != '{') break;
+    // The object, by brace depth, strings respected.
+    const char* q = p;
+    int depth = 0;
+    bool str = false;
+    for (; *q; q++) {
+      if (str) {
+        if (*q == '\\' && q[1]) q++;
+        else if (*q == '"') str = false;
+      } else if (*q == '"') str = true;
+      else if (*q == '{') depth++;
+      else if (*q == '}' && --depth == 0) break;
+    }
+    if (!*q) break;
+    const int len = (int)(q - p + 1);
+    seen++;
+    if (n < max && len < (int)sizeof(obj)) {
+      memcpy(obj, p, (size_t)len);
+      obj[len] = 0;
+      LibBook& b = out[n];
+      b = LibBook();
+      jsonField(obj, "id", b.id, sizeof(b.id));
+      jsonField(obj, "title", b.title, sizeof(b.title));
+      jsonField(obj, "author", b.author, sizeof(b.author));
+      if (b.id[0] && b.title[0]) n++;
+    }
+    p = q + 1;
+  }
+  more = seen > max;
+  return n;
+}
+
+// The file a library book becomes on the card: /books/Readest/<title>.epub,
+// the title made safe for FAT (no \ / : * ? " < > | or control characters,
+// no trailing dot or space) and cut on a UTF-8 boundary.
+inline void libPath(const LibBook& b, char* out, int cap) {
+  char name[100];
+  int n = 0;
+  for (const char* s = b.title; *s && n < (int)sizeof(name) - 1; s++) {
+    const unsigned char c = (unsigned char)*s;
+    name[n++] = (c < 0x20 || strchr("\\/:*?\"<>|", c)) ? '_' : (char)c;
+  }
+  name[n] = 0;
+  while (n > 0 && ((unsigned char)name[n - 1] & 0xC0) == 0x80) n--;  // a cut character
+  if (n > 0 && ((unsigned char)name[n - 1] & 0xC0) == 0xC0) n--;
+  name[n] = 0;
+  while (n > 0 && (name[n - 1] == '.' || name[n - 1] == ' ')) name[--n] = 0;
+  if (!n) snprintf(name, sizeof(name), "%s", b.id);
+  snprintf(out, (size_t)cap, "%s/%s.epub", LIB_DIR, name);
+}
+
+// Where a download's bytes go, and whether to carry on: the reader supplies
+// one that streams to the card and paints a progress bar.
+struct Sink {
+  virtual bool open() = 0;
+  virtual bool write(const uint8_t* d, uint32_t n) = 0;
+  virtual bool close(bool keep) = 0;
+  // false = the person cancelled
+  virtual bool progress(uint32_t got, uint32_t total) = 0;
+  virtual ~Sink() {}
+};
+
 // --- talking to the server ---------------------------------------------------
 
 enum class Result : uint8_t {
@@ -387,6 +477,86 @@ struct HostServer {
   bool expire = false, codeFail = false;
 };
 inline HostServer g_server;
+
+// The library: n books named "Book NN", id = md5 of the title.
+inline int g_hostLibBooks = 11;
+inline Result g_hostLibFail = Result::Ok;
+inline std::string g_hostLastQuery;
+inline uint32_t g_hostBookBytes = 50000;
+
+inline Result listLibrary(Preferences& p, int page, const char* q, LibBook* out, int max,
+                          int& n, bool& more) {
+  n = 0;
+  more = false;
+  if (!haveAccount(p)) return Result::NoAccount;
+  if (g_hostLibFail != Result::Ok) return g_hostLibFail;
+  g_hostLastQuery = q ? q : "";
+  std::string body = "{\"items\":[";
+  int listed = 0;
+  bool first = true;
+  for (int i = 0; i < g_hostLibBooks; i++) {
+    char title[48];
+    snprintf(title, sizeof(title), "Book %02d%s", i + 1, i == 2 ? ": A/B \\\"quoted\\\"" : "");
+    if (q && *q && !strstr(title, q)) continue;
+    if (listed++ < (page - 1) * max) continue;
+    if (listed > page * max + 1) break;
+    char id[33];
+    md5t::hex(title, id);
+    if (!first) body += ",";
+    first = false;
+    body += std::string("{\"id\":\"") + id + "\",\"title\":\"" + title +
+            "\",\"author\":\"Author " + std::to_string(i + 1) + "\",\"url\":\"x\"}";
+  }
+  body += "]}";
+  n = parseLibrary(body.c_str(), out, max, more);
+  return Result::Ok;
+}
+
+// The "download": g_hostBookBytes of a pattern, 4 KB a step.
+class Download {
+ public:
+  Result begin(Preferences& p, const LibBook& b, Sink& sink) {
+    (void)b;
+    _sink = nullptr;
+    got = total = 0;
+    if (!haveAccount(p)) return Result::NoAccount;
+    if (g_hostLibFail != Result::Ok) return g_hostLibFail;
+    if (!sink.open()) return Result::ServerError;
+    _sink = &sink;
+    total = g_hostBookBytes;
+    return Result::Ok;
+  }
+  // True when finished; `r` is then the outcome.
+  bool step(Result& r) {
+    if (!_sink) {
+      r = Result::ServerError;
+      return true;
+    }
+    uint8_t buf[4096];
+    const uint32_t n = total - got < sizeof(buf) ? total - got : sizeof(buf);
+    for (uint32_t i = 0; i < n; i++) buf[i] = (uint8_t)(got + i);
+    if (!_sink->write(buf, n)) {
+      _sink->close(false);
+      _sink = nullptr;
+      r = Result::ServerError;
+      return true;
+    }
+    got += n;
+    _sink->progress(got, total);
+    if (got < total) return false;
+    r = _sink->close(true) ? Result::Ok : Result::ServerError;
+    _sink = nullptr;
+    return true;
+  }
+  void cancel() {
+    if (_sink) _sink->close(false);
+    _sink = nullptr;
+  }
+  uint32_t got = 0, total = 0;
+
+ private:
+  Sink* _sink = nullptr;
+};
 
 inline Result requestCode(DeviceCode& c) {
   g_server.codes++;
@@ -527,6 +697,142 @@ inline Poll pollCode(Preferences& p, const DeviceCode& c) {
   if (code <= 0) return Poll::Pending;  // a dropped poll is not a refusal: ask again
   return takeToken(p, code, reply.c_str());
 }
+
+inline void urlEncode(const char* in, String& out) {
+  static const char* hx = "0123456789ABCDEF";
+  for (const unsigned char* s = (const unsigned char*)in; *s; s++) {
+    if (isalnum(*s) || *s == '-' || *s == '_' || *s == '.' || *s == '~')
+      out += (char)*s;
+    else {
+      out += '%';
+      out += hx[*s >> 4];
+      out += hx[*s & 15];
+    }
+  }
+}
+
+inline Result listLibrary(Preferences& p, int page, const char* q, LibBook* out, int max,
+                          int& n, bool& more) {
+  n = 0;
+  more = false;
+  String path = "/books?page=" + String(page) + "&per_page=" + String(max);
+  if (q && *q) {
+    path += "&q=";
+    urlEncode(q, path);
+  }
+  String reply;
+  const Result r = request(p, "GET", path.c_str(), nullptr, &reply);
+  if (r != Result::Ok) return r;
+  n = parseLibrary(reply.c_str(), out, max, more);
+  return Result::Ok;
+}
+
+// The link first (Readest answers with a signed URL on its storage), then
+// the bytes, a step at a time so the reader can paint progress and hear a
+// Cancel between steps: a book is megabytes and the heap is not.
+class Download {
+ public:
+  Result begin(Preferences& p, const LibBook& b, Sink& sink) {
+    end();
+    got = total = 0;
+    String reply;
+    const Result r = request(p, "GET", (String("/books/") + b.id).c_str(), nullptr, &reply);
+    if (r != Result::Ok) return r;
+    static char url[1024];  // signed URLs are long; static, off the stack
+    if (!jsonField(reply.c_str(), "downloadUrl", url, sizeof(url))) return Result::ServerError;
+    if (heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT) < 24000)
+      return Result::LowMemory;
+    _secure = new NetworkClientSecure();
+    _http = new HTTPClient();
+    _secure->setCACertBundle(kosync_bundle_start, kosync_bundle_end - kosync_bundle_start);
+    _http->setTimeout(15000);
+    _http->setConnectTimeout(10000);
+    _http->setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    if (!_http->begin(*_secure, url)) {
+      end();
+      return Result::NetworkError;
+    }
+    const int code = _http->GET();
+    if (code != 200) {
+      end();
+      return code <= 0 ? Result::NetworkError : Result::ServerError;
+    }
+    const int size = _http->getSize();  // -1 when the server does not say
+    total = size > 0 ? (uint32_t)size : 0;
+    if (!sink.open()) {
+      end();
+      return Result::ServerError;
+    }
+    _sink = &sink;
+    _idle = millis();
+    return Result::Ok;
+  }
+
+  // Reads for up to ~150 ms. True when finished; `r` is then the outcome.
+  bool step(Result& r) {
+    static uint8_t buf[4096];
+    if (!_sink || !_http) {
+      r = Result::ServerError;
+      return true;
+    }
+    NetworkClient* s = _http->getStreamPtr();
+    const uint32_t t0 = millis();
+    while (millis() - t0 < 150) {
+      if (total && got >= total) break;
+      const int avail = s ? s->available() : 0;
+      if (avail <= 0) {
+        if (!_http->connected()) break;
+        if (millis() - _idle > 15000) return fail(r, Result::NetworkError);  // gone quiet
+        delay(2);
+        continue;
+      }
+      const int n = s->readBytes(buf, avail < (int)sizeof(buf) ? avail : (int)sizeof(buf));
+      if (n <= 0) continue;
+      _idle = millis();
+      if (!_sink->write(buf, (uint32_t)n)) return fail(r, Result::ServerError);  // card full
+      got += (uint32_t)n;
+    }
+    _sink->progress(got, total);
+    const bool finished = (total && got >= total) || (!_http->connected() && (!s || s->available() <= 0));
+    if (!finished) return false;
+    if ((total && got != total) || got == 0) return fail(r, Result::NetworkError);
+    Sink* sk = _sink;
+    _sink = nullptr;
+    end();
+    r = sk->close(true) ? Result::Ok : Result::ServerError;
+    return true;
+  }
+
+  void cancel() {
+    if (_sink) _sink->close(false);
+    _sink = nullptr;
+    end();
+  }
+  ~Download() { cancel(); }
+  uint32_t got = 0, total = 0;
+
+ private:
+  bool fail(Result& r, Result why) {
+    if (_sink) _sink->close(false);
+    _sink = nullptr;
+    end();
+    r = why;
+    return true;
+  }
+  void end() {
+    if (_http) {
+      _http->end();
+      delete _http;
+      _http = nullptr;
+    }
+    delete _secure;
+    _secure = nullptr;
+  }
+  NetworkClientSecure* _secure = nullptr;
+  HTTPClient* _http = nullptr;
+  Sink* _sink = nullptr;
+  uint32_t _idle = 0;
+};
 
 #endif
 
