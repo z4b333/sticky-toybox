@@ -17,6 +17,7 @@
 #include "gfx.h"
 #include "cardfonts.h"
 #include "sdcard.h"
+#include "ota.h"
 #include "sensors.h"
 #include "service.h"
 #include "sticky_host.h"
@@ -478,6 +479,11 @@ void setup() {
   pinMode(PIN_BTN_OK, INPUT_PULLUP);
 
   prefs.begin("toybox", false);
+  // A build that arrived over Wi-Fi is on trial until it gets as far as its
+  // second pass through loop(). This counts the boot and, after three that
+  // never got there, goes back to the slot it came from. First thing after
+  // NVS, before anything a broken build could crash in.
+  otadev::bootGuard(prefs);
   buzzer::begin();
   // Volume if this device has ever been told one, otherwise whatever the
   // on/off switch was set to before volume existed.
@@ -700,6 +706,12 @@ void setup() {
 }
 
 void loop() {
+  // setup() finished and one full pass ran: the build works. Not a timer --
+  // a device woken for ten seconds and put back to sleep is a working build,
+  // and a timer would count that wake as a failure.
+  static uint8_t passes = 0;
+  if (passes < 2 && ++passes == 2) otadev::confirm(prefs);
+
   TouchEvent ev;
   touch.poll(ev);
   if (ev.tapped || ev.swiped) noteActivity();

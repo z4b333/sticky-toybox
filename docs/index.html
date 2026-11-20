@@ -389,10 +389,40 @@
             </esp-web-install-button>
           </div>
           <p class="hint"><b>UPDATE</b> is the one to use for every build after
-          your first. <b>FIRST&nbsp;INSTALL</b> adds the bootloader and partition
-          table &mdash; needed once on a new device, or to rescue one that will
-          not boot.</p>
+          your first. <b>FIRST&nbsp;INSTALL</b> also writes the bootloader
+          &mdash; needed once on a new device, or to rescue one that will not
+          boot.</p>
+          <p class="warn"><b>Moving from Toybox 1.x?</b> Use UPDATE once from
+          this page with your Sticky plugged in. Your notes, decks and settings
+          stay. Leave &ldquo;Erase device&rdquo; unticked, and tick your
+          language packs again. After this, updates come over Wi-Fi.</p>
         </div>
+      </div>
+
+      <!-- Updates over Wi-Fi (v2). The browser page cannot talk to the Sticky
+           on the home network itself -- an https page is not allowed to fetch
+           from http://sticky.local -- so this only explains, and links. The
+           Sticky fetches from this site; the computer route is a page the
+           Sticky serves. Plain navigation to http:// is allowed. -->
+      <div class="ota" id="ota">
+        <h3>After that: updates over Wi-Fi</h3>
+        <p>Once Toybox 2 is on your Sticky, you don't need the cable again.
+        It needs a home Wi-Fi saved once (<b>Settings &rsaquo; Clock</b>,
+        from your phone).</p>
+        <ol class="steps">
+          <li><b>From this site.</b> On the Sticky: <b>Settings &rsaquo;
+          Update &amp; about &rsaquo; CHECK FOR UPDATE</b>. It downloads the
+          new version, checks it, and restarts into it.</li>
+          <li><b>From a computer.</b> Press <b>FROM A COMPUTER</b> on the
+          Sticky, open <a href="http://sticky.local">sticky.local</a> (or the
+          address the screen shows) on the same Wi-Fi, type the six-digit code
+          from the screen, and send it
+          <a href="firmware/toybox-app.bin" download>toybox-app.bin</a>.</li>
+        </ol>
+        <p class="hint">Either way your notes, books and settings stay. A new
+        version that can't start goes back to the old one by itself, and says
+        so under <b>Update &amp; about</b>. Keep the battery above 30&nbsp;% or
+        the Sticky plugged in.</p>
       </div>
 
       <!-- What each build changed. Short entries, newest first, five deep:
@@ -669,10 +699,18 @@
   // padded the gaps with 0xFF, which quietly erased NVS on every install --
   // that is exactly what these part-wise writes exist to stop.
   //
-  // UPDATE writes the app alone (plus any ticked font packs). FIRST INSTALL
-  // also writes the bootloader, the partition table and the OTA-data block --
-  // needed once on a blank device, or to recover one.
-  var OFFSETS = { zh: 0x410000, ko: 0x840000, ja: 0xa90000 };
+  // v2 moved everything BETWEEN those two (partitions_toybox.csv): two app
+  // slots for updates over Wi-Fi, the CJK base set, the language packs. So
+  // UPDATE now writes the partition table, the OTA-data block, the app and
+  // the base font every time -- which is what carries a v1 device across, and
+  // is harmless on a v2 one. NVS and LittleFS are still never written, so a
+  // v1 Sticky keeps its notes and settings. FIRST INSTALL adds the bootloader.
+  //
+  // A language pack that is not ticked gets its first 4 KB blanked: after the
+  // move, a pack partition can start in the middle of an old v1 pack, and a
+  // blank head is the unambiguous "not installed" (the magic check fails).
+  var OFFSETS = { zh: 0x710000, ko: 0x9e0000, ja: 0xac0000 };
+  var BASE_FONT = 0x5f0000;
   var urls = { update: null, install: null };
 
   // Appended to every firmware URL. A new build has a new commit, so it has a
@@ -684,15 +722,14 @@
 
   function makeManifest(kind) {
     var parts = [];
-    if (kind === 'install') {
-      parts.push({ path: fw('toybox-boot.bin'), offset: 0x0 });
-      parts.push({ path: fw('toybox-parts.bin'), offset: 0x8000 });
-      parts.push({ path: fw('toybox-ota0.bin'), offset: 0xe000 });
-    }
+    if (kind === 'install') parts.push({ path: fw('toybox-boot.bin'), offset: 0x0 });
+    parts.push({ path: fw('toybox-parts.bin'), offset: 0x8000 });
+    parts.push({ path: fw('toybox-ota0.bin'), offset: 0xe000 });
     parts.push({ path: fw('toybox-app.bin'), offset: 0x10000 });
-    document.querySelectorAll('input[name="pack"]:checked').forEach(function (c) {
+    parts.push({ path: fw('base_font.tfp'), offset: BASE_FONT });
+    document.querySelectorAll('input[name="pack"]').forEach(function (c) {
       parts.push({
-        path: new URL('firmware/' + c.value + '_full.tfp', location.href).href,
+        path: c.checked ? fw(c.value + '_full.tfp') : fw('blank4k.bin'),
         offset: OFFSETS[c.value]
       });
     });

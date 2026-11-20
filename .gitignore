@@ -4,6 +4,7 @@
 test/host/preview*
 test/host/test_logic
 test/host/kosync_test
+test/host/ota_test
 test/host/*.pgm
 __pycache__/
 

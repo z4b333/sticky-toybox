@@ -26,7 +26,7 @@ enum Action : int {
   ACT_LOCK,
   ACT_FILES,
   ACT_SOUND,
-  ACT_RESET,
+  ACT_UPDATE,  // "Update & about": the version, updates over Wi-Fi, and reset stats
   ACT_CLOCK,
   ACT_FONT,
   ACT_COUNT
@@ -89,6 +89,19 @@ inline TRect clockDoneRect() { return filesDoneRect(); }
 // Shown only once a home Wi-Fi and a time zone are saved: the clock without a
 // phone. Above DONE, under the last line of the pairing text.
 inline TRect clockNetRect() { return TRect{16, 620, SCREEN_W - 32, 60}; }
+
+// The update page (Settings > Update & about). The version at the top, two ways
+// to update, then "reset stats" -- which moved here from the main page to make
+// room, and is still two taps. Result and progress screens put their buttons
+// where every other page in settings does: DONE at the bottom, the one thing to
+// do above it.
+inline TRect updCheckRect() { return TRect{16, 288, SCREEN_W - 32, 60}; }
+inline TRect updLanRect() { return TRect{16, 408, SCREEN_W - 32, 60}; }
+inline TRect updResetRect() { return TRect{16, 588, SCREEN_W - 32, 60}; }
+inline TRect updInstallRect() { return TRect{16, 620, SCREEN_W - 32, 60}; }
+inline TRect updDoneRect() { return filesDoneRect(); }
+inline constexpr int UPD_QR = 200, UPD_QR_X = (SCREEN_W - UPD_QR) / 2, UPD_QR_Y = 214;
+inline constexpr int UPD_BAR_X = 48, UPD_BAR_Y = 340, UPD_BAR_W = SCREEN_W - 96, UPD_BAR_H = 28;
 
 // The wallpaper and lock-picture pages: what is on the device now -- shown
 // as the picture itself, a 1:5 miniature, beside its name and its REMOVE --
@@ -197,7 +210,7 @@ class SettingsScreen {
   // The files page runs a web server, so settings needs loop time -- the only
   // page here that does. Returns true when the screen wants repainting after
   // the tick (the card was let go and the summary has changed).
-  bool wantsTick() const { return _page == 4 || _page == 6; }
+  bool wantsTick() const { return _page == 4 || _page == 6 || _page == 9; }
   bool tick(ToolsHost& host);
 
 #ifdef TOYBOX_HOST
@@ -210,6 +223,7 @@ class SettingsScreen {
   fweb::FilesServer& hostFiles() { return _files; }
   cweb::ClockServer& hostClock() { return _clock; }
   uint8_t hostNetStage() const { return _netStage; }
+  uint8_t hostUpStage() const { return _upStage; }
 #endif
 
  private:
@@ -229,6 +243,11 @@ class SettingsScreen {
   bool tapClock(ToolsHost& host, int x, int y);
   bool netReady(ToolsHost& host);
   void leaveClock();
+  void renderUpdate(ToolsHost& host, ToolsCanvas& c);
+  bool tapUpdate(ToolsHost& host, int x, int y);
+  bool tickUpdate(ToolsHost& host);
+  void leaveUpdate(ToolsHost* host);
+  static void onProgress(void* ctx, uint8_t stage, uint32_t done, uint32_t total);
   void renderFontWho(ToolsHost& host, ToolsCanvas& c);
   bool tapFontWho(ToolsHost& host, int x, int y);
   void renderFont(ToolsHost& host, ToolsCanvas& c);
@@ -245,7 +264,8 @@ class SettingsScreen {
   char _coverNote[96] = {};
   // 0 = settings, 1 = lock, 2 = wallpaper, 3 = apps, 4 = files,
   // 5 = the lock screen's picture, off the card, 6 = the clock,
-  // 7 = which text to dress, 8 = the families to dress it in
+  // 7 = which text to dress, 8 = the families to dress it in,
+  // 9 = update & about
   uint8_t _page = 0;
   lock::Config _lock;
   // The card's offerings, read once on entering the page: the card is powered
@@ -279,4 +299,17 @@ class SettingsScreen {
   uint8_t _netStage = 0;
   homenet::Result _netResult = homenet::Result::Ok;
   char _netName[homenet::SSID_MAX] = {};
+  // The update page: 0 = the page, 1 = checking (the next tick does the
+  // blocking work), 2 = what the check found, 3 = installing (the tick blocks,
+  // repainting the bar as bytes land), 4 = installed or not, 5 = the computer
+  // page, 6 = joining the home Wi-Fi for it (the next tick).
+  uint8_t _upStage = 0;
+  ota::Err _upErr = ota::Err::Ok;
+  ota::Check _upCheck;
+  uint8_t _upPart = 0;  // which file the bar is filling: 0 app, 1 fonts
+  uint32_t _upDone = 0, _upTotal = 0, _upPainted = 0;
+  uint8_t _lanSeen = 0xFF;  // the computer page's phase at the last repaint
+  uint32_t _lanPainted = 0;
+  char _upRolled[ota::VER_MAX] = {};  // a version that would not start, once
+  ToolsHost* _upHost = nullptr;       // for the progress callback
 };

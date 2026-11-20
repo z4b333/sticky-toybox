@@ -38,6 +38,6 @@ struct IntlFace {
 // Largest raw block of any baked face: the size of one inflate slot.
 #define INTL_ZBLOCK_MAX 4608
 
-extern const IntlFace INTL_16;
-extern const IntlFace INTL_24;
-extern const IntlFace INTL_32;
+// The baked tables themselves (INTL_16/24/32) are no longer linked into the
+// app: tools/fonts/fonts_intl.cpp is the generator's output and the source of
+// the base_font pack (python3 tools/tfp2.py base ...). gfx.cpp loads it.

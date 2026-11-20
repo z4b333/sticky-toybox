@@ -15,6 +15,7 @@
 #include <Arduino.h>
 #include <Preferences.h>
 
+#include "ota_core.h"
 #include "unicode.h"
 
 // Text size buckets. Each host maps these onto whatever fonts it has.
@@ -246,6 +247,9 @@ enum class SideBtn : uint8_t { Up, Down, Ok };
 class ToolsHost {
  public:
   virtual ~ToolsHost() = default;
+  // Updates over Wi-Fi (ota_core.h). nullptr on a port, or a partition table,
+  // without them: the settings page then shows the version and nothing to press.
+  virtual ota::Device* otaDevice() { return nullptr; }
   virtual ToolsCanvas& canvas() = 0;
   virtual Preferences& prefs() = 0;
   // Re-render the active tool and push it to the panel. full=true forces an

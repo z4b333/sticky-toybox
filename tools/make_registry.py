@@ -14,7 +14,7 @@ Arduino, so that path needs their agreement before any pull request.
 
 The FIRMWARE-ONLY path takes the tested binaries with a manifest that records
 every offset, byte size and SHA-256, plus an upstream source URL and licence.
-That is what this writes, from the same four parts the web installer serves --
+That is what this writes, from the same five parts the web installer serves --
 so what Seeed would flash is byte-identical to what this project's own page
 flashes, which is the only definition of "compatible" worth having.
 
@@ -36,8 +36,8 @@ import sys
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT = os.path.join(ROOT, 'dist', 'registry', 'toybox')
 
-# The registry flashes one package at fixed offsets, so the four parts the
-# installer page writes individually are the four parts named here. Same
+# The registry flashes one package at fixed offsets, so the five parts the
+# installer page writes individually are the five parts named here. Same
 # offsets, same files, same order -- see tools/make_image.sh and docs/index.html.
 #
 # Names are theirs, not ours: the validator wants a bare .bin filename beside
@@ -49,6 +49,10 @@ PARTS = [
     ('docs/firmware/toybox-parts.bin', 'partitions.bin', 0x8000),
     ('docs/firmware/toybox-ota0.bin', 'boot_app0.bin', 0xE000),
     ('docs/firmware/toybox-app.bin', 'toybox.bin', 0x10000),
+    # v2: the common CJK sets left the app for their own partition. Without
+    # this part a Seeed-flashed Sticky draws boxes for Chinese, Japanese and
+    # Korean. Renamed .bin for the validator; the bytes are the TFP2 pack.
+    ('docs/firmware/base_font.tfp', 'base_font.bin', 0x5F0000),
 ]
 
 SOURCE_URL = 'https://github.com/z4b333/sticky-toybox'
@@ -267,7 +271,7 @@ screen.
 ## Package origin
 
 Built from [sticky-toybox](https://github.com/z4b333/sticky-toybox) at
-`%(commit)s`, tagged `v%(version)s`, dated %(date)s. The four binaries here are
+`%(commit)s`, tagged `v%(version)s`, dated %(date)s. The five binaries here are
 the same files the project's own web installer serves at
 <https://z4b333.github.io/sticky-toybox/> -- produced by `tools/make_image.sh`
 and packaged for this registry by `tools/make_registry.py`, so the two installers

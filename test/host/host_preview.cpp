@@ -21,6 +21,54 @@
 #include "sticky_host.h"
 #include "toybox.h"
 #include "settings.h"
+
+// The harness's stand-in for the firmware's ota::Device (src/ota.cpp): scripted
+// answers, so every screen of Settings > Update & about can be drawn and every
+// button's route checked without a radio.
+struct FakeOta : ota::Device {
+  ota::Err checkErr = ota::Err::Ok, installErr = ota::Err::Ok;
+  ota::Check result;
+  ota::Lan lanScript, lanNow;
+  int installs = 0, restarts = 0, checks = 0;
+  bool lanUp = false;
+  char rolled[ota::VER_MAX] = {};
+  const char* version() override { return "v2.0.0-beta.1-4-gab89111"; }
+  const char* slot() override { return "ota_0"; }
+  uint32_t slotBytes() override { return 0x2f0000; }
+  ota::Err check(ota::Check& out) override {
+    checks++;
+    out = result;
+    return checkErr;
+  }
+  ota::Err install(const ota::Check& c, ota::Progress p, void* ctx) override {
+    installs++;
+    if (p && c.needBase) p(ctx, 1, c.remote.base.bytes, c.remote.base.bytes);
+    if (p && c.needApp) {
+      p(ctx, 0, c.remote.app.bytes / 2, c.remote.app.bytes);
+      p(ctx, 0, c.remote.app.bytes, c.remote.app.bytes);
+    }
+    return installErr;
+  }
+  void restart() override { restarts++; }
+  bool lanStart() override {
+    lanUp = true;
+    lanNow = lanScript;
+    return lanNow.phase != ota::Lan::Failed;
+  }
+  void lanLoop() override {}
+  void lanStop() override {
+    lanUp = false;
+    lanNow.phase = ota::Lan::Off;
+  }
+  const ota::Lan& lan() const override { return lanNow; }
+  bool takeRollbackNotice(char* v, size_t n) override {
+    if (!rolled[0]) return false;
+    snprintf(v, n, "%s", rolled);
+    rolled[0] = 0;
+    return true;
+  }
+};
+static FakeOta g_fakeOta;
 #include "bmp_gray.h"
 #include "cardfonts.h"
 #include "tools/cpfont_prep.h"
@@ -1736,6 +1784,28 @@ static void quietTap(int x, int y) {
 static std::string g_syncedBook;  // the book the sync guard synced
 
 int main() {
+  // The common CJK sets left the app for the base_font partition (a TFP2
+  // pack, tools/tfp2.py). The device maps that partition at boot; here it goes
+  // in as a /fonts file before anything draws. Without it every Chinese,
+  // Japanese and Korean check below would be measuring the missing-glyph box.
+  {
+    const char* path = getenv("TOYBOX_BASE_PACK");
+    if (!path) path = "../../docs/firmware/base_font.tfp";
+    FILE* f = fopen(path, "rb");
+    if (!f) {
+      printf("BASE FAIL: no %s (python3 tools/tfp2.py base ...)\n", path);
+      abort();
+    }
+    fseek(f, 0, SEEK_END);
+    const long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    std::string blob((size_t)n, 0);
+    fread(&blob[0], 1, (size_t)n, f);
+    fclose(f);
+    tfs::hostFs()["/fonts/base_font.tfp"] = blob;
+    const int packFaces = gfx::loadFontPacks();
+    printf("base pack loaded (%ld KB, %d pack faces)\n", n / 1024, packFaces);
+  }
   epd.begin();
   prefs.begin("toybox", false);
   toybox.begin(stickyHost);
@@ -1940,7 +2010,164 @@ int main() {
   }
   setScreen("settings_edited");
   g_dumpEnabled = true;
-  tapRect(setui::actionRect(setui::ACT_RESET));  // first tap: arms and asks
+  stickyHost.refresh(true);
+
+  // --- Settings > Update & about ---------------------------------------------
+  // Every screen of the update page against the fake device: the page, a
+  // rollback notice, a check that finds nothing and one that finds a release,
+  // the install with its bar, a failed install, low battery, the computer
+  // page and its lock-out, and the reset that moved here. Each must route
+  // the right taps and fit the panel (the overflow detector watches them all).
+  {
+    ota::hostDevice() = &g_fakeOta;
+    auto& st = toybox.hostSettings();
+    auto shot = [](const char* name) {
+      g_dumpEnabled = true;
+      setScreen(name);
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+    };
+    auto fail = [](const char* why) {
+      printf("UPDATE FAIL: %s\n", why);
+      abort();
+    };
+    g_dumpEnabled = false;
+    snprintf(g_fakeOta.rolled, sizeof(g_fakeOta.rolled), "v2.0.1");
+    tapRect(setui::actionRect(setui::ACT_UPDATE));
+    if (st.hostPage() != 9) fail("the row did not open the update page");
+    shot("update_rolled_back");  // no home wifi saved yet, and the rollback notice once
+    // No home wifi: CHECK says what to do instead of trying.
+    tapRect(setui::updCheckRect());
+    if (st.hostUpStage() != 0 || g_fakeOta.checks) fail("checked with no wifi saved");
+    shot("update_no_wifi");
+
+    homenet::saveWifi(stickyHost.prefs(), "\xe0\xb8\x9a\xe0\xb9\x89\xe0\xb8\xb2\xe0\xb8\x99 5G", "password1");
+    shot("update_page");
+
+    // Reset stats: two taps, the first only asks.
+    tapRect(setui::updResetRect());
+    shot("update_reset_armed");
+    tapRect(TRect{16, 760, 10, 10});  // anywhere else: disarms
+    shot("update_reset_disarmed");
+
+    // Up to date.
+    g_fakeOta.result = ota::Check{};
+    snprintf(g_fakeOta.result.remote.version, ota::VER_MAX, "v2.0.0-beta.1");
+    tapRect(setui::updCheckRect());
+    if (st.hostUpStage() != 1) fail("CHECK did not start");
+    shot("update_checking");
+    toybox.tick();
+    if (st.hostUpStage() != 2 || g_fakeOta.checks != 1) fail("the check did not run");
+    shot("update_up_to_date");
+    tapRect(setui::updInstallRect());
+    if (g_fakeOta.installs) fail("INSTALL pressed on an up-to-date page");
+    tapRect(setui::updDoneRect());
+    if (st.hostUpStage() != 0) fail("DONE did not go back");
+
+    // A check that fails says why.
+    g_fakeOta.checkErr = ota::Err::NoAnswer;
+    tapRect(setui::updCheckRect());
+    toybox.tick();
+    shot("update_check_failed");
+    tapRect(setui::updDoneRect());
+    g_fakeOta.checkErr = ota::Err::Ok;
+
+    // A release, with the fonts.
+    ota::Check& r = g_fakeOta.result;
+    snprintf(r.remote.version, ota::VER_MAX, "v2.0.0-beta.12");
+    snprintf(r.remote.date, sizeof(r.remote.date), "20 Nov 2026");
+    r.remote.app.bytes = 2412544;
+    r.remote.base.bytes = 1103072;
+    r.needApp = r.needBase = true;
+    tapRect(setui::updCheckRect());
+    toybox.tick();
+    shot("update_available");
+
+    // Low battery: no INSTALL to press.
+    const int batWas = sensors::batteryPercent();
+    const bool chgWas = sensors::charging();
+    sensors::hostSetBattery(12, false);
+    shot("update_low_battery");
+    tapRect(setui::updInstallRect());
+    if (g_fakeOta.installs) fail("installed on 12% battery");
+    sensors::hostSetBattery(80, false);
+
+    // Install, failing.
+    g_fakeOta.installErr = ota::Err::Download;
+    tapRect(setui::updInstallRect());
+    if (st.hostUpStage() != 3) fail("INSTALL did not start");
+    g_dumpEnabled = true;
+    setScreen("update_installing");  // painted by the progress callback itself
+    toybox.tick();
+    g_dumpEnabled = false;
+    if (g_fakeOta.installs != 1 || st.hostUpStage() != 4) fail("the install did not run");
+    shot("update_failed");
+    if (g_fakeOta.restarts) fail("restarted after a failed install");
+    tapRect(setui::updDoneRect());
+
+    // Install, working: RESTARTING, then the restart.
+    g_fakeOta.installErr = ota::Err::Ok;
+    tapRect(setui::updCheckRect());
+    toybox.tick();
+    tapRect(setui::updInstallRect());
+    toybox.tick();
+    shot("update_restarting");
+    toybox.tick();
+    if (g_fakeOta.restarts != 1) fail("no restart after a good install");
+    toybox.onTap(BACK_W / 2, TOPBAR_H / 2);  // the real device is gone by now
+    tapRect(setui::actionRect(setui::ACT_UPDATE));
+
+    // From a computer.
+    g_fakeOta.lanScript = ota::Lan{};
+    g_fakeOta.lanScript.phase = ota::Lan::Waiting;
+    snprintf(g_fakeOta.lanScript.url, sizeof(g_fakeOta.lanScript.url), "http://sticky.local");
+    snprintf(g_fakeOta.lanScript.ip, sizeof(g_fakeOta.lanScript.ip), "192.168.1.123");
+    snprintf(g_fakeOta.lanScript.code, sizeof(g_fakeOta.lanScript.code), "480126");
+    tapRect(setui::updLanRect());
+    shot("update_lan_joining");
+    toybox.tick();
+    if (!g_fakeOta.lanUp || st.hostUpStage() != 5) fail("the computer page did not open");
+    shot("update_lan_code");
+    g_fakeOta.lanNow.phase = ota::Lan::Receiving;
+    g_fakeOta.lanNow.done = 1300000;
+    g_fakeOta.lanNow.total = 2412800;
+    snprintf(g_fakeOta.lanNow.incoming, ota::VER_MAX, "v2.0.0-beta.12");
+    toybox.tick();
+    shot("update_lan_receiving");
+    tapRect(setui::updDoneRect());
+    if (!g_fakeOta.lanUp) fail("DONE closed the page mid-upload");
+    g_fakeOta.lanNow.phase = ota::Lan::Waiting;
+    g_fakeOta.lanNow.err = ota::Err::NotToybox;
+    toybox.tick();
+    shot("update_lan_refused");
+    g_fakeOta.lanNow.phase = ota::Lan::Failed;
+    g_fakeOta.lanNow.err = ota::Err::WrongCode;
+    toybox.tick();
+    shot("update_lan_locked");
+    tapRect(setui::updDoneRect());
+    if (g_fakeOta.lanUp) fail("DONE left the server running");
+    // Back out from the computer page: the server goes with the screen.
+    tapRect(setui::updLanRect());
+    toybox.tick();
+    toybox.onTap(BACK_W / 2, TOPBAR_H / 2);
+    if (g_fakeOta.lanUp || st.hostPage() != 0) fail("back left the server running");
+    // Never got onto the network.
+    tapRect(setui::actionRect(setui::ACT_UPDATE));
+    g_fakeOta.lanScript.phase = ota::Lan::Failed;
+    g_fakeOta.lanScript.code[0] = 0;
+    g_fakeOta.lanScript.err = ota::Err::WifiNotFound;
+    tapRect(setui::updLanRect());
+    toybox.tick();
+    shot("update_lan_no_wifi");
+    tapRect(setui::updDoneRect());
+    toybox.onTap(BACK_W / 2, TOPBAR_H / 2);
+
+    homenet::forgetWifi(stickyHost.prefs());
+    sensors::hostSetBattery(batWas, chgWas);
+    printf("update page ok (%d checks, %d installs, %d restart)\n", g_fakeOta.checks,
+           g_fakeOta.installs, g_fakeOta.restarts);
+    g_dumpEnabled = true;
+  }
 
   // The lock screen page, reached by the button on the settings screen.
   setScreen("settings_lock");
@@ -6622,8 +6849,11 @@ int main() {
   tapRect(setui::actionRect(setui::ACT_APPS));
   tapRect(setui::appsCardsRect());
   toybox.hostSettings().back();
-  tapRect(setui::actionRect(setui::ACT_RESET));  // armed again
-  tapRect(setui::actionRect(setui::ACT_RESET));  // ...and confirmed
+  // Reset lives on the update page now (Settings > Update & about).
+  tapRect(setui::actionRect(setui::ACT_UPDATE));
+  tapRect(setui::updResetRect());  // armed again
+  tapRect(setui::updResetRect());  // ...and confirmed
+  toybox.hostSettings().back();
   // Cleared means gone, not zeroed: a sentinel default proves the key itself
   // was removed, so a fresh device and a reset one read identically.
   if (prefs.getInt("w_games", -1) != -1 || prefs.getUInt("c_heads", 99) != 99 ||
@@ -8153,6 +8383,53 @@ int main() {
     } else {
       printf("font pack SKIPPED (no /tmp/packs/ko_full.tfp -- run make_font_pack.py)\n");
     }
+  }
+
+  // --- damaged packs ----------------------------------------------------------
+  // A pack comes from a flash partition or a card: it is data, and a bad one
+  // must be refused whole, never half-registered or read past its end. Every
+  // cut of the base pack, and a few corrupted block tables, go through the
+  // real loader (run this build under -fsanitize=address to see the reads).
+  {
+    std::string good = tfs::hostFs()["/fonts/base_font.tfp"];
+    const int before = gfx::loadedFaceCount();
+    int refused = 0, tries = 0;
+    auto offer = [&](const std::string& blob) {
+      char name[32];
+      snprintf(name, sizeof(name), "/fonts/bad%d.tfp", tries++);
+      tfs::hostFs()[name] = blob;
+      gfx::loadFontPacks();
+      tfs::hostFs().erase(name);
+      if (gfx::loadedFaceCount() == before) refused++;
+    };
+    // Cuts: inside the header, the cps, the glyph table, the block tables, the stream.
+    for (size_t cut : {size_t(3), size_t(9), size_t(30), size_t(5000), size_t(100000),
+                       size_t(110000), good.size() / 2, good.size() - 5})
+      offer(good.substr(0, cut));
+    // Not a base pack any more (flags 0) but every face truncated: refused.
+    // A block claiming more raw bytes than a slot holds: refused.
+    {
+      std::string b = good;
+      const uint32_t count = *(const uint32_t*)&b[12 + 8];
+      const uint32_t nblk = *(const uint32_t*)&b[12 + 12];
+      size_t at = 12 + 20 + count * 2;
+      at = (at + 3) & ~(size_t)3;
+      at += (size_t)count * 12;
+      uint32_t* zraw = (uint32_t*)&b[at];
+      zraw[1] = zraw[0] + 9000;  // > INTL_ZBLOCK_MAX
+      b[8] = 0;                  // offer it as a language pack
+      offer(b);
+      std::string c = good;
+      uint32_t* zoff = (uint32_t*)&c[at + (nblk + 1) * 4];
+      zoff[1] = 0x7fffffff;      // stream offset far past the end
+      c[8] = 0;
+      offer(c);
+    }
+    if (refused != tries) {
+      printf("PACK GUARD FAIL: %d of %d damaged packs accepted\n", tries - refused, tries);
+      abort();
+    }
+    printf("damaged packs refused (%d of %d)\n", refused, tries);
   }
 
   // --- accented Latin in the baked faces ------------------------------------

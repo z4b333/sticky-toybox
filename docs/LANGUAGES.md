@@ -29,6 +29,12 @@ out equal widths. Thai lines break between words, using ICU's Thai word list
 These sets cover normal everyday text. A character outside them is drawn as
 a small empty box.
 
+The Chinese, Japanese and Korean sets are not inside the app itself: they
+live in their own flash partition, `base_font`, which the installer always
+writes. That keeps the app small enough for two update slots (see
+`docs/OTA.md`). If that partition is ever blank, Thai, Vietnamese and Latin
+still draw; CJK text shows boxes until the next full install.
+
 ## Font packs for full coverage
 
 If you need rare characters, install a font pack. Each pack contains a
@@ -36,9 +42,9 @@ language's full character set, minus what the firmware already includes:
 
 | pack | adds | size |
 |---|---|---|
-| `zh_full.tfp` | 15,967 more Chinese characters | 4.3 MB |
-| `ko_full.tfp` | the remaining 8,822 Korean syllables | 2.3 MB |
-| `ja_full.tfp` | 2,732 more kanji | 0.7 MB |
+| `zh_full.tfp` | 15,967 more Chinese characters | 2.7 MB |
+| `ko_full.tfp` | the remaining 8,822 Korean syllables | 0.8 MB |
+| `ja_full.tfp` | 2,732 more kanji | 0.5 MB |
 
 The easiest way to install packs is the web flasher: each language is a
 checkbox, and any combination can be selected. Each pack has its own flash
@@ -46,7 +52,13 @@ partition (see `partitions_toybox.csv`) and is written there directly. The
 firmware memory-maps installed packs straight from flash, so they cost no
 RAM. An empty partition is simply skipped.
 
-Packs are built with `tools/make_font_pack.py`. As an alternative to the
+Since v2 the packs are compressed (TFP2: the glyph bitmaps as small deflate
+blocks, inflated into PSRAM the first time one of their glyphs is drawn), which
+took the three from 7.4 MB to 4.0 MB. Older uncompressed packs (TFP1) still
+load.
+
+Packs are built with `tools/make_font_pack.py`, then compressed with
+`tools/tfp2.py`. As an alternative to the
 flasher, a pack file copied to `/fonts/` on the device's filesystem is also
 picked up at boot.
 
@@ -111,7 +123,9 @@ File names also keep their original script. A note named รายการ stay
 python3 tools/make_fonts.py > src/fonts_ui.h
 python3 tools/make_fonts_script.py
 python3 tools/make_fonts_intl.py
+python3 tools/tfp2.py base tools/fonts/fonts_intl.cpp docs/firmware/base_font.tfp
 python3 tools/make_font_pack.py /tmp/packs
+for l in zh ko ja; do python3 tools/tfp2.py zip /tmp/packs/${l}_full.tfp docs/firmware/${l}_full.tfp; done
 ```
 
 The scripts need Python with Pillow (with raqm, for the Thai mark

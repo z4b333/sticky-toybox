@@ -1,3 +1,4 @@
+#include "ota.h"
 #include "sticky_host.h"
 
 #include "cardfonts.h"
@@ -407,4 +408,12 @@ void StickyHost::fontContent(bool on) {
   }
   const int built = g_fontSlotOpen >= 0 ? builtInIndex(*this, fontFor(g_fontSlotOpen)) : 0;
   gfx::setTypeface(built > 0 ? built : 0);
+}
+
+ota::Device* StickyHost::otaDevice() {
+#ifdef TOYBOX_HOST
+  return ota::hostDevice();
+#else
+  return otadev::device(prefs());
+#endif
 }

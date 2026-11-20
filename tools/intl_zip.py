@@ -12,7 +12,7 @@ Used two ways:
   * by make_fonts_intl.py, which calls emit_z() while generating, and
   * on its own, to compress an existing raw fonts_intl.cpp in place without
     re-rasterising (the glyphs stay byte-identical to the shipped ones):
-        python3 tools/intl_zip.py src/fonts_intl.cpp src/fonts_intl.h
+        python3 tools/intl_zip.py tools/fonts/fonts_intl.cpp src/fonts_intl.h
 """
 import re
 import sys

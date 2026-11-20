@@ -1,16 +1,29 @@
-# Toybox partition map (16 MB).
+# Toybox partition map (16 MB), v2: two app slots for updates over Wi-Fi.
 #
-# One app slot, no OTA pair: this firmware updates over USB. Each optional
-# language pack has its own raw data partition, so the web installer can
-# flash any combination of them independently, and the firmware maps them
-# straight from flash (no RAM copy, no filesystem involvement). An erased
-# (all-0xFF) pack partition simply fails the magic check and is skipped.
-# LittleFS keeps 4.7 MB for notes and flashcard decks.
+# NVS and LittleFS sit EXACTLY where they sat in v1 (0x9000 and 0xB50000, same
+# sizes). That is the whole migration story: a v1 device rewritten with this
+# table keeps its settings, saved pages, notes, decks and pictures, because
+# nothing that holds them moves. Do not shift either one.
+#
+# Everything between them is rebuilt:
+#   ota_0/ota_1  two 2.94 MB app slots. An update streams into the slot that
+#                is not running, is checked, and only then becomes the boot
+#                slot; a build that cannot reach the home screen three times
+#                running is rolled back to the other (src/ota.h).
+#   base_font    the common CJK sets that used to be baked into the app (TFP2,
+#                tools/tfp2.py). Always written by the installer.
+#   *_font       the optional language packs, compressed (TFP2). An erased or
+#                stale partition fails the magic check and is skipped; the
+#                installer blanks the head of every pack it is not writing.
+# Each pack keeps ~48-96 KB of slack for a regenerated set.
+#
 # Name,     Type, SubType, Offset,   Size
 nvs,        data, nvs,     0x9000,   0x5000
-phy_init,   data, phy,     0xe000,   0x1000
-factory,    app,  factory, 0x10000,  0x400000
-zh_font,    data, 0x40,    0x410000, 0x430000
-ko_font,    data, 0x41,    0x840000, 0x250000
-ja_font,    data, 0x42,    0xa90000, 0xc0000
+otadata,    data, ota,     0xe000,   0x2000
+ota_0,      app,  ota_0,   0x10000,  0x2f0000
+ota_1,      app,  ota_1,   0x300000, 0x2f0000
+base_font,  data, 0x43,    0x5f0000, 0x120000
+zh_font,    data, 0x40,    0x710000, 0x2d0000
+ko_font,    data, 0x41,    0x9e0000, 0xe0000
+ja_font,    data, 0x42,    0xac0000, 0x90000
 spiffs,     data, spiffs,  0xb50000, 0x4b0000

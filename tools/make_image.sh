@@ -27,7 +27,17 @@ python -m esptool --chip esp32s3 merge-bin \
   0x0     "$BUILD/bootloader.bin" \
   0x8000  "$BUILD/partitions.bin" \
   0xe000  "$BOOT_APP0" \
-  0x10000 "$BUILD/firmware.bin"
+  0x10000 "$BUILD/firmware.bin" \
+  0x5f0000 docs/firmware/base_font.tfp
+
+# The app has to fit an OTA slot (partitions_toybox.csv: ota_0 = 0x2f0000).
+# platformio.ini's maximum_size already fails the build past it; this says why.
+APP_MAX=$((0x2f0000))
+APP_NOW=$(stat -c %s "$BUILD/firmware.bin")
+if [ "$APP_NOW" -gt "$APP_MAX" ]; then
+  echo "app is $APP_NOW bytes, the OTA slot holds $APP_MAX" >&2
+  exit 1
+fi
 
 # The same app on its own, for anyone flashing over USB with the partitions
 # already in place.
@@ -42,6 +52,10 @@ cp "$BUILD/partitions.bin" docs/firmware/toybox-parts.bin
 cp "$BOOT_APP0"            docs/firmware/toybox-ota0.bin
 cp "$BUILD/firmware.bin"   docs/firmware/toybox-app.bin
 
+# Nothing the installer writes may land on settings (NVS) or notes (LittleFS).
+# After the copies above: it checks the files the page will actually serve.
+python tools/check_layout.py
+
 # What the flasher page prints beside the install button. The version is the
 # same string the firmware carries, so what the page says it is about to write
 # and what the service screen says afterwards can be compared directly.
@@ -54,6 +68,13 @@ DATE=$(git log -1 --format=%cd --date=format:'%d %b %Y' 2>/dev/null || echo '')
 BYTES=$(stat -c %s docs/firmware/toybox-full.bin)
 SHA=$(sha256sum docs/firmware/toybox-full.bin | cut -c1-16)
 APP_BYTES=$(stat -c %s docs/firmware/toybox-app.bin)
+# The full hashes are what a Sticky checks an update against over Wi-Fi
+# (src/ota.h): it streams the file into the spare slot, hashes it on the way,
+# and refuses to boot it if the two disagree. The base font pack travels the
+# same way when it changes, which is rarely.
+APP_SHA=$(sha256sum docs/firmware/toybox-app.bin | cut -d' ' -f1)
+BASE_BYTES=$(stat -c %s docs/firmware/base_font.tfp)
+BASE_SHA=$(sha256sum docs/firmware/base_font.tfp | cut -d' ' -f1)
 cat > docs/firmware/version.json <<JSON
 {
   "version": "$VERSION",
@@ -61,7 +82,12 @@ cat > docs/firmware/version.json <<JSON
   "date": "$DATE",
   "bytes": $BYTES,
   "sha256": "$SHA",
-  "appBytes": $APP_BYTES
+  "appBytes": $APP_BYTES,
+  "ota": {
+    "app": { "path": "firmware/toybox-app.bin", "bytes": $APP_BYTES, "sha256": "$APP_SHA" },
+    "base": { "path": "firmware/base_font.tfp", "bytes": $BASE_BYTES, "sha256": "$BASE_SHA" },
+    "minBattery": 30
+  }
 }
 JSON
 cat docs/firmware/version.json

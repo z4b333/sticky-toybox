@@ -276,3 +276,9 @@ details ul, details ol { padding-left: 20px; }
   .site-header .inner { flex-wrap: wrap; gap: 8px; }
   .card { padding: 18px; }
 }
+
+/* Updates over Wi-Fi, under the install buttons. */
+.ota { margin: 2.5rem 0; }
+.ota h3 { margin: 0 0 0.5rem; }
+.ota .steps { padding-left: 1.25rem; }
+.ota .steps li { margin: 0.5rem 0; }

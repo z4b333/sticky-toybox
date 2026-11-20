@@ -79,6 +79,18 @@ const char* nameOf(const applist::Item& it) {
   return it.game ? gicons::NAMES[it.idx] : ticons::NAMES[it.idx];
 }
 
+// "v2.0.0-beta.3-7-gab89111" -> "v2.0.0-beta.3+7": what a row has room for.
+void shortVersion(const char* v, char* out, size_t n) {
+  snprintf(out, n, "%s", v ? v : "");
+  const ota::Ver p = ota::parse(v);
+  if (!p.ok || !p.past) return;
+  char* g = strstr(out, "-g");
+  if (!g) return;
+  *g = 0;
+  char* dash = strrchr(out, '-');
+  if (dash) *dash = '+';
+}
+
 // Little line icons for the settings rows, one per Action, drawn in a ~30 px
 // box centred on (cx, cy). Primitives only, like the hub's app icons, so
 // both font passes render them identically.
@@ -122,7 +134,15 @@ inline void draw(ToolsCanvas& c, int act, int cx, int cy, bool dark) {
     case ACT_FONT:  // a letter, which is the only honest icon for a typeface
       c.textInBox(cx - 14, cy - 15, 28, 30, "Aa", TS_MED, dark, true);
       break;
-    default:  // ACT_RESET: a circle coming back around
+    case ACT_UPDATE:  // an arrow coming down into a tray
+      c.drawLine(cx, cy - 14, cx, cy + 4, 2, dark);
+      c.drawLine(cx - 7, cy - 3, cx, cy + 4, 2, dark);
+      c.drawLine(cx + 7, cy - 3, cx, cy + 4, 2, dark);
+      c.drawLine(cx - 13, cy + 4, cx - 13, cy + 12, 2, dark);
+      c.drawLine(cx - 13, cy + 12, cx + 13, cy + 12, 2, dark);
+      c.drawLine(cx + 13, cy + 12, cx + 13, cy + 4, 2, dark);
+      break;
+    default:  // reset stats (now on the update page): a circle coming back around
       c.drawCircle(cx, cy, 11, 2, dark);
       c.drawLine(cx + 6, cy - 12, cx + 13, cy - 13, 2, dark);
       c.drawLine(cx + 13, cy - 13, cx + 10, cy - 6, 2, dark);
@@ -150,6 +170,14 @@ bool SettingsScreen::back() {
   leaveFiles();  // no-op unless the files page was the one being left
   leaveClock();  // ditto for the clock page's access point
   _netStage = 0;
+  if (_page == 9) {
+    // Nothing to leave while the device is busy writing; the shell's back
+    // tap cannot even arrive then (the tick blocks). The computer page is
+    // the one that can be open, and it closes with the screen.
+    leaveUpdate(_upHost);
+    _upStage = 0;
+    _armed = false;
+  }
   // The picture list was opened from the lock screen page, so it goes back
   // there rather than all the way out; every other page came from the top.
   _page = _page == 5 ? 1 : (_page == 8 ? 7 : 0);
@@ -169,9 +197,11 @@ void SettingsScreen::leaveFiles() {
 void SettingsScreen::leave() {
   leaveFiles();
   leaveClock();
+  leaveUpdate(_upHost);
 }
 
 bool SettingsScreen::tick(ToolsHost& host) {
+  if (_page == 9) return tickUpdate(host);
   if (_page == 6) {
     if (_netStage == 1) {
       // The "connecting" screen went up with the tap; this is the wait it
@@ -914,6 +944,10 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
     renderFontWho(host, c);
     return;
   }
+  if (_page == 9) {
+    renderUpdate(host, c);
+    return;
+  }
   if (_page == 8) {
     renderFont(host, c);
     return;
@@ -951,6 +985,10 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
     else
       snprintf(clockV, sizeof(clockV), "not set");
   }
+  // The version, as far as it fits beside the row's name: a development
+  // build's "-7-gab89111" tail is for the service screen, not this row.
+  char upV[24] = "";
+  if (ota::Device* d = host.otaDevice()) shortVersion(d->version(), upV, sizeof(upV));
   const char* sound = soundLabel(host);
   const char* soundV = strchr(sound, ' ') ? strchr(sound, ' ') + 1 : sound;
   struct Row {
@@ -970,11 +1008,11 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
       {ACT_FILES, "Files over WiFi", "", true},
       {ACT_CLOCK, "Clock", clockV, true},
       {ACT_SOUND, "Sound", soundV, false},
-      {ACT_RESET, _armed ? "Tap again to erase scores" : "Reset stats and tallies", "", false},
+      {ACT_UPDATE, "Update & about", upV, true},
   };
   for (const Row& r : rows) {
     const TRect a = actionRect(r.act);
-    const bool inverted = r.act == ACT_RESET && _armed;
+    const bool inverted = false;
     if (inverted) c.fillRect(a.x, a.y, a.w, a.h, true);
     setico::draw(c, r.act, a.x + 22, a.y + a.h / 2, !inverted);
     c.text(a.x + 52, a.y + (a.h - c.textHeight(TS_MED)) / 2, r.name, TS_MED, !inverted);
@@ -1277,6 +1315,7 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
   if (_page == 6) return tapClock(host, x, y);
   if (_page == 7) return tapFontWho(host, x, y);
   if (_page == 8) return tapFont(host, x, y);
+  if (_page == 9) return tapUpdate(host, x, y);
 
   // Any tap that is not the reset takes the confirm back down, so an armed
   // button never survives long enough to be pressed by accident later.
@@ -1342,16 +1381,15 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
     return false;
   }
 
-  if (actionRect(ACT_RESET).hit(x, y)) {
-    if (!wasArmed) {
-      _armed = true;
-      host.beep(2);
-    } else {
-      record::clearAll(host.prefs());
-      _note = "scores and tallies cleared";
-      host.beep(1);
-    }
-    return true;
+  if (actionRect(ACT_UPDATE).hit(x, y)) {
+    host.beep(1);
+    _page = 9;
+    _upStage = 0;
+    _upErr = ota::Err::Ok;
+    _upRolled[0] = 0;
+    if (ota::Device* d = host.otaDevice()) d->takeRollbackNotice(_upRolled, sizeof(_upRolled));
+    host.refresh(true);
+    return false;
   }
 
   if (actionRect(ACT_SOUND).hit(x, y)) {
@@ -1365,4 +1403,416 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
   }
 
   return wasArmed;  // only repaint if a question came down
+}
+
+// --- update & about -------------------------------------------------------------
+// The version this Sticky runs, the two ways to a newer one, and the reset that
+// moved here from the main page. The work itself is ota::Device's; this page
+// only says what is happening, in the order it happens. Nothing here can touch
+// notes or settings, and the page says so where people look before they press.
+
+namespace {
+const char* upHint(ota::Err e) {
+  switch (e) {
+    case ota::Err::NoWifiSaved: return "save a home wifi first: Settings > Clock";
+    case ota::Err::WifiNotFound: return "is the router on and in range?";
+    case ota::Err::WifiRefused: return "save the wifi again from the phone";
+    case ota::Err::NoAnswer: return "the wifi works; the internet did not";
+    case ota::Err::NoUpdateFile: return "try again later, or update from the website";
+    case ota::Err::Download: return "move closer to the router and try again";
+    case ota::Err::Mismatch: return "a damaged download; try again";
+    case ota::Err::LowBattery: return "charge it, or plug it in, and try again";
+    case ota::Err::LowMemory: return "restart the device and try again";
+    default: return "update from the website instead";
+  }
+}
+
+// A bar in the device's own language: an outlined box filling with ink.
+void upBar(ToolsCanvas& c, uint32_t done, uint32_t total) {
+  using namespace setui;
+  c.drawRect(UPD_BAR_X, UPD_BAR_Y, UPD_BAR_W, UPD_BAR_H, 2, true);
+  const int inner = UPD_BAR_W - 8;
+  const int w = total ? (int)((uint64_t)inner * (done > total ? total : done) / total) : 0;
+  if (w > 0) c.fillRect(UPD_BAR_X + 4, UPD_BAR_Y + 4, w, UPD_BAR_H - 8, true);
+}
+
+void upBytes(ToolsCanvas& c, int y, uint32_t done, uint32_t total) {
+  char a[16], b[16], line[48];
+  ota::sizeText(done, a, sizeof(a));
+  if (total) {
+    ota::sizeText(total, b, sizeof(b));
+    snprintf(line, sizeof(line), "%s of %s", a, b);
+  } else {
+    snprintf(line, sizeof(line), "%s", a);
+  }
+  c.textCentered(SCREEN_W / 2, y, line, TS_SMALL, true);
+}
+}  // namespace
+
+void SettingsScreen::renderUpdate(ToolsHost& host, ToolsCanvas& c) {
+  using namespace setui;
+  _upHost = &host;
+  ota::Device* d = host.otaDevice();
+  drawTopBar(c, "UPDATE");
+  char buf[96];
+
+  if (_upStage == 1) {
+    c.textCentered(SCREEN_W / 2, 260, "CHECKING", TS_MED, true, true);
+    c.textCentered(SCREEN_W / 2, 320, _netName, TS_LARGE, true);
+    c.textCentered(SCREEN_W / 2, 400, "asking the update site", TS_MED, true);
+    c.textCentered(SCREEN_W / 2, 436, "this takes up to half a minute", TS_SMALL, true);
+    return;
+  }
+
+  if (_upStage == 2) {
+    const ota::Remote& r = _upCheck.remote;
+    const TRect dn = updDoneRect();
+    if (_upErr != ota::Err::Ok) {
+      c.textCentered(SCREEN_W / 2, 120, "NOT CHECKED", TS_MED, true, true);
+      c.textCentered(SCREEN_W / 2, 220, ota::describe(_upErr), TS_LARGE, true);
+      c.textCentered(SCREEN_W / 2, 300, upHint(_upErr), TS_MED, true);
+      c.textCentered(SCREEN_W / 2, 440, "the wifi is off again", TS_SMALL, true);
+      c.button(dn.x, dn.y, dn.w, dn.h, "DONE", false, TS_LARGE);
+      return;
+    }
+    if (!_upCheck.needApp && !_upCheck.needBase) {
+      c.textCentered(SCREEN_W / 2, 120, "UP TO DATE", TS_MED, true, true);
+      c.textCentered(SCREEN_W / 2, 220, d ? d->version() : r.version, TS_LARGE, true, true);
+      snprintf(buf, sizeof(buf), "the newest on the site is %s", r.version);
+      c.textCentered(SCREEN_W / 2, 300, buf, TS_SMALL, true);
+      c.textCentered(SCREEN_W / 2, 440, "the wifi is off again", TS_SMALL, true);
+      c.button(dn.x, dn.y, dn.w, dn.h, "DONE", false, TS_LARGE);
+      return;
+    }
+    c.textCentered(SCREEN_W / 2, 100, _upCheck.needApp ? "NEW VERSION" : "FONTS NEED REPAIR", TS_MED,
+                   true, true);
+    c.textCentered(SCREEN_W / 2, 170, _upCheck.needApp ? r.version : "CJK base set", TS_HUGE,
+                   true, true);
+    if (r.date[0]) c.textCentered(SCREEN_W / 2, 250, r.date, TS_SMALL, true);
+    {
+      uint32_t bytes = 0;
+      if (_upCheck.needApp) bytes += r.app.bytes;
+      if (_upCheck.needBase) bytes += r.base.bytes;
+      char sz[16];
+      ota::sizeText(bytes, sz, sizeof(sz));
+      snprintf(buf, sizeof(buf), "%s to download%s", sz,
+               _upCheck.needApp && _upCheck.needBase ? ", fonts included" : "");
+      c.textCentered(SCREEN_W / 2, 290, buf, TS_MED, true);
+    }
+    snprintf(buf, sizeof(buf), "now: %s", d ? d->version() : "");
+    c.textCentered(SCREEN_W / 2, 336, buf, TS_SMALL, true);
+    c.fillRect(48, 392, SCREEN_W - 96, 1, true);
+    c.textCentered(SCREEN_W / 2, 420, "about a minute, over the home wifi", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, 448, "notes, books and settings stay", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, 476, "if it will not start, it goes back by itself", TS_SMALL, true);
+    const int bat = host.batteryPercent();
+    const bool low = !host.charging() && bat >= 0 && bat < r.minBattery;
+    const TRect in = updInstallRect();
+    if (low) {
+      snprintf(buf, sizeof(buf), "battery %d%%: charge to %d%% or plug in", bat, r.minBattery);
+      c.textCentered(SCREEN_W / 2, in.y + 16, buf, TS_MED, true, true);
+    } else {
+      c.button(in.x, in.y, in.w, in.h, "INSTALL", true, TS_LARGE);
+    }
+    c.button(dn.x, dn.y, dn.w, dn.h, "NOT NOW", false, TS_LARGE);
+    return;
+  }
+
+  if (_upStage == 3) {
+    c.textCentered(SCREEN_W / 2, 120, "UPDATING", TS_MED, true, true);
+    c.textCentered(SCREEN_W / 2, 190, _upCheck.remote.version, TS_LARGE, true, true);
+    c.textCentered(SCREEN_W / 2, 296, _upPart ? "the fonts" : "the firmware", TS_MED, true);
+    upBar(c, _upDone, _upTotal);
+    upBytes(c, UPD_BAR_Y + UPD_BAR_H + 16, _upDone, _upTotal);
+    c.textCentered(SCREEN_W / 2, 470, "keep it near the router", TS_MED, true);
+    c.textCentered(SCREEN_W / 2, 506, "notes and settings are not touched", TS_SMALL, true);
+    return;
+  }
+
+  if (_upStage == 4) {
+    if (_upErr == ota::Err::Ok) {
+      c.textCentered(SCREEN_W / 2, 300, "RESTARTING", TS_MED, true, true);
+      snprintf(buf, sizeof(buf), "into %s", _upCheck.remote.version);
+      c.textCentered(SCREEN_W / 2, 360, buf, TS_LARGE, true);
+      return;
+    }
+    c.textCentered(SCREEN_W / 2, 120, "NOT UPDATED", TS_MED, true, true);
+    c.textCentered(SCREEN_W / 2, 220, ota::describe(_upErr), TS_LARGE, true);
+    c.textCentered(SCREEN_W / 2, 300, upHint(_upErr), TS_MED, true);
+    c.textCentered(SCREEN_W / 2, 380, "this version keeps running", TS_SMALL, true);
+    const TRect dn = updDoneRect();
+    c.button(dn.x, dn.y, dn.w, dn.h, "DONE", false, TS_LARGE);
+    return;
+  }
+
+  if (_upStage == 5 || _upStage == 6) {
+    const ota::Lan* l = d ? &d->lan() : nullptr;
+    const TRect dn = updDoneRect();
+    if (_upStage == 6 || !l || l->phase == ota::Lan::Joining) {
+      c.textCentered(SCREEN_W / 2, 260, "CONNECTING", TS_MED, true, true);
+      c.textCentered(SCREEN_W / 2, 320, _netName, TS_LARGE, true);
+      c.textCentered(SCREEN_W / 2, 400, "joining the home wifi", TS_MED, true);
+      return;
+    }
+    switch (l->phase) {
+      case ota::Lan::Receiving:
+      case ota::Lan::Verifying:
+        c.textCentered(SCREEN_W / 2, 120,
+                       l->phase == ota::Lan::Receiving ? "RECEIVING" : "CHECKING THE FILE", TS_MED,
+                       true, true);
+        c.textCentered(SCREEN_W / 2, 190, l->incoming[0] ? l->incoming : "from the computer",
+                       TS_LARGE, true, true);
+        upBar(c, l->done, l->total);
+        upBytes(c, UPD_BAR_Y + UPD_BAR_H + 16, l->done, l->total);
+        c.textCentered(SCREEN_W / 2, 470, "keep it near the router", TS_MED, true);
+        return;
+      case ota::Lan::Done:
+        c.textCentered(SCREEN_W / 2, 300, "RESTARTING", TS_MED, true, true);
+        snprintf(buf, sizeof(buf), "into %s", l->incoming[0] ? l->incoming : "the new build");
+        c.textCentered(SCREEN_W / 2, 360, buf, TS_LARGE, true);
+        return;
+      case ota::Lan::Failed:
+        if (l->err != ota::Err::Ok && !l->code[0]) {  // never got on the network
+          c.textCentered(SCREEN_W / 2, 120, "NOT CONNECTED", TS_MED, true, true);
+          c.textCentered(SCREEN_W / 2, 220, ota::describe(l->err), TS_LARGE, true);
+          c.textCentered(SCREEN_W / 2, 300, upHint(l->err), TS_MED, true);
+          c.button(dn.x, dn.y, dn.w, dn.h, "DONE", false, TS_LARGE);
+          return;
+        }
+        break;  // locked out: the code screen says so below
+      default:
+        break;
+    }
+    c.textCentered(SCREEN_W / 2, 64, "FROM A COMPUTER", TS_MED, true, true);
+    c.textCentered(SCREEN_W / 2, 100, "on the same wifi, open", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, 132, "sticky.local", TS_LARGE, true, true);
+    snprintf(buf, sizeof(buf), "or http://%s", l->ip);
+    c.textCentered(SCREEN_W / 2, 176, buf, TS_SMALL, true);
+    snprintf(buf, sizeof(buf), "http://%s", l->ip);
+    fqr::draw(c, UPD_QR_X, UPD_QR_Y, UPD_QR, buf);
+    c.textCentered(SCREEN_W / 2, 432, "then type this code", TS_SMALL, true);
+    c.textTrackedCentered(SCREEN_W / 2, 466, l->code, TS_HUGE, true, true, 8);
+    if (l->phase == ota::Lan::Failed) {
+      c.textCentered(SCREEN_W / 2, 560, "too many wrong codes", TS_MED, true, true);
+      c.textCentered(SCREEN_W / 2, 596, "press DONE and open the page again", TS_SMALL, true);
+    } else if (l->err != ota::Err::Ok) {
+      snprintf(buf, sizeof(buf), "last try: %s", ota::describe(l->err));
+      c.textCentered(SCREEN_W / 2, 560, buf, TS_MED, true, true);
+      c.textCentered(SCREEN_W / 2, 596, "the page can send again", TS_SMALL, true);
+    } else {
+      c.textCentered(SCREEN_W / 2, 560, "the page takes toybox-app.bin", TS_SMALL, true);
+      c.textCentered(SCREEN_W / 2, 588, "notes and settings stay", TS_SMALL, true);
+    }
+    c.button(dn.x, dn.y, dn.w, dn.h, "DONE", false, TS_LARGE);
+    return;
+  }
+
+  // The page.
+  c.textTracked(16, 64, "THIS STICKY", TS_SMALL, true, false, 1);
+  c.fillRect(16, 86, SCREEN_W - 32, 1, true);
+  c.text(16, 100, d ? d->version() : "", TS_LARGE, true, true);
+  if (d) {
+    char sz[16];
+    ota::sizeText(d->slotBytes(), sz, sizeof(sz));
+    snprintf(buf, sizeof(buf), "running from %s, %s update slots", d->slot(), sz);
+    c.text(16, 146, buf, TS_SMALL, true);
+  } else {
+    c.text(16, 146, "no update slots on this install:", TS_SMALL, true);
+    c.text(16, 172, "use UPDATE on the website once", TS_SMALL, true);
+  }
+  if (_upRolled[0]) {
+    c.fillRect(16, 190, SCREEN_W - 32, 64, true);
+    snprintf(buf, sizeof(buf), "%s did not start", _upRolled);
+    c.textCentered(SCREEN_W / 2, 196, buf, TS_MED, false, true);
+    c.textCentered(SCREEN_W / 2, 228, "so this version came back", TS_SMALL, false);
+  }
+  c.textTracked(16, 262, "UPDATE", TS_SMALL, true, false, 1);
+  c.fillRect(16, 284 - 0, SCREEN_W - 32, 1, true);
+  const bool wifi = homenet::haveWifi(host.prefs());
+  if (d) {
+    const TRect ck = updCheckRect(), ln = updLanRect();
+    c.button(ck.x, ck.y, ck.w, ck.h, "CHECK FOR UPDATE", false, TS_MED);
+    if (wifi) {
+      char name[homenet::SSID_MAX];
+      homenet::wifiName(host.prefs(), name, sizeof(name));
+      snprintf(buf, sizeof(buf), "from the website, through %s", name);
+    } else {
+      snprintf(buf, sizeof(buf), "save a home wifi first: Settings > Clock");
+    }
+    c.textCentered(SCREEN_W / 2, ck.y + ck.h + 10, buf, TS_SMALL, true);
+    c.button(ln.x, ln.y, ln.w, ln.h, "FROM A COMPUTER", false, TS_MED);
+    c.textCentered(SCREEN_W / 2, ln.y + ln.h + 10, "a page at sticky.local takes a .bin file", TS_SMALL,
+                   true);
+  }
+  c.textTracked(16, 532, "EXTRAS", TS_SMALL, true, false, 1);
+  c.fillRect(16, 554, SCREEN_W - 32, 1, true);
+  {
+    const TRect a = updResetRect();
+    if (_armed) c.fillRect(a.x, a.y, a.w, a.h, true);
+    setico::draw(c, -1, a.x + 22, a.y + a.h / 2, !_armed);
+    c.text(a.x + 52, a.y + (a.h - c.textHeight(TS_MED)) / 2,
+           _armed ? "Tap again to erase scores" : "Reset stats and tallies", TS_MED, !_armed);
+  }
+  c.textCentered(SCREEN_W / 2, 776, _note ? _note : "notes and settings stay through every update",
+                 TS_SMALL, true);
+}
+
+bool SettingsScreen::tapUpdate(ToolsHost& host, int x, int y) {
+  using namespace setui;
+  ota::Device* d = host.otaDevice();
+  if (_upStage == 1 || _upStage == 3 || _upStage == 6) return false;  // busy
+  if (_upStage == 2) {
+    const bool offer = _upErr == ota::Err::Ok && (_upCheck.needApp || _upCheck.needBase);
+    const int bat = host.batteryPercent();
+    const bool low = !host.charging() && bat >= 0 && bat < _upCheck.remote.minBattery;
+    if (offer && !low && d && updInstallRect().hit(x, y)) {
+      host.beep(1);
+      _upStage = 3;
+      _upPart = _upCheck.needBase ? 1 : 0;
+      _upDone = 0;
+      _upTotal = _upPart ? _upCheck.remote.base.bytes : _upCheck.remote.app.bytes;
+      _upPainted = 0;
+      host.refresh(true);  // the next tick does the work, painting as it goes
+      return false;
+    }
+    if (updDoneRect().hit(x, y)) {
+      host.beep(1);
+      _upStage = 0;
+      host.refresh(true);
+      return false;
+    }
+    return false;
+  }
+  if (_upStage == 4) {
+    if (_upErr != ota::Err::Ok && updDoneRect().hit(x, y)) {
+      host.beep(1);
+      _upStage = 0;
+      host.refresh(true);
+    }
+    return false;
+  }
+  if (_upStage == 5) {
+    const ota::Lan::Phase ph = d ? d->lan().phase : ota::Lan::Off;
+    if (ph == ota::Lan::Receiving || ph == ota::Lan::Verifying || ph == ota::Lan::Done) return false;
+    if (updDoneRect().hit(x, y)) {
+      host.beep(1);
+      leaveUpdate(&host);
+      _upStage = 0;
+      host.refresh(true);
+    }
+    return false;
+  }
+
+  // The page.
+  const bool wasArmed = _armed;
+  _armed = false;
+  _note = nullptr;
+  if (updResetRect().hit(x, y)) {
+    if (!wasArmed) {
+      _armed = true;
+      host.beep(2);
+    } else {
+      record::clearAll(host.prefs());
+      _note = "scores and tallies cleared";
+      host.beep(1);
+    }
+    return true;
+  }
+  if (!d) return wasArmed;
+  if (updCheckRect().hit(x, y)) {
+    if (!homenet::haveWifi(host.prefs())) {
+      host.beep(2);
+      _note = "save a home wifi from the phone first";
+      return true;
+    }
+    host.beep(1);
+    homenet::wifiName(host.prefs(), _netName, sizeof(_netName));
+    _upRolled[0] = 0;
+    _upStage = 1;
+    host.refresh(true);
+    return false;
+  }
+  if (updLanRect().hit(x, y)) {
+    if (!homenet::haveWifi(host.prefs())) {
+      host.beep(2);
+      _note = "save a home wifi from the phone first";
+      return true;
+    }
+    host.beep(1);
+    homenet::wifiName(host.prefs(), _netName, sizeof(_netName));
+    _upRolled[0] = 0;
+    _upStage = 6;
+    _lanSeen = 0xFF;
+    host.refresh(true);
+    return false;
+  }
+  return wasArmed;
+}
+
+void SettingsScreen::onProgress(void* ctx, uint8_t stage, uint32_t done, uint32_t total) {
+  SettingsScreen* s = (SettingsScreen*)ctx;
+  ToolsHost* host = s->_upHost;
+  s->_upPart = stage;
+  s->_upDone = done;
+  s->_upTotal = total;
+  if (!host) return;
+  // A partial refresh is 0.3 s; one every ~6 % keeps the bar honest without
+  // the panel becoming the slow part of the download.
+  const uint32_t step = total / 16 + 1;
+  if (done == total || done >= s->_upPainted + step || done < s->_upPainted) {
+    s->_upPainted = done;
+    host->refresh(false);
+  }
+}
+
+bool SettingsScreen::tickUpdate(ToolsHost& host) {
+  _upHost = &host;
+  ota::Device* d = host.otaDevice();
+  if (!d) return false;
+  if (_upStage == 1) {
+    _upErr = d->check(_upCheck);
+    if (homenet::g_joined[0]) snprintf(_netName, sizeof(_netName), "%s", homenet::g_joined);
+    _upStage = 2;
+    host.beep(_upErr == ota::Err::Ok ? 1 : 2);
+    return true;
+  }
+  if (_upStage == 3) {
+    _upErr = d->install(_upCheck, &SettingsScreen::onProgress, this);
+    _upStage = 4;
+    host.beep(_upErr == ota::Err::Ok ? 1 : 2);
+    return true;
+  }
+  if (_upStage == 4) {
+    if (_upErr == ota::Err::Ok) d->restart();  // "RESTARTING" is on the panel by now
+    return false;
+  }
+  if (_upStage == 6) {
+    d->lanStart();
+    _upStage = 5;
+    _lanSeen = 0xFF;
+    return true;
+  }
+  if (_upStage == 5) {
+    d->lanLoop();
+    const ota::Lan& l = d->lan();
+    if (l.phase != _lanSeen) {
+      _lanSeen = l.phase;
+      _lanPainted = l.done;
+      if (l.phase == ota::Lan::Done) host.beep(1);
+      return true;
+    }
+    if (l.phase == ota::Lan::Receiving && l.done >= _lanPainted + (l.total / 16 + 1)) {
+      _lanPainted = l.done;
+      host.refresh(false);
+    }
+    return false;
+  }
+  return false;
+}
+
+void SettingsScreen::leaveUpdate(ToolsHost* host) {
+  if (!host) return;
+  if (ota::Device* d = host->otaDevice()) {
+    if (_upStage == 5 || _upStage == 6) d->lanStop();
+  }
 }

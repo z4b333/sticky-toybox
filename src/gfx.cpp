@@ -194,6 +194,14 @@ void blit(const UiFont* f, const FontGlyph& g, int x, int y, uint8_t color) {
 // 1.9 MB to a 4 MB app partition to make headlines bigger in Chinese. TS_HUGE
 // borrows the 32 px face and centres it in the taller box, which is the same
 // thing every typesetter does when the size they want is not in the drawer.
+// The common CJK sets (GB2312-L1, JIS-L1 kanji, KS X 1001, kana) used to be
+// baked into the app. They now live in the base_font partition as a TFP2 pack
+// (tools/tfp2.py) so the app fits an OTA slot; registerPack() fills these three
+// slots from it. Until it does -- or on a device whose base partition is blank --
+// they are empty faces of the right box: lookups miss and draw the box glyph,
+// and the language packs still match against the box.
+IntlFace g_base[3] = {{16, 0, 0}, {24, 0, 0}, {32, 0, 0}};
+
 const IntlFace* intlFor(int px, int& yAdjust) {
   yAdjust = 0;
   // Up to 20, not up to 16: the smallest Latin bucket moved to 18 px and the
@@ -202,15 +210,15 @@ const IntlFace* intlFor(int px, int& yAdjust) {
   // size here would be a size those packs do not carry, and every Chinese
   // character in small text would fall back to nothing. A 16 px glyph inside
   // an 18 px line reads a shade small; a missing one reads as a hole.
-  if (px <= 20) return &INTL_16;
-  if (px <= 24) return &INTL_24;
-  if (px <= 32) return &INTL_32;
+  if (px <= 20) return &g_base[0];
+  if (px <= 24) return &g_base[1];
+  if (px <= 32) return &g_base[2];
   yAdjust = (px - 32) / 2;
-  return &INTL_32;
+  return &g_base[2];
 }
 
 const IntlGlyph* intlGlyph(const IntlFace* f, uint32_t cp) {
-  if (cp > 0xFFFF) return nullptr;
+  if (cp > 0xFFFF || f->count == 0) return nullptr;
   uint32_t lo = 0, hi = f->count;
   while (lo < hi) {
     const uint32_t mid = (lo + hi) / 2;
@@ -806,30 +814,72 @@ uint32_t rd32(const char* p) {
   return v;
 }
 
-// Registers the faces inside one loaded blob. The blob stays allocated for the
-// life of the process; faces point straight into it.
+// Registers the faces inside one loaded blob. The blob stays allocated (or
+// mapped) for the life of the process; faces point straight into it.
+//   TFP1: raw bitmaps -- the packs installed by v1.x installers.
+//   TFP2: raw-deflate blocks, inflated on demand like the baked faces were.
+//         Flag bit 0 marks the base pack, which fills g_base by box instead
+//         of taking pack slots.
 bool registerPack(char* blob, size_t len) {
-  if (len < 8 || memcmp(blob, "TFP1", 4) != 0) return false;
+  if (len < 8) return false;
+  const bool v2 = memcmp(blob, "TFP2", 4) == 0;
+  if (!v2 && memcmp(blob, "TFP1", 4) != 0) return false;
   const uint32_t faces = rd32(blob + 4);
-  size_t at = 8;
+  const uint32_t flags = v2 && len >= 12 ? rd32(blob + 8) : 0;
+  const bool base = flags & 1;
+  size_t at = v2 ? 12 : 8;
+  IntlFace parsed[MAX_PACK_FACES];
+  if (faces == 0 || faces > MAX_PACK_FACES) return false;
   for (uint32_t i = 0; i < faces; i++) {
-    if (at + 16 > len || g_packFaceCount >= MAX_PACK_FACES) return false;
-    IntlFace f{};  // zBlocks/zRaw/zOff/z stay zero: packs keep raw bits
+    const size_t head = v2 ? 20 : 16;
+    if (at + head > len) return false;
+    IntlFace f{};
     f.box = (uint16_t)rd32(blob + at);
     f.toneDrop = (uint16_t)rd32(blob + at + 4);
     f.count = rd32(blob + at + 8);
-    const uint32_t bitsLen = rd32(blob + at + 12);
-    at += 16;
+    const uint32_t n3 = rd32(blob + at + 12);  // TFP1: bits length; TFP2: block count
+    const uint32_t zLen = v2 ? rd32(blob + at + 16) : 0;
+    at += head;
+    if (f.count > 0x10000) return false;
     f.cps = (const uint16_t*)(blob + at);
     at += (size_t)f.count * 2;
     at = (at + 3) & ~(size_t)3;
     f.glyphs = (const IntlGlyph*)(blob + at);
     at += (size_t)f.count * sizeof(IntlGlyph);
-    f.bits = (const uint8_t*)(blob + at);
-    at += bitsLen;
+    if (v2) {
+      if (n3 > 0x10000) return false;
+      f.zBlocks = n3;
+      f.zRaw = (const uint32_t*)(blob + at);
+      at += ((size_t)n3 + 1) * 4;
+      f.zOff = (const uint32_t*)(blob + at);
+      at += ((size_t)n3 + 1) * 4;
+      f.z = (const uint8_t*)(blob + at);
+      at += zLen;
+      if (at > len) return false;
+      // Every block must fit one inflate slot, and the stream offsets must be
+      // inside the blob: a pack is data from a flash partition or a card.
+      for (uint32_t k = 0; k < n3; k++) {
+        uint32_t r0, r1, z0, z1;
+        memcpy(&r0, &f.zRaw[k], 4); memcpy(&r1, &f.zRaw[k + 1], 4);
+        memcpy(&z0, &f.zOff[k], 4); memcpy(&z1, &f.zOff[k + 1], 4);
+        if (r1 < r0 || r1 - r0 > INTL_ZBLOCK_MAX || z1 < z0 || z1 > zLen) return false;
+      }
+    } else {
+      f.bits = (const uint8_t*)(blob + at);
+      at += n3;
+    }
     at = (at + 3) & ~(size_t)3;
     if (at > len) return false;
-    g_packFaces[g_packFaceCount++] = f;
+    parsed[i] = f;
+  }
+  for (uint32_t i = 0; i < faces; i++) {
+    if (base) {
+      for (IntlFace& slot : g_base)
+        if (slot.box == parsed[i].box) slot = parsed[i];
+    } else {
+      if (g_packFaceCount >= MAX_PACK_FACES) return false;
+      g_packFaces[g_packFaceCount++] = parsed[i];
+    }
   }
   return true;
 }
@@ -849,8 +899,8 @@ int loadFontPacks() {
   static bool partitionsDone = false;
   if (!partitionsDone) {
     partitionsDone = true;
-    const char* parts[3] = {"zh_font", "ko_font", "ja_font"};
-    for (int i = 0; i < 3; i++) {
+    const char* parts[4] = {"base_font", "zh_font", "ko_font", "ja_font"};
+    for (int i = 0; i < 4; i++) {
       const esp_partition_t* p =
           esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY, parts[i]);
       if (!p) continue;
