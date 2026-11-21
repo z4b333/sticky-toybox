@@ -1803,6 +1803,9 @@ int main() {
   }
   epd.begin();
   prefs.begin("toybox", false);
+  // The reader's first-open guide eats the first touch; every walk below
+  // opens books as somebody who has seen it. Its own check clears the flag.
+  prefs.putBool("ep_guide", true);
   toybox.begin(stickyHost);
   lock::apply(prefs);
   lock::setInfoHook(hostLockInfo);
@@ -3290,8 +3293,28 @@ int main() {
       abort();
     }
 
-    // Open the one invented book; it starts at the top of chapter one.
+    // Open the one invented book; it starts at the top of chapter one. The
+    // very first open ever shows the guide to the tap zones, and the first
+    // touch puts it away for good without doing anything else.
+    stickyHost.prefs().remove("ep_guide");
     toybox.onTap(240, epubui::LIST_Y0 + epubui::LIST_ROW_H + 10);
+    if (!et->hostGuide()) {
+      printf("GUIDE FAIL: the first book did not show the guide\n");
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_epub_guide");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    {
+      const int pageWas = et->hostPage();
+      toybox.onTap(470, 400);  // would be "next page" -- the guide takes it
+      if (et->hostGuide() || et->hostPage() != pageWas ||
+          !stickyHost.prefs().getBool("ep_guide", false)) {
+        printf("GUIDE FAIL: the first touch did not just put the guide away\n");
+        abort();
+      }
+    }
     if (et->hostScreen() != 1 || et->hostSpine() != 0 || et->hostPage() != 0) {
       printf("EPUB APP FAIL: the book did not open at the start (s%d p%d)\n", et->hostSpine(),
              et->hostPage());
@@ -3831,7 +3854,7 @@ int main() {
     {
       const uint32_t before = et->hostPageOffset();
       const int lines = et->hostLineCount();
-      toybox.onTap(440, 110 + 34 + 20);  // SIZE +
+      tapRect(epubui::textPlus(0));  // SIZE +
       if (et->hostTextSize() != 1) {
         printf("EPUB APP FAIL: the size did not change (%d)\n", et->hostTextSize());
         abort();
@@ -3845,7 +3868,22 @@ int main() {
         printf("EPUB APP FAIL: bigger type gave %d lines, was %d\n", et->hostLineCount(), lines);
         abort();
       }
-      toybox.onTap(40, 110 + 34 + 20);  // SIZE -, back to normal
+      tapRect(epubui::textMinus(0));  // SIZE -, back to normal
+      // v2: margins and paragraph gap step, and a wider margin fits fewer
+      // words on a line, so the page holds no more text than before.
+      const uint32_t offBefore = et->hostPageOffset();
+      tapRect(epubui::textPlus(2));  // margins: wide
+      tapRect(epubui::textPlus(3));  // paragraphs: large
+      g_dumpEnabled = true;
+      setScreen("tool_epub_text_fine");
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+      if (et->hostPageOffset() > offBefore) {
+        printf("EPUB APP FAIL: wider margins moved the reader forward\n");
+        abort();
+      }
+      tapRect(epubui::textMinus(2));  // back to normal
+      tapRect(epubui::textMinus(3));
     }
 
     // The contents fallback: a book with no navigation document names its
@@ -3962,7 +4000,7 @@ int main() {
       stickyHost.refresh(true);
       g_dumpEnabled = false;
 
-      toybox.onTap(440, 110 + 34 + 20);  // SIZE +, to the family's 18 pt
+      tapRect(epubui::textPlus(0));  // SIZE +, to the family's 18 pt
       if (stickyHost.faceSize() != 1 || gfx::cardFaceLine(24, true) != 44) {
         printf("READER SIZE FAIL: stepping up left the size at %d and the body box at %d px\n",
                stickyHost.faceSize(), gfx::cardFaceLine(24, true));
@@ -3990,7 +4028,7 @@ int main() {
         }
       }
       // The top of the family is the top: there is no next size to step to.
-      toybox.onTap(440, 110 + 34 + 20);
+      tapRect(epubui::textPlus(0));
       if (stickyHost.faceSize() != 1) {
         printf("READER SIZE FAIL: stepping past the family's largest gave %d\n",
                stickyHost.faceSize());
@@ -4043,7 +4081,7 @@ int main() {
       // Put the book back the way the next check expects to find it.
       toybox.onButton(SideBtn::Ok);
       toybox.onTap(240, rmenu::rootRect(2, 480).y + 40);
-      toybox.onTap(40, 110 + 34 + 20);  // SIZE -, back to the family's 12 pt
+      tapRect(epubui::textMinus(0));  // SIZE -, back to the family's 12 pt
       toybox.onButton(SideBtn::Ok);
       toybox.onButton(SideBtn::Ok);
       stickyHost.fontSet(ToolsHost::FONT_READER, "");
@@ -6798,8 +6836,81 @@ int main() {
     g_dumpEnabled = true;
     setScreen("tool_epub_footer_long");
     toybox.onTap(240, 400);  // the middle toggles the footer
+    // The top-right corner opens More (v2): a card of six tiles over the
+    // page; a tap outside it closes it again.
+    {
+    const int MW = stickyHost.sharedCanvas().width(), MH = stickyHost.sharedCanvas().height();
+    setScreen("tool_epub_more");
+    toybox.onTap(MW - 30, 20);
+    if (!static_cast<EpubTool*>(toybox.hostActive())->hostMoreOpen()) {
+      printf("MORE FAIL: the top-right corner did not open More\n");
+      abort();
+    }
     g_dumpEnabled = false;
-    toybox.onTap(240, 400);  // and away again
+    toybox.onTap(240, 790);  // below the card: closed
+    if (static_cast<EpubTool*>(toybox.hostActive())->hostMoreOpen()) {
+      printf("MORE FAIL: a tap outside the card did not close it\n");
+      abort();
+    }
+    toybox.onTap(240, 400);  // and the footer away again
+    // Settings tile: the book settings list.
+    toybox.onTap(MW - 30, 20);
+    tapRect(rmenu::moreTile(4, MW, MH));
+    g_dumpEnabled = true;
+    setScreen("tool_epub_book_settings");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    toybox.onButton(SideBtn::Ok);  // and down onto the page
+    // Rotation tile: freed, the page turns with the device by itself (tick),
+    // wears TAP TO LOCK, and the plate locks it. More then opens landscape.
+    {
+      EpubTool* ep = static_cast<EpubTool*>(toybox.hostActive());
+      sensors::hostSetImu(true);
+      sensors::hostSetOrientation(0);
+      toybox.onTap(MW - 30, 20);
+      tapRect(rmenu::moreTile(3, MW, MH));
+      sensors::hostSetOrientation(1);
+      g_dumpEnabled = true;
+      setScreen("tool_epub_follow");
+      for (int k = 0; k < 3 && ep->hostRot() != 1; k++) {
+        g_millis += 500;
+        toybox.tick();
+      }
+      g_dumpEnabled = false;
+      if (ep->hostRot() != 1 || !ep->hostFollowing()) {
+        printf("ROTATION FAIL: following did not take angle 1 by itself (rot %d)\n", ep->hostRot());
+        abort();
+      }
+      tapRect(rmenu::lockPlate(stickyHost.sharedCanvas().width()));
+      if (ep->hostFollowing()) {
+        printf("ROTATION FAIL: the plate did not lock\n");
+        abort();
+      }
+      const int LW = stickyHost.sharedCanvas().width(), LH = stickyHost.sharedCanvas().height();
+      g_dumpEnabled = true;
+      setScreen("tool_epub_more_landscape");
+      toybox.onTap(LW - 30, 20);
+      g_dumpEnabled = false;
+      if (!ep->hostMoreOpen() || stickyHost.canvasRotation() != 1) {
+        printf("ROTATION FAIL: More did not open at the landscape angle\n");
+        abort();
+      }
+      // Back to locked portrait for the checks after this one.
+      tapRect(rmenu::moreTile(3, LW, LH));  // free again
+      sensors::hostSetOrientation(0);
+      for (int k = 0; k < 3 && ep->hostRot() != 0; k++) {
+        g_millis += 500;
+        toybox.tick();
+      }
+      tapRect(rmenu::lockPlate(stickyHost.sharedCanvas().width()));
+      if (ep->hostRot() != 0 || ep->hostFollowing()) {
+        printf("ROTATION FAIL: could not get back to locked portrait (rot %d)\n", ep->hostRot());
+        abort();
+      }
+      sensors::hostSetImu(false);
+    }
+    }
+    printf("more popup ok (opens in the middle, closes outside, settings tile, rotation follows)\n");
 
     const char* pp = posOf(
         "/books/A Book With The Kind Of Very Long Release Filename Publishers Actually Use Vol 01.epub");

@@ -20,6 +20,8 @@
 #include "epub/epubcore.h"
 #include "thai_words.h"
 #include "bookmarks.h"
+#include "decor.h"
+#include "../chrome.h"
 #include "flash_qr.h"
 #include "help.h"
 #include "series.h"
@@ -34,7 +36,11 @@
 
 namespace epubui {
 inline constexpr int MARGIN = 24;
+// v2: the corner marks -- Back (peeled corner) top-left, More top-right --
+// are invisible while reading and drawn in full, on white plates, while the
+// footer is up. The first book ever opened shows a guide to the tap zones.
 inline constexpr int TOP = 18;
+inline constexpr int MARK = 36;
 // The footer band is measured from the bottom of whichever canvas is live:
 // the page reads at any of the four rotations now, and 480-tall landscape
 // needs the band as much as 800-tall portrait does.
@@ -64,6 +70,24 @@ inline TSize sizeFor(int bodyIdx, int head) { return head ? headSize(bodyIdx) : 
 // than floating between two paragraphs.
 inline constexpr int HEAD_GAP = 10;
 inline constexpr int PARA_GAP = 14;
+// v2 fine tuning (kit "Text"): side margins and the gap between paragraphs,
+// three steps each, beside size and line spacing.
+inline constexpr int MARGINS = 3, PARAS = 3;
+inline int marginPx(int i) { return i <= 0 ? 14 : (i == 1 ? 24 : 40); }
+inline const char* marginName(int i) { return i <= 0 ? "narrow" : (i == 1 ? "normal" : "wide"); }
+inline int paraPx(int i) { return i <= 0 ? 4 : (i == 1 ? PARA_GAP : 28); }
+inline const char* paraName(int i) { return i <= 0 ? "small" : (i == 1 ? "normal" : "large"); }
+// The Text page's four rows: a label on the left, [-] value [+] on the right.
+inline constexpr int TXT_Y0 = 64, TXT_STEP = 70, TXT_BTN = 48;
+inline TRect textRow(int r) { return TRect{16, TXT_Y0 + r * TXT_STEP, 448, TXT_STEP - 8}; }
+inline TRect textMinus(int r) {
+  const TRect t = textRow(r);
+  return TRect{t.x + t.w - 3 * TXT_BTN - 40, t.y + (t.h - TXT_BTN) / 2, TXT_BTN, TXT_BTN};
+}
+inline TRect textPlus(int r) {
+  const TRect t = textRow(r);
+  return TRect{t.x + t.w - TXT_BTN, t.y + (t.h - TXT_BTN) / 2, TXT_BTN, TXT_BTN};
+}
 // Enough for the smallest type at the tightest leading: 752 px of page over a
 // 30 px step is 25 lines, and a page that runs out of Line slots stops early
 // with a gap at the bottom that nothing explains.
@@ -145,6 +169,10 @@ class EpubTool : public ToolApp {
     reload();
     _size = (uint8_t)prefs().getUInt("rd_size", 0);
     _lead = (uint8_t)prefs().getUInt("rd_lead", 1);
+    _margin = (uint8_t)prefs().getUInt("rd_marg", 1);
+    _para = (uint8_t)prefs().getUInt("rd_para", 1);
+    if (_margin >= epubui::MARGINS) _margin = 1;
+    if (_para >= epubui::PARAS) _para = 1;
     // The face is one choice now, not two. It used to live in "rd_face" as a
     // number 0 or 1; it lives in the Books slot as a NAME, which can equally
     // be a family off the card. A device that was reading in Literata is
@@ -349,9 +377,32 @@ class EpubTool : public ToolApp {
       menuTap(x, y);
       return;
     }
-    // The page. Corner out, thirds turn, middle toggles the footer.
+    if (_guide) {
+      _guide = false;
+      prefs().putBool("ep_guide", true);
+      host().beep(1);
+      host().refresh(true);
+      return;
+    }
+    // The page (v2). While it follows the device, the plate at the top locks
+    // it, and any other tap first takes the device's angle.
+    if (_rotFollow) {
+      if (rmenu::lockPlate(host().canvas().width()).hit(x, y)) {
+        _rotFollow = false;
+        host().beep(1);
+        host().refresh(false);
+        return;
+      }
+      if (followDevice()) return;
+    }
+    // Top-left closes, top-right opens More (v2), thirds turn, and the
+    // middle toggles the footer.
     if (x < 110 && y < 50) {
       closeBook(true);
+      return;
+    }
+    if (rmenu::moreCorner(host().canvas().width()).hit(x, y)) {
+      moreOpen();
       return;
     }
     const bool left = x < epubui::TURN_W;
@@ -413,6 +464,10 @@ class EpubTool : public ToolApp {
 
 #ifdef TOYBOX_HOST
   int hostScreen() const { return _screen == Screen::Page ? 1 : 0; }
+  bool hostMoreOpen() const { return _menu == rmenu::Page::More; }
+  int hostRot() const { return _rot; }
+  bool hostFollowing() const { return _rotFollow; }
+  bool hostGuide() const { return _guide; }
   // What the shelf row for book i currently claims: true means it draws
   // "carries on where it stopped".
   int hostBookCount() const { return _n < 0 ? 0 : _n; }
@@ -762,9 +817,22 @@ class EpubTool : public ToolApp {
   }
   bool wantsTick() const override {
     return _saveDue != 0 || _syncStage == 1 || _syncStage == 3 || _syncStage == 4 ||
-           _screen == Screen::Library;
+           _screen == Screen::Library || following();
+  }
+  // v2: while the page follows the device it watches the angle by itself,
+  // and the host may nap between looks.
+  bool following() const {
+    return _rotFollow && _open && _screen == Screen::Page && _menu == rmenu::Page::None &&
+           !_picking;
+  }
+  bool napsOk() const override {
+    return following() && _saveDue == 0 && _syncStage == 0;
   }
   void tick() override {
+    if (following() && host().nowMs() - _lastLook >= 400) {
+      _lastLook = host().nowMs();
+      followDevice();
+    }
     if (_screen == Screen::Library) {
       libTick();
       return;
@@ -955,6 +1023,7 @@ class EpubTool : public ToolApp {
       off = p.hasOffset ? p.offset : 0;
     }
     _screen = Screen::Page;
+    _guide = !prefs().getBool("ep_guide", false);  // v2: once, the first book ever
     host().setCanvasRotation(_rot);  // gotoPlace lays out at this width
     _rotLaid = _rot;
     if (!unwrapped) host().beep(1);  // an unwrapped open already sounded, at the cover
@@ -1234,7 +1303,7 @@ class EpubTool : public ToolApp {
     ContentFace cf(host());
     ToolsCanvas& c = host().canvas();
     const TSize ts = bodyTS();
-    const int lineW = c.width() - 2 * epubui::MARGIN;
+    const int lineW = c.width() - 2 * epubui::marginPx(_margin);
     // A line's height follows its own type: a heading line is taller than the
     // body around it, so the step cannot be one number for the page any more.
     auto stepFor = [&](int head) {
@@ -1360,7 +1429,7 @@ class EpubTool : public ToolApp {
           _atEnd = false;
           break;  // full at a paragraph edge; nothing pends
         }
-        y += epubui::PARA_GAP;
+        y += epubui::paraPx(_para);
         continue;
       }
 
@@ -2608,6 +2677,7 @@ class EpubTool : public ToolApp {
   }
 
   void menuOpen() {
+    _fromMore = false;
     _menu = rmenu::Page::Root;
     _mpage = 0;
     _resetArmed = false;  // a question does not survive the screen that asked it
@@ -2621,6 +2691,186 @@ class EpubTool : public ToolApp {
       host().refresh(true);
     else
       paint();
+  }
+
+  // --- v2: the More popup and the rotation that follows the device ----------
+  void moreOpen() {
+    _menu = rmenu::Page::More;
+    _mpage = 0;
+    _resetArmed = false;
+    _nmarks = marks::load(host(), _books[_cur].file, _marks);
+    // The card sits over the page at the page's own angle, so a landscape
+    // reader gets a landscape card.
+    host().beep(0);
+    paint();
+  }
+
+  // Takes the device's angle if it has changed. True when the page was
+  // re-laid (the tap that asked is used up by the turn).
+  bool followDevice() {
+    const int o = host().deviceOrientation();
+    if (o < 0 || o == _rot) return false;
+    _rot = (uint8_t)o;
+    prefs().putUInt("rd_rot", _rot);
+    applyRot(_rot);
+    syncPageRot();
+    host().beep(0);
+    host().refresh(true);
+    return true;
+  }
+
+  void renderMore(ToolsCanvas& c) {
+    const int W = c.width(), H = c.height();
+    renderPage(c);
+    const TRect k = rmenu::moreCard(W, H);
+    c.fillRect(k.x + 8, k.y + 8, k.w, k.h, true);  // the card's solid edge
+    c.fillRect(k.x, k.y, k.w, k.h, false);
+    c.drawRect(k.x, k.y, k.w, k.h, 3, true);
+    // The book, and where in it.
+    // Where in the book, and the battery (owner, 21 Nov): the card is the one
+    // place mid-book that is drawn fresh, so the number on it is true.
+    char pg[20], pos[40];
+    if (_chapterPages > 0)
+      snprintf(pg, sizeof(pg), "p %d/%d", _page + 1, _chapterPages);
+    else
+      snprintf(pg, sizeof(pg), "p %d", _page + 1);
+    const int bat = host().batteryPercent();
+    if (bat >= 0)
+      snprintf(pos, sizeof(pos), "%d%%  \xc2\xb7  %s", bat, pg);
+    else
+      snprintf(pos, sizeof(pos), "%s", pg);
+    const int pw = c.textWidth(pos, TS_SMALL);
+    c.textClipped(k.x + 18, k.y + 20, k.w - 36 - pw - 12, _books[_cur].title, TS_MED, true, true);
+    c.text(k.x + k.w - 18 - pw, k.y + 24, pos, TS_SMALL, true);
+    c.fillRect(k.x + 16, k.y + 58, k.w - 32, 1, true);
+
+    const char* syncSub = !syncReady()                     ? "no Wi-Fi saved"
+                          : !kosync::haveAccount(prefs()) ? "sign in"
+                          : kosync::isReadest(prefs())    ? "Readest"
+                                                          : "KOReader";
+    char markSub[24];
+    snprintf(markSub, sizeof(markSub), _nmarks ? "%d kept" : "keep a phrase", _nmarks);
+    const char* lab[6] = {"Contents", "Bookmark", "Sync", "Rotation", "Settings", "Exit"};
+    const char* sub[6] = {"chapters", markSub, syncSub,
+                          _rotFollow ? "follows" : "locked",
+                          "text, font", "close the book"};
+    for (int i = 0; i < 6; i++) {
+      const TRect t = rmenu::moreTile(i, W, H);
+      const bool on = i == 3 && _rotFollow;
+      if (on) c.fillRect(t.x, t.y, t.w, t.h, true);
+      else c.drawRect(t.x, t.y, t.w, t.h, 2, true);
+      moreIcon(c, i, t.x + t.w / 2, t.y + 34, !on);
+      c.textCentered(t.x + t.w / 2, t.y + 64, lab[i], TS_SMALL, !on, true);
+      c.textCentered(t.x + t.w / 2, t.y + 90, sub[i], TS_SMALL, !on);
+    }
+    c.textCentered(k.x + k.w / 2, k.y + k.h - 40, "tap outside to close", TS_SMALL, true);
+  }
+
+  // Small line icons for the More tiles, in a ~32 px box.
+  static void moreIcon(ToolsCanvas& c, int i, int cx, int cy, bool dark) {
+    switch (i) {
+      case 0:  // contents: lines
+        for (int k = 0; k < 4; k++) c.fillRect(cx - 14, cy - 12 + k * 8, k % 2 ? 20 : 28, 3, dark);
+        break;
+      case 1:  // bookmark ribbon
+        c.fillRect(cx - 10, cy - 16, 20, 26, dark);
+        decor::triangle(c, cx - 10, cy + 16, cx + 10, cy + 16, cx, cy + 6, !dark);
+        c.fillRect(cx - 10, cy + 10, 20, 6, dark);
+        decor::triangle(c, cx - 10, cy + 16, cx + 9, cy + 16, cx, cy + 7, !dark);
+        break;
+      case 2:  // sync: two arcs with heads
+        c.drawCircle(cx, cy, 13, 3, dark);
+        c.fillRect(cx - 16, cy - 2, 32, 4, !dark);
+        decor::triangle(c, cx + 9, cy - 4, cx + 17, cy - 4, cx + 13, cy + 4, dark);
+        decor::triangle(c, cx - 17, cy + 4, cx - 9, cy + 4, cx - 13, cy - 4, dark);
+        break;
+      case 3:  // rotation: a turned letter A
+        c.drawLine(cx - 12, cy + 10, cx, cy - 14, 3, dark);
+        c.drawLine(cx, cy - 14, cx + 12, cy + 10, 3, dark);
+        c.drawLine(cx - 6, cy + 1, cx + 6, cy + 1, 3, dark);
+        break;
+      case 4:  // settings: a gear
+        decor::gear(c, cx, cy, 13, 8, dark);
+        c.fillCircle(cx, cy, 4, !dark);
+        break;
+      default:  // exit: an arrow out of a door
+        c.drawRect(cx - 14, cy - 14, 16, 28, 3, dark);
+        c.drawLine(cx - 4, cy, cx + 16, cy, 3, dark);
+        c.drawLine(cx + 9, cy - 7, cx + 16, cy, 3, dark);
+        c.drawLine(cx + 9, cy + 7, cx + 16, cy, 3, dark);
+        break;
+    }
+  }
+
+  void moreTap(int x, int y) {
+    const int W = host().canvas().width(), H = host().canvas().height();
+    if (!rmenu::moreCard(W, H).hit(x, y)) {
+      menuClose();
+      return;
+    }
+    // Every page behind the card is a portrait one; stand up for it.
+    // Returns whether it had to turn, which makes the repaint a full one.
+    const auto standUp = [&] {
+      if (host().canvasRotation() == 0) return false;
+      host().setCanvasRotation(0);
+      return true;
+    };
+    const auto show = [&](bool turned) {
+      if (turned) host().refresh(true);
+      else paint();
+    };
+    switch (rmenu::hitMoreTile(x, y, W, H)) {
+      case 0: {
+        const bool t = standUp();
+        _fromMore = true;
+        _menu = rmenu::Page::Contents;
+        _mpage = pageOfSpine();
+        host().beep(0);
+        show(t);
+        return;
+      }
+      case 1:
+        // Choosing the phrase happens on the page itself, at its angle.
+        _fromMore = true;
+        _menu = rmenu::Page::None;
+        pickStart();
+        return;
+      case 2:
+        if (!syncReady()) {
+          host().beep(2);
+          return;
+        }
+        {
+          const bool t = standUp();
+          _fromMore = true;
+          _menu = rmenu::Page::Sync;
+          _syncStage = kosync::haveAccount(prefs()) ? 1 : 3;
+          host().beep(1);
+          show(t);
+        }
+        return;
+      case 3:
+        // Free: back to the page, which now turns with the device by itself
+        // and wears TAP TO LOCK until locked again.
+        _rotFollow = !_rotFollow;
+        host().beep(1);
+        menuClose();
+        return;
+      case 4: {
+        const bool t = standUp();
+        _fromMore = false;
+        _menu = rmenu::Page::Root;
+        host().beep(0);
+        show(t);
+        return;
+      }
+      case 5:
+        _menu = rmenu::Page::None;
+        closeBook(true);
+        return;
+      default:
+        return;
+    }
   }
 
   // Forget where this book was being read, and go back to its first page.
@@ -2665,6 +2915,13 @@ class EpubTool : public ToolApp {
 
   void menuBack() {
     if (_menu == rmenu::Page::Sync && (_syncStage == 1 || _syncStage == 3)) return;
+    if (_fromMore && _menu != rmenu::Page::Root) {
+      // Reached from the popup: back is back to the page it was over.
+      syncAbort();
+      _fromMore = false;
+      menuClose();
+      return;
+    }
     syncAbort();
     _menu = rmenu::Page::Root;
     _mpage = 0;
@@ -2776,7 +3033,7 @@ class EpubTool : public ToolApp {
       const int n = j - i > (int)sizeof(probe) - 1 ? (int)sizeof(probe) - 1 : j - i;
       memcpy(probe, line, (size_t)(i + n) > sizeof(probe) - 1 ? sizeof(probe) - 1 : (size_t)(i + n));
       probe[(size_t)(i + n) > sizeof(probe) - 1 ? sizeof(probe) - 1 : (size_t)(i + n)] = 0;
-      if (epubui::MARGIN + c.textWidth(probe, ts) > tapX) return word;
+      if (epubui::marginPx(_margin) + c.textWidth(probe, ts) > tapX) return word;
       while (line[j] == ' ') j++;
       i = j;
       word++;
@@ -2792,7 +3049,7 @@ class EpubTool : public ToolApp {
     const TSize ts = bodyTS();
     char probe[200];
     int i = 0, word = 0;
-    x0 = x1 = epubui::MARGIN;
+    x0 = x1 = epubui::marginPx(_margin);
     while (line[i]) {
       int j = i;
       while (line[j] && line[j] != ' ') j++;
@@ -2800,11 +3057,11 @@ class EpubTool : public ToolApp {
         const size_t pre = (size_t)i < sizeof(probe) ? (size_t)i : sizeof(probe) - 1;
         memcpy(probe, line, pre);
         probe[pre] = 0;
-        x0 = epubui::MARGIN + c.textWidth(probe, ts);
+        x0 = epubui::marginPx(_margin) + c.textWidth(probe, ts);
         const size_t upto = (size_t)j < sizeof(probe) ? (size_t)j : sizeof(probe) - 1;
         memcpy(probe, line, upto);
         probe[upto] = 0;
-        x1 = epubui::MARGIN + c.textWidth(probe, ts);
+        x1 = epubui::marginPx(_margin) + c.textWidth(probe, ts);
         return;
       }
       while (line[j] == ' ') j++;
@@ -2951,6 +3208,10 @@ class EpubTool : public ToolApp {
 
   void renderMenu(ToolsCanvas& c) {
     char buf[64];
+    if (_menu == rmenu::Page::More) {
+      renderMore(c);
+      return;
+    }
     if (_menu == rmenu::Page::Root) {
       rmenu::Item items[8];
       items[0].label = "Contents";
@@ -3010,7 +3271,7 @@ class EpubTool : public ToolApp {
       items[n].label = "Close the book";
       items[n].sub = _books[_cur].title;
       char clk[8];
-      rmenu::drawRoot(host(), c, "Options", items, n + 1, "READ",
+      rmenu::drawRoot(host(), c, "BOOK SETTINGS", items, n + 1, "READ",
                       rmenu::clockCorner(host(), clk, sizeof(clk)));
       if (_resetArmed) {  // the armed row inverts, as the reset in settings does
         const TRect r = rmenu::rootRect(rowReset, c.width());
@@ -3097,12 +3358,26 @@ class EpubTool : public ToolApp {
 
     if (_menu == rmenu::Page::Text) {
       host().topBar("TEXT", false, "OPTIONS");
-      const char* labels[2] = {"Size", "Spacing"};
-      const char* values[2] = {sizeLabel(), epubui::leadName(_lead)};
-      // The steppers live in reader_menu.h now; the recipe app offers the
-      // same two and should not have to draw its own circles.
-      for (int r = 0; r < 2; r++)
-        rmenu::drawStepper(c, 110 + r * rmenu::STEP_H, labels[r], values[r]);
+      // v2: four fine rows -- size, line space, margins, paragraph gap -- each
+      // a label with [-] value [+] on the right, so the sample below stays
+      // in view while they change.
+      const char* labels[4] = {"Size", "Line space", "Margins", "Paragraphs"};
+      const char* values[4] = {sizeLabel(), epubui::leadName(_lead), epubui::marginName(_margin),
+                               epubui::paraName(_para)};
+      for (int r = 0; r < 4; r++) {
+        const TRect row = epubui::textRow(r);
+        c.text(row.x + 8, row.y + (row.h - c.textHeight(TS_MED)) / 2, labels[r], TS_MED, true);
+        const TRect mi = epubui::textMinus(r), pl = epubui::textPlus(r);
+        c.drawRect(mi.x, mi.y, mi.w, mi.h, 2, true);
+        c.fillRect(mi.x + 14, mi.y + mi.h / 2 - 1, mi.w - 28, 3, true);
+        c.drawRect(pl.x, pl.y, pl.w, pl.h, 2, true);
+        c.fillRect(pl.x + 14, pl.y + pl.h / 2 - 1, pl.w - 28, 3, true);
+        c.fillRect(pl.x + pl.w / 2 - 1, pl.y + 14, 3, pl.h - 28, true);
+        const int vx0 = mi.x + mi.w, vx1 = pl.x;
+        c.textCentered((vx0 + vx1) / 2, row.y + (row.h - c.textHeight(TS_SMALL)) / 2, values[r],
+                       TS_SMALL, true, true);
+        c.fillRect(row.x, row.y + row.h + 3, row.w, 1, true);
+      }
       // Page turns: three cadences, cycled by tapping the row. A row rather
       // than a stepper because there is no scale here to step along -- the
       // three are named things, and arrows either side of one would suggest a
@@ -3127,7 +3402,8 @@ class EpubTool : public ToolApp {
         for (int i = 0; i < 4; i++) {
           const int y = TURNS_Y + 122 + i * step;
           if (y > 730) break;
-          c.textClipped(28, y, c.width() - 56, kSample[i], ts, true);
+          const int mx = epubui::marginPx(_margin);
+          c.textClipped(mx, y, c.width() - 2 * mx, kSample[i], ts, true);
         }
       }
       c.textCentered(c.width() / 2, 748, "the page you are on is kept when this changes", TS_SMALL,
@@ -3183,6 +3459,10 @@ class EpubTool : public ToolApp {
   }
 
   void menuTap(int x, int y) {
+    if (_menu == rmenu::Page::More) {
+      moreTap(x, y);
+      return;
+    }
     if (host().isBackTap(x, y)) {
       if (_menu == rmenu::Page::Root)
         menuClose();
@@ -3340,10 +3620,23 @@ class EpubTool : public ToolApp {
         paint();
         return;
       }
-      for (int r = 0; r < 2; r++) {
-        const int step = rmenu::hitStepper(x, y, 110 + r * rmenu::STEP_H,
-                                           host().canvas().width());
+      for (int r = 0; r < 4; r++) {
+        const int step = epubui::textMinus(r).hit(x, y) ? -1 : epubui::textPlus(r).hit(x, y) ? 1 : 0;
         if (step == 0) continue;
+        if (r >= 2) {
+          uint8_t& v = r == 2 ? _margin : _para;
+          const int nv = (int)v + step;
+          if (nv < 0 || nv >= 3) {
+            host().beep(2);
+            return;
+          }
+          v = (uint8_t)nv;
+          prefs().putUInt(r == 2 ? "rd_marg" : "rd_para", v);
+          restyle();
+          host().beep(0);
+          paint();
+          return;
+        }
         // Size, when the book is set in a family off the card, steps through
         // that family's own sizes -- and each step reads the files for it, the
         // same second of card that opening the book costs. The firmware's
@@ -3416,7 +3709,7 @@ class EpubTool : public ToolApp {
     jumpTo(_marks[idx].spine, _marks[idx].off);
   }
 
-  static constexpr int TURNS_Y = 356;
+  static constexpr int TURNS_Y = epubui::TXT_Y0 + 4 * epubui::TXT_STEP + 16;  // 360
 
   int pageOfSpine() {
     if (_ntoc <= 0) return _spine / shelf::PER_PAGE;
@@ -3468,7 +3761,7 @@ class EpubTool : public ToolApp {
       const Line& ln = _lines[i];
       const TSize lts = tsFor(ln.head);
       const int n = (int)strlen(ln.t);
-      int x = epubui::MARGIN;
+      int x = epubui::marginPx(_margin);
       // A heading is bold throughout, and bold beats italic (see gfx.h), so
       // both questions are answered per byte and a run is a stretch where
       // neither answer changes.
@@ -3487,7 +3780,15 @@ class EpubTool : public ToolApp {
         a = b;
       }
     }
+    drawPageMarks(c);
+    if (_rotFollow) drawLockPlate(c);
+    if (_guide) {
+      cf.off();
+      drawGuide(c);
+      return;
+    }
     if (!_chrome) return;
+
     // Out of the book's face first. The footer is the firmware saying where
     // you are, not the book speaking -- and it is drawn in the 24 px box,
     // which is the very box a family's chosen size sits in, so leaving the
@@ -3511,6 +3812,66 @@ class EpubTool : public ToolApp {
     while (take > 0 && ((uint8_t)first[take] & 0xC0) == 0x80) take--;
     memcpy(_chapName, first, (size_t)take);
     _chapName[take] = 0;
+  }
+
+  // The page's two corner marks (v2), shown only with the footer up, each on
+  // a white plate so they read over the words.
+  void drawPageMarks(ToolsCanvas& c) {
+    if (!_chrome) return;
+    const int W = c.width(), M = epubui::MARK;
+    c.fillRect(0, 0, M + 6, M + 6, false);
+    chrome2::peel(c, M);
+    c.fillCircle(W - M / 2 - 4, M / 2 + 2, M / 2 + 4, false);
+    chrome2::moreDots(c, W - M / 2 - 4, M / 2 + 2);
+  }
+
+  // The first-open guide (v2, owner: "clean and easy to understand"): the
+  // page faded; two dashed lines split it into its three tap zones, each
+  // named once in the middle of its column; the two corners pointed at with
+  // their own marks; one line at the foot says how to begin. Any touch puts
+  // it away for good.
+  void drawGuide(ToolsCanvas& c) {
+    const int W = c.width(), H = c.height(), T = epubui::TURN_W, M = epubui::MARK;
+    host().fadeBehind();
+    // A white plate with a hairline, for every word the guide says.
+    auto plate = [&](int cx, int y, const char* a, const char* b, TSize sz) {
+      const int aw = c.textWidth(a, sz, true), bw = b ? c.textWidth(b, TS_SMALL) : 0;
+      const int pw = (aw > bw ? aw : bw) + 24;
+      const int ph = c.textHeight(sz) + (b ? c.textHeight(TS_SMALL) + 6 : 0) + 16;
+      c.fillRect(cx - pw / 2, y, pw, ph, false);
+      c.drawRect(cx - pw / 2, y, pw, ph, 2, true);
+      c.textCentered(cx, y + 8, a, sz, true, true);
+      if (b) c.textCentered(cx, y + 8 + c.textHeight(sz) + 4, b, TS_SMALL, true);
+    };
+    // The three columns.
+    const int top = 96, bot = H - 120;
+    for (const int x : {T, W - T})
+      for (int y = top; y < bot; y += 14) c.fillRect(x - 1, y, 3, 8, true);
+    const int mid = (top + bot) / 2 - 30;
+    plate(T / 2, mid, "<", "previous", TS_LARGE);
+    plate(W - T / 2, mid, ">", "next", TS_LARGE);
+    plate(W / 2, mid, "footer", "show / hide", TS_MED);
+    // The corners: their marks, and what they do.
+    c.fillRect(0, 0, M + 6, M + 6, false);
+    chrome2::peel(c, M);
+    c.fillCircle(W - M / 2 - 4, M / 2 + 2, M / 2 + 4, false);
+    chrome2::moreDots(c, W - M / 2 - 4, M / 2 + 2);
+    plate(M + 74, 8, "close book", nullptr, TS_SMALL);
+    plate(W - M - 52, 8, "more", nullptr, TS_SMALL);
+    // The heading and the way in.
+    plate(W / 2, top - 40 + 72, "HOW TO READ", nullptr, TS_MED);
+    const int by = H - 96;
+    c.fillRect(24, by, W - 48, 64, true);
+    c.textCentered(W / 2, by + 8, "tap anywhere to start", TS_MED, false, true);
+    c.textCentered(W / 2, by + 38, "the side buttons turn pages too", TS_SMALL, false);
+  }
+
+  // While the page follows the device: a plate at the top that locks it.
+  void drawLockPlate(ToolsCanvas& c) {
+    const TRect r = rmenu::lockPlate(c.width());
+    c.fillRect(r.x, r.y, r.w, r.h, true);
+    c.textTracked(r.x + (r.w - c.textTrackedWidth("TAP TO LOCK", TS_SMALL, true, 2)) / 2,
+                  r.y + (r.h - c.textHeight(TS_SMALL)) / 2, "TAP TO LOCK", TS_SMALL, false, true, 2);
   }
 
   void renderFooter(ToolsCanvas& c) {
@@ -3610,6 +3971,7 @@ class EpubTool : public ToolApp {
   int _nmarks = 0;
   char _rootSub[5][48] = {};
   uint8_t _size = 0, _lead = 1;
+  uint8_t _margin = 1, _para = 1;  // v2: side margins, paragraph gap
   char _szLabel[16] = "";  // "12 pt", when the size came off the card
   uint8_t _face = 0;  // which built-in cut sits under whatever is chosen
   // The card's families, read once on the way in (see enter): inside a book
@@ -3620,6 +3982,10 @@ class EpubTool : public ToolApp {
   bool _browsing = false;    // this app owns the card's shelf session
   bool _resetArmed = false;  // "Start again" asked once and waiting on a second tap
   uint8_t _rot = 0;      // the page view's rotation; every menu screen is portrait
+  bool _rotFollow = false;  // v2: the page follows the device's angle until locked
+  uint32_t _lastLook = 0;   // when the angle was last looked at
+  bool _guide = false;      // the first-open guide to the tap zones is up
+  bool _fromMore = false;   // the open menu page was reached from the More popup
   uint8_t _rotLaid = 0;  // the rotation the current layout was measured at
 
   HostIO _io;
