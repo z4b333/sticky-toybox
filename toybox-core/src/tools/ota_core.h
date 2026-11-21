@@ -240,7 +240,7 @@ inline Gate mayStart(int batteryPercent, bool onPower, int minBattery, uint32_t 
 }
 
 // --- pairing ----------------------------------------------------------------------
-// Updating from a computer opens a page on the home network (sticky.local).
+// Updating from a computer opens a page on the home network (toybox.local).
 // Anybody on that network can load the page; only somebody who can READ THE
 // PANEL can use it. The code is six digits, new every time the page is opened,
 // and five wrong tries close the door until the page is opened again.
@@ -369,7 +369,7 @@ struct Lan {
   enum Phase : uint8_t { Off, Joining, Waiting, Receiving, Verifying, Done, Failed };
   Phase phase = Off;
   Err err = Err::Ok;
-  char url[32] = {};      // http://sticky.local
+  char url[32] = {};      // http://toybox.local
   char ip[16] = {};       // and the address, for phones that cannot resolve .local
   char code[7] = {};
   char incoming[VER_MAX] = {};  // the version inside the file being sent, once seen

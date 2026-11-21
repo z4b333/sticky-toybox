@@ -22,16 +22,31 @@ inline constexpr int DOCK_ICON = 44;
 inline constexpr int HINT_X = SCREEN_W - 22;
 inline constexpr int HINT_GEAR_Y = 192;
 inline constexpr int HINT_RESUME_Y = 282;
+// v2 home: the More disc in the top-right corner (opens settings).
+inline constexpr int MORE_X = SCREEN_W - 34;
+inline constexpr int MORE_Y = 34;
+inline constexpr int MORE_R = 22;
 inline constexpr int HINT_R = 13;  // 26 px across: the smallest size at which
                                    // the gear keeps its hole
 
-// Drawer pages: two columns of hairline-divided cells under a big title.
-inline constexpr int FOLDER_TOP = 164;     // below the title and its rule
-// Every drawer keeps the dock along its bottom now -- one tap between
-// drawers, no trip home -- so every mode lays out above it.
+// Drawer pages (v2): the shared top bar with the drawer's name, then a grid
+// of three columns of outlined tiles, top-anchored, and the dock below.
+// Touch is by column slice (a third of the width) and row, so a tap in the
+// gutter between two tiles still lands on one of them.
+inline constexpr int COLS = 3;
+inline constexpr int CELL_W = SCREEN_W / COLS;  // 160, the touch slice
+inline constexpr int FOLDER_TOP = TOPBAR_H + 14;  // 54
 inline constexpr int FOLDER_BOTTOM = DOCK_Y - 8;
-inline constexpr int TILE = 104;           // icon size
-inline constexpr int ROW_STEP = 180;       // cells above the dock
+inline constexpr int TILE = 64;            // icon size inside a tile
+inline constexpr int ROW_STEP = 164;       // tile height plus the gap under it
+inline constexpr int TILE_GAP = 8;
+inline constexpr int GRID_X = 16;          // the outlined tiles' left edge
+inline constexpr int TILE_W = (SCREEN_W - 2 * GRID_X - (COLS - 1) * TILE_GAP) / COLS;  // 144
+// Where tile i (0-based, on the page) sits.
+inline int cellCol(int i) { return i % COLS; }
+inline int cellRow(int i) { return i / COLS; }
+inline int cellCx(int i) { return cellCol(i) * CELL_W + CELL_W / 2; }
+inline int cellTop(int i) { return FOLDER_TOP + cellRow(i) * ROW_STEP; }
 
 // As a guest inside another firmware there is no home page at all -- the
 // drawers are the top level, so they carry the dock themselves and the rows

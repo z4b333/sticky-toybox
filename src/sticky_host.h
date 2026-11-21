@@ -167,6 +167,14 @@ class StickyHost : public ToolsHost {
     minute = ck.minute;
     return true;
   }
+  bool clockDate(int& year, int& month, int& day) const override {
+    sensors::Clock ck;
+    if (!sensors::readClock(ck)) return false;
+    year = ck.year;
+    month = ck.month;
+    day = ck.day;
+    return true;
+  }
 
   // The reading face, off the card. Declared out of line for the same reason
   // as the rest of the card calls below.

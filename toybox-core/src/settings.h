@@ -29,6 +29,7 @@ enum Action : int {
   ACT_UPDATE,  // "Update & about": the version, updates over Wi-Fi, and reset stats
   ACT_CLOCK,
   ACT_FONT,
+  ACT_VOLUME,  // v2: Low / Mid / High beside the Sound switch
   ACT_COUNT
 };
 // Visual order groups the rows by what they are about (LOOK first -- the
@@ -42,12 +43,31 @@ enum Action : int {
 // it for the apps page, which is where the cards belong: it is a row about
 // apps, and it was sitting in EXTRAS because that is where rows go when
 // nobody asks where they belong.
-inline constexpr int ROOT_POS[ACT_COUNT] = {3, 0, 1, 4, 6, 7, 5, 2};
-// How many group headings sit above each visual row.
-inline constexpr int ROOT_HEADS[ACT_COUNT] = {1, 1, 1, 2, 3, 3, 4, 5};
+// v2 (kit "Settings"): three tabs, LOOK / CONNECT / DEVICE, under the bar,
+// and the rows of the open tab under them. The enum order stays put so a
+// caller aiming at a row by name never has to care which tab it sits in.
+inline constexpr int TAB_LOOK = 0, TAB_CONNECT = 1, TAB_DEVICE = 2, TAB_COUNT = 3;
+//                                      APPS WALL LOCK FILES SOUND UPDATE CLOCK FONT VOLUME
+inline constexpr int TAB_OF[ACT_COUNT] = {2,   0,   0,   1,    2,    2,     1,    0,   2};
+inline constexpr int TAB_POS[ACT_COUNT] = {2,  0,   1,   0,    0,    3,     1,    2,   1};
+inline constexpr int TAB_Y = TOPBAR_H + 12, TAB_H = 48, TAB_GAP = 8;
+inline constexpr int TAB_W = (SCREEN_W - 32 - 2 * TAB_GAP) / TAB_COUNT;
+inline constexpr int TAB_ROWS_Y = TAB_Y + TAB_H + 14;
+inline TRect tabRect(int t) { return TRect{16 + t * (TAB_W + TAB_GAP), TAB_Y, TAB_W, TAB_H}; }
+inline int tabCount(int t) {
+  int n = 0;
+  for (int i = 0; i < ACT_COUNT; i++) n += TAB_OF[i] == t;
+  return n;
+}
 inline TRect actionRect(int i) {
-  const int r = ROOT_POS[i];
-  return TRect{BTN_X, ROOT_Y0 + r * BTN_STEP + ROOT_HEADS[r] * ROOT_HEAD, BTN_W, BTN_H};
+  return TRect{BTN_X, TAB_ROWS_Y + TAB_POS[i] * BTN_STEP, BTN_W, BTN_H};
+}
+// The volume row's three segments, right-aligned in the row.
+inline constexpr int VOL_SEG_W = 70, VOL_SEG_H = 40;
+inline TRect volSeg(int k) {
+  const TRect r = actionRect(ACT_VOLUME);
+  return TRect{r.x + r.w - 3 * VOL_SEG_W + k * VOL_SEG_W, r.y + (r.h - VOL_SEG_H) / 2, VOL_SEG_W,
+               VOL_SEG_H};
 }
 
 // The files-over-wifi page. Two pairing steps, then a summary of what the
@@ -267,6 +287,7 @@ class SettingsScreen {
   // 7 = which text to dress, 8 = the families to dress it in,
   // 9 = update & about
   uint8_t _page = 0;
+  uint8_t _tab = 0;  // which settings tab is open (v2)
   lock::Config _lock;
   // The card's offerings, read once on entering the page: the card is powered
   // per call, and re-listing on every repaint would strobe it. Pages 2 and 5

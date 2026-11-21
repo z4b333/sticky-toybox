@@ -131,6 +131,9 @@ inline void draw(ToolsCanvas& c, int act, int cx, int cy, bool dark) {
       c.drawLine(cx, cy, cx, cy - 8, 2, dark);
       c.drawLine(cx, cy, cx + 6, cy + 3, 2, dark);
       break;
+    case ACT_VOLUME:  // four rising bars
+      for (int k = 0; k < 4; k++) c.fillRect(cx - 13 + k * 7, cy + 8 - (k + 1) * 5, 4, (k + 1) * 5, dark);
+      break;
     case ACT_FONT:  // a letter, which is the only honest icon for a typeface
       c.textInBox(cx - 14, cy - 15, 28, 30, "Aa", TS_MED, dark, true);
       break;
@@ -959,15 +962,19 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
   drawTopBar(c, "SETTINGS");
 
   using namespace setui;
-  // Group headings above their first rows, from the same position table the
-  // rects come from -- so a row cannot move without its heading following.
+  // The tabs: the open one filled, each with how many rows it holds.
   {
-    static const char* kHeads[5] = {"LOOK", "APPS", "PHONE", "DEVICE", "EXTRAS"};
-    static const int kFirstRow[5] = {0, 3, 4, 6, 7};
-    for (int k = 0; k < 5; k++) {
-      const int y = ROOT_Y0 + kFirstRow[k] * BTN_STEP + (k + 1) * ROOT_HEAD - 28;
-      c.textTracked(BTN_X, y, kHeads[k], TS_SMALL, true, false, 1);
-      c.fillRect(BTN_X, y + 22, BTN_W, 1, true);
+    static const char* kTabs[TAB_COUNT] = {"LOOK", "CONNECT", "DEVICE"};
+    for (int t = 0; t < TAB_COUNT; t++) {
+      const TRect r = tabRect(t);
+      const bool on = t == _tab;
+      if (on) c.fillRect(r.x, r.y, r.w, r.h, true);
+      else c.drawRect(r.x, r.y, r.w, r.h, 2, true);
+      char lab[16];
+      snprintf(lab, sizeof(lab), "%s %d", kTabs[t], tabCount(t));
+      const int tw = c.textTrackedWidth(lab, TS_SMALL, true, 1);
+      c.textTracked(r.x + (r.w - tw) / 2, r.y + (r.h - c.textHeight(TS_SMALL)) / 2, lab, TS_SMALL,
+                    !on, true, 1);
     }
   }
 
@@ -1005,13 +1012,35 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
                              : host.typefaceName(0),
        true},
       {ACT_APPS, "Apps on the hub", apps, true},
-      {ACT_FILES, "Files over WiFi", "", true},
+      {ACT_FILES, "Add over Wi-Fi", "", true},
       {ACT_CLOCK, "Clock", clockV, true},
-      {ACT_SOUND, "Sound", soundV, false},
+      {ACT_SOUND, "Sound", "", false},
+      {ACT_VOLUME, "Volume", "", false},
       {ACT_UPDATE, "Update & about", upV, true},
   };
+  (void)soundV;
   for (const Row& r : rows) {
+    if (TAB_OF[r.act] != _tab) continue;
     const TRect a = actionRect(r.act);
+    c.fillRect(a.x, a.y + a.h + (BTN_STEP - a.h) / 2, a.w, 1, true);  // the row's hairline
+    if (r.act == ACT_SOUND) {
+      // A switch: filled track with the knob right when on.
+      const bool on = host.soundLevel() > 0;
+      const int tw = 64, th = 32, tx = a.x + a.w - tw - 4, ty = a.y + (a.h - th) / 2;
+      if (on) c.fillRect(tx, ty, tw, th, true);
+      else c.drawRect(tx, ty, tw, th, 2, true);
+      c.fillCircle(on ? tx + tw - th / 2 : tx + th / 2, ty + th / 2, th / 2 - 6, !on);
+    } else if (r.act == ACT_VOLUME) {
+      static const char* kVol[3] = {"Low", "Mid", "High"};
+      const int lv = host.soundLevel();  // 0 = off, 1..3
+      for (int k = 0; k < 3; k++) {
+        const TRect g = volSeg(k);
+        const bool sel = lv == k + 1;
+        if (sel) c.fillRect(g.x, g.y, g.w, g.h, true);
+        else c.drawRect(g.x, g.y, g.w, g.h, 2, true);
+        c.textInBox(g.x, g.y, g.w, g.h, kVol[k], TS_SMALL, !sel, true);
+      }
+    }
     const bool inverted = false;
     if (inverted) c.fillRect(a.x, a.y, a.w, a.h, true);
     setico::draw(c, r.act, a.x + 22, a.y + a.h / 2, !inverted);
@@ -1324,20 +1353,30 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
   _note = nullptr;
 
   using namespace setui;
-  if (actionRect(ACT_APPS).hit(x, y)) {
+  for (int t = 0; t < TAB_COUNT; t++) {
+    if (tabRect(t).hit(x, y)) {
+      if (_tab == t) return wasArmed;
+      _tab = (uint8_t)t;
+      host.beep(0);
+      return true;
+    }
+  }
+  // Only the open tab's rows answer.
+  auto rowHit = [&](int act) { return TAB_OF[act] == _tab && actionRect(act).hit(x, y); };
+  if (rowHit(ACT_APPS)) {
     _page = 3;
     host.beep(1);
     return true;
   }
 
-  if (actionRect(ACT_LOCK).hit(x, y)) {
+  if (rowHit(ACT_LOCK)) {
     _lock = lock::load(host.prefs());
     _page = 1;
     host.beep(1);
     return true;
   }
 
-  if (actionRect(ACT_WALL).hit(x, y)) {
+  if (rowHit(ACT_WALL)) {
     host.beep(1);
     enterWall(host);  // powers the card once; the page then repaints from RAM
     _page = 2;
@@ -1348,7 +1387,7 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
     return false;
   }
 
-  if (actionRect(ACT_FILES).hit(x, y)) {
+  if (rowHit(ACT_FILES)) {
     host.beep(1);
     _filesOk = _files.start(host);
     _filesSawClient = false;
@@ -1359,7 +1398,7 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
     return false;
   }
 
-  if (actionRect(ACT_FONT).hit(x, y)) {
+  if (rowHit(ACT_FONT)) {
     host.beep(1);
     _page = 7;
     // Reading the card takes the panel's bus with it, so what comes back has
@@ -1368,7 +1407,7 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
     return false;
   }
 
-  if (actionRect(ACT_CLOCK).hit(x, y)) {
+  if (rowHit(ACT_CLOCK)) {
     host.beep(1);
     _clockOk = _clock.start(host.prefs());
     _netStage = 0;
@@ -1381,7 +1420,7 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
     return false;
   }
 
-  if (actionRect(ACT_UPDATE).hit(x, y)) {
+  if (rowHit(ACT_UPDATE)) {
     host.beep(1);
     _page = 9;
     _upStage = 0;
@@ -1392,14 +1431,22 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
     return false;
   }
 
-  if (actionRect(ACT_SOUND).hit(x, y)) {
-    // Down through the levels and round again, loudest first, so a device
-    // whose owner wants it quiet gets there in one tap rather than three.
+  if (rowHit(ACT_SOUND)) {
+    // The switch. Off remembers nothing; on comes back at Mid, the default.
     const int n = host.soundLevels();
-    host.setSoundLevel((host.soundLevel() + n - 1) % n);
-    host.beep(0);  // at the level just chosen, which is the only useful preview
+    if (host.soundLevel() > 0) host.setSoundLevel(0);
+    else host.setSoundLevel(n > 2 ? 2 : n - 1);
     host.beep(1);
     return true;
+  }
+  if (TAB_OF[ACT_VOLUME] == _tab) {
+    for (int k = 0; k < 3; k++) {
+      if (!volSeg(k).hit(x, y)) continue;
+      const int n = host.soundLevels();
+      host.setSoundLevel(k + 1 < n ? k + 1 : n - 1);
+      host.beep(0);  // at the level just chosen: the only useful preview
+      return true;
+    }
   }
 
   return wasArmed;  // only repaint if a question came down
@@ -1585,7 +1632,7 @@ void SettingsScreen::renderUpdate(ToolsHost& host, ToolsCanvas& c) {
     }
     c.textCentered(SCREEN_W / 2, 64, "FROM A COMPUTER", TS_MED, true, true);
     c.textCentered(SCREEN_W / 2, 100, "on the same wifi, open", TS_SMALL, true);
-    c.textCentered(SCREEN_W / 2, 132, "sticky.local", TS_LARGE, true, true);
+    c.textCentered(SCREEN_W / 2, 132, "toybox.local", TS_LARGE, true, true);
     snprintf(buf, sizeof(buf), "or http://%s", l->ip);
     c.textCentered(SCREEN_W / 2, 176, buf, TS_SMALL, true);
     snprintf(buf, sizeof(buf), "http://%s", l->ip);
@@ -1641,7 +1688,7 @@ void SettingsScreen::renderUpdate(ToolsHost& host, ToolsCanvas& c) {
     }
     c.textCentered(SCREEN_W / 2, ck.y + ck.h + 10, buf, TS_SMALL, true);
     c.button(ln.x, ln.y, ln.w, ln.h, "FROM A COMPUTER", false, TS_MED);
-    c.textCentered(SCREEN_W / 2, ln.y + ln.h + 10, "a page at sticky.local takes a .bin file", TS_SMALL,
+    c.textCentered(SCREEN_W / 2, ln.y + ln.h + 10, "a page at toybox.local takes a .bin file", TS_SMALL,
                    true);
   }
   c.textTracked(16, 532, "EXTRAS", TS_SMALL, true, false, 1);

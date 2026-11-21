@@ -487,9 +487,9 @@ class StickyOta : public ota::Device {
       return false;
     }
     WiFi.setSleep(false);  // a sleeping radio drops upload packets
-    MDNS.begin("sticky");
+    MDNS.begin("toybox");
     MDNS.addService("http", "tcp", 80);
-    snprintf(_lan.url, sizeof(_lan.url), "http://sticky.local");
+    snprintf(_lan.url, sizeof(_lan.url), "http://toybox.local");
     snprintf(_lan.ip, sizeof(_lan.ip), "%s", WiFi.localIP().toString().c_str());
     _pair.fresh(esp_random());
     snprintf(_lan.code, sizeof(_lan.code), "%s", _pair.code);

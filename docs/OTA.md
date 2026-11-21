@@ -35,14 +35,14 @@ if it changed, then streams the app into the slot that is not running,
 hashing as it goes. Only a file whose SHA-256 matches `version.json` and whose
 image checksum holds becomes the boot slot. 30 % battery or USB power.
 
-**From a computer.** FROM A COMPUTER opens http://sticky.local (and the IP,
+**From a computer.** FROM A COMPUTER opens http://toybox.local (and the IP,
 for phones that cannot resolve `.local`) on the home Wi-Fi. The page asks for
 the six digits on the panel (new each time, five wrong tries lock it) and
 takes a `.bin`. The file must carry the Toybox-for-Sticky marker
 (`toybox_app_marker` in `src/ota.cpp`) or it is refused before it can boot.
 
 The GitHub page cannot push to the Sticky: an https page may not fetch from
-http on the local network. It only links to sticky.local.
+http on the local network. It only links to toybox.local.
 
 ## Rollback
 

@@ -84,7 +84,7 @@ constexpr uint8_t ADD_IDX = 255;
 // Six tiles to a page; a drawer with more pages them behind < > arrows in
 // its header corner. The page is clamped here rather than trusted, so a
 // stale page (an app hidden while deep in the list) cannot show nothing.
-inline constexpr int FOLDER_PER = 6;
+inline constexpr int FOLDER_PER = 9;  // three rows of three
 
 int folderPagesOf(int cells) { return cells <= 0 ? 1 : (cells + FOLDER_PER - 1) / FOLDER_PER; }
 
@@ -106,19 +106,11 @@ void walkFolder(int folder, bool guest, bool topAnchor, int page, F f) {
   const int first = clampFolderPage(page, n) * FOLDER_PER;
   const int count = n - first > FOLDER_PER ? FOLDER_PER : n - first;
 
-  const int step = ROW_STEP;
-  const int bottom = FOLDER_BOTTOM;
-  const int rows = (count + 1) / 2;
-  const int block = rows * step;
-  const int avail = bottom - FOLDER_TOP;
-  int y0 = topAnchor ? FOLDER_TOP : FOLDER_TOP + (avail - block) / 2;
-  if (y0 < FOLDER_TOP) y0 = FOLDER_TOP;
-
+  (void)topAnchor;  // v2 grids always hang from the bar
   for (int i = 0; i < count; i++) {
-    const int col = i % 2, row = i / 2;
-    const int cx = SCREEN_W / 4 + col * (SCREEN_W / 2);
-    const int rowTop = y0 + row * step;
-    f(vis[first + i], cx, rowTop + TILE / 2, col, rowTop, rowTop + step);
+    const int rowTop = hubui::cellTop(i);
+    f(vis[first + i], hubui::cellCx(i), rowTop + TILE / 2, hubui::cellCol(i), rowTop,
+      rowTop + ROW_STEP);
   }
 }
 
@@ -133,11 +125,11 @@ int folderCells(int folder, bool guest) {
   return n;
 }
 
-int stripTopFor(int cells) { return FOLDER_TOP + ((cells + 1) / 2) * ROW_STEP + REC_GAP; }
+int stripTopFor(int cells) { return FOLDER_TOP + ((cells + COLS - 1) / COLS) * ROW_STEP + REC_GAP; }
 
 // The strip fits only when the tiles stop at two rows; the third row (hidden
 // apps growing the + add cell) takes the space back.
-bool stripFits(int cells) { return cells > 0 && cells <= 4; }
+bool stripFits(int cells) { return cells > 0 && cells <= 2 * COLS; }
 
 // Sentence case, the design's register: "Wordle", "Flashcards". A name of one
 // or two letters (XO) is an initialism and keeps its capitals; digits pass
@@ -217,66 +209,38 @@ void renderFolder(ToolsHost& host, ToolsCanvas& c, int folder, int page,
   const bool guest = host.canExit();
   const Group& grp = GROUPS[folder];
 
-  // The header, per the design: a back arrow, the count small in the far
-  // corner, and the drawer's name big, left-aligned, in sentence case. For a
-  // guest the back arrow leaves Toybox altogether, the corner carries the gear
-  // (settings has no button hold to reach it by), and the count goes -- a
-  // corner does one thing.
-  c.drawLine(24, 34, 52, 34, 3, true);
-  c.drawLine(24, 34, 36, 24, 3, true);
-  c.drawLine(24, 34, 36, 44, 3, true);
+  // The header is the shared v2 bar with the drawer's name. A guest's back
+  // corner leaves Toybox altogether and its far corner carries the gear.
   const int cellCount = folderCells(folder, guest);
   const int pages = folderPagesOf(cellCount);
   page = clampFolderPage(page, cellCount);
-  if (guest) {
-    decor::gear(c, SCREEN_W - 34, 34, 14, 8, true);
-  } else if (pages <= 1) {
-    const int n = visibleCount(folder);
-    char buf[16];
-    snprintf(buf, sizeof(buf), "%d apps", n);
-    c.text(SCREEN_W - 16 - c.textWidth(buf, TS_SMALL), 24, buf, TS_SMALL, true);
-  }
+  host.topBar(grp.name);
+  if (guest) decor::gear(c, SCREEN_W - 30, TOPBAR_H / 2, 12, 8, true);
   if (pages > 1) drawFolderPager(c, guest, page, pages);
-  char title[16];
-  sentence(title, sizeof(title), grp.name);
-  c.text(24, 68, title, TS_HUGE, true, true);
-  c.fillRect(16, 140, SCREEN_W - 32, 2, true);
 
-  // Where the block of cells starts and ends, for the hairline dividers. The
-  // walk is the authority; this only records what it did.
   const bool strip = folder == 2 && !guest && recN > 0 && pages == 1 && stripFits(cellCount);
-  int top = SCREEN_H, bottom = 0, cells = 0;
   walkFolder(folder, guest, strip, page,
-             [&](const Item& it, int cx, int cy2, int, int rowTop, int rowBottom) {
-    cells++;
-    if (rowTop < top) top = rowTop;
-    if (rowBottom > bottom) bottom = rowBottom;
+             [&](const Item& it, int cx, int, int col, int rowTop, int) {
+    const int tx = GRID_X + col * (TILE_W + TILE_GAP);
+    const int th = ROW_STEP - TILE_GAP;
+    c.drawRect(tx, rowTop, TILE_W, th, 2, true);
+    (void)cx;
+    const int icx = tx + TILE_W / 2;
     if (it.idx == ADD_IDX && !it.game) {
-      c.textCentered(cx, cy2 + TILE / 2 - 14, "+ add", TS_MED, true);
+      c.textCentered(icx, rowTop + th / 2 - 12, "+ add", TS_SMALL, true);
       return;
     }
-    // A touch smaller and lower than the cell's midpoint: the timer's crown
-    // and the ship's mast reach above their nominal box, and the hairline
-    // divider runs right along the row top.
     if (it.game)
-      gicons::draw(c, it.idx, cx, cy2 + 8, TILE - 8);
+      gicons::draw(c, it.idx, icx, rowTop + 22 + TILE / 2, TILE);
     else
-      ticons::draw(c, it.idx, cx, cy2 + 8, TILE - 8);
+      ticons::draw(c, it.idx, icx, rowTop + 22 + TILE / 2, TILE);
     char label[24];
     sentence(label, sizeof(label), it.game ? gicons::NAMES[it.idx] : ticons::NAMES[it.idx]);
-    const TSize sz = c.textWidth(label, TS_MED) <= SCREEN_W / 2 - 24 ? TS_MED : TS_SMALL;
-    c.textCentered(cx, cy2 + TILE / 2 + 26, label, sz, true);
+    const TSize sz = c.textWidth(label, TS_SMALL, true) <= TILE_W - 12 ? TS_SMALL : TS_SMALL;
+    c.textCentered(icx, rowTop + 22 + TILE + 14, label, sz, true, true);
   });
   drawDock(c, folder);
   if (strip) drawRecentStrip(c, stripTopFor(cellCount), rec, recN);
-  if (cells == 0) return;
-
-  // Hairline dividers between cells, not boxes around them.
-  const int step = ROW_STEP;
-  const int rows = (cells + 1) / 2;
-  if (cells > 1) c.fillRect(SCREEN_W / 2, top, 1, bottom - top, true);
-  for (int r = 1; r < rows; r++)
-    c.fillRect(16, top + r * step, SCREEN_W - 32, 1, true);
 }
 }  // namespace
 
@@ -320,44 +284,46 @@ void HubScreen::render(ToolsHost& host, ToolsCanvas& c) {
   // the picture.
   drawDock(c, -1);
 
-  // The wordmark: each letter in its own small plate, the T and B plates
-  // filled. Plates carry their own background, so no halo is needed.
-  {
-    static const char* L[6] = {"T", "O", "Y", "B", "O", "X"};
-    static const bool FILLED[6] = {true, false, false, true, false, false};
-    // The plates touch: a wordmark reads as one word, not six tiles.
-    for (int i = 0; i < 6; i++) {
-      const int bx = 16 + i * 26;
-      c.fillRect(bx, 14, 26, 26, FILLED[i]);
-      if (!FILLED[i]) c.drawRect(bx, 14, 26, 26, 2, true);
-      c.textInBox(bx, 14, 26, 26, L[i], TS_SMALL, !FILLED[i], true);
-    }
-  }
-
-  // Clock, then the percentage, right-aligned in that order. The clock only
-  // exists when an RTC has been set; the loop ticks it with a partial refresh
-  // once a minute while home is showing.
-  hubmarks::haloed([&](int dx, int dy, bool black) {
-    batteryFrame(c, host, SCREEN_W - 14 + dx, 18 + dy, black);
-  });
+  // v2 home (kit "Home · Wallpaper"): the clock big in the top-left with the
+  // date under it, the battery as a bare number top-right, and the More mark
+  // on a white disc beside it -- the one way into settings by touch (hold UP
+  // is the other). Everything over the picture is haloed. No wordmark and no
+  // hint marks: the kit took them off.
   {
     int hh = 0, mm = 0;
     if (host.clockHHMM(hh, mm)) {
       char clk[8];
       snprintf(clk, sizeof(clk), "%02d:%02d", hh, mm);
-      const int pctW = batteryWidth(c, host);
-      const int x = SCREEN_W - 14 - pctW - (pctW ? 14 : 0) - c.textWidth(clk, TS_MED);
       hubmarks::haloed(
-          [&](int dx, int dy, bool black) { c.text(x + dx, 13 + dy, clk, TS_MED, black); });
+          [&](int dx, int dy, bool black) { c.text(20 + dx, 14 + dy, clk, TS_HUGE, black, true); });
+      int y = 0, mo = 0, d = 0;
+      if (host.clockDate(y, mo, d) && mo >= 1 && mo <= 12) {
+        static const char* MON[12] = {"Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                                      "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"};
+        static const char* WD[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+        // Sakamoto's day of the week.
+        static const int T[12] = {0, 3, 2, 5, 0, 3, 5, 1, 4, 6, 2, 4};
+        int yy = y - (mo < 3);
+        const int wd = (yy + yy / 4 - yy / 100 + yy / 400 + T[mo - 1] + d) % 7;
+        char date[24];
+        snprintf(date, sizeof(date), "%s %d %s", WD[wd], d, MON[mo - 1]);
+        hubmarks::haloed([&](int dx, int dy, bool black) {
+          c.text(22 + dx, 14 + c.textHeight(TS_HUGE) + 2 + dy, date, TS_SMALL, black, true);
+        });
+      }
     }
   }
-  hubmarks::haloed([&](int dx, int dy, bool black) {
-    decor::gear(c, HINT_X + dx, HINT_GEAR_Y + dy, HINT_R, 8, black);
-  });
-  hubmarks::haloed([&](int dx, int dy, bool black) {
-    hubmarks::resume(c, HINT_X + dx, HINT_RESUME_Y + dy, HINT_R, black);
-  });
-
+  // More: three dots on a white disc, no rim.
+  c.fillCircle(hubui::MORE_X, hubui::MORE_Y, hubui::MORE_R, false);
+  chrome2::moreDots(c, hubui::MORE_X, hubui::MORE_Y);
+  // The battery: a bare number, a size up from the old corner, no cell.
+  if (host.batteryPercent() >= 0) {
+    char pct[8];
+    snprintf(pct, sizeof(pct), "%d%%", host.batteryPercent());
+    const int px = hubui::MORE_X - hubui::MORE_R - 10 - c.textWidth(pct, TS_MED, true);
+    const int py = hubui::MORE_Y - c.textHeight(TS_MED) / 2;
+    hubmarks::haloed([&](int dx, int dy, bool black) { c.text(px + dx, py + dy, pct, TS_MED, black, true); });
+  }
 }
 
 HubScreen::Tap HubScreen::hit(const ToolsHost& host, int x, int y) const {
@@ -372,7 +338,7 @@ HubScreen::Tap HubScreen::hit(const ToolsHost& host, int x, int y) const {
       t.kind = guest ? Tap::Exit : Tap::Home;
       return t;
     }
-    if (guest && inRect(x, y, SCREEN_W - 100, 0, 100, 60)) {
+    if (guest && inRect(x, y, SCREEN_W - 100, 0, 100, BAR_TOUCH_H)) {
       t.kind = Tap::Settings;  // the gear in the header corner
       return t;
     }
@@ -412,8 +378,8 @@ HubScreen::Tap HubScreen::hit(const ToolsHost& host, int x, int y) const {
     walkFolder(folder, guest, strip, page,
                [&](const Item& it, int cx, int, int col, int rowTop, int rowBottom) {
                  if (found) return;
-                 const int left = col == 0 ? 0 : SCREEN_W / 2;
-                 if (x < left || x >= left + SCREEN_W / 2) return;
+                 const int left = col * CELL_W;
+                 if (x < left || x >= left + CELL_W) return;
                  if (y < rowTop || y >= rowBottom) return;
                  found = true;
                  got = it;
@@ -429,8 +395,11 @@ HubScreen::Tap HubScreen::hit(const ToolsHost& host, int x, int y) const {
     return t;
   }
 
-  // Home, which only a standalone device has. The dock is the only touch
-  // surface on it.
+  // Home, which only a standalone device has: the dock, and the More disc.
+  if (inRect(x, y, hubui::MORE_X - 36, 0, 72, hubui::MORE_Y + 36)) {
+    t.kind = Tap::Settings;
+    return t;
+  }
   if (y >= DOCK_Y) {
     t.kind = Tap::Folder;
     t.idx = x / (SCREEN_W / 3);

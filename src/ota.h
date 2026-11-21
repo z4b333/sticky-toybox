@@ -5,7 +5,7 @@
 //     their sizes and SHA-256. The app streams into the slot that is not
 //     running, hashed on the way; only a file that matches becomes the boot
 //     slot. The base pack, when it changed, is written first, the same way.
-//   * From a computer on the home network: http://sticky.local, a page that
+//   * From a computer on the home network: http://toybox.local, a page that
 //     takes a .bin after the six digits on the panel. The file must carry this
 //     build's marker (it is a Toybox image for a Sticky), and the image's own
 //     checksum must hold, before it can become the boot slot.

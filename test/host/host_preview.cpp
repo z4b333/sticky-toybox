@@ -141,6 +141,7 @@ static bool g_dumpEnabled = true;
 // stale the moment a layout moves, and a guard that silently taps empty panel
 // reports the wrong screen rather than a failure.
 static void tapRect(const TRect& r);
+static void tapAct(int act);
 
 #ifdef TOYBOX_CP_FONTS
 // The CrossPoint pass renders every screen with the reader's own faces, which
@@ -444,32 +445,26 @@ static void checkHubRouting(const char* label) {
     const int cells = G[gi].n + (hasAdd ? 1 : 0);
     if (cells == 0) continue;
 
-    // The drawer's grid, mirrored from hub.cpp: two columns, centred block --
-    // except Study with recents, whose block pins to the top for the strip.
-    const bool strip = gi == 2 && recentsN > 0 && cells <= 4;
-    const int rows = (cells + 1) / 2;
-    int y0 = strip ? hubui::FOLDER_TOP
-                   : hubui::FOLDER_TOP +
-                         ((hubui::FOLDER_BOTTOM - hubui::FOLDER_TOP) - rows * hubui::ROW_STEP) / 2;
-    if (y0 < hubui::FOLDER_TOP) y0 = hubui::FOLDER_TOP;
+    // The drawer's grid (v2): three columns hanging from the bar, touch by
+    // column slice and row -- hubui's cell helpers are the authority.
+    const int rows = (cells + hubui::COLS - 1) / hubui::COLS;
+    const int y0 = hubui::FOLDER_TOP;
     for (int ii = 0; ii < G[gi].n; ii++) {
-      const int col = ii % 2, row = ii / 2;
-      const int cx = EPD_W / 4 + col * (EPD_W / 2);
-      const int rowTop = y0 + row * hubui::ROW_STEP;
+      const int col = hubui::cellCol(ii);
+      const int cx = hubui::cellCx(ii);
+      const int rowTop = hubui::cellTop(ii);
       const Want& w = G[gi].items[ii];
-      routesTo(cx, rowTop + hubui::TILE / 2, w, "centre", gi, ii);
+      routesTo(cx, rowTop + hubui::ROW_STEP / 2, w, "centre", gi, ii);
       routesTo(cx, rowTop + 1, w, "top edge", gi, ii);
       routesTo(cx, rowTop + hubui::ROW_STEP - 2, w, "bottom edge", gi, ii);
-      routesTo(col == 0 ? 1 : EPD_W / 2 + 1, rowTop + hubui::TILE / 2, w, "left edge", gi, ii);
-      routesTo(col == 0 ? EPD_W / 2 - 2 : EPD_W - 2, rowTop + hubui::TILE / 2, w, "right edge",
-               gi, ii);
+      routesTo(col * hubui::CELL_W + 1, rowTop + hubui::ROW_STEP / 2, w, "left edge", gi, ii);
+      routesTo((col + 1) * hubui::CELL_W - 2, rowTop + hubui::ROW_STEP / 2, w, "right edge", gi,
+               ii);
     }
     if (hasAdd) {
       // The ghost cell itself: it must open settings, and leaving settings
       // must come back to the hub with the drawer still selected.
-      const int col = G[gi].n % 2, row = G[gi].n / 2;
-      toybox.onTap(EPD_W / 4 + col * (EPD_W / 2),
-                   y0 + row * hubui::ROW_STEP + hubui::TILE / 2);
+      toybox.onTap(hubui::cellCx(G[gi].n), hubui::cellTop(G[gi].n) + hubui::ROW_STEP / 2);
       if (!toybox.hostInSettings()) {
         printf("HUB ROUTING FAIL: + add in drawer %d did not open settings\n", gi);
         abort();
@@ -480,9 +475,9 @@ static void checkHubRouting(const char* label) {
         abort();
       }
     }
-    // An odd count leaves the last right-hand cell empty; nothing may open.
-    if (cells % 2 == 1) {
-      toybox.onTap(3 * EPD_W / 4, y0 + (rows - 1) * hubui::ROW_STEP + hubui::TILE / 2);
+    // A short last row leaves empty slices; nothing may open there.
+    if (cells % hubui::COLS != 0) {
+      toybox.onTap(hubui::cellCx(cells), hubui::cellTop(cells) + hubui::ROW_STEP / 2);
       if (toybox.hostInApp() || toybox.hostInSettings()) {
         printf("HUB ROUTING FAIL: empty cell in folder %d opened something\n", gi);
         abort();
@@ -1110,10 +1105,8 @@ static void checkThaiLines() {
   {
     recents::Entry rr[recents::MAX];
     const bool strip = recents::list(stickyHost.prefs(), rr) > 0;
-    const int y0 = strip ? hubui::FOLDER_TOP
-                         : hubui::FOLDER_TOP + ((hubui::FOLDER_BOTTOM - hubui::FOLDER_TOP) -
-                                                2 * hubui::ROW_STEP) / 2;
-    toybox.onTap(EPD_W / 4, y0 + hubui::TILE / 2);
+    (void)strip;
+    toybox.onTap(hubui::cellCx(0), hubui::cellTop(0) + hubui::ROW_STEP / 2);
   }
   if (!toybox.hostInApp() || strcmp(toybox.activeTitle(), "EPUB") != 0) {
     printf("THAI LINES FAIL: the EPUB app did not open\n");
@@ -1889,9 +1882,7 @@ int main() {
   {
     g_dumpEnabled = false;
     toybox.onTap(80, hubui::DOCK_Y + 30);  // PLAY
-    toybox.onTap(EPD_W / 4, hubui::FOLDER_TOP +
-                     ((hubui::FOLDER_BOTTOM - hubui::FOLDER_TOP) - 3 * hubui::ROW_STEP) / 2 +
-                     hubui::TILE / 2);  // the first tile: wordle
+    toybox.onTap(hubui::cellCx(0), hubui::cellTop(0) + hubui::ROW_STEP / 2);  // the first tile: wordle
     if (!toybox.hostInApp() || !toybox.hostIsGame() || toybox.hostIdx() != 0) {
       printf("RESUME FAIL: could not open wordle to leave a trail\n");
       abort();
@@ -1975,7 +1966,7 @@ int main() {
 
   // The checkbox list lives behind APPS ON THE HUB... now.
   setScreen("settings_apps");
-  tapRect(setui::actionRect(setui::ACT_APPS));
+  tapAct(setui::ACT_APPS);
 
   // Hide four apps through the screen itself, so the hub below reflows around
   // exactly what a finger would have hidden. STUDY's heading sits at
@@ -1984,28 +1975,28 @@ int main() {
   for (auto rc : {setRow(0, 92, 0), setRow(0, 92, 2), setRow(1, 92, 1), setRow(1, 444, 2)})
     toybox.onTap(rc.first, rc.second);
   toybox.onTap(BACK_W / 2, TOPBAR_H / 2);  // back up to the buttons page
-  // Sound steps down a level on each tap and wraps at the bottom, so tapping it
-  // once from the top has to land on the level below the top, and tapping it
-  // as many times as there are levels has to come back to where it started.
+  // v2: Sound is a switch, Volume is Low / Mid / High. Off, on (at Mid), a
+  // level by its segment, and the screen below drawn muted.
   const int levels = stickyHost.soundLevels();
-  const int soundWas = stickyHost.soundLevel();
-  tapRect(setui::actionRect(setui::ACT_SOUND));
-  if (appvis::shown() != 12 || stickyHost.soundLevel() != soundWas - 1) {
-    printf("SETTINGS FAIL: taps did not land (%d shown, sound %d)\n", appvis::shown(),
-           stickyHost.soundLevel());
+  tapRect(setui::tabRect(setui::TAB_DEVICE));
+  if (appvis::shown() != 12) {
+    printf("SETTINGS FAIL: taps did not land (%d shown)\n", appvis::shown());
     abort();
   }
-  for (int i = 1; i < levels; i++) tapRect(setui::actionRect(setui::ACT_SOUND));
-  if (stickyHost.soundLevel() != soundWas) {
-    printf("SETTINGS FAIL: %d taps on sound landed on %d, not %d\n", levels,
-           stickyHost.soundLevel(), soundWas);
+  if (stickyHost.soundLevel() == 0) tapAct(setui::ACT_SOUND);
+  tapRect(setui::volSeg(2));
+  if (stickyHost.soundLevel() != (levels > 3 ? 3 : levels - 1)) {
+    printf("SETTINGS FAIL: High landed on %d\n", stickyHost.soundLevel());
     abort();
   }
-  // ...and the screen below is drawn with it muted, which is the state the
-  // walk used to leave it in.
-  for (int i = 0; i < levels - 1; i++) tapRect(setui::actionRect(setui::ACT_SOUND));
+  tapRect(setui::volSeg(0));
+  if (stickyHost.soundLevel() != 1) {
+    printf("SETTINGS FAIL: Low landed on %d\n", stickyHost.soundLevel());
+    abort();
+  }
+  tapAct(setui::ACT_SOUND);
   if (stickyHost.soundLevel() != 0) {
-    printf("SETTINGS FAIL: could not reach mute\n");
+    printf("SETTINGS FAIL: the switch did not mute\n");
     abort();
   }
   setScreen("settings_edited");
@@ -2033,7 +2024,7 @@ int main() {
     };
     g_dumpEnabled = false;
     snprintf(g_fakeOta.rolled, sizeof(g_fakeOta.rolled), "v2.0.1");
-    tapRect(setui::actionRect(setui::ACT_UPDATE));
+    tapAct(setui::ACT_UPDATE);
     if (st.hostPage() != 9) fail("the row did not open the update page");
     shot("update_rolled_back");  // no home wifi saved yet, and the rollback notice once
     // No home wifi: CHECK says what to do instead of trying.
@@ -2115,12 +2106,12 @@ int main() {
     toybox.tick();
     if (g_fakeOta.restarts != 1) fail("no restart after a good install");
     toybox.onTap(BACK_W / 2, TOPBAR_H / 2);  // the real device is gone by now
-    tapRect(setui::actionRect(setui::ACT_UPDATE));
+    tapAct(setui::ACT_UPDATE);
 
     // From a computer.
     g_fakeOta.lanScript = ota::Lan{};
     g_fakeOta.lanScript.phase = ota::Lan::Waiting;
-    snprintf(g_fakeOta.lanScript.url, sizeof(g_fakeOta.lanScript.url), "http://sticky.local");
+    snprintf(g_fakeOta.lanScript.url, sizeof(g_fakeOta.lanScript.url), "http://toybox.local");
     snprintf(g_fakeOta.lanScript.ip, sizeof(g_fakeOta.lanScript.ip), "192.168.1.123");
     snprintf(g_fakeOta.lanScript.code, sizeof(g_fakeOta.lanScript.code), "480126");
     tapRect(setui::updLanRect());
@@ -2152,7 +2143,7 @@ int main() {
     toybox.onTap(BACK_W / 2, TOPBAR_H / 2);
     if (g_fakeOta.lanUp || st.hostPage() != 0) fail("back left the server running");
     // Never got onto the network.
-    tapRect(setui::actionRect(setui::ACT_UPDATE));
+    tapAct(setui::ACT_UPDATE);
     g_fakeOta.lanScript.phase = ota::Lan::Failed;
     g_fakeOta.lanScript.code[0] = 0;
     g_fakeOta.lanScript.err = ota::Err::WifiNotFound;
@@ -2171,7 +2162,7 @@ int main() {
 
   // The lock screen page, reached by the button on the settings screen.
   setScreen("settings_lock");
-  tapRect(setui::actionRect(setui::ACT_LOCK));
+  tapAct(setui::ACT_LOCK);
   if (!toybox.hostInSettings()) {
     printf("LOCK FAIL: the lock screen page did not open\n");
     abort();
@@ -2291,7 +2282,7 @@ int main() {
     }
     toybox.goHub();
     toybox.openSettings();  // back into settings...
-    tapRect(setui::actionRect(setui::ACT_LOCK));  // ...and back to the lock page
+    tapAct(setui::ACT_LOCK);  // ...and back to the lock page
 
     // Back from the picture list goes up to the lock page, not out of it: it
     // was opened from a row there, and landing on the settings root would lose
@@ -2324,7 +2315,7 @@ int main() {
     toybox.openSettings();
     g_dumpEnabled = true;
     setScreen("settings_wallpaper");
-    tapRect(setui::actionRect(setui::ACT_WALL));
+    tapAct(setui::ACT_WALL);
     g_dumpEnabled = false;
     if (wallimg::have()) {
       printf("WALLPAPER FAIL: a wallpaper existed before one was chosen\n");
@@ -2343,7 +2334,7 @@ int main() {
       abort();
     }
     toybox.openSettings();
-    tapRect(setui::actionRect(setui::ACT_WALL));
+    tapAct(setui::ACT_WALL);
     tapRect(setui::wallRemoveRect());
     if (wallimg::have()) {
       printf("WALLPAPER FAIL: REMOVE left the wallpaper behind\n");
@@ -2366,7 +2357,7 @@ int main() {
     toybox.goHub();
     toybox.hostHub().goHome();
     toybox.openSettings();
-    tapRect(setui::actionRect(setui::ACT_FILES));
+    tapAct(setui::ACT_FILES);
     if (toybox.hostSettings().hostPage() != 4) {
       printf("FILES FAIL: the row did not open the files page\n");
       abort();
@@ -2471,7 +2462,7 @@ int main() {
       abort();
     }
     // ...and so must leaving settings by any other door.
-    tapRect(setui::actionRect(setui::ACT_FILES));
+    tapAct(setui::ACT_FILES);
     toybox.goHub();
     if (toybox.hostSettings().hostFiles().hasClient()) {
       printf("FILES FAIL: the access point outlived settings\n");
@@ -2503,7 +2494,7 @@ int main() {
     stickyHost.refresh(true);
     g_dumpEnabled = false;
 
-    tapRect(setui::actionRect(setui::ACT_CLOCK));
+    tapAct(setui::ACT_CLOCK);
     if (toybox.hostSettings().hostPage() != 6) {
       printf("CLOCK FAIL: the row did not open the clock page\n");
       abort();
@@ -2566,7 +2557,7 @@ int main() {
     g_clockRefuses = true;
     sensors::hostSetClock(false);
     g_clockSetMs = 0;
-    tapRect(setui::actionRect(setui::ACT_CLOCK));
+    tapAct(setui::ACT_CLOCK);
     for (int i = 0; i < 5 && !toybox.hostSettings().hostClock().wasRefused(); i++) toybox.tick();
     auto& cs2 = toybox.hostSettings().hostClock();
     if (!cs2.wasRefused() || cs2.wasSet() || g_clockSetMs == 0) {
@@ -2580,7 +2571,7 @@ int main() {
     g_dumpEnabled = false;
     tapRect(setui::clockDoneRect());
     g_clockRefuses = false;
-    tapRect(setui::actionRect(setui::ACT_CLOCK));
+    tapAct(setui::ACT_CLOCK);
     toybox.goHub();
     if (toybox.hostSettings().hostClock().hasClient()) {
       printf("CLOCK FAIL: the access point outlived settings\n");
@@ -2635,7 +2626,7 @@ int main() {
     toybox.hostHub().goHome();
     homenet::forgetWifi(prefs);
     toybox.openSettings();
-    tapRect(setui::actionRect(setui::ACT_CLOCK));
+    tapAct(setui::ACT_CLOCK);
     // No home Wi-Fi: the button is not there, and its spot does nothing.
     tapRect(setui::clockNetRect());
     if (toybox.hostSettings().hostNetStage() != 0 || toybox.hostSettings().hostPage() != 6) {
@@ -2659,7 +2650,7 @@ int main() {
     tapRect(setui::clockDoneRect());
 
     // With both saved, the first screen offers the internet.
-    tapRect(setui::actionRect(setui::ACT_CLOCK));
+    tapAct(setui::ACT_CLOCK);
     g_dumpEnabled = true;
     setScreen("settings_clock_net_offer");
     stickyHost.refresh(true);
@@ -2673,7 +2664,7 @@ int main() {
     };
     bool first = true;
     for (const auto& r : runs) {
-      if (!first) tapRect(setui::actionRect(setui::ACT_CLOCK));
+      if (!first) tapAct(setui::ACT_CLOCK);
       first = false;
       homenet::g_hostNet = r.net;
       homenet::g_hostJoins = homenet::g_hostOffs = 0;
@@ -3195,10 +3186,8 @@ int main() {
     {
       recents::Entry rr[recents::MAX];
       const bool strip = recents::list(stickyHost.prefs(), rr) > 0;
-      const int y0 = strip ? hubui::FOLDER_TOP
-                           : hubui::FOLDER_TOP + ((hubui::FOLDER_BOTTOM - hubui::FOLDER_TOP) -
-                                                  2 * hubui::ROW_STEP) / 2;
-      toybox.onTap(EPD_W / 4, y0 + hubui::TILE / 2);
+      (void)strip;
+    toybox.onTap(hubui::cellCx(0), hubui::cellTop(0) + hubui::ROW_STEP / 2);
     }
     if (!toybox.hostInApp() || strcmp(toybox.activeTitle(), "EPUB") != 0) {
       printf("EPUB APP FAIL: the STUDY drawer's first cell did not open EPUB\n");
@@ -4549,8 +4538,8 @@ int main() {
     stickyHost.refresh(true);
     g_dumpEnabled = false;
 
-    // The title rows sit under the two tile rows; row 0 is the epub.
-    const int rowY = hubui::FOLDER_TOP + 2 * hubui::ROW_STEP + hubui::REC_GAP +
+    // The title rows sit under the one tile row; row 0 is the epub.
+    const int rowY = hubui::FOLDER_TOP + 1 * hubui::ROW_STEP + hubui::REC_GAP +
                      hubui::REC_HEAD_H;
     stickyHost.hostResetPaints();
     toybox.onTap(EPD_W / 4, rowY + 10);
@@ -5323,7 +5312,7 @@ int main() {
     const int pages = (n + setui::WALL_PER - 1) / setui::WALL_PER;
     toybox.goHub();
     toybox.openSettings();
-    tapRect(setui::actionRect(setui::ACT_WALL));
+    tapAct(setui::ACT_WALL);
     tapRect(setui::wallPagerNext(false));  // page two
     tapRect(setui::wallRect(0));           // its first row
     char src[40] = "";
@@ -6846,11 +6835,11 @@ int main() {
   prefs.putBool("h_wrd", true);
   toybox.openSettings();  // the routing walk left us on the hub: go back in
   // The cards row lives on the apps page now, which is the page about apps.
-  tapRect(setui::actionRect(setui::ACT_APPS));
+  tapAct(setui::ACT_APPS);
   tapRect(setui::appsCardsRect());
   toybox.hostSettings().back();
   // Reset lives on the update page now (Settings > Update & about).
-  tapRect(setui::actionRect(setui::ACT_UPDATE));
+  tapAct(setui::ACT_UPDATE);
   tapRect(setui::updResetRect());  // armed again
   tapRect(setui::updResetRect());  // ...and confirmed
   toybox.hostSettings().back();
@@ -6868,7 +6857,7 @@ int main() {
   {
     g_dumpEnabled = false;
     toybox.openSettings();
-    tapRect(setui::actionRect(setui::ACT_FONT));
+    tapAct(setui::ACT_FONT);
     if (toybox.hostSettings().hostPage() != 7) {
       printf("FONT PAGE FAIL: the row did not open the page\n");
       abort();
@@ -6967,7 +6956,7 @@ int main() {
     toybox.goHub();
     toybox.hostHub().goHome();
     toybox.onTap(80 + 2 * 160, hubui::DOCK_Y + 30);  // the STUDY drawer
-    toybox.onTap(EPD_W / 4, hubui::FOLDER_TOP + hubui::TILE / 2);  // EPUB, first cell (strip up)
+    toybox.onTap(hubui::cellCx(0), hubui::cellTop(0) + hubui::ROW_STEP / 2);  // EPUB, first cell
     if (!toybox.hostInApp() || strcmp(toybox.activeTitle(), "EPUB") != 0) {
       printf("FONT PAGE FAIL: could not open the reader to check its face\n");
       abort();
@@ -7787,7 +7776,7 @@ int main() {
     g_dumpEnabled = false;  // the walk in refreshes on every step
     toybox.goHub();
     toybox.openSettings();
-    tapRect(setui::actionRect(setui::ACT_LOCK));  // into the lock page
+    tapAct(setui::ACT_LOCK);  // into the lock page
     g_dumpEnabled = true;
     setScreen("settings_lock_picture");
     epd.clear();
@@ -8840,3 +8829,8 @@ int main() {
 }
 
 static void tapRect(const TRect& r) { toybox.onTap(r.x + r.w / 2, r.y + r.h / 2); }
+// A root settings row lives in one tab (v2): open that tab, then the row.
+static void tapAct(int act) {
+  tapRect(setui::tabRect(setui::TAB_OF[act]));
+  tapRect(setui::actionRect(act));
+}
