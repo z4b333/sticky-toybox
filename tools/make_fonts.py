@@ -63,12 +63,15 @@ FAMILIES = [
     # (table prefix, faces) -- Noto keeps the plain FONT_<size>_<style> names,
     # which the CrossPoint stand-in tables (test/host/fonts_cp.h) also define.
     ('', {
-        'REG': HERE + '/NotoSans-Regular.ttf',
+        # Medium, not Regular (owner, 19 Nov): Regular's stems read thin on
+        # the panel; Medium is one step heavier and still opens its counters.
+        'REG': HERE + '/NotoSans-Medium.ttf',
         'BOLD': HERE + '/NotoSans-SemiBold.ttf',
         'ITAL': HERE + '/NotoSans-Italic.ttf',
     }),
     ('PLX_', {
-        'REG': HERE + '/IBMPlexSans-Regular.ttf',
+        # Medium for the same reason as Noto (owner, 21 Nov).
+        'REG': HERE + '/IBMPlexSans-Medium.ttf',
         'BOLD': HERE + '/IBMPlexSans-SemiBold.ttf',
         'ITAL': HERE + '/IBMPlexSans-Italic.ttf',
     }),

@@ -58,6 +58,65 @@ inline void dottedRule(ToolsCanvas& c, int x, int y, int w) {
 inline void moreDots(ToolsCanvas& c, int cx, int cy, bool black = true) {
   for (int k = -1; k <= 1; k++) c.fillCircle(cx + k * 8, cy, 2, black);
 }
+
+// A system banner (kit "Banners"): a full-width white strip across the
+// middle of whatever is on the panel, ruled 3 px top and bottom, with a
+// small tracked label, a bold line, and an optional quiet line. The caller
+// fades the screen behind first (ToolsHost::fadeBehind). Returns the strip's
+// bottom edge, for a caller that adds a button under the words.
+enum BannerIcon : uint8_t { BI_NONE, BI_POWER, BI_BATTERY, BI_DOWNLOAD, BI_WORKING };
+inline int banner(ToolsCanvas& c, int cy, BannerIcon icon, const char* label, const char* title,
+                  const char* sub = nullptr, int extraH = 0, int batteryPct = -1) {
+  const int w = c.width();
+  const int lh = c.textHeight(TS_SMALL), th = c.textHeight(TS_LARGE), sh = c.textHeight(TS_SMALL);
+  const int body = lh + 4 + th + (sub ? 8 + sh : 0);
+  const int h = 28 + body + 28 + extraH;
+  const int top = cy - h / 2;
+  c.fillRect(0, top - 6, w, h + 12, false);
+  c.fillRect(0, top, w, 3, true);
+  c.fillRect(0, top + h - 3, w, 3, true);
+  int tx = 28;
+  const int iy = top + 28 + (lh + 4 + th) / 2;
+  switch (icon) {
+    case BI_POWER:
+      c.drawCircle(46, iy + 2, 16, 3, true);
+      c.fillRect(42, iy - 22, 8, 16, false);
+      c.fillRect(44, iy - 20, 3, 20, true);
+      tx = 82;
+      break;
+    case BI_BATTERY: {
+      c.drawRect(28, iy - 14, 56, 28, 3, true);
+      c.fillRect(84, iy - 6, 5, 12, true);
+      const int fill = batteryPct < 0 ? 0 : (48 * batteryPct + 50) / 100;
+      if (fill > 0) c.fillRect(32, iy - 10, fill < 4 ? 4 : fill, 20, true);
+      tx = 104;
+      break;
+    }
+    case BI_DOWNLOAD:
+      c.drawLine(46, iy - 18, 46, iy + 6, 3, true);
+      c.drawLine(36, iy - 4, 46, iy + 6, 3, true);
+      c.drawLine(56, iy - 4, 46, iy + 6, 3, true);
+      c.fillRect(30, iy + 12, 33, 3, true);
+      tx = 82;
+      break;
+    case BI_WORKING:
+      c.fillRect(30, iy - 16, 14, 14, true);
+      c.drawRect(48, iy - 16, 14, 14, 2, true);
+      c.drawRect(30, iy + 2, 14, 14, 2, true);
+      c.fillRect(48, iy + 2, 14, 14, true);
+      tx = 82;
+      break;
+    default:
+      break;
+  }
+  int y = top + 28;
+  if (label && label[0]) c.textTracked(tx, y, label, TS_SMALL, true, false, 3);
+  y += lh + 4;
+  c.textClipped(tx, y, w - tx - 20, title, TS_LARGE, true, true);
+  y += th;
+  if (sub && sub[0]) c.textClipped(28, y + 8, w - 56, sub, TS_SMALL, true);
+  return top + h;
+}
 }  // namespace chrome2
 
 // backLabel is kept for the callers that pass one (a series shelf names the

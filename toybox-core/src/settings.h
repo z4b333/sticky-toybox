@@ -30,6 +30,7 @@ enum Action : int {
   ACT_CLOCK,
   ACT_FONT,
   ACT_VOLUME,  // v2: Low / Mid / High beside the Sound switch
+  ACT_SETUP,   // v2: run the setup steps again
   ACT_COUNT
 };
 // Visual order groups the rows by what they are about (LOOK first -- the
@@ -47,9 +48,9 @@ enum Action : int {
 // and the rows of the open tab under them. The enum order stays put so a
 // caller aiming at a row by name never has to care which tab it sits in.
 inline constexpr int TAB_LOOK = 0, TAB_CONNECT = 1, TAB_DEVICE = 2, TAB_COUNT = 3;
-//                                      APPS WALL LOCK FILES SOUND UPDATE CLOCK FONT VOLUME
-inline constexpr int TAB_OF[ACT_COUNT] = {2,   0,   0,   1,    2,    2,     1,    0,   2};
-inline constexpr int TAB_POS[ACT_COUNT] = {2,  0,   1,   0,    0,    3,     1,    2,   1};
+//                                      APPS WALL LOCK FILES SOUND UPDATE CLOCK FONT VOLUME SETUP
+inline constexpr int TAB_OF[ACT_COUNT] = {2,   0,   0,   1,    2,    2,     1,    0,   2,     2};
+inline constexpr int TAB_POS[ACT_COUNT] = {3,  0,   1,   0,    0,    4,     1,    2,   1,     2};
 inline constexpr int TAB_Y = TOPBAR_H + 12, TAB_H = 48, TAB_GAP = 8;
 inline constexpr int TAB_W = (SCREEN_W - 32 - 2 * TAB_GAP) / TAB_COUNT;
 inline constexpr int TAB_ROWS_Y = TAB_Y + TAB_H + 14;
@@ -68,6 +69,18 @@ inline TRect volSeg(int k) {
   const TRect r = actionRect(ACT_VOLUME);
   return TRect{r.x + r.w - 3 * VOL_SEG_W + k * VOL_SEG_W, r.y + (r.h - VOL_SEG_H) / 2, VOL_SEG_W,
                VOL_SEG_H};
+}
+
+// The setup steps (v2, kit "Setup"): font, sleep, beep, Wi-Fi. Big outlined
+// rows, the chosen one filled, and Next at the foot. Language, "how to set
+// up" and the home-screen style join when the firmware has them to offer.
+inline constexpr int SETUP_STEPS = 4;
+inline constexpr int SU_TITLE_Y = TOPBAR_H + 22, SU_ROW_Y = 168, SU_ROW_H = 76, SU_ROW_STEP = 88;
+inline TRect setupRow(int i) { return TRect{16, SU_ROW_Y + i * SU_ROW_STEP, SCREEN_W - 32, SU_ROW_H}; }
+inline TRect setupNext() { return TRect{16, SCREEN_H - 84, SCREEN_W - 32, 64}; }
+inline TRect setupLater() { return TRect{16, SCREEN_H - 84, (SCREEN_W - 40) / 2, 64}; }
+inline TRect setupDone() {
+  return TRect{24 + (SCREEN_W - 40) / 2, SCREEN_H - 84, (SCREEN_W - 40) / 2, 64};
 }
 
 // The files-over-wifi page. Two pairing steps, then a summary of what the
@@ -164,28 +177,39 @@ enum LockRow : int {
   LR_COUNT
 };
 // Explicit positions, because the sections interleave the enum's order.
-inline constexpr int LOCK_ROW_Y[LR_COUNT] = {100, 198, 252, 564, 614, 360, 410, 460};
-inline constexpr int LOCK_ROW_H[LR_COUNT] = {46, 46, 56, 46, 62, 44, 44, 44};
+// v2 (kit "Lock screen"): the four faces as picture tiles, the picture's own
+// row, SLEEP as one row of segments, WAKING as Wake to + Turn with the
+// device. The footer toggles are gone -- no clock or temperature on a
+// sleeping panel (they would go stale) -- so their rows sit off the glass.
+inline constexpr int LOCK_ROW_Y[LR_COUNT] = {462, 92, 352, 576, 648, 900, 900, 900};
+inline constexpr int LOCK_ROW_H[LR_COUNT] = {56, 250, 56, 56, 62, 0, 0, 0};
 inline TRect lockRect(int i) { return TRect{LOCK_X, LOCK_ROW_Y[i], LOCK_W, LOCK_ROW_H[i]}; }
 
 inline constexpr int CHIP_GAP = 6;
-// The empty-panel chips, over their row.
+// The empty-panel tiles: two rows of three (v2, six faces).
+inline constexpr int LOCK_TILE_COLS = 3, LOCK_TILE_H = 120, LOCK_TILE_GAP = 10;
 inline TRect chipRect(int i) {
   const TRect r = lockRect(LR_EMPTY);
-  const int w = (r.w - (lock::EMPTY_COUNT - 1) * CHIP_GAP) / lock::EMPTY_COUNT;
-  return TRect{r.x + i * (w + CHIP_GAP), r.y, w, r.h};
+  const int w = (r.w - (LOCK_TILE_COLS - 1) * LOCK_TILE_GAP) / LOCK_TILE_COLS;
+  return TRect{r.x + (i % LOCK_TILE_COLS) * (w + LOCK_TILE_GAP),
+               r.y + (i / LOCK_TILE_COLS) * (LOCK_TILE_H + LOCK_TILE_GAP), w, LOCK_TILE_H};
 }
-// Sleep timing as five chips: never, 1, 5, 15, 30 minutes.
+// Sleep timing as one segmented control, right-aligned in its row, offered
+// 1 / 5 / 15 / 30 / Never. Indexed by lock::SLEEP_MINUTES (0 = never), so
+// "never" sits last on the glass and first in the table.
+inline constexpr int SEG_H = 44, SEG_W = 52, SEG_NEVER_W = 84;
 inline TRect sleepChipRect(int i) {
   const TRect r = lockRect(LR_SLEEP);
-  const int w = (r.w - (lock::SLEEP_COUNT - 1) * CHIP_GAP) / lock::SLEEP_COUNT;
-  return TRect{r.x + i * (w + CHIP_GAP), r.y, w, r.h};
+  const int x0 = r.x + r.w - (4 * SEG_W + SEG_NEVER_W);
+  const int pos = i == 0 ? 4 : i - 1;
+  return TRect{x0 + pos * SEG_W, r.y + (r.h - SEG_H) / 2, pos == 4 ? SEG_NEVER_W : SEG_W, SEG_H};
 }
-// Where the power button wakes to: the note, or the hub.
+// Where the power button wakes to: the note, or home.
+inline constexpr int WAKE_SEG_W = 100;
 inline TRect wakeChipRect(int i) {
   const TRect r = lockRect(LR_WAKE);
-  const int w = (r.w - CHIP_GAP) / 2;
-  return TRect{r.x + i * (w + CHIP_GAP), r.y, w, r.h};
+  const int x0 = r.x + r.w - 2 * WAKE_SEG_W;
+  return TRect{x0 + i * WAKE_SEG_W, r.y + (r.h - SEG_H) / 2, WAKE_SEG_W, SEG_H};
 }
 
 // The picture row's actions, right-aligned: choose one from the card, and
@@ -231,6 +255,19 @@ class SettingsScreen {
   // page here that does. Returns true when the screen wants repainting after
   // the tick (the card was let go and the summary has changed).
   bool wantsTick() const { return _page == 4 || _page == 6 || _page == 9; }
+
+  // The setup steps, from the first boot of a new device (fromBoot: the last
+  // step and the back corner on the first one lead to the hub) or from
+  // Settings > DEVICE > Setup (they lead back to settings).
+  void startSetup(bool fromBoot);
+  // True once a boot-started setup has been finished or left: the shell
+  // goes to the hub instead of the settings root.
+  bool setupFinished() {
+    const bool f = _setupLeft;
+    _setupLeft = false;
+    return f;
+  }
+  bool inSetup() const { return _page >= 10 && _page < 10 + setui::SETUP_STEPS; }
   bool tick(ToolsHost& host);
 
 #ifdef TOYBOX_HOST
@@ -285,9 +322,14 @@ class SettingsScreen {
   // 0 = settings, 1 = lock, 2 = wallpaper, 3 = apps, 4 = files,
   // 5 = the lock screen's picture, off the card, 6 = the clock,
   // 7 = which text to dress, 8 = the families to dress it in,
-  // 9 = update & about
+  // 9 = update & about, 10..13 = the setup steps
   uint8_t _page = 0;
   uint8_t _tab = 0;  // which settings tab is open (v2)
+  bool _setupBoot = false;  // the setup steps were started by a new device
+  bool _setupLeft = false;  // ...and have just been left: go to the hub
+  bool _setupWifi = false;  // the clock page was opened from setup's Wi-Fi step
+  void renderSetup(ToolsHost& host, ToolsCanvas& c);
+  bool tapSetup(ToolsHost& host, int x, int y);
   lock::Config _lock;
   // The card's offerings, read once on entering the page: the card is powered
   // per call, and re-listing on every repaint would strobe it. Pages 2 and 5

@@ -283,6 +283,12 @@ class ToolsHost {
   // scan), grey pages, or ink over a photo wallpaper -- those use
   // refresh(true).
   void refreshUi() { refreshFast(8); }
+  // Knock back what is on the panel, in place, so a banner can sit over it
+  // (v2). A host without a readable framebuffer leaves it as it is.
+  virtual void fadeBehind() {}
+  // Push what is in the framebuffer as it stands, without re-rendering the
+  // screen underneath -- for a banner laid over the last frame.
+  virtual void showAsIs() {}
   virtual void beep(uint8_t kind) = 0;  // 0 tap, 1 confirm, 2 reject, 3 alarm
   // Timing, for finding out where a page turn's time goes before guessing.
   // A monotonic millisecond clock and one line to the serial console; the
@@ -747,6 +753,10 @@ class ToolApp {
   virtual void onSwipe(int dx, int dy) { (void)dx; (void)dy; }
   virtual void tick() {}                       // ~50 Hz, for running timers
   virtual bool wantsTick() const { return false; }
+  // True when the app only needs its ticks to keep time -- nothing on a
+  // network, nothing streaming -- so the host may light-sleep between them
+  // (v2: a running timer used to hold the chip fully awake).
+  virtual bool napsOk() const { return false; }
   // Write out anything the app is holding back in RAM. The reader saves its
   // place a moment AFTER a page turn rather than during it (the three small
   // files cost ~420 ms, a third of a turn); the shell calls this before the

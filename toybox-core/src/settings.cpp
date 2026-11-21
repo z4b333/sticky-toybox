@@ -5,6 +5,7 @@
 #include "record.h"
 #include "tools/book_thumbs.h"
 #include "tools/flash_qr.h"
+#include "tools/home_net.h"
 #include "tools/lock_image.h"
 #include "tools/recents.h"
 #include "tools/tool_icons.h"
@@ -68,9 +69,11 @@ const char* soundLabel(const ToolsHost& host) {
 // The lock screen's mode, in the register a value-on-the-right speaks.
 const char* emptyLabelSmall(uint8_t e) {
   switch (e) {
-    case lock::EMPTY_PICTURE: return "picture";
-    case lock::EMPTY_COVER: return "cover";
-    case lock::EMPTY_PAGE: return "the page";
+    case lock::EMPTY_PICTURE: return "my picture";
+    case lock::EMPTY_COVER: return "full cover";
+    case lock::EMPTY_COVER_ON_PAGE: return "cover on page";
+    case lock::EMPTY_COVER_INK: return "see-through";
+    case lock::EMPTY_PAGE: return "last page";
     default: return "goodbye";
   }
 }
@@ -131,6 +134,10 @@ inline void draw(ToolsCanvas& c, int act, int cx, int cy, bool dark) {
       c.drawLine(cx, cy, cx, cy - 8, 2, dark);
       c.drawLine(cx, cy, cx + 6, cy + 3, 2, dark);
       break;
+    case ACT_SETUP:  // a wand: a stick and a small star
+      c.drawLine(cx - 12, cy + 12, cx + 4, cy - 4, 3, dark);
+      decor::star(c, cx + 8, cy - 8, 8, 3, 4, 0.f, dark);
+      break;
     case ACT_VOLUME:  // four rising bars
       for (int k = 0; k < 4; k++) c.fillRect(cx - 13 + k * 7, cy + 8 - (k + 1) * 5, 4, (k + 1) * 5, dark);
       break;
@@ -170,6 +177,27 @@ void SettingsScreen::enter() {
 
 bool SettingsScreen::back() {
   if (_page == 0) return false;
+  if (inSetup()) {
+    if (_page > 10) {
+      _page--;
+      return true;
+    }
+    if (_setupBoot) {
+      _setupBoot = false;
+      _page = 0;
+      return false;  // the shell takes a new device to the hub
+    }
+    _page = 0;
+    return true;
+  }
+  if (_page == 6 && _setupWifi) {
+    // The clock page, opened from the setup's Wi-Fi step, goes back to it.
+    leaveClock();
+    _netStage = 0;
+    _setupWifi = false;
+    _page = 13;
+    return true;
+  }
   leaveFiles();  // no-op unless the files page was the one being left
   leaveClock();  // ditto for the clock page's access point
   _netStage = 0;
@@ -923,6 +951,10 @@ bool SettingsScreen::tapFiles(ToolsHost& host, int x, int y) {
 }
 
 void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
+  if (inSetup()) {
+    renderSetup(host, c);
+    return;
+  }
   if (_page == 1) {
     renderLock(host, c);
     return;
@@ -1016,6 +1048,7 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
       {ACT_CLOCK, "Clock", clockV, true},
       {ACT_SOUND, "Sound", "", false},
       {ACT_VOLUME, "Volume", "", false},
+      {ACT_SETUP, "Setup", "run again", true},
       {ACT_UPDATE, "Update & about", upV, true},
   };
   (void)soundV;
@@ -1121,9 +1154,11 @@ bool SettingsScreen::tapApps(ToolsHost& host, int x, int y) {
 namespace {
 const char* emptyLabel(uint8_t e) {
   switch (e) {
-    case lock::EMPTY_PICTURE: return "PICTURE";
-    case lock::EMPTY_COVER: return "COVER";
-    case lock::EMPTY_PAGE: return "PAGE";
+    case lock::EMPTY_PICTURE: return "MY PICTURE";
+    case lock::EMPTY_COVER: return "FULL COVER";
+    case lock::EMPTY_COVER_ON_PAGE: return "COVER ON PAGE";
+    case lock::EMPTY_COVER_INK: return "SEE-THROUGH";
+    case lock::EMPTY_PAGE: return "LAST PAGE";
     default: return "GOODBYE";
   }
 }
@@ -1154,41 +1189,107 @@ void lockHead(ToolsCanvas& c, int y, const char* name, const char* sub) {
     const int sw = c.textWidth(sub, TS_SMALL);
     c.text(setui::LOCK_X + setui::LOCK_W - sw, y, sub, TS_SMALL, true);
   }
-  c.fillRect(setui::LOCK_X, y + 22, setui::LOCK_W, 1, true);
+  chrome2::dottedRule(c, setui::LOCK_X, y + 24, setui::LOCK_W);
+}
+}  // namespace
+
+namespace {
+// A tile's little picture of what the sleeping panel will show.
+void lockThumb(ToolsCanvas& c, uint8_t v, int x, int y, int w, int h) {
+  c.fillRect(x, y, w, h, false);
+  c.drawRect(x, y, w, h, 2, true);
+  const int ix = x + 8, iw = w - 16;
+  switch (v) {
+    case lock::EMPTY_PICTURE:  // a dotted field: a picture
+      for (int yy = y + 6; yy < y + h - 6; yy += 6)
+        for (int xx = x + 6 + ((yy / 6) & 1) * 3; xx < x + w - 6; xx += 6) c.fillRect(xx, yy, 2, 2, true);
+      break;
+    case lock::EMPTY_COVER:  // faint lines behind a hatched cover
+      for (int yy = y + 10; yy < y + h - 8; yy += 8) c.fillRect(ix, yy, iw - (yy % 3) * 8, 1, true);
+      c.fillRect(x + w / 2 - 24, y + 18, 48, h - 36, false);
+      c.drawRect(x + w / 2 - 24, y + 18, 48, h - 36, 2, true);
+      for (int d = 0; d < 48 + h - 36; d += 7)
+        c.drawLine(x + w / 2 - 24 + (d < 48 ? d : 48), y + 18 + (d < 48 ? 0 : d - 48),
+                   x + w / 2 - 24 + (d < h - 36 ? 0 : d - (h - 36)),
+                   y + 18 + (d < h - 36 ? d : h - 36), 1, true);
+      break;
+    case lock::EMPTY_COVER_ON_PAGE:  // a small framed cover over a page of text
+    case lock::EMPTY_COVER_INK: {  // the cover's ink straight on the page
+      for (int yy = y + 10, k = 0; yy < y + h - 8; yy += 8, k++)
+        if (k % 2 == 0 || v == lock::EMPTY_COVER_INK) c.fillRect(ix, yy, iw - ((k * 7) % 4) * 6, 1, true);
+      if (v == lock::EMPTY_COVER_ON_PAGE) {
+        const int cw = w / 2, ch = h / 2, cx0 = x + (w - cw) / 2, cy0 = y + (h - ch) / 2;
+        c.fillRect(cx0 + 3, cy0 + 3, cw, ch, true);
+        c.fillRect(cx0, cy0, cw, ch, false);
+        c.drawRect(cx0, cy0, cw, ch, 2, true);
+        for (int d = 4; d < cw + ch; d += 6)
+          c.drawLine(cx0 + (d < cw ? d : cw - 1), cy0 + (d < cw ? 0 : d - cw),
+                     cx0 + (d < ch ? 0 : d - ch), cy0 + (d < ch ? d : ch - 1), 1, true);
+      } else {
+        const int cw = w * 2 / 3, ch = h - 24, cx0 = x + (w - cw) / 2, cy0 = y + 12;
+        for (int d = 0; d < cw + ch; d += 9)
+          c.drawLine(cx0 + (d < cw ? d : cw - 1), cy0 + (d < cw ? 0 : d - cw),
+                     cx0 + (d < ch ? 0 : d - ch), cy0 + (d < ch ? d : ch - 1), 2, true);
+      }
+      break;
+    }
+    case lock::EMPTY_PAGE:  // a page of text
+      for (int yy = y + 12, k = 0; yy < y + h - 10; yy += 9, k++)
+        c.fillRect(ix, yy, iw - ((k * 7) % 4) * 6, 3, true);
+      break;
+    default: {  // goodbye: the box with TB
+      const int bw = 44, bh = 32, bx = x + (w - bw) / 2, by = y + h / 2 - 10;
+      c.fillRect(bx, by, bw, bh, true);
+      c.textInBox(bx, by, bw, bh, "TB", TS_SMALL, false, true);
+      decor::star(c, bx + bw / 2, by - 12, 7, 2, 4, 0.f, true);
+      decor::star(c, bx + 6, by - 6, 4, 1, 4, 0.f, true);
+      decor::star(c, bx + bw - 6, by - 6, 4, 1, 4, 0.f, true);
+      break;
+    }
+  }
+}
+// One segment of a segmented control: filled when chosen.
+void segment(ToolsCanvas& c, const TRect& r, const char* label, bool on, bool lastEdge) {
+  (void)lastEdge;
+  if (on) c.fillRect(r.x, r.y, r.w, r.h, true);
+  else c.drawRect(r.x, r.y, r.w, r.h, 2, true);
+  c.textInBox(r.x, r.y, r.w, r.h, label, TS_SMALL, !on, true);
 }
 }  // namespace
 
 void SettingsScreen::renderLock(ToolsHost& host, ToolsCanvas& c) {
   using namespace setui;
+  (void)host;
   drawTopBar(c, "LOCK SCREEN");
 
-  // WHEN IT SLEEPS: the five timings as chips, the current one filled.
-  lockHead(c, 64, "WHEN IT SLEEPS", "the panel keeps its image");
-  static const char* kSleep[lock::SLEEP_COUNT] = {"never", "1 min", "5 min", "15 min", "30 min"};
-  for (int k = 0; k < lock::SLEEP_COUNT; k++) {
-    const TRect ch = sleepChipRect(k);
-    c.button(ch.x, ch.y, ch.w, ch.h, kSleep[k], _lock.sleepIdx == k, TS_SMALL);
-  }
-
-  // WHAT IT SHOWS, with no note pinned: the four faces, then the picture's
-  // own row -- its state on the left, its actions on the right.
-  lockHead(c, 162, "WHAT IT SHOWS", "with no note pinned");
+  // WHEN NOTHING IS PINNED: the four faces as tiles, each a small picture of
+  // what the sleeping panel shows, then the picture's own row.
+  lockHead(c, 58, "WHEN NOTHING IS PINNED", nullptr);
   for (int k = 0; k < lock::EMPTY_COUNT; k++) {
     const uint8_t v = lock::emptyAt(k);
-    const TRect ch = chipRect(k);
-    c.button(ch.x, ch.y, ch.w, ch.h, emptyLabel(v), _lock.empty == v, TS_SMALL);
+    const TRect t = chipRect(k);
+    const bool on = _lock.empty == v;
+    const int th = t.h - 34;
+    lockThumb(c, v, t.x, t.y, t.w, th);
+    if (on) c.drawRect(t.x - 2, t.y - 2, t.w + 4, th + 4, 2, true);
+    const char* lab = emptyLabel(v);
+    char name[16];
+    // The chips spoke in caps; the tiles speak in words.
+    snprintf(name, sizeof(name), "%c%s", lab[0], lab + 1);
+    for (char* q = name + 1; *q; q++)
+      if (*q >= 'A' && *q <= 'Z') *q = (char)(*q + 32);
+    const int lw = c.textWidth(name, TS_SMALL, true);
+    const int ly = t.y + th + 8;
+    if (on) c.fillRect(t.x + (t.w - lw) / 2 - 6, ly - 2, lw + 12, c.textHeight(TS_SMALL) + 4, true);
+    c.text(t.x + (t.w - lw) / 2, ly, name, TS_SMALL, !on, true);
   }
   {
     const TRect r = lockRect(LR_PICTURE);
-    c.text(r.x + 4, r.y + 8, "The picture", TS_MED, true);
-    // Which of the two files it is, because they are not interchangeable: a
-    // grey picture gets the panel's four-level repaint on its own, and a
-    // black-and-white one is the only kind that can be laid OVER something.
-    // "one is stored" was true of both and told nobody which they had.
+    c.text(r.x + 4, r.y + 4, "The picture", TS_MED, true);
     const char* kind = !lockimg::have()      ? "none chosen yet"
-                       : lockimg::haveG2()   ? "one is stored, in grey"
-                                             : "one is stored, black and white";
-    c.text(r.x + 4, r.y + 36, kind, TS_SMALL, true);
+                       : lockimg::haveG2()   ? "stored, in grey"
+                                             : "stored, black and white";
+    c.text(r.x + 4, r.y + 32, kind, TS_SMALL, true);
     const TRect sr = sendRect();
     c.button(sr.x, sr.y, sr.w, sr.h, lockimg::have() ? "REPLACE" : "FROM CARD", false, TS_MED);
     if (lockimg::have()) {
@@ -1197,32 +1298,38 @@ void SettingsScreen::renderLock(ToolsHost& host, ToolsCanvas& c) {
     }
   }
 
-  // THE FOOTER LINE: what the sleeping panel's bottom line carries.
-  lockHead(c, 324, "THE FOOTER LINE", "under a note or a goodbye");
-  for (int i = LR_TIME; i <= LR_BATT; i++) {
-    const TRect r = lockRect(i);
-    c.text(r.x + 4, r.y + (r.h - c.textHeight(TS_MED)) / 2, rowName(i), TS_MED, true);
-    checkbox(c, r.x + r.w - 4 - BOX, r.y + (r.h - BOX) / 2, rowChecked(i, _lock));
+  // SLEEP: one row, five segments.
+  lockHead(c, 426, "SLEEP", nullptr);
+  {
+    const TRect r = lockRect(LR_SLEEP);
+    c.text(r.x + 4, r.y + 2, "Sleep after", TS_MED, true);
+    c.text(r.x + 4, r.y + 30, "minutes, no taps", TS_SMALL, true);
+    static const char* kSleep[lock::SLEEP_COUNT] = {"Never", "1", "5", "15", "30"};
+    for (int k = 0; k < lock::SLEEP_COUNT; k++)
+      segment(c, sleepChipRect(k), kSleep[k], _lock.sleepIdx == k, false);
   }
 
   // WAKING: where the power button lands, and whether the note follows the
   // device's angle while it sleeps.
-  lockHead(c, 528, "WAKING", "the power button, and the angle");
+  lockHead(c, 540, "WAKING", nullptr);
   {
-    const TRect a = wakeChipRect(0), b = wakeChipRect(1);
-    c.button(a.x, a.y, a.w, a.h, "WAKE TO THE NOTE", _lock.wake == lock::WAKE_NOTE, TS_SMALL);
-    c.button(b.x, b.y, b.w, b.h, "WAKE TO THE HUB", _lock.wake == lock::WAKE_HUB, TS_SMALL);
+    const TRect r = lockRect(LR_WAKE);
+    c.text(r.x + 4, r.y + (r.h - c.textHeight(TS_MED)) / 2, "Wake to", TS_MED, true);
+    segment(c, wakeChipRect(0), "Note", _lock.wake == lock::WAKE_NOTE, false);
+    segment(c, wakeChipRect(1), "Home", _lock.wake == lock::WAKE_HUB, false);
   }
   {
     const TRect r = lockRect(LR_ROTATE);
-    c.text(r.x + 4, r.y + 6, rowName(LR_ROTATE), TS_MED, true);
-    // When it is off, say what happens instead -- otherwise the note simply
-    // stops turning and it looks like the angle came from nowhere.
-    c.text(r.x + 4, r.y + 34,
-           _lock.autoRotate ? "only the pinned note turns; apps stay portrait"
+    c.text(r.x + 4, r.y + 4, rowName(LR_ROTATE), TS_MED, true);
+    c.text(r.x + 4, r.y + 32,
+           _lock.autoRotate ? "the pinned note turns; apps stay portrait"
                             : "the note rests at the angle it was pinned at",
            TS_SMALL, true);
-    checkbox(c, r.x + r.w - 4 - BOX, r.y + (r.h - BOX) / 2, _lock.autoRotate);
+    const bool on = _lock.autoRotate;
+    const int tw = 64, th = 32, tx = r.x + r.w - tw - 4, ty = r.y + (r.h - th) / 2;
+    if (on) c.fillRect(tx, ty, tw, th, true);
+    else c.drawRect(tx, ty, tw, th, 2, true);
+    c.fillCircle(on ? tx + tw - th / 2 : tx + th / 2, ty + th / 2, th / 2 - 6, !on);
   }
 
   c.textCentered(SCREEN_W / 2, 776, _note ? _note : "everything here takes effect at once",
@@ -1269,11 +1376,11 @@ bool SettingsScreen::tapLock(ToolsHost& host, int x, int y) {
       lock::setConfig(_lock);
       snprintf(_pageNote, sizeof(_pageNote), "the page %s  -  %s",
                lock::pageDimName(_lock.pageDim),
-               lockimg::have() ? "tap PAGE to change" : "no picture stored yet");
+               lockimg::have() ? "tap Last page to change" : "no picture stored yet");
       _note = _pageNote;
       return true;
     }
-    if (_lock.empty != lock::EMPTY_COVER) {
+    if (!lock::usesCover(_lock.empty)) {
       _note = nullptr;
       return true;
     }
@@ -1336,6 +1443,7 @@ bool SettingsScreen::tapLock(ToolsHost& host, int x, int y) {
 }
 
 bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
+  if (inSetup()) return tapSetup(host, x, y);
   if (_page == 1) return tapLock(host, x, y);
   if (_page == 2) return tapWall(host, x, y);
   if (_page == 5) return tapLockPic(host, x, y);
@@ -1431,6 +1539,11 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
     return false;
   }
 
+  if (rowHit(ACT_SETUP)) {
+    host.beep(1);
+    startSetup(false);
+    return true;
+  }
   if (rowHit(ACT_SOUND)) {
     // The switch. Off remembers nothing; on comes back at Mid, the default.
     const int n = host.soundLevels();
@@ -1503,11 +1616,21 @@ void SettingsScreen::renderUpdate(ToolsHost& host, ToolsCanvas& c) {
   drawTopBar(c, "UPDATE");
   char buf[96];
 
+  // v2 banners: the page under them, faded, and a strip across the middle.
+  auto overPage = [&](chrome2::BannerIcon icon, const char* label, const char* title,
+                      const char* sub) {
+    const uint8_t was = _upStage;
+    _upStage = 0;
+    c.clear();
+    renderUpdate(host, c);
+    _upStage = was;
+    host.fadeBehind();
+    chrome2::banner(c, SCREEN_H / 2, icon, label, title, sub);
+  };
   if (_upStage == 1) {
-    c.textCentered(SCREEN_W / 2, 260, "CHECKING", TS_MED, true, true);
-    c.textCentered(SCREEN_W / 2, 320, _netName, TS_LARGE, true);
-    c.textCentered(SCREEN_W / 2, 400, "asking the update site", TS_MED, true);
-    c.textCentered(SCREEN_W / 2, 436, "this takes up to half a minute", TS_SMALL, true);
+    char lab[48];
+    snprintf(lab, sizeof(lab), "CHECKING  %s", _netName);
+    overPage(chrome2::BI_WORKING, lab, "Asking the update site", "Up to half a minute.");
     return;
   }
 
@@ -1578,9 +1701,8 @@ void SettingsScreen::renderUpdate(ToolsHost& host, ToolsCanvas& c) {
 
   if (_upStage == 4) {
     if (_upErr == ota::Err::Ok) {
-      c.textCentered(SCREEN_W / 2, 300, "RESTARTING", TS_MED, true, true);
       snprintf(buf, sizeof(buf), "into %s", _upCheck.remote.version);
-      c.textCentered(SCREEN_W / 2, 360, buf, TS_LARGE, true);
+      overPage(chrome2::BI_DOWNLOAD, "RESTARTING", buf, nullptr);
       return;
     }
     c.textCentered(SCREEN_W / 2, 120, "NOT UPDATED", TS_MED, true, true);
@@ -1614,9 +1736,8 @@ void SettingsScreen::renderUpdate(ToolsHost& host, ToolsCanvas& c) {
         c.textCentered(SCREEN_W / 2, 470, "keep it near the router", TS_MED, true);
         return;
       case ota::Lan::Done:
-        c.textCentered(SCREEN_W / 2, 300, "RESTARTING", TS_MED, true, true);
         snprintf(buf, sizeof(buf), "into %s", l->incoming[0] ? l->incoming : "the new build");
-        c.textCentered(SCREEN_W / 2, 360, buf, TS_LARGE, true);
+        overPage(chrome2::BI_DOWNLOAD, "RESTARTING", buf, nullptr);
         return;
       case ota::Lan::Failed:
         if (l->err != ota::Err::Ok && !l->code[0]) {  // never got on the network
@@ -1862,4 +1983,164 @@ void SettingsScreen::leaveUpdate(ToolsHost* host) {
   if (ota::Device* d = host->otaDevice()) {
     if (_upStage == 5 || _upStage == 6) d->lanStop();
   }
+}
+
+// --- the setup steps (v2) -------------------------------------------------------
+namespace {
+// One big choice row: outlined, or filled with a tick when chosen. The sub
+// line is optional.
+void setupRowDraw(ToolsCanvas& c, const TRect& r, const char* label, const char* sub, bool on) {
+  if (on) c.fillRect(r.x, r.y, r.w, r.h, true);
+  else c.drawRect(r.x, r.y, r.w, r.h, 2, true);
+  const int lh = c.textHeight(TS_MED), sh = c.textHeight(TS_SMALL);
+  const int block = sub ? lh + 2 + sh : lh;
+  const int ty = r.y + (r.h - block) / 2;
+  c.text(r.x + 20, ty, label, TS_MED, !on, true);
+  if (sub) c.text(r.x + 20, ty + lh + 2, sub, TS_SMALL, !on);
+  if (on) {
+    const int cx = r.x + r.w - 34, cy = r.y + r.h / 2;
+    c.drawLine(cx - 10, cy, cx - 3, cy + 7, 3, false);
+    c.drawLine(cx - 3, cy + 7, cx + 10, cy - 7, 3, false);
+  }
+}
+// Setup's sleep rows, in the order they are offered, as lock::SLEEP_MINUTES
+// indexes: 1, 5, 15, 30 minutes, then never.
+constexpr uint8_t kSetupSleep[5] = {1, 2, 3, 4, 0};
+// The built-in faces setup offers for the device's own words.
+constexpr int kSetupFace[2] = {0, 2};  // Noto Sans, IBM Plex Sans
+}  // namespace
+
+void SettingsScreen::startSetup(bool fromBoot) {
+  _armed = false;
+  _note = nullptr;
+  _setupBoot = fromBoot;
+  _setupLeft = false;
+  _setupWifi = false;
+  _lock = lock::config();
+  _page = 10;
+}
+
+void SettingsScreen::renderSetup(ToolsHost& host, ToolsCanvas& c) {
+  using namespace setui;
+  const int step = _page - 10;
+  char corner[12];
+  snprintf(corner, sizeof(corner), "%d / %d", step + 1, SETUP_STEPS);
+  drawTopBar(c, "SETUP", false, "", corner);
+
+  static const char* kTitle[SETUP_STEPS] = {"Font", "Sleep after", "Beep level", "Wi-Fi"};
+  static const char* kSub[SETUP_STEPS] = {
+      "For menus. Books can have their own.",
+      "No taps for this long, it sleeps.",
+      "Tap one to hear it.",
+      "For the clock, sync and updates. Optional."};
+  c.text(16, SU_TITLE_Y, kTitle[step], TS_LARGE, true, true);
+  c.text(16, SU_TITLE_Y + c.textHeight(TS_LARGE) + 6, kSub[step], TS_SMALL, true);
+
+  const char* hint = nullptr;
+  if (step == 0) {
+    const char* cur = host.fontFor(ToolsHost::FONT_DEVICE);
+    for (int i = 0; i < 2; i++) {
+      const char* name = host.typefaceName(kSetupFace[i]);
+      const bool on = i == 0 ? !cur[0] || strcmp(cur, name) == 0 : strcmp(cur, name) == 0;
+      const TRect r = setupRow(i);
+      // Each row is set in the face it names, so the choice is made by eye.
+      const int was = host.typeface();
+      host.setTypeface(kSetupFace[i]);
+      setupRowDraw(c, r, name, "Aa Bb 123  \xE0\xB8\x81\xE0\xB8\x82\xE0\xB8\x84", on);
+      host.setTypeface(was);
+    }
+    hint = "More faces in Settings > LOOK > Font";
+  } else if (step == 1) {
+    static const char* kLab[5] = {"1 min", "5 min", "15 min", "30 min", "Never"};
+    static const char* kNote[5] = {"Longest battery", "Recommended", nullptr, nullptr,
+                                   "Uses the most battery"};
+    for (int i = 0; i < 5; i++)
+      setupRowDraw(c, setupRow(i), kLab[i], kNote[i], _lock.sleepIdx == kSetupSleep[i]);
+    hint = "The last screen stays on while it sleeps";
+  } else if (step == 2) {
+    static const char* kLab[4] = {"Off", "Low", "Mid", "High"};
+    static const char* kNote[4] = {"No beeps at all", nullptr, "Default", nullptr};
+    const int lv = host.soundLevel();
+    for (int i = 0; i < 4; i++) setupRowDraw(c, setupRow(i), kLab[i], kNote[i], lv == i);
+    hint = "Timers and games use this too";
+  } else {
+    char name[homenet::SSID_MAX] = {};
+    const bool have = homenet::haveWifi(host.prefs());
+    if (have) homenet::wifiName(host.prefs(), name, sizeof(name));
+    setupRowDraw(c, setupRow(0), have ? name : "No home Wi-Fi yet", have ? "saved" : nullptr,
+                 have);
+    setupRowDraw(c, setupRow(1), have ? "Change it with my phone" : "Set it up with my phone",
+                 "Scan a code, type it there", false);
+    hint = "Or later: Settings > CONNECT > Clock";
+  }
+  if (hint) c.textCentered(SCREEN_W / 2, setupNext().y - 34, hint, TS_SMALL, true);
+  if (step == SETUP_STEPS - 1) {
+    c.button(setupLater().x, setupLater().y, setupLater().w, setupLater().h, "Later", false);
+    c.button(setupDone().x, setupDone().y, setupDone().w, setupDone().h, "Done", true);
+  } else {
+    const TRect n = setupNext();
+    c.button(n.x, n.y, n.w, n.h, "Next", true);
+  }
+}
+
+bool SettingsScreen::tapSetup(ToolsHost& host, int x, int y) {
+  using namespace setui;
+  const int step = _page - 10;
+  auto finish = [&] {
+    host.beep(1);
+    if (_setupBoot) {
+      _setupBoot = false;
+      _setupLeft = true;  // the shell takes it from here, to the hub
+      _page = 0;
+      return true;
+    }
+    _page = 0;
+    return true;
+  };
+  if (step == SETUP_STEPS - 1) {
+    if (setupLater().hit(x, y) || setupDone().hit(x, y)) return finish();
+    if (setupRow(1).hit(x, y)) {
+      host.beep(1);
+      _setupWifi = true;
+      _clockOk = _clock.start(host.prefs());
+      _netStage = 0;
+      _clockSawClient = false;
+      _clockSawSet = false;
+      _page = 6;
+      return true;
+    }
+    return false;
+  }
+  if (setupNext().hit(x, y)) {
+    host.beep(1);
+    _page++;
+    return true;
+  }
+  if (step == 0) {
+    for (int i = 0; i < 2; i++) {
+      if (!setupRow(i).hit(x, y)) continue;
+      host.beep(0);
+      host.fontSet(ToolsHost::FONT_DEVICE, i == 0 ? "" : host.typefaceName(kSetupFace[i]));
+      host.refresh(true);  // every glyph on the panel just changed
+      return false;
+    }
+  } else if (step == 1) {
+    for (int i = 0; i < 5; i++) {
+      if (!setupRow(i).hit(x, y)) continue;
+      _lock.sleepIdx = kSetupSleep[i];
+      lock::save(host.prefs(), _lock);
+      lock::setConfig(_lock);
+      host.beep(0);
+      return true;
+    }
+  } else if (step == 2) {
+    for (int i = 0; i < 4; i++) {
+      if (!setupRow(i).hit(x, y)) continue;
+      const int n = host.soundLevels();
+      host.setSoundLevel(i < n ? i : n - 1);
+      host.beep(0);  // at the level just chosen
+      return true;
+    }
+  }
+  return false;
 }

@@ -58,6 +58,45 @@ inline bool draw(ToolsCanvas& c, const char* path) {
   return true;
 }
 
+// The same picture at num/den of its size, its top-left at (x, y): white
+// first (a frame for it to sit in), then its black, sampled nearest. For the
+// small cover laid over the page.
+inline bool drawScaled(ToolsCanvas& c, const char* path, int x, int y, int num, int den) {
+  size_t len = 0;
+  char* buf = tfs::readAlloc(path, len);
+  if (!buf) return false;
+  const uint8_t* b = (const uint8_t*)buf;
+  const uint32_t magic = (uint32_t)b[0] | ((uint32_t)b[1] << 8) | ((uint32_t)b[2] << 16) |
+                         ((uint32_t)b[3] << 24);
+  const int w = b[4] | (b[5] << 8), h = b[6] | (b[7] << 8);
+  if (len != FILE_SIZE || magic != MAGIC || w != W || h != H) {
+    free(buf);
+    return false;
+  }
+  const uint8_t* px = b + HEADER;
+  const int ow = W * num / den, oh = H * num / den;
+  c.fillRect(x, y, ow, oh, false);
+  for (int oy = 0; oy < oh; oy++) {
+    const int sy = oy * den / num;
+    const uint8_t* row = px + (size_t)sy * (W / 8);
+    int run = -1;
+    for (int ox = 0; ox <= ow; ox++) {
+      bool ink = false;
+      if (ox < ow) {
+        const int sx = ox * den / num;
+        ink = !(row[sx >> 3] & (0x80 >> (sx & 7)));
+      }
+      if (ink && run < 0) run = ox;
+      if (!ink && run >= 0) {
+        c.fillRect(x + run, y + oy, ox - run, 1, true);
+        run = -1;
+      }
+    }
+  }
+  free(buf);
+  return true;
+}
+
 }  // namespace tbimg
 
 // The lock screen's grey picture: the same 480x800, but 2 bits per pixel in

@@ -26,6 +26,8 @@ class Toybox {
   bool onButton(SideBtn b);
   void tick();
   bool wantsTick() const;
+  // A running app that only keeps time: the host may light-sleep between ticks.
+  bool canNap() const;
   // Before power-off: the open app writes what it is holding (ToolApp::flush).
   void flush();
 
@@ -47,6 +49,8 @@ class Toybox {
   // by touch on the standalone device -- the gear moved off the glass and onto
   // the physical button beside it.
   void openSettings();
+  // The setup steps; fromBoot = a new device, which ends at the hub.
+  void openSetup(bool fromBoot);
   // Reopens the last app that was opened, from NVS, so it survives power-off.
   // False means there is nothing to resume (or it is hidden), and the caller
   // owns the low beep that says so.

@@ -132,6 +132,14 @@ void Toybox::open(bool game, int idx, bool paint) {
   if (paint) _host->refresh(_active->enterTouchesCard() || wallimg::have());
 }
 
+void Toybox::openSetup(bool fromBoot) {
+  release();
+  _settings.enter();
+  _settings.startSetup(fromBoot);
+  _where = Where::Settings;
+  _host->refresh(true);
+}
+
 void Toybox::openSettings() {
   release();
   _settings.enter();
@@ -235,7 +243,14 @@ void Toybox::onTap(int x, int y) {
       goHub();
       return;
     }
-    if (_settings.onTap(*_host, x, y)) _host->refresh(false);
+    const bool repaint = _settings.onTap(*_host, x, y);
+    if (_settings.setupFinished()) {
+      // A new device's setup is over: on to the hub.
+      appvis::save(_host->prefs());
+      goHub();
+      return;
+    }
+    if (repaint) _host->refresh(false);
     return;
   }
 
@@ -306,6 +321,8 @@ void Toybox::tick() {
   // joined, or the card was handed back -- so it has to be repainted here.
   if (_where == Where::Settings && _settings.tick(*_host)) _host->refresh(true);
 }
+
+bool Toybox::canNap() const { return _where == Where::App && _active && _active->napsOk(); }
 
 bool Toybox::wantsTick() const {
   if (_where == Where::Settings) return _settings.wantsTick();

@@ -1390,7 +1390,9 @@ static void checkLockOverPage() {
   // leave somebody's settings screen on the fridge.
   for (int i = 0; i < lock::EMPTY_COUNT; i++) {
     const uint8_t e = lock::emptyAt(i);
-    if (e == lock::EMPTY_PAGE) continue;
+    // The page and the two covers laid over it keep the page (v2).
+    if (e == lock::EMPTY_PAGE || e == lock::EMPTY_COVER_ON_PAGE || e == lock::EMPTY_COVER_INK)
+      continue;
     lock::Config other;
     other.empty = e;
     if (lock::keepsPage(other, false, false, true, 0)) {
@@ -1998,6 +2000,61 @@ int main() {
   if (stickyHost.soundLevel() != 0) {
     printf("SETTINGS FAIL: the switch did not mute\n");
     abort();
+  }
+
+  // --- v2 setup steps ---------------------------------------------------------
+  // From Settings > DEVICE > Setup: four steps, each drawn; sleep and beep
+  // rows write what they say; back on step 1 returns to the settings root.
+  {
+    const bool wasDump = g_dumpEnabled;
+    g_dumpEnabled = true;
+    tapAct(setui::ACT_SETUP);
+    setScreen("setup_font");
+    stickyHost.refresh(true);
+    tapRect(setui::setupNext());
+    setScreen("setup_sleep");
+    tapRect(setui::setupRow(2));  // 15 min
+    if (lock::config().sleepIdx != 3) {
+      printf("SETUP FAIL: 15 min wrote sleepIdx %d\n", lock::config().sleepIdx);
+      abort();
+    }
+    tapRect(setui::setupRow(1));  // back to 5 min, the default
+    stickyHost.refresh(true);
+    tapRect(setui::setupNext());
+    setScreen("setup_beep");
+    tapRect(setui::setupRow(2));  // Mid
+    if (stickyHost.soundLevel() != 2) {
+      printf("SETUP FAIL: Mid landed on %d\n", stickyHost.soundLevel());
+      abort();
+    }
+    stickyHost.refresh(true);
+    tapRect(setui::setupNext());
+    setScreen("setup_wifi");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    toybox.onTap(BACK_W / 2, TOPBAR_H / 2);  // to beep
+    toybox.onTap(BACK_W / 2, TOPBAR_H / 2);  // to sleep
+    toybox.onTap(BACK_W / 2, TOPBAR_H / 2);  // to font
+    toybox.onTap(BACK_W / 2, TOPBAR_H / 2);  // to the settings root
+    if (!toybox.hostInSettings() || toybox.hostSettings().inSetup()) {
+      printf("SETUP FAIL: back from step 1 did not land on the settings root\n");
+      abort();
+    }
+    // A new device: Done on the last step goes to the hub.
+    toybox.openSetup(true);
+    for (int i = 0; i < setui::SETUP_STEPS - 1; i++) tapRect(setui::setupNext());
+    tapRect(setui::setupDone());
+    if (toybox.hostInSettings() || toybox.hostInApp()) {
+      printf("SETUP FAIL: a new device's setup did not end at the hub\n");
+      abort();
+    }
+    toybox.openSettings();
+    tapRect(setui::tabRect(setui::TAB_DEVICE));
+    tapAct(setui::ACT_SOUND);  // back to muted, the state the walk expects
+    if (stickyHost.soundLevel() != 0) tapAct(setui::ACT_SOUND);
+    printf("setup steps ok (%d steps, sleep and beep write, back and boot ends)\n",
+           setui::SETUP_STEPS);
+    g_dumpEnabled = wasDump;
   }
   setScreen("settings_edited");
   g_dumpEnabled = true;
@@ -7829,6 +7886,24 @@ int main() {
       abort();
     }
     epd.displayFull();
+
+    // v2: the two covers over the page, drawn over a stand-in page of text
+    // faded the way the power-off path fades the reader's page.
+    for (const uint8_t m : {lock::EMPTY_COVER_ON_PAGE, lock::EMPTY_COVER_INK}) {
+      setScreen(m == lock::EMPTY_COVER_INK ? "lockscreen_cover_ink" : "lockscreen_cover_on_page");
+      epd.clear();
+      ToolsCanvas& lc = stickyHost.sharedCanvas();
+      for (int ly = 40, k = 0; ly < 760; ly += 34, k++)
+        lc.text(24, ly, k % 3 ? "The rain had not stopped since dusk. She" :
+                                "turned another page, and the little", TS_MED, true);
+      epd.dim(m == lock::EMPTY_COVER_ON_PAGE && lock::config().pageDim < 2 ? 2
+                                                                           : lock::config().pageDim);
+      if (!bthumb::drawOverPage(lc, m)) {
+        printf("COVER LOCK FAIL: mode %d did not draw over the page\n", m);
+        abort();
+      }
+      epd.displayFull();
+    }
     g_dumpEnabled = false;
 
     // With the setting on, a book open copies its own cover over the top...

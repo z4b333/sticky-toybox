@@ -167,6 +167,8 @@ class StickyHost : public ToolsHost {
     minute = ck.minute;
     return true;
   }
+  void fadeBehind() override { epd.dim(3); }
+  void showAsIs() override { epd.displayPartial(); }
   bool clockDate(int& year, int& month, int& day) const override {
     sensors::Clock ck;
     if (!sensors::readClock(ck)) return false;

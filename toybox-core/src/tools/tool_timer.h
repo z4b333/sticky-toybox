@@ -61,6 +61,9 @@ class TimerTool : public ToolApp {
   }
 
   bool wantsTick() const override { return _running; }
+  // Naps are fine until the last few seconds, which want the 3-2-1 beeps on
+  // time rather than up to a second late.
+  bool napsOk() const override { return _running && (_stopwatch || remainMs() > 5000u); }
 
   void render(ToolsCanvas& c) override {
     using namespace timerui;
@@ -108,7 +111,18 @@ class TimerTool : public ToolApp {
 
   void tick() override {
     if (!_running) return;
+    if (!_stopwatch) {
+      // The last three seconds count down out loud (owner, 21 Nov): one
+      // short beep at 3, 2 and 1, then the alarm at 0.
+      const uint32_t rem = remainMs();
+      const int left = (int)((rem + 999u) / 1000u);
+      if (rem > 0 && left <= 3 && left != _warned) {
+        _warned = left;
+        host().beep(1);
+      }
+    }
     if (!_stopwatch && remainMs() == 0) {
+      _warned = 0;
       _running = false;
       _finished = true;
       _remainMs = 0;
@@ -175,6 +189,7 @@ class TimerTool : public ToolApp {
       } else {
         if (_remainMs == 0) _remainMs = (uint32_t)_setSec * 1000u;
         _endMs = millis() + _remainMs;
+        _warned = 0;
         _running = true;
         _lastShown = -1;
       }
@@ -313,4 +328,5 @@ class TimerTool : public ToolApp {
   uint32_t _laps[kLaps] = {};
   int _lapN = 0;
   int _lastShown = -1;
+  int _warned = 0;  // the last of the 3-2-1 warning beeps sounded
 };

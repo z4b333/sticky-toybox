@@ -99,6 +99,21 @@ inline constexpr int BAND_ROW_BYTES = BIG_W / 8;  // 60, one row of a 1-bit cove
 
 inline bool haveLock() { return tbimg::have(LOCK_PATH); }
 
+// The two v2 covers laid over the (already faded) page the reader left on
+// the panel. COVER_INK: the full cover's black only, its white leaving the
+// page showing. COVER_ON_PAGE: three fifths of the cover, framed, a little
+// above centre, with a solid offset edge so it reads as a card on the page.
+inline bool drawOverPage(ToolsCanvas& c, uint8_t mode) {
+  if (mode == lock::EMPTY_COVER_INK) return tbimg::draw(c, LOCK_PATH);
+  const int ow = tbimg::W * 3 / 5, oh = tbimg::H * 3 / 5;
+  const int x = (c.width() - ow) / 2, y = (c.height() - oh) / 2 - 20;
+  c.fillRect(x + 8, y + 8, ow + 6, oh + 6, true);
+  c.fillRect(x - 3, y - 3, ow + 6, oh + 6, true);
+  if (tbimg::drawScaled(c, LOCK_PATH, x, y, 3, 5)) return true;
+  c.fillRect(x, y, ow, oh, false);
+  return false;
+}
+
 // Copies this book's full-size cover off the card into that file. False when
 // the book has no cover yet (the very first open, before the builder has run)
 // or the card is gone -- and the lock screen falls back to GOODBYE, which is
@@ -144,7 +159,7 @@ inline bool stashForLock(ToolsHost& h, const char* file) {
 // every open would be a cost paid by everyone for a setting most people leave
 // alone.
 inline bool noteForLock(ToolsHost& h, const char* file) {
-  if (lock::load(h.prefs()).empty != lock::EMPTY_COVER) return false;
+  if (!lock::usesCover(lock::load(h.prefs()).empty)) return false;
   return stashForLock(h, file);
 }
 

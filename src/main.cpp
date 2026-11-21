@@ -20,6 +20,7 @@
 #include "ota.h"
 #include "sensors.h"
 #include "service.h"
+#include "chrome.h"
 #include "sticky_host.h"
 #include "tools/book_thumbs.h"
 #include "tools/lock_image.h"
@@ -214,10 +215,40 @@ bool paintGreySleep() {
   return done;
 }
 
-void powerOff(bool lowBattery = false) {
+// Light sleep for up to `ms`, ended early by either side button, the power
+// button or the touch controller's interrupt line (all active low).
+void lightNap(uint32_t ms) {
+  static const int kPins[] = {PIN_BTN_UP, PIN_BTN_DOWN, PIN_BTN_OK, PIN_TP_INT};
+  for (const int p : kPins) gpio_wakeup_enable((gpio_num_t)p, GPIO_INTR_LOW_LEVEL);
+  esp_sleep_enable_gpio_wakeup();
+  esp_sleep_enable_timer_wakeup((uint64_t)ms * 1000ULL);
+  esp_light_sleep_start();
+  for (const int p : kPins) gpio_wakeup_disable((gpio_num_t)p);
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+}
+
+// The v2 "Shutting down" banner, shown for a held power button. The
+// framebuffer is put back exactly as it was afterwards, because the sleep
+// path below may keep the page that was on it.
+void announceShutdown() {
+  static uint8_t* saved = nullptr;
+  if (!saved) saved = (uint8_t*)ps_malloc(EPD_BUF_SIZE);
+  if (!saved) return;  // no room: skip the banner, never the shutdown
+  memcpy(saved, epd.fb(), EPD_BUF_SIZE);
+  stickyHost.fadeBehind();
+  chrome2::banner(stickyHost.sharedCanvas(), stickyHost.sharedCanvas().height() / 2,
+                  chrome2::BI_POWER, "SHUTTING DOWN", "Your place is saved");
+  epd.displayPartial();
+  // Long enough to read (owner, 21 Nov: it flashed by too fast to).
+  delay(1500);
+  memcpy(epd.fb(), saved, EPD_BUF_SIZE);
+}
+
+void powerOff(bool lowBattery = false, bool announce = false) {
   // First, while the card and the app are both still there: a reader that
   // has turned a page in the last few seconds has not saved its place yet.
   toybox.flush();
+  if (announce && !lowBattery) announceShutdown();
   // E-paper keeps its last image with no power. If a note is pinned, leave that
   // on the panel instead of a goodbye card — that is the whole point of a note
   // you stick on the fridge.
@@ -237,8 +268,20 @@ void powerOff(bool lowBattery = false) {
     // a lock screen rather than as something spilled on the page. Then the
     // picture, whose white is already transparent -- tbimg::draw skips runs of
     // white -- so it lays over the page instead of replacing it.
-    epd.dim(lock::config().pageDim);
-    lockimg::drawOver(c);
+    // The small cover wants the page well back behind it; the page alone
+    // and the cover's ink keep the owner's own setting.
+    const uint8_t dimLv = lock::config().empty == lock::EMPTY_COVER_ON_PAGE && lock::config().pageDim < 2
+                              ? 2 : lock::config().pageDim;
+    epd.dim(dimLv);
+    switch (lock::config().empty) {
+      case lock::EMPTY_COVER_INK:
+      case lock::EMPTY_COVER_ON_PAGE:
+        bthumb::drawOverPage(c, lock::config().empty);
+        break;
+      default:
+        lockimg::drawOver(c);
+        break;
+    }
   } else {
     epd.clear();
     // A pinned note goes down at its resting angle whatever the device was
@@ -278,6 +321,8 @@ void powerOff(bool lowBattery = false) {
       // they were last in is the honest next best thing.
       case lock::EMPTY_PAGE:
       case lock::EMPTY_COVER:
+      case lock::EMPTY_COVER_ON_PAGE:  // no page under it: the cover on its own
+      case lock::EMPTY_COVER_INK:
         if (tbimg::draw(c, bthumb::LOCK_PATH)) break;
         // fall through
       default:
@@ -308,7 +353,7 @@ void handlePowerButton() {
   if (digitalRead(PIN_BTN_OK) == LOW) {
     noteActivity();
     if (g_okDownSince == 0) g_okDownSince = millis();
-    if (millis() - g_okDownSince > 2000) powerOff();
+    if (millis() - g_okDownSince > 2000) powerOff(false, true);
     return;
   }
   const bool wasDown = g_okDownSince != 0;
@@ -414,12 +459,42 @@ void handleIdleSleep() {
   if (millis() - g_lastActivity > idle) powerOff();
 }
 
+// The v2 low-battery banner: once at 20 % and once at 10 % per discharge,
+// over the faded screen, with an OK that any tap answers. Charging back past
+// 25 % arms both again.
+bool g_bannerUp = false;
+int g_batteryWarned = 101;
+
+void showBatteryBanner(int pct) {
+  ToolsCanvas& c = stickyHost.sharedCanvas();
+  stickyHost.fadeBehind();
+  char label[24];
+  snprintf(label, sizeof(label), "BATTERY %d%%", pct);
+  const int okH = 52;
+  const int bottom = chrome2::banner(c, c.height() / 2, chrome2::BI_BATTERY, label,
+                                     pct <= 10 ? "Charge me now" : "Charge soon",
+                                     "Sync pauses below 10%.", okH + 14, pct);
+  c.button(28, bottom - 28 - okH, c.width() - 56, okH, "OK", true);
+  epd.displayPartial();
+  g_bannerUp = true;
+  buzzer::tap();
+}
+
 void handleLowBattery() {
   if (millis() - g_lastBatteryCheck < 60000) return;
   g_lastBatteryCheck = millis();
   if (sensors::charging()) return;
   const int pct = sensors::batteryPercent();
   if (pct >= 0 && pct <= LOW_BATTERY_PCT) powerOff(true);
+  if (pct > 25) g_batteryWarned = 101;
+  if (pct < 0 || g_bannerUp || g_pinnedMode) return;
+  for (const int at : {10, 20}) {
+    if (pct <= at && g_batteryWarned > at) {
+      g_batteryWarned = at;
+      showBatteryBanner(pct);
+      return;
+    }
+  }
 }
 }  // namespace
 
@@ -615,8 +690,10 @@ void setup() {
     }
   }
 
+  bool newDevice = false;
   if (welcome::pending(prefs)) {
     const bool updated = prefs.isKey("welcome");
+    newDevice = !updated;
     ToolsCanvas& c = stickyHost.sharedCanvas();
     epd.clear();
     welcome::render(c, updated);
@@ -691,7 +768,13 @@ void setup() {
   // Waking goes to whichever the settings say. With a note pinned the note is
   // usually the thing you came back to, but not everyone agrees, so it asks.
   char pinned[note::NAME_LEN + 1];
-  if (note::getPinned(pinned) && lock::config().wake == lock::WAKE_NOTE) {
+  if (newDevice) {
+    // A device's very first boot goes through the setup steps (v2); they
+    // end at the hub. An updated device skips them -- Settings > DEVICE >
+    // Setup runs them again on request.
+    TB_LOG("new device: opening setup\n");
+    toybox.openSetup(true);
+  } else if (note::getPinned(pinned) && lock::config().wake == lock::WAKE_NOTE) {
     TB_LOG("opening the pinned note \"%s\"\n", pinned);
     g_pinnedMode = true;
     showPinned();
@@ -745,7 +828,12 @@ void loop() {
     return;
   }
 
-  if (ev.tapped)
+  if (g_bannerUp && (ev.tapped || ev.swiped)) {
+    // A banner on the glass takes the next touch for itself: OK, or anywhere.
+    g_bannerUp = false;
+    buzzer::tap();
+    stickyHost.refresh(true);
+  } else if (ev.tapped)
     toybox.onTap(ev.x, ev.y);
   else if (ev.swiped)
     toybox.onSwipe(ev.dx, ev.dy);
@@ -769,5 +857,16 @@ void loop() {
   handlePowerButton();
   handleLowBattery();
   handleIdleSleep();
+  // v2: a running timer is the one thing that held the chip fully awake for
+  // minutes on end (~20-40 mA). Once nobody has touched it for a few
+  // seconds, nap in light sleep instead of spinning: up to a second at a
+  // time, woken early by a button or the touch line, with millis() carried
+  // across so the countdown stays true. Not on USB (the CDC console drops
+  // in light sleep, and there is no battery to save).
+  if (toybox.canNap() && !sensors::charging() && millis() - g_lastActivity > 5000 &&
+      !g_bannerUp) {
+    lightNap(1000);
+    return;
+  }
   delay(20);
 }

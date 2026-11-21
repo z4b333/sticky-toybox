@@ -48,6 +48,12 @@ enum Empty : uint8_t {
   EMPTY_BLANK = 3,  // retired -- see kEmptyOffered
   EMPTY_COVER = 4,
   EMPTY_PAGE = 5,
+  // v2 (owner, 21 Nov): the cover over the page being read rather than on
+  // white. COVER_ON_PAGE puts a smaller cover in a frame over the faded
+  // page; COVER_INK lays the full cover's black on the faded page and leaves
+  // its white alone, so the page shows through.
+  EMPTY_COVER_ON_PAGE = 6,
+  EMPTY_COVER_INK = 7,
 };
 // What is actually offered, in the order the chips sit in. BLANK is gone
 // (owner's call): a panel showing nothing is what a flat battery looks like,
@@ -55,10 +61,15 @@ enum Empty : uint8_t {
 // VALUE stays where it is rather than the four being renumbered -- a stored
 // setting is a number in NVS, and shifting them would silently move somebody
 // from COVER to PAGE. A device still set to it is moved to GOODBYE on load.
-inline constexpr uint8_t kEmptyOffered[] = {EMPTY_PICTURE, EMPTY_GOODBYE, EMPTY_COVER, EMPTY_PAGE};
+inline constexpr uint8_t kEmptyOffered[] = {EMPTY_PICTURE, EMPTY_GOODBYE, EMPTY_COVER,
+                                            EMPTY_COVER_ON_PAGE, EMPTY_COVER_INK, EMPTY_PAGE};
 inline constexpr int EMPTY_COUNT = (int)(sizeof(kEmptyOffered) / sizeof(kEmptyOffered[0]));
 inline constexpr uint8_t EMPTY_FIRST = EMPTY_PICTURE;
-inline constexpr uint8_t EMPTY_LAST = EMPTY_PAGE;
+inline constexpr uint8_t EMPTY_LAST = EMPTY_COVER_INK;
+// Every mode that shows the book's cover, and needs it copied for the lock.
+inline bool usesCover(uint8_t e) {
+  return e == EMPTY_COVER || e == EMPTY_COVER_ON_PAGE || e == EMPTY_COVER_INK;
+}
 inline uint8_t emptyAt(int i) { return kEmptyOffered[i < 0 ? 0 : (i >= EMPTY_COUNT ? 0 : i)]; }
 inline int emptyIndexOf(uint8_t v) {
   for (int i = 0; i < EMPTY_COUNT; i++)
@@ -91,8 +102,8 @@ inline constexpr int SLEEP_COUNT = (int)(sizeof(SLEEP_MINUTES) / sizeof(SLEEP_MI
 struct Config {
   uint8_t sleepIdx = 2;  // index into SLEEP_MINUTES; 5 minutes
   uint8_t empty = EMPTY_GOODBYE;
-  bool showTime = true;
-  bool showTemp = true;
+  bool showTime = false;
+  bool showTemp = false;
   bool showBattery = true;
   bool autoRotate = true;
   // Which way up a pinned note rests when it is not following the device.
@@ -117,8 +128,12 @@ inline Config load(Preferences& p) {
   // device set before it was retired -- comes back as GOODBYE.
   if (emptyIndexOf(c.empty) == 1) c.empty = EMPTY_GOODBYE;
   c.pinRotation = (uint8_t)(p.getInt("ls_pinrot", 0) & 3);
-  c.showTime = p.getBool("ls_time", true);
-  c.showTemp = p.getBool("ls_temp", true);
+  // v2: no clock or temperature on a sleeping panel -- they would be stale
+  // the moment it slept. The keys stay (an older build reads them) but are
+  // no longer offered or honoured.
+  (void)p.getBool("ls_time", false);
+  c.showTime = false;
+  c.showTemp = false;
   c.showBattery = p.getBool("ls_batt", true);
   c.autoRotate = p.getBool("ls_rot", true);
   c.wake = (uint8_t)p.getInt("ls_wake", WAKE_NOTE);
@@ -150,7 +165,8 @@ inline void save(Preferences& p, const Config& c) {
 // wear it.
 inline bool keepsPage(const Config& c, bool pinned, bool lowBattery, bool showingPage,
                       int rotation) {
-  return c.empty == EMPTY_PAGE && showingPage && !pinned && !lowBattery && rotation == 0;
+  return (c.empty == EMPTY_PAGE || c.empty == EMPTY_COVER_ON_PAGE || c.empty == EMPTY_COVER_INK) &&
+         showingPage && !pinned && !lowBattery && rotation == 0;
 }
 
 inline Config g_config;
