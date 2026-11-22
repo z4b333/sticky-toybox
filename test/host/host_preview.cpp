@@ -3753,6 +3753,33 @@ int main() {
              et->hostMarkLabel(0));
       abort();
     }
+    // v2: Cancel on the Highlight bar leaves highlight mode altogether --
+    // no bar left behind on the page.
+    {
+      toybox.onButton(SideBtn::Ok);
+      toybox.onTap(rmenu::plusRect(1, 480).x + 40, rmenu::plusRect(1, 480).y + 40);
+      toybox.onTap(40, et->hostLineY(0) + 10);
+      toybox.onTap(200, et->hostLineY(1) + 10);
+      if (et->hostMenu() != (int)rmenu::Page::Keep) {
+        printf("HIGHLIGHT FAIL: no Highlight bar to cancel (menu %d)\n", et->hostMenu());
+        abort();
+      }
+      toybox.onTap(360, 600);  // Cancel
+      if (et->hostMenu() != 0 || et->hostPicking() || et->hostMarkCount() != 1) {
+        printf("HIGHLIGHT FAIL: Cancel left menu %d picking %d marks %d\n", et->hostMenu(),
+               (int)et->hostPicking(), et->hostMarkCount());
+        abort();
+      }
+      g_dumpEnabled = true;
+      setScreen("tool_epub_highlight_cancelled");
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+    }
+    // v2: the kept words are underlined on the page they were picked from.
+    g_dumpEnabled = true;
+    setScreen("tool_epub_highlighted");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
     {
       char mp[bstore::PATH_CAP];
       marks::path("/books/wind.epub", mp, sizeof(mp));

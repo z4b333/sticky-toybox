@@ -219,6 +219,10 @@ class EpubTool : public ToolApp {
         renderPick(c);
         return;
       }
+      if (_menu == rmenu::Page::Keep) {
+        renderKeep(c);
+        return;
+      }
       if (_menu != rmenu::Page::None) {
         renderMenu(c);
         return;
@@ -1024,6 +1028,7 @@ class EpubTool : public ToolApp {
     }
     _screen = Screen::Page;
     _guide = !prefs().getBool("ep_guide", false);  // v2: once, the first book ever
+    _nmarks = marks::load(host(), _books[_cur].file, _marks);  // highlights to underline
     host().setCanvasRotation(_rot);  // gotoPlace lays out at this width
     _rotLaid = _rot;
     if (!unwrapped) host().beep(1);  // an unwrapped open already sounded, at the cover
@@ -2749,8 +2754,8 @@ class EpubTool : public ToolApp {
                           : kosync::isReadest(prefs())    ? "Readest"
                                                           : "KOReader";
     char markSub[24];
-    snprintf(markSub, sizeof(markSub), _nmarks ? "%d kept" : "keep a phrase", _nmarks);
-    const char* lab[6] = {"Contents", "Bookmark", "Sync", "Rotation", "Settings", "Exit"};
+    snprintf(markSub, sizeof(markSub), _nmarks ? "%d kept" : "two taps", _nmarks);
+    const char* lab[6] = {"Contents", "Highlight", "Sync", "Rotation", "Settings", "Exit"};
     const char* sub[6] = {"chapters", markSub, syncSub,
                           _rotFollow ? "follows" : "locked",
                           "text, font", "close the book"};
@@ -3119,10 +3124,14 @@ class EpubTool : public ToolApp {
   }
 
   void pickCancel() {
+    // Leaves the Highlight / Cancel bar too (it lives on the Keep state):
+    // without this the bar stayed up after Cancel, and with no words chosen
+    // it moved to the top of the page.
     _picking = false;
     _pickL0 = _pickL1 = -1;
+    if (_menu == rmenu::Page::Keep) _menu = rmenu::Page::None;
     host().beep(2);
-    paint();
+    host().refresh(false);
   }
 
   void keepMark(const char* label) {
@@ -3186,6 +3195,86 @@ class EpubTool : public ToolApp {
     paint();
   }
 
+  // --- v2 highlight: the chosen words shown inverted on the page, and the
+  // action bar in whichever half of the glass they are not in. ---------------
+  TRect keepBar() {
+    ToolsCanvas& c = host().canvas();
+    const int H = c.height(), W = c.width();
+    int midY = H;
+    if (_pickL0 >= 0 && _pickL1 >= 0 && _pickL1 < _lineN)
+      midY = (_lines[_pickL0].y + _lines[_pickL1].y) / 2;
+    const bool selTop = midY < H / 2;
+    return TRect{24, selTop ? H - 240 : 120, W - 48, 96};
+  }
+
+  // Byte range of word w in line.
+  static bool wordBytes(const char* line, int w, int& b0, int& b1) {
+    int i = 0, word = 0;
+    while (line[i]) {
+      int j = i;
+      while (line[j] && line[j] != ' ') j++;
+      if (word == w) {
+        b0 = i;
+        b1 = j;
+        return true;
+      }
+      while (line[j] == ' ') j++;
+      i = j;
+      word++;
+    }
+    return false;
+  }
+
+  void drawSelection(ToolsCanvas& c) {
+    if (_pickL0 < 0 || _pickL1 < 0) return;
+    FaceScope fs(host(), _face);
+    ContentFace cf(host());
+    const TSize ts = bodyTS();
+    const int step = lineStepNow();
+    for (int l = _pickL0; l <= _pickL1 && l < _lineN; l++) {
+      const char* line = _lines[l].t;
+      int nWords = 0;
+      for (int b0, b1; wordBytes(line, nWords, b0, b1);) nWords++;
+      if (nWords == 0) continue;
+      const int wa = l == _pickL0 ? _pickW0 : 0;
+      const int wb = l == _pickL1 ? _pickW1 : nWords - 1;
+      int a0, a1, z0, z1;
+      if (!wordBytes(line, wa, a0, a1) || !wordBytes(line, wb, z0, z1)) continue;
+      int x0, xa, x1, xz;
+      wordSpan(line, wa, x0, xa);
+      wordSpan(line, wb, xz, x1);
+      c.fillRect(x0 - 3, _lines[l].y - 2, x1 - x0 + 6, step - 2, true);
+      char seg[201];
+      const int n = z1 - a0 < 200 ? z1 - a0 : 200;
+      memcpy(seg, line + a0, (size_t)n);
+      seg[n] = 0;
+      c.text(x0, _lines[l].y, seg, ts, false);
+    }
+  }
+
+  void renderKeep(ToolsCanvas& c) {
+    renderPage(c);
+    drawSelection(c);
+    const TRect b = keepBar();
+    c.fillRect(b.x + 6, b.y + 6, b.w, b.h, true);  // a solid edge, like More
+    c.fillRect(b.x, b.y, b.w, b.h, false);
+    c.drawRect(b.x, b.y, b.w, b.h, 3, true);
+    c.fillRect(b.x, b.y, b.w / 2, b.h, true);
+    c.textInBox(b.x, b.y, b.w / 2, b.h, "Highlight", TS_LARGE, false, true);
+    c.textInBox(b.x + b.w / 2, b.y, b.w / 2, b.h, "Cancel", TS_LARGE, true);
+    // What the picker said, on the label at the top.
+    drawPickLabel(c, "HIGHLIGHT THESE WORDS?", "or tap another word to start again");
+  }
+
+  // The picker's label, in the footer band at the foot of the page -- the
+  // top would cover the first line, whose words have to stay pickable.
+  void drawPickLabel(ToolsCanvas& c, const char* what, const char* sub) {
+    const int fy = c.height() - epubui::FOOT_H;
+    c.fillRect(0, fy, c.width(), epubui::FOOT_H, true);
+    c.textTrackedCentered(c.width() / 2, fy + 6, what, TS_SMALL, false, true, 1);
+    if (sub) c.textCentered(c.width() / 2, fy + 30, sub, TS_SMALL, false);
+  }
+
   void renderPick(ToolsCanvas& c) {
     FaceScope fs(host(), _face);
     renderPage(c);
@@ -3200,10 +3289,9 @@ class EpubTool : public ToolApp {
     const int fy = c.height() - epubui::FOOT_H;
     c.fillRect(0, fy, c.width(), epubui::FOOT_H, false);
     c.fillRect(0, fy, c.width(), 2, true);
-    c.textCentered(c.width() / 2, 752,
-                   _pickL0 < 0 ? "tap the first word to keep" : "now tap the last word", TS_MED,
-                   true);
-    c.textCentered(c.width() / 2, 778, "tap this bar to stop", TS_SMALL, true);
+    drawPickLabel(c, _pickL0 < 0 ? "HIGHLIGHT  1 / 2  TAP THE FIRST WORD"
+                                 : "HIGHLIGHT  2 / 2  TAP THE LAST WORD",
+                  "tap this bar to stop");
   }
 
   void renderMenu(ToolsCanvas& c) {
@@ -3228,11 +3316,11 @@ class EpubTool : public ToolApp {
         snprintf(_rootSub[0], sizeof(_rootSub[0]), "chapter %d of %d", _spine + 1,
                  _book.spineCount());
       items[0].sub = _rootSub[0];
-      items[1].label = "Bookmarks";
+      items[1].label = "Highlights";
       if (_nmarks > 0)
-        snprintf(_rootSub[1], sizeof(_rootSub[1]), "%d kept  -  + keeps a phrase", _nmarks);
+        snprintf(_rootSub[1], sizeof(_rootSub[1]), "%d kept  -  + highlights a phrase", _nmarks);
       else
-        snprintf(_rootSub[1], sizeof(_rootSub[1]), "none yet  -  + keeps a phrase");
+        snprintf(_rootSub[1], sizeof(_rootSub[1]), "none yet  -  + highlights a phrase");
       items[1].sub = _rootSub[1];
       items[1].plus = true;
       items[2].label = "Text";
@@ -3412,10 +3500,10 @@ class EpubTool : public ToolApp {
     }
 
     const bool contents = _menu == rmenu::Page::Contents;
-    host().topBar(contents ? "Contents" : "Bookmarks", false, "OPTIONS");
+    host().topBar(contents ? "CONTENTS" : "HIGHLIGHTS", false, "OPTIONS");
     const int total = contents ? tocCount() : _nmarks;
     if (total <= 0) {
-      rmenu::drawEmpty(c, "no bookmarks yet", "KEEP THIS PLACE puts one here");
+      rmenu::drawEmpty(c, "no highlights yet", "More > Highlight, then two words");
       return;
     }
     for (int k = 0; k < shelf::PER_PAGE; k++) {
@@ -3573,11 +3661,28 @@ class EpubTool : public ToolApp {
     }
 
     if (_menu == rmenu::Page::Keep) {
-      if (y >= 560 && y < 656) {
-        if (x < host().canvas().width() / 2)
+      const TRect bar = keepBar();
+      if (bar.hit(x, y)) {
+        if (x < bar.x + bar.w / 2)
           keepMark(_phrase);
         else
           pickCancel();
+        return;
+      }
+      // v2: a third tap on the words starts a new selection there.
+      const int step = lineStepNow();
+      for (int i = 0; i < _lineN; i++) {
+        if (y < _lines[i].y - 6 || y >= _lines[i].y + step) continue;
+        const int word = wordAt(_lines[i].t, x);
+        if (word < 0) return;
+        _menu = rmenu::Page::None;
+        _picking = true;
+        _pickL0 = i;
+        _pickW0 = word;
+        _pickL1 = -1;
+        host().beep(0);
+        host().refresh(false);
+        return;
       }
       return;
     }
@@ -3780,6 +3885,7 @@ class EpubTool : public ToolApp {
         a = b;
       }
     }
+    drawHighlights(c);
     drawPageMarks(c);
     if (_rotFollow) drawLockPlate(c);
     if (_guide) {
@@ -3812,6 +3918,63 @@ class EpubTool : public ToolApp {
     while (take > 0 && ((uint8_t)first[take] & 0xC0) == 0x80) take--;
     memcpy(_chapName, first, (size_t)take);
     _chapName[take] = 0;
+  }
+
+  // Kept highlights, underlined where their words are on this page (v2).
+  // Found by their text, the way the label was made: the page's lines joined
+  // by single spaces, so a phrase that ran across a line break still matches.
+  void drawHighlights(ToolsCanvas& c) {
+    if (_nmarks <= 0 || _lineN <= 0 || _picking) return;
+    bool any = false;
+    for (int k = 0; k < _nmarks; k++) any |= _marks[k].label[0] && _marks[k].spine == (uint16_t)_spine;
+    if (!any) return;
+    const size_t cap = (size_t)_lineN * 201 + 1;
+    char* joined = (char*)malloc(cap);
+    int* starts = (int*)malloc(sizeof(int) * (size_t)_lineN);
+    if (!joined || !starts) {
+      free(joined);
+      free(starts);
+      return;
+    }
+    int n = 0;
+    for (int l = 0; l < _lineN; l++) {
+      if (l) joined[n++] = ' ';
+      starts[l] = n;
+      const int len = (int)strlen(_lines[l].t);
+      memcpy(joined + n, _lines[l].t, (size_t)len);
+      n += len;
+    }
+    joined[n] = 0;
+    ContentFace cf(host());
+    const TSize ts = bodyTS();
+    const int mx = epubui::marginPx(_margin);
+    for (int k = 0; k < _nmarks; k++) {
+      const marks::Mark& m = _marks[k];
+      if (!m.label[0] || m.spine != (uint16_t)_spine) continue;
+      char want[marks::LABEL];
+      snprintf(want, sizeof(want), "%s", m.label);
+      size_t wl = strlen(want);
+      if (wl >= 3 && strcmp(want + wl - 3, "...") == 0) want[wl -= 3] = 0;
+      if (wl < 3) continue;
+      const char* hit = strstr(joined, want);
+      if (!hit) continue;
+      const int a = (int)(hit - joined), z = a + (int)wl;
+      for (int l = 0; l < _lineN; l++) {
+        const int ls = starts[l], le = ls + (int)strlen(_lines[l].t);
+        if (z <= ls || a >= le) continue;
+        const int ca = (a > ls ? a : ls) - ls, cz = (z < le ? z : le) - ls;
+        char pre[201];
+        memcpy(pre, _lines[l].t, (size_t)ca);
+        pre[ca] = 0;
+        const int x0 = mx + c.textWidth(pre, ts);
+        memcpy(pre, _lines[l].t, (size_t)cz);
+        pre[cz] = 0;
+        const int x1 = mx + c.textWidth(pre, ts);
+        c.fillRect(x0, _lines[l].y + c.textHeight(ts) - 1, x1 - x0, 2, true);
+      }
+    }
+    free(joined);
+    free(starts);
   }
 
   // The page's two corner marks (v2), shown only with the footer up, each on
