@@ -436,6 +436,21 @@ void handleSideButtons() {
     return;
   }
 
+  // Both held together for two seconds: one event, once per hold (Focus ends
+  // early on it). The single presses that began it still went through above.
+  static uint32_t bothSince = 0;
+  static bool bothFired = false;
+  if (upNow && downNow) {
+    if (!bothSince) bothSince = millis() | 1;
+    if (!bothFired && millis() - bothSince >= 2000) {
+      bothFired = true;
+      noteActivity();
+      toybox.onBothHeld();
+    }
+  } else {
+    bothSince = 0;
+    if (!upNow && !downNow) bothFired = false;
+  }
   const bool pressed = (upNow && !upWas) || (downNow && !downWas);
   upWas = upNow;
   downWas = downNow;
@@ -833,6 +848,9 @@ void loop() {
     g_bannerUp = false;
     buzzer::tap();
     stickyHost.refresh(true);
+  } else if (ev.held) {
+    noteActivity();
+    toybox.onHold(ev.x, ev.y);
   } else if (ev.tapped)
     toybox.onTap(ev.x, ev.y);
   else if (ev.swiped)

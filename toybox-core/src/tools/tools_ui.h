@@ -289,7 +289,7 @@ class ToolsHost {
   // Push what is in the framebuffer as it stands, without re-rendering the
   // screen underneath -- for a banner laid over the last frame.
   virtual void showAsIs() {}
-  virtual void beep(uint8_t kind) = 0;  // 0 tap, 1 confirm, 2 reject, 3 alarm
+  virtual void beep(uint8_t kind) = 0;  // 0 tap, 1 confirm, 2 reject, 3 alarm, 4 focus chime, 5 slow focus chime
   // Timing, for finding out where a page turn's time goes before guessing.
   // A monotonic millisecond clock and one line to the serial console; the
   // defaults do nothing, so a host without a console pays nothing.
@@ -751,6 +751,10 @@ class ToolApp {
   virtual void render(ToolsCanvas& c) = 0;
   virtual void onTap(int x, int y) = 0;
   virtual void onSwipe(int dx, int dy) { (void)dx; (void)dy; }
+  // A finger held still for about 1.5 s (v2): the focus timer's way out.
+  virtual void onHold(int x, int y) { (void)x; (void)y; }
+  // Both side buttons held together for two seconds.
+  virtual void onBothHeld() {}
   virtual void tick() {}                       // ~50 Hz, for running timers
   virtual bool wantsTick() const { return false; }
   // True when the app only needs its ticks to keep time -- nothing on a

@@ -15,7 +15,7 @@
 namespace appvis {
 
 constexpr int GAMES = 4;   // wordle, nonogram, 2048, xo
-constexpr int TOOLS = 12;  // the tool shell's own apps, in ticons order
+constexpr int TOOLS = 14;  // the tool shell's own apps, in ticons order
 constexpr int COUNT = GAMES + TOOLS;
 constexpr uint32_t ALL = (1u << COUNT) - 1;
 
@@ -52,11 +52,20 @@ inline void toggle(bool game, int idx) { g_mask ^= 1u << bitOf(game, idx); }
 // opinion about them, and "the new app is hidden" is the wrong default for
 // something just shipped. Hiding one afterwards sticks only until the next
 // boot; that is the accepted cost of not versioning the key.
+//
+// v2 apps (CALENDAR, FOCUS) are shown the same way, once: "vis_n" records how
+// many tools the stored mask knew about, so a tool newer than the mask is
+// switched on, and hiding it afterwards sticks.
 inline void load(Preferences& p) {
-  g_mask = (p.getUInt("vis", ALL) | (1u << bitOf(false, 9)) | (1u << bitOf(false, 10)) |
-            (1u << bitOf(false, 11))) &
-           ALL;
+  uint32_t m = p.getUInt("vis", ALL) | (1u << bitOf(false, 9)) | (1u << bitOf(false, 10)) |
+               (1u << bitOf(false, 11));
+  const int known = (int)p.getUInt("vis_n", 12);
+  for (int t = known; t < TOOLS; t++) m |= 1u << bitOf(false, t);
+  g_mask = m & ALL;
 }
-inline void save(Preferences& p) { p.putUInt("vis", g_mask); }
+inline void save(Preferences& p) {
+  p.putUInt("vis", g_mask);
+  p.putUInt("vis_n", TOOLS);
+}
 
 }  // namespace appvis

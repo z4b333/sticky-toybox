@@ -26,7 +26,14 @@ inline constexpr int HINT_RESUME_Y = 282;
 inline constexpr int MORE_X = SCREEN_W - 34;
 inline constexpr int MORE_Y = 34;
 inline constexpr int MORE_R = 22;
-inline constexpr int HINT_R = 13;  // 26 px across: the smallest size at which
+inline constexpr int HINT_R = 13;
+// v2: the due popup's two buttons, under its words.
+inline constexpr int DUE_CY = SCREEN_H / 2 - 40;
+inline constexpr int DUE_BTN_H = 60;
+inline TRect dueLater(int bottom) { return TRect{28, bottom - 28 - DUE_BTN_H, (SCREEN_W - 70) / 2, DUE_BTN_H}; }
+inline TRect dueDone(int bottom) {
+  return TRect{42 + (SCREEN_W - 70) / 2, bottom - 28 - DUE_BTN_H, (SCREEN_W - 70) / 2, DUE_BTN_H};
+}  // 26 px across: the smallest size at which
                                    // the gear keeps its hole
 
 // Drawer pages (v2): the shared top bar with the drawer's name, then a grid
@@ -73,7 +80,8 @@ class HubScreen {
  public:
   struct Tap {
     enum Kind : uint8_t {
-      None, App, Folder, Home, Settings, Exit, Recent, PagePrev, PageNext
+      None, App, Folder, Home, Settings, Exit, Recent, PagePrev, PageNext,
+      DueLater, DueDone, DueSwallow  // v2: the calendar's due popup over home
     } kind = None;
     // Settings is also the answer for the drawers' "+ add" cell, which exists
     // to bring hidden apps back.
@@ -104,4 +112,17 @@ class HubScreen {
   // The recently-read entries, cached at render time so the const hit() can
   // agree with what was drawn without touching NVS.
   int8_t _recN = 0;
+  // v2: the calendar item popping up over home, found at render so the const
+  // hit() agrees with what is on the glass. -1 = none.
+  int8_t _dueItem = -1;
+  uint32_t _dueOcc = 0;
+  int _dueBottom = 0;
+  void drawDue(ToolsHost& host, ToolsCanvas& c);
+
+ public:
+  int dueItem() const { return _dueItem; }
+  uint32_t dueOccurrence() const { return _dueOcc; }
+  int hostDueBottom() const { return _dueBottom; }
+
+ private:
 };

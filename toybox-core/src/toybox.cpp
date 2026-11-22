@@ -18,6 +18,8 @@
 #include "tools/tool_timer.h"
 #include "wordle.h"
 #include "xo.h"
+#include "tools/tool_calendar.h"
+#include "tools/tool_focus.h"
 
 Toybox toybox;
 
@@ -47,6 +49,8 @@ bool Toybox::build(bool game, int idx) {
       case 8: _active = new SudokuTool(); break;
       case 9: return false;  // the manga reader, removed in v2
       case 11: _active = new RecipeTool(); break;
+      case 12: _active = new CalendarTool(); break;
+      case 13: _active = new FocusTool(); break;
       default: _active = new EpubTool(); break;
     }
   }
@@ -256,6 +260,23 @@ void Toybox::onTap(int x, int y) {
 
   const HubScreen::Tap t = _hub.hit(*_host, x, y);
   if (t.kind == HubScreen::Tap::None) return;
+  if (t.kind == HubScreen::Tap::DueSwallow) return;
+  if (t.kind == HubScreen::Tap::DueLater || t.kind == HubScreen::Tap::DueDone) {
+    const int i = _hub.dueItem();
+    if (t.kind == HubScreen::Tap::DueLater) {
+      cal::snoozed() |= 1ull << i;  // until the device is next switched on
+    } else {
+      static cal::Store store;
+      cal::load(store);
+      if (i >= 0 && i < store.n) {
+        store.items[i].doneDay = _hub.dueOccurrence();
+        cal::save(store);
+      }
+    }
+    _host->beep(1);
+    _host->refresh(wallimg::have());
+    return;
+  }
   _host->beep(1);
   switch (t.kind) {
     case HubScreen::Tap::Exit:
@@ -301,6 +322,14 @@ void Toybox::onTap(int x, int y) {
       open(t.game, t.idx);
       return;
   }
+}
+
+void Toybox::onHold(int x, int y) {
+  if (_where == Where::App && _active) _active->onHold(x, y);
+}
+
+void Toybox::onBothHeld() {
+  if (_where == Where::App && _active) _active->onBothHeld();
 }
 
 bool Toybox::onButton(SideBtn b) {

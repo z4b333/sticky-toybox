@@ -299,14 +299,14 @@ inline void drawEmpty(ToolsCanvas& c, const char* what, const char* how) {
 // A card over the page with six tiles in two rows. Shared geometry, so the
 // draw and the hit test cannot disagree.
 // Centred on whatever the canvas is -- the card turns with a landscape page.
-inline constexpr int MORE_W = 432, MORE_H = 420;
+inline constexpr int MORE_W = 432, MORE_H = 440;  // title on two lines (owner, 22 Nov)
 inline constexpr int MORE_TILE_H = 124, MORE_TILE_GAP = 10;
 inline constexpr int MORE_TILE_W = (MORE_W - 32 - 2 * MORE_TILE_GAP) / 3;
 inline TRect moreCard(int w, int h) { return {(w - MORE_W) / 2, (h - MORE_H) / 2, MORE_W, MORE_H}; }
 inline TRect moreTile(int i, int w, int h) {
   const TRect k = moreCard(w, h);
   return {k.x + 16 + (i % 3) * (MORE_TILE_W + MORE_TILE_GAP),
-          k.y + 74 + (i / 3) * (MORE_TILE_H + MORE_TILE_GAP), MORE_TILE_W, MORE_TILE_H};
+          k.y + 94 + (i / 3) * (MORE_TILE_H + MORE_TILE_GAP), MORE_TILE_W, MORE_TILE_H};
 }
 inline int hitMoreTile(int x, int y, int w, int h) {
   for (int i = 0; i < 6; i++)

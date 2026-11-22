@@ -24,6 +24,8 @@ class Toybox {
   // A side button press, offered to the open app. False means nothing wanted
   // it, and the caller can do whatever it would have done otherwise.
   bool onButton(SideBtn b);
+  void onHold(int x, int y);
+  void onBothHeld();
   void tick();
   bool wantsTick() const;
   // A running app that only keeps time: the host may light-sleep between ticks.

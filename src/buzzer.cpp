@@ -52,6 +52,34 @@ void win() {
   tone_ms(2093, 160);
 }
 
+// Focus time is up. Not the timer's jingle: the end of a stretch of quiet work
+// should arrive gently -- a falling then rising bell figure, a breath, again.
+void chime() {
+  if (dutyFor(g_level) == 0) return;
+  for (int r = 0; r < 2; r++) {
+    tone_ms(1568, 160);  // G6
+    delay(60);
+    tone_ms(1175, 160);  // D6
+    delay(60);
+    tone_ms(1568, 420);  // G6, held
+    if (r == 0) delay(700);
+  }
+}
+
+// Slow: the same figure an octave lower, each note held longer, with more
+// air between -- for ending quietly.
+void chimeSlow() {
+  if (dutyFor(g_level) == 0) return;
+  for (int r = 0; r < 2; r++) {
+    tone_ms(784, 380);  // G5
+    delay(220);
+    tone_ms(587, 380);  // D5
+    delay(220);
+    tone_ms(784, 900);  // G5, held
+    if (r == 0) delay(1400);
+  }
+}
+
 // The two boot sounds. A flash is done blind -- the panel is dark for several
 // seconds while the browser writes, and the first thing anyone does is stare at
 // it wondering whether the write took. These play the moment the welcome card

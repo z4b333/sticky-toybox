@@ -26,7 +26,8 @@ constexpr int LIST_TOP = 92;
 // Group 0 fills the left column and everything after it stacks down the right.
 // Three groups is what there is; a fourth would go on the right too and want
 // the row height trimmed.
-int columnOf(int g) { return g == 0 ? 0 : 1; }
+// v2: PLAY and STUDY on the left, UTILITY (eight apps now) on the right.
+int columnOf(int g) { return g == 1 ? 1 : 0; }
 
 //   f(item, group, headTop, rowTop, col)
 template <typename F>

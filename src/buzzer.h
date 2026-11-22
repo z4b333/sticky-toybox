@@ -28,6 +28,8 @@ void tap();      // subtle key click
 void confirm();  // action accepted
 void error();    // invalid action
 void win();      // little jingle
+void chime();     // focus over, Fast: a soft bell figure, twice
+void chimeSlow(); // focus over, Slow: lower and unhurried
 
 // Boot, once per flash: the first ever start of a device, and every start on a
 // firmware it has not run before. See buzzer.cpp for why they differ.

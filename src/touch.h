@@ -9,6 +9,7 @@
 struct TouchEvent {
   bool tapped = false;    // finger lifted without moving beyond slop
   bool swiped = false;    // finger lifted after moving beyond swipe threshold
+  bool held = false;      // finger still down, unmoved, for HOLD_MS (v2: hold to stop)
   int x = 0, y = 0;       // tap position (panel coords, 800x480 landscape)
   int dx = 0, dy = 0;     // swipe delta (up/down/left/right from sign & magnitude)
 };
@@ -46,9 +47,12 @@ class Touch {
   bool _swap = true, _tfx = true, _tfy = true;
   bool _pfx = false, _pfy = false;
   bool _down = false;
+  bool _holdFired = false;
+  uint32_t _downMs = 0;
   int _downX = 0, _downY = 0;
   int _lastX = 0, _lastY = 0;
   static constexpr int TAP_SLOP = 14;
+  static constexpr uint32_t HOLD_MS = 1500;
   static constexpr int SWIPE_MIN = 40;
 };
 

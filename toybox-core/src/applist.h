@@ -29,7 +29,10 @@ inline constexpr Group GROUPS[] = {
     // consult and put down -- and recipes, whose "what should we cook" is
     // answered the same way. (STUDY's drawer is full: a fifth tile there
     // would push the recently-read covers off the panel.)
-    {"UTILITY", {{false, 0}, {false, 1}, {false, 3}, {false, 4}, {false, 2}, {false, 11}}, 6},
+    {"UTILITY",
+     {{false, 0}, {false, 1}, {false, 3}, {false, 4}, {false, 2}, {false, 11}, {false, 12},
+      {false, 13}},
+     8},
     // The reader first: the drawer was drawn around "the thing you were
     // reading on top". (Index 9 was the .tbk manga reader, removed in v2;
     // the number is not reused.) Few apps on top keeps the bottom of the

@@ -6,14 +6,16 @@
 
 namespace ticons {
 
-inline constexpr int COUNT = 12;
+inline constexpr int COUNT = 14;
 inline const char* const NAMES[COUNT] = {"COIN",  "DICE",   "TIMER", "RANDOM",
                                          "PICKER", "FLASHCARDS", "NOTES",  "SHIPS",
-                                         "SUDOKU", "BOOKS", "EPUB", "RECIPES"};
+                                         "SUDOKU", "BOOKS", "EPUB", "RECIPES",
+                                         "CALENDAR", "FOCUS"};
 // Kept short: a hub tile is 140 px, which is about twelve characters.
 inline const char* const DESCS[COUNT] = {"heads/tails", "D4 - D20",   "countdown", "number/card",
                                          "from a list", "flashcards", "from phone", "battleship",
-                                         "9x9 numbers", "from the card", "ebooks", "what to cook"};
+                                         "9x9 numbers", "from the card", "ebooks", "what to cook",
+                                         "the month", "no countdown"};
 
 inline void coin(ToolsCanvas& c, int cx, int cy, int s) {
   c.drawCircle(cx, cy, s / 2, 3, true);
@@ -143,8 +145,29 @@ inline void recipes(ToolsCanvas& c, int cx, int cy, int s) {
   }
 }
 
+// v2: a page of a wall calendar -- two rings, a header band, a grid of days.
+inline void calendar(ToolsCanvas& c, int cx, int cy, int s) {
+  const int w = s * 4 / 5, h = s * 4 / 5, x = cx - w / 2, y = cy - h / 2 + 4;
+  c.drawRect(x, y, w, h, 3, true);
+  c.fillRect(x, y, w, h / 4, true);
+  c.fillRect(x + w / 4 - 2, y - 8, 5, 14, true);
+  c.fillRect(x + 3 * w / 4 - 2, y - 8, 5, 14, true);
+  for (int r = 0; r < 3; r++)
+    for (int k = 0; k < 4; k++)
+      c.fillRect(x + 8 + k * (w - 16) / 4 + 2, y + h / 4 + 8 + r * (h * 3 / 4 - 12) / 3, 6, 5, true);
+}
+
+// v2: a circle with a dot in it -- attention on one point.
+inline void focus(ToolsCanvas& c, int cx, int cy, int s) {
+  c.drawCircle(cx, cy, s / 2 - 2, 3, true);
+  c.drawCircle(cx, cy, s / 4, 2, true);
+  c.fillCircle(cx, cy, s / 10, true);
+}
+
 inline void draw(ToolsCanvas& c, int idx, int cx, int cy, int s) {
   switch (idx) {
+    case 12: calendar(c, cx, cy, s); break;
+    case 13: focus(c, cx, cy, s); break;
     case 0: coin(c, cx, cy, s); break;
     case 1: dice(c, cx, cy, s); break;
     case 2: timer(c, cx, cy, s); break;

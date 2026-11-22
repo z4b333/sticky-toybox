@@ -20,6 +20,8 @@
 #include "welcome.h"
 #include "sticky_host.h"
 #include "toybox.h"
+#include "tools/tool_calendar.h"
+#include "tools/tool_focus.h"
 #include "settings.h"
 
 // The harness's stand-in for the firmware's ota::Device (src/ota.cpp): scripted
@@ -337,6 +339,8 @@ void tap() {}
 void confirm() { g_confirms++; }
 void error() {}
 void win() {}
+void chime() {}
+void chimeSlow() {}
 }  // namespace buzzer
 
 Touch touch;
@@ -370,10 +374,12 @@ static void hostLockInfo(lock::Info& i) {
 // the centred block -- so the two can disagree loudly rather than quietly.
 static void checkHubRouting(const char* label) {
   struct Want { bool game; int idx; };
-  struct Grp { Want items[6]; int n; };
+  struct Grp { Want items[8]; int n; };
   const Grp ALL[3] = {
       {{{true, 0}, {true, 1}, {true, 2}, {true, 3}, {false, 7}, {false, 8}}, 6},
-      {{{false, 0}, {false, 1}, {false, 3}, {false, 4}, {false, 2}, {false, 11}}, 6},
+      {{{false, 0}, {false, 1}, {false, 3}, {false, 4}, {false, 2}, {false, 11}, {false, 12},
+        {false, 13}},
+       8},
       {{{false, 10}, {false, 5}, {false, 6}}, 3},  // 9 was the manga reader (removed in v2)
   };
   // The Study drawer wears the recently-read strip once any book has been
@@ -1975,16 +1981,17 @@ int main() {
 
   // Hide four apps through the screen itself, so the hub below reflows around
   // exactly what a finger would have hidden. STUDY's heading sits at
-  // 92 + 26 + 6*52 + 14 = 444 with UTILITY's six rows above it.
+  // 92 + 26 + 8*52 + 14 = 548 with UTILITY's eight rows above it (v2 added
+  // CALENDAR and FOCUS).
   g_dumpEnabled = false;
-  for (auto rc : {setRow(0, 92, 0), setRow(0, 92, 2), setRow(1, 92, 1), setRow(1, 444, 2)})
+  for (auto rc : {setRow(0, 92, 0), setRow(0, 92, 2), setRow(1, 92, 1), setRow(0, 444, 2)})
     toybox.onTap(rc.first, rc.second);
   toybox.onTap(BACK_W / 2, TOPBAR_H / 2);  // back up to the buttons page
   // v2: Sound is a switch, Volume is Low / Mid / High. Off, on (at Mid), a
   // level by its segment, and the screen below drawn muted.
   const int levels = stickyHost.soundLevels();
   tapRect(setui::tabRect(setui::TAB_DEVICE));
-  if (appvis::shown() != 12) {
+  if (appvis::shown() != appvis::COUNT - 4) {
     printf("SETTINGS FAIL: taps did not land (%d shown)\n", appvis::shown());
     abort();
   }
@@ -2058,6 +2065,298 @@ int main() {
     printf("setup steps ok (%d steps, sleep and beep write, back and boot ends)\n",
            setui::SETUP_STEPS);
     g_dumpEnabled = wasDump;
+  }
+
+  // --- v2 calendar: two items typed on the keyboard, the due popup over home
+  // (now, and three days ahead), Done and Remind later. -------------------------
+  {
+    const bool wasDump = g_dumpEnabled;
+    tfs::remove(cal::PATH);
+    auto typeText = [](CalendarTool* ct, const char* text, osk::State& st) {
+      (void)ct;
+      for (const char* p = text; *p; p++) {
+        bool hit = false;
+        for (int attempt = 0; attempt < 2 && !hit; attempt++) {
+          for (int row = 0; row < osk::ROWS && !hit; row++)
+            for (int col = 0;; col++) {
+              TRect r;
+              int code;
+              if (!osk::keyAt(st, row, col, r, code)) break;
+              if (code == (unsigned char)*p || (*p == ' ' && code == osk::K_SPACE)) {
+                toybox.onTap(r.x + r.w / 2, r.y + r.h / 2);
+                osk::tap(st, nullptr, 0, -1, -1);  // no-op, keeps st in step below
+                if (*p != ' ' && code >= 'A' && code <= 'Z') st.shift = false;
+                else if (*p != ' ') st.shift = false;
+                hit = true;
+                break;
+              }
+            }
+          if (!hit) {  // the letter is on the other case: shift and retry
+            TRect r;
+            int code;
+            osk::keyAt(st, 2, 0, r, code);
+            toybox.onTap(r.x + r.w / 2, r.y + r.h / 2);
+            st.shift = !st.shift;
+          }
+        }
+        if (!hit) {
+          printf("CALENDAR FAIL: no key for '%c'\n", *p);
+          abort();
+        }
+      }
+      TRect r;
+      int code;
+      osk::keyAt(st, 3, 2, r, code);  // Done
+      toybox.onTap(r.x + r.w / 2, r.y + r.h / 2);
+    };
+    g_dumpEnabled = true;
+    setScreen("tool_calendar");
+    toybox.open(false, 12);
+    CalendarTool* ct = static_cast<CalendarTool*>(toybox.hostActive());
+    // One today at 09:00 (the clock says 09:41): due now.
+    tapRect(calui::ADD);
+    setScreen("tool_calendar_type");
+    osk::State st;
+    typeText(ct, "Dentist", st);
+    setScreen("tool_calendar_add");
+    stickyHost.refresh(true);
+    tapRect(calui::timeBox());  // type 09:00
+    for (const int k : {numpad::ZERO, 8, numpad::DONE}) tapRect(calui::padKey(k));
+    if (ct->hostDraftHour() != 9 || ct->hostDraftMinute() != 0) {
+      printf("CALENDAR FAIL: keypad gave %02d:%02d, not 09:00\n", ct->hostDraftHour(),
+             ct->hostDraftMinute());
+      abort();
+    }
+    tapRect(calui::SAVE);
+    // Cancel keeps nothing.
+    {
+      const int before = ct->hostCount();
+      tapRect(calui::ADD);
+      osk::State stc;
+      typeText(ct, "Nope", stc);
+      tapRect(calui::CANCEL_BTN);
+      if (ct->hostCount() != before || ct->hostPage() != 0) {
+        printf("CALENDAR FAIL: Cancel kept an item (%d -> %d) or stayed (page %d)\n", before,
+               ct->hostCount(), ct->hostPage());
+        abort();
+      }
+    }
+    // One three days on, popping up three days ahead.
+    tapRect(calui::ADD);
+    osk::State st2;
+    typeText(ct, "Mum visits", st2);
+    for (int k = 0; k < 3; k++) tapRect(calui::aPlus(0, 1));
+    for (int k = 0; k < 3; k++) tapRect(calui::aPlus(4, 1));
+    tapRect(calui::SAVE);
+    // Edit: open Mum, type 18:30 on the keypad, save; it keeps its place.
+    {
+      tapRect(calui::itemRow(0));  // the selected day (13th) lists Mum
+      tapRect(calui::EDIT_BTN);
+      tapRect(calui::timeBox());  // the time: type it
+      g_dumpEnabled = true;
+      setScreen("tool_calendar_time");
+      for (const int k : {0, 7, 2, 10}) tapRect(calui::padKey(k));  // 1 8 3 0
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+      tapRect(calui::padKey(11));
+      tapRect(calui::SAVE);
+      g_dumpEnabled = true;
+    }
+    // An all-day item that repeats every week until a date, set on the
+    // repeat page; and a yearly one. Checked against the store's own rules.
+    {
+      tapRect(calui::ADD);
+      osk::State st3;
+      typeText(ct, "Gym", st3);
+      tapRect(calui::allDayChip());
+      tapRect(calui::repeatRow());
+      g_dumpEnabled = true;
+      setScreen("tool_calendar_repeat");
+      tapRect(calui::repOpt(2));  // every week
+      tapRect(calui::endSeg(1));  // ends on a date: typed, 2026 / 9 / 13
+      setScreen("tool_calendar_until");
+      for (const int k : {1, numpad::ZERO, 1, 5, numpad::DONE, 8, numpad::DONE, 0}) tapRect(calui::padKey(k));
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+      for (const int k : {2, numpad::DONE}) tapRect(calui::padKey(k));
+      if (ct->hostDraftUntil() != 20260913u) {
+        printf("CALENDAR FAIL: end date typed as %u\n", (unsigned)ct->hostDraftUntil());
+        abort();
+      }
+      g_dumpEnabled = true;
+      setScreen("tool_calendar_repeat2");
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+      tapRect(calui::REP_DONE);
+      g_dumpEnabled = true;
+      setScreen("tool_calendar_allday");
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+      tapRect(calui::SAVE);
+      cal::Item gym{};
+      for (int i = 0; i < ct->hostCount(); i++)
+        if (!strcmp(ct->hostTitle(i), "Gym")) gym = ct->hostItem(i);
+      if (!gym.allDay || gym.repeat != cal::REPEAT_WEEKLY || !gym.until ||
+          !cal::on(gym, 2026, 8, 20) || !cal::on(gym, 2026, 9, 10) || cal::on(gym, 2026, 9, 17)) {
+        printf("CALENDAR FAIL: Gym allDay %d repeat %d until %u\n", gym.allDay, gym.repeat,
+               (unsigned)gym.until);
+        abort();
+      }
+      cal::Item bday{};
+      bday.year = 2026;
+      bday.month = 8;
+      bday.day = 20;
+      bday.repeat = cal::REPEAT_YEARLY;
+      if (!cal::on(bday, 2031, 8, 20) || cal::on(bday, 2031, 8, 21) || cal::on(bday, 2025, 8, 20)) {
+        printf("CALENDAR FAIL: a yearly item lands on the wrong days\n");
+        abort();
+      }
+      // Remove Gym again so the counts below hold.
+      for (int i = 0; i < ct->hostCount(); i++)
+        if (!strcmp(ct->hostTitle(i), "Gym")) ct->hostRemove(i);
+      g_dumpEnabled = true;
+    }
+    // The month's name opens the picker: 2027, March; Today comes back.
+    {
+      tapRect(calui::TITLE_TAP);
+      g_dumpEnabled = true;
+      setScreen("tool_calendar_pick");
+      tapRect(calui::YEAR_TAP);  // the year: a page of twelve, 2024 - 2035
+      setScreen("tool_calendar_years");
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+      tapRect(calui::monthTile(3));  // 2027
+      tapRect(calui::monthTile(2));
+      if (ct->hostViewYear() != 2027 || ct->hostViewMonth() != 3) {
+        printf("CALENDAR FAIL: the picker went to %d-%d\n", ct->hostViewYear(), ct->hostViewMonth());
+        abort();
+      }
+      g_dumpEnabled = true;
+      setScreen("tool_calendar_away");
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+      toybox.onButton(SideBtn::Up);    // April
+      toybox.onButton(SideBtn::Down);
+      toybox.onButton(SideBtn::Down);  // February
+      if (ct->hostViewMonth() != 2) {
+        printf("CALENDAR FAIL: the side buttons landed on month %d\n", ct->hostViewMonth());
+        abort();
+      }
+      tapRect(calui::TODAY);
+      if (ct->hostViewYear() != 2026 || ct->hostViewMonth() != 8) {
+        printf("CALENDAR FAIL: Today went to %d-%d\n", ct->hostViewYear(), ct->hostViewMonth());
+        abort();
+      }
+      g_dumpEnabled = true;
+    }
+    if (ct->hostCount() != 2 || strcmp(ct->hostTitle(1), "Mum visits") != 0 ||
+        ct->hostHour(1) != 18 || ct->hostMinute(1) != 30) {
+      printf("CALENDAR FAIL: the edit gave %s at %02d:%02d\n", ct->hostTitle(1), ct->hostHour(1),
+             ct->hostMinute(1));
+      abort();
+    }
+    if (ct->hostCount() != 2 || strcmp(ct->hostTitle(0), "Dentist") != 0 ||
+        strcmp(ct->hostTitle(1), "Mum visits") != 0) {
+      printf("CALENDAR FAIL: %d items ('%s', '%s')\n", ct->hostCount(),
+             ct->hostCount() > 0 ? ct->hostTitle(0) : "", ct->hostCount() > 1 ? ct->hostTitle(1) : "");
+      abort();
+    }
+    setScreen("tool_calendar_month");
+    stickyHost.refresh(true);
+    // Home: Dentist is due; Done puts it away and Mum (in 3 days) comes up.
+    setScreen("hub_due");
+    toybox.goHub();
+    toybox.hostHub().goHome();
+    stickyHost.refresh(true);
+    if (toybox.hostHub().dueItem() != 0) {
+      printf("CALENDAR FAIL: home shows due item %d, wanted 0\n", toybox.hostHub().dueItem());
+      abort();
+    }
+    toybox.onTap(240, 120);  // anywhere else on home: swallowed
+    if (toybox.hostInApp() || toybox.hostInSettings()) {
+      printf("CALENDAR FAIL: a tap beside the popup went through it\n");
+      abort();
+    }
+    setScreen("hub_due_ahead");
+    tapRect(hubui::dueDone(toybox.hostHub().hostDueBottom()));
+    if (toybox.hostHub().dueItem() != 1) {
+      printf("CALENDAR FAIL: after Done, home shows %d, wanted 1\n", toybox.hostHub().dueItem());
+      abort();
+    }
+    g_dumpEnabled = false;
+    tapRect(hubui::dueLater(toybox.hostHub().hostDueBottom()));
+    if (toybox.hostHub().dueItem() != -1) {
+      printf("CALENDAR FAIL: Remind later left %d up\n", toybox.hostHub().dueItem());
+      abort();
+    }
+    cal::snoozed() = 0;
+    tfs::remove(cal::PATH);
+    printf("calendar ok (typed titles, keypad time, edit, due now + 3 days ahead, done, later)\n");
+
+    // --- v2 focus: no countdown, a tap on Stop does nothing, a hold does.
+    g_dumpEnabled = true;
+    setScreen("tool_focus");
+    toybox.open(false, 13);
+    FocusTool* ft = static_cast<FocusTool*>(toybox.hostActive());
+    // Type 40 on the keypad, save it as a preset: it goes first.
+    tapRect(focusui::VALUE);
+    setScreen("tool_focus_type");
+    for (const int k : {3, numpad::ZERO}) tapRect(calui::padKey(k));  // 4 0
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    tapRect(calui::padKey(numpad::DONE));
+    tapRect(focusui::SAVE_PRESET);
+    tapRect(focusui::toneSeg(1));  // Slow
+    if (ft->hostTone() != 1) {
+      printf("FOCUS FAIL: end tone did not switch to Slow\n");
+      abort();
+    }
+    if (ft->hostMin() != 40 || ft->hostPreset(0) != 40 || ft->hostPreset(1) != 15) {
+      printf("FOCUS FAIL: typed %d, presets %d %d\n", ft->hostMin(), ft->hostPreset(0), ft->hostPreset(1));
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_focus_set");
+    stickyHost.refresh(true);
+    setScreen("tool_focus_run");
+    tapRect(focusui::START);
+    g_dumpEnabled = false;
+    tapRect(focusui::STOP);
+    if (ft->hostStage() != 1) {
+      printf("FOCUS FAIL: a tap on Stop ended it (stage %d)\n", ft->hostStage());
+      abort();
+    }
+    toybox.onHold(focusui::STOP.x + 20, focusui::STOP.y + 20);
+    if (ft->hostStage() != 0) {
+      printf("FOCUS FAIL: holding Stop did not end it (stage %d)\n", ft->hostStage());
+      abort();
+    }
+    tapRect(focusui::START);
+    ft->hostSkipToSecondThird();
+    toybox.tick();  // the dots move on: a quiet repaint
+    g_dumpEnabled = true;
+    setScreen("tool_focus_run_mid");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    toybox.onBothHeld();  // both side buttons, held: stops it
+    if (ft->hostStage() != 0) {
+      printf("FOCUS FAIL: holding both side buttons did not stop it\n");
+      abort();
+    }
+    tapRect(focusui::START);
+    ft->hostSkipToEnd();
+    g_dumpEnabled = true;
+    setScreen("tool_focus_done");
+    toybox.tick();
+    g_dumpEnabled = false;
+    if (ft->hostStage() != 2) {
+      printf("FOCUS FAIL: the end did not come (stage %d)\n", ft->hostStage());
+      abort();
+    }
+    toybox.goHub();
+    printf("focus ok (tap ignored, hold stops, end beeps)\n");
+    g_dumpEnabled = wasDump;
+    toybox.openSettings();
   }
   setScreen("settings_edited");
   g_dumpEnabled = true;

@@ -33,6 +33,8 @@ void StickyHost::beep(uint8_t kind) {
     case 0: buzzer::tap(); break;
     case 1: buzzer::confirm(); break;
     case 2: buzzer::error(); break;
+    case 4: buzzer::chime(); break;
+    case 5: buzzer::chimeSlow(); break;
     default: buzzer::win(); break;
   }
 }

@@ -2744,10 +2744,10 @@ class EpubTool : public ToolApp {
       snprintf(pos, sizeof(pos), "%d%%  \xc2\xb7  %s", bat, pg);
     else
       snprintf(pos, sizeof(pos), "%s", pg);
-    const int pw = c.textWidth(pos, TS_SMALL);
-    c.textClipped(k.x + 18, k.y + 20, k.w - 36 - pw - 12, _books[_cur].title, TS_MED, true, true);
-    c.text(k.x + k.w - 18 - pw, k.y + 24, pos, TS_SMALL, true);
-    c.fillRect(k.x + 16, k.y + 58, k.w - 32, 1, true);
+    // The title gets the whole width and up to two lines (owner, 22 Nov);
+    // battery and page moved to the foot of the card.
+    titleTwoLines(c, k.x + 18, k.y + 14, k.w - 36, _books[_cur].title);
+    c.fillRect(k.x + 16, k.y + 80, k.w - 32, 1, true);
 
     const char* syncSub = !syncReady()                     ? "no Wi-Fi saved"
                           : !kosync::haveAccount(prefs()) ? "sign in"
@@ -2768,7 +2768,43 @@ class EpubTool : public ToolApp {
       c.textCentered(t.x + t.w / 2, t.y + 64, lab[i], TS_SMALL, !on, true);
       c.textCentered(t.x + t.w / 2, t.y + 90, sub[i], TS_SMALL, !on);
     }
-    c.textCentered(k.x + k.w / 2, k.y + k.h - 40, "tap outside to close", TS_SMALL, true);
+    const int fy = k.y + k.h - 40;
+    c.text(k.x + 18, fy, pos, TS_SMALL, true);
+    const char* hint = "tap outside to close";
+    c.text(k.x + k.w - 18 - c.textWidth(hint, TS_SMALL), fy, hint, TS_SMALL, true);
+  }
+
+  // A title on up to two lines: the first breaks at the last space that fits
+  // (or mid-word, by codepoint, for scripts with no spaces); the rest is
+  // clipped with dots on the second.
+  static void titleTwoLines(ToolsCanvas& c, int x, int y, int maxW, const char* s) {
+    if (!s || !*s) return;
+    if (c.textWidth(s, TS_MED, true) <= maxW) {
+      c.text(x, y + 16, s, TS_MED, true, true);  // one line, centred in the two
+      return;
+    }
+    char buf[192];
+    int n = 0, lastSpace = -1;
+    const char* p = s;
+    while (*p) {
+      const char* q = p;
+      uni::next(q);
+      const int add = (int)(q - p);
+      if (n + add >= (int)sizeof(buf)) break;
+      memcpy(buf + n, p, (size_t)add);
+      buf[n + add] = 0;
+      if (c.textWidth(buf, TS_MED, true) > maxW) break;
+      if (*p == ' ') lastSpace = n;
+      n += add;
+      p = q;
+    }
+    int cut = n;
+    if (*p && lastSpace > 0) cut = lastSpace;  // break at a word, not in one
+    buf[cut] = 0;
+    c.text(x, y, buf, TS_MED, true, true);
+    const char* rest = s + cut;
+    while (*rest == ' ') rest++;
+    c.textClipped(x, y + 32, maxW, rest, TS_MED, true, true);
   }
 
   // Small line icons for the More tiles, in a ~32 px box.

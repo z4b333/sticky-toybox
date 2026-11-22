@@ -1,4 +1,5 @@
 #include "hub.h"
+#include "tools/cal_store.h"
 
 #include "tools/book_thumbs.h"
 #include "tools/recents.h"
@@ -324,6 +325,53 @@ void HubScreen::render(ToolsHost& host, ToolsCanvas& c) {
     const int py = hubui::MORE_Y - c.textHeight(TS_MED) / 2;
     hubmarks::haloed([&](int dx, int dy, bool black) { c.text(px + dx, py + dy, pct, TS_MED, black, true); });
   }
+  drawDue(host, c);
+}
+
+// v2: a calendar item whose time has come (or is coming, for one set to pop
+// up days ahead) sits over home in a banner until it is put off or done.
+void HubScreen::drawDue(ToolsHost& host, ToolsCanvas& c) {
+  _dueItem = -1;
+  _dueBottom = 0;
+  int y = 0, mo = 0, d = 0, hh = 0, mm = 0;
+  if (!host.clockDate(y, mo, d) || !host.clockHHMM(hh, mm)) return;
+  static cal::Store store;  // static: 2.5 KB is not stack
+  cal::load(store);
+  int first = -1, count = 0, inDays = -1;
+  uint32_t occ = 0;
+  for (int i = 0; i < store.n; i++) {
+    if (cal::snoozed() & (1ull << i)) continue;
+    uint32_t k = 0;
+    const int din = cal::dueIn(store.items[i], y, mo, d, hh, mm, k);
+    if (din < 0) continue;
+    if (first < 0) {
+      first = i;
+      occ = k;
+      inDays = din;
+    }
+    count++;
+  }
+  if (first < 0) return;
+  _dueItem = (int8_t)first;
+  _dueOcc = occ;
+  const cal::Item& it = store.items[first];
+  char label[48], sub[24];
+  char at[8] = "";
+  if (!it.allDay) snprintf(at, sizeof(at), "  %02d:%02d", it.hour, it.minute);
+  if (inDays == 0)
+    snprintf(label, sizeof(label), it.allDay ? "TODAY" : "DUE%s", at);
+  else if (inDays == 1)
+    snprintf(label, sizeof(label), "TOMORROW%s", at);
+  else
+    snprintf(label, sizeof(label), "IN %d DAYS%s", inDays, at);
+  if (count > 1) snprintf(sub, sizeof(sub), "1 of %d", count);
+  host.fadeBehind();
+  const int bottom = chrome2::banner(c, hubui::DUE_CY, chrome2::BI_NONE, label, it.title,
+                                     count > 1 ? sub : nullptr, hubui::DUE_BTN_H + 16);
+  _dueBottom = bottom;
+  const TRect l = hubui::dueLater(bottom), r = hubui::dueDone(bottom);
+  c.button(l.x, l.y, l.w, l.h, "Remind later", false);
+  c.button(r.x, r.y, r.w, r.h, "Done", true);
 }
 
 HubScreen::Tap HubScreen::hit(const ToolsHost& host, int x, int y) const {
@@ -395,6 +443,13 @@ HubScreen::Tap HubScreen::hit(const ToolsHost& host, int x, int y) const {
     return t;
   }
 
+  // The due popup, when one is up, answers first and takes every other tap.
+  if (_dueItem >= 0) {
+    if (hubui::dueLater(_dueBottom).hit(x, y)) t.kind = Tap::DueLater;
+    else if (hubui::dueDone(_dueBottom).hit(x, y)) t.kind = Tap::DueDone;
+    else t.kind = Tap::DueSwallow;
+    return t;
+  }
   // Home, which only a standalone device has: the dock, and the More disc.
   if (inRect(x, y, hubui::MORE_X - 36, 0, 72, hubui::MORE_Y + 36)) {
     t.kind = Tap::Settings;
