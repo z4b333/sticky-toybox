@@ -4,32 +4,27 @@
 // only repaints every second inside the last minute; above that it steps every
 // 10 seconds (and says so). The time shown is always current — just coarser.
 #pragma once
+#include "big_digits.h"
+#include "numpad.h"
 #include "tools_draw.h"
 
 namespace timerui {
-inline constexpr TRect MODE_CD{40, 50, 190, 48};
-inline constexpr TRect MODE_SW{250, 50, 190, 48};
+inline constexpr TRect MODE_CD{20, 52, 220, 52};
+inline constexpr TRect MODE_SW{240, 52, 220, 52};
 
 // countdown
 inline constexpr int PRESET_W = 104, PRESET_H = 52, PRESET_GAP = 8;
 inline constexpr int PRESET_X0 = 20, PRESET_Y0 = 312, PRESET_Y1 = 372;
-inline constexpr int PRESET_MIN[8] = {1, 3, 5, 10, 15, 25, 30, 60};
+// The presets a first start has; the owner's own replace them (24 Nov: the
+// time is typed on a keypad, and "Save as preset" keeps it as a chip).
+inline constexpr int MAX_PRESETS = 8;
+inline constexpr int PRESET_DEF_MIN[MAX_PRESETS] = {1, 3, 5, 10, 15, 25, 30, 60};
+inline constexpr int MIN_SEC = 5, MAX_SEC = 99 * 60 + 59;
 inline constexpr TRect CD_START{40, 444, 200, 66};
 inline constexpr TRect CD_RESET{260, 444, 180, 66};
-// Minus down the left, plus down the right, one row per size. This is the
-// column the single -1 MIN / +1 MIN pair used to occupy, so the two seconds
-// rows arrive under buttons the hand already knows.
-//
-// The alternative was all six on one line, reading as a number line, which is
-// tidier on paper and leaves each button 7.3 mm wide to be pressed by a thumb.
-// Two columns keep them at 20 mm. On a panel this small that is the argument
-// that wins.
-inline constexpr int ADJ_H = 56, ADJ_STEP = 62, ADJ_Y0 = 524;
-inline constexpr int ADJ_SEC[3] = {60, 30, 5};
-inline constexpr const char* ADJ_MINUS[3] = {"-1 MIN", "-30 SEC", "-5 SEC"};
-inline constexpr const char* ADJ_PLUS[3] = {"+1 MIN", "+30 SEC", "+5 SEC"};
-inline TRect adjMinusRect(int i) { return TRect{40, ADJ_Y0 + i * ADJ_STEP, 200, ADJ_H}; }
-inline TRect adjPlusRect(int i) { return TRect{260, ADJ_Y0 + i * ADJ_STEP, 180, ADJ_H}; }
+inline constexpr TRect SAVE_BTN{20, 532, 440, 60};
+// The big time: tap it to type one.
+inline constexpr TRect TIME_TAP{20, 112, 440, 144};
 
 // stopwatch
 inline constexpr TRect SW_START{40, 300, 190, 66};
@@ -50,8 +45,11 @@ class TimerTool : public ToolApp {
   void enter(ToolsHost& h) override {
     ToolApp::enter(h);
     _stopwatch = false;
+    _typing = false;
+    _armPre = -1;
+    loadPresets();
     _setSec = prefs().getInt("t_set", 5 * 60);
-    if (_setSec < 5 || _setSec > 99 * 60) _setSec = 5 * 60;
+    if (_setSec < timerui::MIN_SEC || _setSec > timerui::MAX_SEC) _setSec = 5 * 60;
     _remainMs = (uint32_t)_setSec * 1000u;
     _running = false;
     _finished = false;
@@ -67,14 +65,16 @@ class TimerTool : public ToolApp {
 
   void render(ToolsCanvas& c) override {
     using namespace timerui;
+    if (_typing) return renderKeypad(c);
     host().topBar(title());
 
-    c.button(MODE_CD.x, MODE_CD.y, MODE_CD.w, MODE_CD.h, "COUNTDOWN", !_stopwatch);
-    c.button(MODE_SW.x, MODE_SW.y, MODE_SW.w, MODE_SW.h, "STOPWATCH", _stopwatch);
+    choice(c, MODE_CD, "Countdown", !_stopwatch);
+    choice(c, MODE_SW, "Stopwatch", _stopwatch);
 
+    // The time in the UI face's digits, bold and big (owner), the colon drawn.
     char buf[16];
     formatMs(buf, sizeof(buf), _stopwatch ? swElapsed() : remainMs());
-    tdraw::seg7Centered(c, c.width() / 2, 124, 110, buf, true);
+    bigTime(c, c.width() / 2, 122, buf);
 
     if (_stopwatch)
       renderStopwatch(c);
@@ -82,13 +82,35 @@ class TimerTool : public ToolApp {
       renderCountdown(c);
 
     if (_finished) {
-      c.fillRect(30, 140, 420, 90, true);
-      c.textInBox(30, 140, 420, 90, "TIME'S UP!", TS_HUGE, false, true);
+      c.fillRect(20, 132, 440, 110, true);
+      c.textInBox(20, 132, 440, 110, "Time is up", TS_HUGE, false, true);
     }
+  }
+
+  static void choice(ToolsCanvas& c, const TRect& r, const char* label, bool on) {
+    c.drawRect(r.x, r.y, r.w, r.h, on ? 3 : 1, true);
+    c.textInBox(r.x, r.y, r.w, r.h, label, TS_MED, true, on);
+  }
+
+  // "25:00": digits from big_digits, the colon as two squares.
+  static void bigTime(ToolsCanvas& c, int cx, int y, const char* t) {
+    char a[8] = "", b[8] = "";
+    const char* colon = strchr(t, ':');
+    if (!colon) return bigdigits::drawCentered(c, cx, y, t, true);
+    snprintf(a, sizeof(a), "%.*s", (int)(colon - t), t);
+    snprintf(b, sizeof(b), "%s", colon + 1);
+    const int wa = bigdigits::width(a), wb = bigdigits::width(b), gap = 34;
+    const int x0 = cx - (wa + gap + wb) / 2;
+    bigdigits::drawCentered(c, x0 + wa / 2, y, a, true);
+    bigdigits::drawCentered(c, x0 + wa + gap + wb / 2, y, b, true);
+    const int sq = 12, mx = x0 + wa + gap / 2 - sq / 2;
+    c.fillRect(mx, y + bigdigits::H * 3 / 10, sq, sq, true);
+    c.fillRect(mx, y + bigdigits::H * 7 / 10 - sq, sq, sq, true);
   }
 
   void onTap(int x, int y) override {
     using namespace timerui;
+    if (_typing) return tapKeypad(x, y);
     if (host().isBackTap(x, y)) {
       host().beep(1);
       host().goHub();
@@ -108,6 +130,23 @@ class TimerTool : public ToolApp {
     else
       tapCountdown(x, y);
   }
+
+  // Hold a preset: it offers Remove.
+  void onHold(int x, int y) override {
+    if (_typing || _stopwatch || _finished) return;
+    for (int i = 0; i < _nPre; i++)
+      if (timerui::presetRect(i).hit(x, y)) {
+        _armPre = i;
+        host().beep(0);
+        host().refresh(false);
+        return;
+      }
+  }
+
+  int hostSetSec() const { return _setSec; }
+  int hostPresets() const { return _nPre; }
+  int hostPreset(int i) const { return i >= 0 && i < _nPre ? _pre[i] : -1; }
+  bool hostTyping() const { return _typing; }
 
   void tick() override {
     if (!_running) return;
@@ -146,34 +185,68 @@ class TimerTool : public ToolApp {
     using namespace timerui;
     const uint32_t total = (uint32_t)_setSec * 1000u;
     const int permille = total ? (int)((remainMs() * 1000ULL) / total) : 0;
-    tdraw::progressBar(c, 40, 258, 400, 26, permille);
+    tdraw::progressBar(c, 20, 262, 440, 12, permille);
 
-    char buf[12];
-    for (int i = 0; i < 8; i++) {
+    char buf[40];
+    c.text(PRESET_X0, PRESET_Y0 - 30, "PRESETS", TS_MED, true);
+    if (_nPre == 0)
+      c.textInBox(PRESET_X0, PRESET_Y0, 440, PRESET_Y1 + PRESET_H - PRESET_Y0, "none yet: save one below", TS_MED,
+                  true);
+    for (int i = 0; i < _nPre; i++) {
       const TRect r = presetRect(i);
-      snprintf(buf, sizeof(buf), "%d", PRESET_MIN[i]);
-      c.button(r.x, r.y, r.w, r.h, buf, PRESET_MIN[i] * 60 == _setSec);
+      if (i == _armPre) {
+        c.button(r.x, r.y, r.w, r.h, "Remove", true, TS_MED);
+        continue;
+      }
+      presetLabel(_pre[i], buf, sizeof(buf));
+      choice(c, r, buf, _pre[i] == _setSec);
     }
-    c.text(PRESET_X0, PRESET_Y0 - 22, "MINUTES", TS_MED, true);
 
-    c.button(CD_START.x, CD_START.y, CD_START.w, CD_START.h, _running ? "PAUSE" : "START",
-             true, TS_LARGE);
-    c.button(CD_RESET.x, CD_RESET.y, CD_RESET.w, CD_RESET.h, "RESET", false);
-    for (int i = 0; i < 3; i++) {
-      const TRect m = adjMinusRect(i), p = adjPlusRect(i);
-      c.button(m.x, m.y, m.w, m.h, ADJ_MINUS[i], false);
-      c.button(p.x, p.y, p.w, p.h, ADJ_PLUS[i], false);
+    c.button(CD_START.x, CD_START.y, CD_START.w, CD_START.h, _running ? "Pause" : "Start", true, TS_LARGE);
+    c.button(CD_RESET.x, CD_RESET.y, CD_RESET.w, CD_RESET.h, "Reset", false, TS_LARGE);
+
+    // Save the time on the clock as a chip -- or say why it cannot be.
+    char t[12];
+    presetLabel(_setSec, t, sizeof(t));
+    const int have = presetIndex(_setSec);
+    if (have >= 0)
+      snprintf(buf, sizeof(buf), "%s is a preset", t);
+    else if (_nPre >= MAX_PRESETS)
+      snprintf(buf, sizeof(buf), "8 presets: hold one to remove it");
+    else
+      snprintf(buf, sizeof(buf), "Save %s as a preset", t);
+    if (have < 0 && _nPre < MAX_PRESETS) {
+      c.button(SAVE_BTN.x, SAVE_BTN.y, SAVE_BTN.w, SAVE_BTN.h, buf, false, TS_MED);
+    } else {
+      c.drawRect(SAVE_BTN.x, SAVE_BTN.y, SAVE_BTN.w, SAVE_BTN.h, 1, true);
+      c.textInBox(SAVE_BTN.x, SAVE_BTN.y, SAVE_BTN.w, SAVE_BTN.h, buf, TS_MED, true);
+    }
+    if (!_running) {
+      c.textCentered(c.width() / 2, 620, "tap the time to type one", TS_MED, true);
+      c.textCentered(c.width() / 2, 654, "hold a preset to remove it", TS_MED, true);
     }
 
     if (_running && remainMs() > 61000u)
-      c.textCentered(c.width() / 2, 726, "the display steps every 10s", TS_MED, true);
+      c.textCentered(c.width() / 2, 726, "the time steps every 10 s", TS_MED, true);
   }
 
   void tapCountdown(int x, int y) {
     using namespace timerui;
-    for (int i = 0; i < 8; i++) {
+    const int armed = _armPre;
+    _armPre = -1;
+    if (armed >= 0 && presetRect(armed).hit(x, y)) return removePreset(armed);
+    if (!_running && TIME_TAP.hit(x, y)) {
+      _typing = true;
+      _nd = 0;
+      host().beep(1);
+      host().refreshUi();
+      return;
+    }
+    if (SAVE_BTN.hit(x, y)) return savePreset();
+    for (int i = 0; i < _nPre; i++) {
       if (presetRect(i).hit(x, y)) {
-        _setSec = PRESET_MIN[i] * 60;
+        if (armed >= 0) break;  // a tap away from Remove just puts it back
+        _setSec = _pre[i];
         prefs().putInt("t_set", _setSec);
         _remainMs = (uint32_t)_setSec * 1000u;
         _running = false;
@@ -204,45 +277,154 @@ class TimerTool : public ToolApp {
       host().refreshUi();
       return;
     }
-    for (int i = 0; i < 3; i++) {
-      if (adjMinusRect(i).hit(x, y)) return adjust(-ADJ_SEC[i]);
-      if (adjPlusRect(i).hit(x, y)) return adjust(ADJ_SEC[i]);
-    }
+    if (armed >= 0) host().refresh(false);
   }
 
-  void adjust(int deltaSec) {
-    _setSec += deltaSec;
-    // Five seconds is a sensible floor now that five-second steps exist: one
-    // second of countdown is a stopwatch with extra steps, and the tool has one
-    // of those already.
-    if (_setSec < 5) _setSec = 5;
-    if (_setSec > 99 * 60) _setSec = 99 * 60;
-    prefs().putInt("t_set", _setSec);
-    if (_running) {
-      // Adjust the live deadline instead of restarting the countdown.
-      const uint32_t left = remainMs();
-      const long adjusted = (long)left + deltaSec * 1000L;
-      _endMs = millis() + (uint32_t)(adjusted < 0 ? 0 : adjusted);
+  // --- typing the time -------------------------------------------------------
+  // Digits come in from the right, as on a microwave: 2 5 0 0 is 25:00, 9 0 is
+  // 00:90, which is a minute and a half. Five seconds to 99:59.
+  int typedSec() const {
+    int v = 0;
+    for (int i = 0; i < _nd; i++) v = v * 10 + (_dig[i] - '0');
+    return (v / 100) * 60 + v % 100;
+  }
+
+  void renderKeypad(ToolsCanvas& c) {
+    using namespace timerui;
+    host().topBar("SET THE TIME");
+    char buf[12];
+    if (_nd) {
+      int v = 0;
+      for (int i = 0; i < _nd; i++) v = v * 10 + (_dig[i] - '0');
+      snprintf(buf, sizeof(buf), "%02d:%02d", v / 100, v % 100);
     } else {
+      formatMs(buf, sizeof(buf), (uint32_t)_setSec * 1000u);
+    }
+    bigTime(c, c.width() / 2, 96, buf);
+    c.textCentered(c.width() / 2, 240, "minutes, then seconds", TS_MED, true);
+    if (_nd && (typedSec() < MIN_SEC || typedSec() > MAX_SEC))
+      c.textCentered(c.width() / 2, 270, "5 seconds to 99:59", TS_MED, true, true);
+    numpad::draw(c);
+  }
+
+  void tapKeypad(int x, int y) {
+    using namespace timerui;
+    if (host().isBackTap(x, y)) {
+      _typing = false;
+      host().beep(1);
+      host().refreshUi();
+      return;
+    }
+    const int k = numpad::hit(x, y);
+    if (k < 0) return;
+    if (k == numpad::CLEAR) {
+      _nd = 0;
+    } else if (k == numpad::DONE) {
+      if (_nd == 0) {  // nothing typed: keep the time there was
+        _typing = false;
+        host().beep(1);
+        host().refreshUi();
+        return;
+      }
+      const int sec = typedSec();
+      if (sec < MIN_SEC || sec > MAX_SEC) {
+        host().beep(2);
+        host().refresh(false);
+        return;
+      }
+      _setSec = sec;
+      prefs().putInt("t_set", _setSec);
       _remainMs = (uint32_t)_setSec * 1000u;
+      _running = false;
+      _typing = false;
+      host().beep(1);
+      host().refreshUi();
+      return;
+    } else {
+      if (_nd >= 4) {
+        host().beep(2);
+        return;
+      }
+      if (_nd == 0 && numpad::digit(k) == 0) {  // a leading zero changes nothing
+        host().beep(0);
+        return;
+      }
+      _dig[_nd++] = (char)('0' + numpad::digit(k));
     }
     host().beep(0);
+    host().refresh(false);
+  }
+
+  // --- presets ----------------------------------------------------------------
+  // NVS "t_pre": a count, then up to eight times in seconds.
+  void loadPresets() {
+    using namespace timerui;
+    uint16_t b[1 + MAX_PRESETS] = {};
+    if (prefs().getBytes("t_pre", b, sizeof(b)) >= sizeof(uint16_t) && b[0] <= MAX_PRESETS) {
+      _nPre = 0;
+      for (int i = 0; i < b[0]; i++)
+        if (b[1 + i] >= MIN_SEC && b[1 + i] <= MAX_SEC) _pre[_nPre++] = b[1 + i];
+      return;
+    }
+    _nPre = MAX_PRESETS;
+    for (int i = 0; i < MAX_PRESETS; i++) _pre[i] = PRESET_DEF_MIN[i] * 60;
+  }
+  void savePresets() {
+    uint16_t b[1 + timerui::MAX_PRESETS] = {};
+    b[0] = (uint16_t)_nPre;
+    for (int i = 0; i < _nPre; i++) b[1 + i] = (uint16_t)_pre[i];
+    prefs().putBytes("t_pre", b, sizeof(b));
+  }
+  int presetIndex(int sec) const {
+    for (int i = 0; i < _nPre; i++)
+      if (_pre[i] == sec) return i;
+    return -1;
+  }
+  // Whole minutes read "25 min"; anything else "2:30".
+  static void presetLabel(int sec, char* out, size_t n) {
+    if (sec % 60 == 0)
+      snprintf(out, n, "%d min", sec / 60);
+    else
+      snprintf(out, n, "%d:%02d", sec / 60, sec % 60);
+  }
+
+  // Kept in order, shortest first, so the chips read like a ruler.
+  void savePreset() {
+    if (presetIndex(_setSec) >= 0 || _nPre >= timerui::MAX_PRESETS) {
+      host().beep(2);
+      return;
+    }
+    int at = _nPre;
+    while (at > 0 && _pre[at - 1] > _setSec) {
+      _pre[at] = _pre[at - 1];
+      at--;
+    }
+    _pre[at] = _setSec;
+    _nPre++;
+    savePresets();
+    host().beep(1);
+    host().refresh(false);
+  }
+
+  void removePreset(int i) {
+    for (int j = i; j + 1 < _nPre; j++) _pre[j] = _pre[j + 1];
+    _nPre--;
+    savePresets();
+    host().beep(2);
     host().refresh(false);
   }
 
   // --- stopwatch ---------------------------------------------------------
   void renderStopwatch(ToolsCanvas& c) {
     using namespace timerui;
-    c.button(SW_START.x, SW_START.y, SW_START.w, SW_START.h, _running ? "STOP" : "START", true,
-             TS_LARGE);
-    c.button(SW_RESET.x, SW_RESET.y, SW_RESET.w, SW_RESET.h, "RESET", false);
-    c.button(SW_LAP.x, SW_LAP.y, SW_LAP.w, SW_LAP.h, "LAP", false);
+    c.button(SW_START.x, SW_START.y, SW_START.w, SW_START.h, _running ? "Stop" : "Start", true, TS_LARGE);
+    c.button(SW_RESET.x, SW_RESET.y, SW_RESET.w, SW_RESET.h, "Reset", false, TS_MED);
+    c.button(SW_LAP.x, SW_LAP.y, SW_LAP.w, SW_LAP.h, "Lap", false, TS_MED);
 
     // The caption belongs to the buttons it explains, not to the bottom of the
     // panel: it used to sit 250 px below the last lap with nothing in between.
     if (_running && swElapsed() > 60000u)
-      c.textCentered(c.width() / 2, SW_START.y + SW_START.h + 12, "the display steps every 10s",
-                     TS_MED, true);
+      c.textCentered(c.width() / 2, SW_START.y + SW_START.h + 12, "the time steps every 10 s", TS_MED, true);
 
     if (_lapN > 0) {
       c.drawLine(40, 412, 440, 412, 1, true);
@@ -329,4 +511,10 @@ class TimerTool : public ToolApp {
   int _lapN = 0;
   int _lastShown = -1;
   int _warned = 0;  // the last of the 3-2-1 warning beeps sounded
+
+  bool _typing = false;
+  char _dig[4] = {};
+  int _nd = 0;
+  int _pre[timerui::MAX_PRESETS] = {};
+  int _nPre = 0, _armPre = -1;
 };

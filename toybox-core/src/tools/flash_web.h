@@ -12,6 +12,8 @@
 #pragma once
 #include <Arduino.h>
 
+#include "lan_web.h"
+#include "phone_kit.h"
 #include "flash_store.h"
 
 #ifndef TOYBOX_HOST
@@ -34,7 +36,22 @@ class ImportServer {
     _running = true;
     return true;
   }
-  void stop() { _running = false; }
+  // On the home Wi-Fi instead of our own access point (lan_web.h).
+  bool startHome(Preferences& p, const char* path) {
+    if (!lanweb::join(p)) return false;
+    _running = true;
+    _home = true;
+    snprintf(_homeUrl, sizeof(_homeUrl), "http://toybox.local%s", path);
+    lanweb::ipUrl(path, _ipUrl, sizeof(_ipUrl));
+    return true;
+  }
+  bool home() const { return _home; }
+  const char* homeUrl() const { return _homeUrl; }
+  const char* ipUrl() const { return _ipUrl; }
+  void stop() {
+    if (_home) lanweb::leave();
+    _running = _home = false;
+  }
   // Preview scaffolding, in the order it happens on a real one: a phone joins
   // the access point on the first poll and posts a deck a couple of polls
   // later. The join has to be modelled, not skipped -- the screen is supposed
@@ -68,6 +85,8 @@ class ImportServer {
   bool _running = false, _received = false, _fakeClient = false;
   int _count = 0, _ticks = 0;
   char _ssid[20] = {}, _pass[12] = {}, _deck[fcard::NAME_LEN + 1] = {};
+  bool _home = false;
+  char _homeUrl[40] = {}, _ipUrl[40] = {};
 };
 
 #else
@@ -117,7 +136,35 @@ class ImportServer {
     return true;
   }
 
+  // On the home Wi-Fi instead of our own access point (lan_web.h): the same
+  // page at toybox.local{path}, no DNS server, no captive-portal probes.
+  bool startHome(Preferences& p, const char* path) {
+    if (_running) stop();
+    _received = false;
+    if (!lanweb::join(p)) return false;
+    _server.on("/", HTTP_GET, [this] { sendPage(); });
+    _server.on(path, HTTP_GET, [this] { sendPage(); });
+    _server.on("/save", HTTP_POST, [this] { handleSave(); });
+    _server.onNotFound([this] { sendPage(); });
+    _server.begin();
+    _home = true;
+    _running = true;
+    snprintf(_homeUrl, sizeof(_homeUrl), "http://toybox.local%s", path);
+    lanweb::ipUrl(path, _ipUrl, sizeof(_ipUrl));
+    return true;
+  }
+  bool home() const { return _home; }
+  const char* homeUrl() const { return _homeUrl; }
+  const char* ipUrl() const { return _ipUrl; }
+
   void stop() {
+    if (_home) {
+      _server.stop();
+      lanweb::leave();
+      _home = false;
+      _running = false;
+      return;
+    }
     if (!_running) {
       // Nothing ran, but a start() that failed after building the DNS server
       // leaves one behind; it has to go while the stack is still up.
@@ -136,6 +183,10 @@ class ImportServer {
 
   void loop() {
     if (!_running) return;
+    if (_home) {
+      _server.handleClient();
+      return;
+    }
     _dns->processNextRequest();
     _server.handleClient();
   }
@@ -153,7 +204,7 @@ class ImportServer {
   }
   // This one raises its own access point rather than borrowing portal::Portal,
   // so it asks WiFi directly. Same question either way: is a phone on it yet.
-  bool hasClient() const { return _running && WiFi.softAPgetStationNum() > 0; }
+  bool hasClient() const { return _running && !_home && WiFi.softAPgetStationNum() > 0; }
 
  private:
   void sendPage();
@@ -203,6 +254,8 @@ class ImportServer {
   int _count = 0;
   char _ssid[20] = {}, _pass[12] = {}, _deck[fcard::NAME_LEN + 1] = {};
   char _url[24] = "http://192.168.4.1";
+  bool _home = false;
+  char _homeUrl[40] = {}, _ipUrl[40] = {};
 };
 
 // Kept out of the class body so the (large) literal lands in flash cleanly.
@@ -213,127 +266,72 @@ class ImportServer {
 // though the device's network has no internet and the reference links may not
 // load until the phone falls back to mobile data.
 inline void ImportServer::sendPage() {
-  static const char kPage[] PROGMEM = R"HTML(<!DOCTYPE html><html><head>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Toybox flashcards</title><style>
-*{box-sizing:border-box}
-body{font:16px/1.5 system-ui,-apple-system,sans-serif;margin:0;padding:20px 18px 40px;
-background:#f5f5f3;color:#111;max-width:620px;margin-inline:auto}
-h1{font-size:21px;margin:0 0 2px}
-h2{font-size:15px;margin:26px 0 8px;text-transform:uppercase;letter-spacing:.06em;color:#555}
-p.sub{margin:0 0 20px;color:#666;font-size:14px}
-label{display:block;font-weight:600;margin:16px 0 6px;font-size:15px}
-input,textarea{width:100%;padding:12px;border:1px solid #ccc;border-radius:9px;font:inherit;
-background:#fff;-webkit-appearance:none}
-textarea{min-height:220px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:14px}
-button{width:100%;padding:16px;margin-top:18px;border:0;border-radius:9px;background:#111;
-color:#fff;font:600 17px system-ui;cursor:pointer}
-.hint{font-size:13px;color:#666;margin-top:6px}
-.count{font-size:14px;font-weight:600;margin-top:10px;min-height:20px}
-ol.steps{margin:0 0 4px;padding-left:22px;font-size:15px}
-ol.steps li{margin:5px 0}
-.fmt{background:#fff;border:1px solid #e2e2dd;border-radius:10px;padding:12px 14px;margin:8px 0}
-.fmt b{font-size:15px}
-.fmt .why{font-size:13px;color:#666;margin:2px 0 8px}
-.fmt pre{margin:0;padding:9px 11px;background:#f0f0ec;border-radius:7px;overflow-x:auto;
-font:13px/1.5 ui-monospace,Menlo,monospace;white-space:pre}
-.fmt pre .tab{color:#b3b3aa}
-.fmt .use{width:auto;margin:9px 0 0;padding:7px 13px;background:#fff;color:#111;
-border:1px solid #bbb;border-radius:7px;font:600 13px system-ui}
-ul.links{margin:6px 0 0;padding-left:20px;font-size:14px}
-ul.links li{margin:6px 0}
-a{color:#0a58c9}
-.note{font-size:13px;color:#666;background:#eeeeea;border-radius:8px;padding:10px 12px;margin-top:10px}
-</style></head><body>
-<h1>Send flashcards to Toybox</h1>
-<p class="sub">Nothing to install. Fill this in and tap send.</p>
+  // Kit "Phone Flashcards": the deck as a little stack with its count, then
+  // 1 name, 2 a file, 3 or type the cards; formats as small chips; one black
+  // button at the foot.
+  static const char kBody[] PROGMEM = R"HTML(
+<form method="POST" action="/save" id="f" style="display:flex;flex-direction:column;gap:16px">
+<div style="display:flex;gap:18px;align-items:center">
+<div style="position:relative;width:150px;height:110px;flex:none" aria-hidden="true">
+<div style="position:absolute;left:12px;top:0;width:134px;height:92px;background:#fff;border:2px solid #111;transform:rotate(5deg)"></div>
+<div style="position:absolute;left:6px;top:4px;width:134px;height:92px;background:#FFD84D;border:2px solid #111;transform:rotate(2deg)"></div>
+<div style="position:absolute;left:0;top:10px;width:134px;height:92px;background:#fff;border:2px solid #111;box-shadow:3px 3px 0 #111;transform:rotate(-3deg);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:6px">
+<b id="front" style="font-size:24px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">cat</b><span class="eye" style="font-size:9px">tap to flip</span></div></div>
+<div><div id="n" style="font-size:30px;font-weight:800;line-height:1">0</div><div class="eye">cards ready</div>
+<div class="hint" style="margin-top:6px">front &mdash; back,<br>one per line</div></div></div>
 
-<ol class="steps">
-<li>Name the deck.</li>
-<li>Paste your cards, or pick a file.</li>
-<li>Tap <b>Send to device</b> &mdash; it appears on the Toybox straight away.</li>
-</ol>
+<div><div class="lab"><span class="num">1</span>Deck name</div>
+<input id="name" name="name" maxlength="24" value="my deck" autocapitalize="off"></div>
 
-<form method="POST" action="/save" id="f">
-<label for="name">Deck name</label>
-<input id="name" name="name" maxlength="24" value="my deck" autocapitalize="off">
+<div><div class="lab"><span class="num">2</span>Upload a file</div>
+<label class="drop" for="file">Choose .csv &middot; .tsv &middot; .txt &middot; Anki</label>
+<input id="file" type="file" accept=".csv,.tsv,.txt,text/plain,text/csv" style="display:none">
+<div class="hint" style="margin-top:6px">Read here in your browser and put in the box below, so you can check it first.</div></div>
 
-<label for="file">Upload a file <span style="font-weight:400;color:#666">(optional)</span></label>
-<input id="file" type="file" accept=".csv,.tsv,.txt,text/plain,text/csv">
-<div class="hint">Read here in your browser and dropped into the box below, so you can check
-it before sending. .txt, .csv and .tsv all work.</div>
+<div><div class="lab"><span class="num">3</span>Or type the cards</div>
+<textarea id="data" name="data" spellcheck="false" placeholder="cat | แมว&#10;dog | หมา&#10;elephant | ช้าง"></textarea>
+<div id="warn" class="hint" style="display:none;margin-top:8px;padding:10px 12px;border:2px solid #111;background:#FFD84D;color:#111"></div>
+<div class="chips" style="margin-top:8px"><button type="button" class="chip sm use" data-t="1">a | b</button>
+<button type="button" class="chip sm use" data-t="2">a, b</button><button type="button" class="chip sm use" data-t="0">a &#8677; b</button>
+<button type="button" class="chip sm use" data-t="3">a - b</button><span class="hint">tap for an example</span></div></div>
 
-<label for="data">Cards &mdash; one per line</label>
-<textarea id="data" name="data" spellcheck="false"
-placeholder="bonjour | hello&#10;merci | thank you&#10;au revoir | goodbye"></textarea>
-<div class="count" id="c"></div>
-<button type="submit">Send to device</button>
-</form>
-
-<h2>Formats it understands</h2>
-<div class="fmt"><b>Tab</b>
-<div class="why">What Anki exports, and what you get pasting from a spreadsheet.
-The <span class="tab">&#8677;</span> below marks a real tab character.</div>
-<pre id="e0">bonjour<span class="tab">&#8677;</span>hello
-merci<span class="tab">&#8677;</span>thank you</pre>
-<button class="use" data-t="0" type="button">Use this example</button></div>
-
-<div class="fmt"><b>Vertical bar</b>
-<div class="why">Easiest to type by hand, and never clashes with your text.</div>
-<pre id="e1">bonjour | hello
-merci | thank you</pre>
-<button class="use" data-t="1" type="button">Use this example</button></div>
-
-<div class="fmt"><b>Comma (CSV)</b>
-<div class="why">Quizlet, Excel and Google Sheets. Wrap a field in quotes if it
-contains a comma &mdash; only the first comma splits the line.</div>
-<pre id="e2">bonjour,hello
-"oui, bien sur","yes, of course"</pre>
-<button class="use" data-t="2" type="button">Use this example</button></div>
-
-<div class="fmt"><b>Spaced dash</b>
-<div class="why">Reads naturally in notes. Needs spaces around it, so hyphenated
-words stay intact.</div>
-<pre id="e3">bonjour - hello
-merci - thank you</pre>
-<button class="use" data-t="3" type="button">Use this example</button></div>
-
-<h2>Getting cards out of other apps</h2>
-<ul class="links">
-<li><b>Anki</b> &mdash; File &rsaquo; Export &rsaquo; Notes in Plain Text.
-<a href="https://docs.ankiweb.net/exporting.html" target="_blank" rel="noreferrer">How to export</a>
-&middot; <a href="https://docs.ankiweb.net/importing/text-files.html" target="_blank" rel="noreferrer">text file format</a></li>
-<li><b>Quizlet</b> &mdash; open a set &rsaquo; &hellip; &rsaquo; Export, then copy the text.
-<a href="https://help.quizlet.com/hc/en-us/articles/360034345672-Exporting-your-sets" target="_blank" rel="noreferrer">Exporting your sets</a></li>
-<li><b>Google Sheets / Excel</b> &mdash; two columns, then File &rsaquo; Download &rsaquo; CSV.
-Or just select both columns and paste them straight in (that arrives as tabs).</li>
-<li><b>Notes or a chatbot</b> &mdash; ask for "one card per line, term | meaning" and paste the reply.</li>
-</ul>
-<div class="note">Those links need mobile data: this Toybox network has no internet of its
-own. The examples above work offline.</div>
-
-<h2>Good to know</h2>
-<ul class="links">
-<li>Blank lines and lines with no separator are skipped, so headings in an export do no harm.</li>
-<li>Up to 200 cards per deck. Front up to 64 characters, back up to 96.</li>
-<li>Sending to a deck name that already exists replaces it but <b>keeps your progress</b>
-on cards whose front text has not changed.</li>
-</ul>
-
+<details><summary>Cards from other apps</summary>
+<p><b>Anki</b>: File &rsaquo; Export &rsaquo; Notes in Plain Text, then pick the file above.
+<a href="https://docs.ankiweb.net/exporting.html" target="_blank" rel="noreferrer">How to export</a></p>
+<p><b>Quizlet</b>: open a set &rsaquo; &hellip; &rsaquo; Export, then copy the text.</p>
+<p><b>Google Sheets / Excel</b>: two columns, File &rsaquo; Download &rsaquo; CSV, or select both columns and paste here.</p>
+<p><b>Notes or a chatbot</b>: ask for "one card per line, term | meaning" and paste the reply.</p></details>
+<details><summary>Good to know</summary>
+<p>Blank lines and lines with no separator are skipped, so headings in an export do no harm.</p>
+<p>Up to 300 cards a deck. Front up to 128 characters, back up to 256; a long card shows in smaller type, never cut.</p>
+<p>Sending a deck name that already exists replaces it but keeps your progress on cards whose front has not changed.</p></details>
+<div class="go"><button type="submit" id="go">Send to device &rarr;</button></div>
+</form></main>
 <script>
 var EX=[
- "bonjour\thello\nmerci\tthank you\nau revoir\tgoodbye",
- "bonjour | hello\nmerci | thank you\nau revoir | goodbye",
- "bonjour,hello\n\"oui, bien sur\",\"yes, of course\"\nau revoir,goodbye",
- "bonjour - hello\nmerci - thank you\nau revoir - goodbye"];
-var d=document.getElementById('data'),c=document.getElementById('c');
-function upd(){var n=d.value.split('\n').filter(function(l){
- return l.trim()&&/\t| \| |\||,| - /.test(l)}).length;
- c.textContent=n?n+' card'+(n==1?'':'s')+' ready to send':'';}
+ "cat\tแมว\ndog\tหมา\nelephant\tช้าง",
+ "cat | แมว\ndog | หมา\nelephant | ช้าง",
+ "cat,แมว\n\"oui, bien sur\",\"yes, of course\"\nbird,นก",
+ "cat - แมว\ndog - หมา\nbird - นก"];
+var d=document.getElementById('data');
+var MAXC=300,MAXF=128,MAXB=256;
+function cut(l){var m=l.indexOf('\t');if(m>=0)return[l.slice(0,m),l.slice(m+1)];
+ m=l.indexOf(' | ');if(m>=0)return[l.slice(0,m),l.slice(m+3)];
+ m=l.indexOf('|');if(m>=0)return[l.slice(0,m),l.slice(m+1)];
+ var q=false;for(var i=0;i<l.length;i++){if(l[i]=='"')q=!q;if(l[i]==','&&!q)return[l.slice(0,i),l.slice(i+1)];}
+ m=l.indexOf(' - ');if(m>=0)return[l.slice(0,m),l.slice(m+3)];return null;}
+function len(t){return Array.from(t.trim().replace(/^"|"$/g,'')).length;}
+function upd(){var L=d.value.split('\n').filter(function(l){return l.trim()&&/\t| \| |\||,| - /.test(l)});
+ document.getElementById('n').textContent=L.length>MAXC?MAXC+'+':L.length;
+ var long=[];L.forEach(function(l,i){var c=cut(l);if(c&&(len(c[0])>MAXF||len(c[1])>MAXB))long.push(i+1);});
+ var w=[];if(L.length>MAXC)w.push('This has '+L.length+' cards; a deck holds '+MAXC+'. Only the first '+MAXC+' are kept.');
+ if(long.length)w.push(long.length+(long.length==1?' card is':' cards are')+' too long (card '+long.slice(0,8).join(', ')+(long.length>8?', &hellip;':'')+'): a front keeps its first '+MAXF+' characters, a back its first '+MAXB+'.');
+ var W=document.getElementById('warn');W.innerHTML=w.join('<br>');W.style.display=w.length?'block':'none';
+ document.getElementById('front').textContent=L.length?L[0].split(/\t| \| |\||,| - /)[0].replace(/^"/,'').trim():'cat';
+ document.getElementById('go').disabled=!L.length;}
 d.addEventListener('input',upd);
 Array.prototype.forEach.call(document.querySelectorAll('.use'),function(b){
- b.addEventListener('click',function(){d.value=EX[+b.dataset.t];upd();
-  d.scrollIntoView({behavior:'smooth',block:'center'});});});
+ b.addEventListener('click',function(){d.value=EX[+b.dataset.t];upd();});});
 document.getElementById('file').addEventListener('change',function(e){
  var f=e.target.files[0];if(!f)return;var r=new FileReader();
  r.onload=function(){d.value=r.result;upd();
@@ -343,8 +341,11 @@ document.getElementById('file').addEventListener('change',function(e){
  r.readAsText(f);});
 document.getElementById('f').addEventListener('submit',function(e){
  if(!d.value.trim()){e.preventDefault();alert('Add some cards first.');}});
-</script></body></html>)HTML";
-  _server.send_P(200, "text/html", kPage);
+upd();
+</script>)HTML";
+  phonekit::begin(_server, "Send flashcards to Toybox", "Paste or upload a deck", "Flashcards");
+  _server.sendContent_P(kBody);
+  phonekit::end(_server);
 }
 
 #endif  // TOYBOX_HOST

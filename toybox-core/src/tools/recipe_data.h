@@ -23,13 +23,16 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
 
 namespace rcp {
 
 inline constexpr int NAME_LEN = 80;
 inline constexpr int YIELD_LEN = 40;
 inline constexpr int MAX_ING = 24, ING_LEN = 96;
-inline constexpr int MAX_STEPS = 24, STEP_LEN = 320;
+// A step is a paragraph on some sites; 320 chopped them mid-word (owner,
+// 24 Nov). The buffers this size needs live on the heap, never the stack.
+inline constexpr int MAX_STEPS = 24, STEP_LEN = 1000;
 
 struct Recipe {
   char name[NAME_LEN];
@@ -317,7 +320,14 @@ inline bool instructions(P& c, Recipe& r, int depth);
 inline bool instrObject(P& c, Recipe& r, int depth) {
   if (depth > MAX_DEPTH) return false;
   c.p++;  // '{'
-  char text[STEP_LEN] = "", name[STEP_LEN] = "";
+  // Two step-sized buffers, from the heap: the stack is 2 KB a frame.
+  struct Buf {
+    char* p = (char*)calloc(1, STEP_LEN);
+    ~Buf() { free(p); }
+  } tb, nb;
+  if (!tb.p || !nb.p) return false;
+  char* text = tb.p;
+  char* name = nb.p;
   bool hadList = false;
   ws(c);
   if (c.p < c.e && *c.p == '}') {
@@ -332,9 +342,9 @@ inline bool instrObject(P& c, Recipe& r, int depth) {
     c.p++;
     ws(c);
     if (strcmp(key, "text") == 0 && c.p < c.e && *c.p == '"') {
-      if (!str(c, text, sizeof(text))) return false;
+      if (!str(c, text, STEP_LEN)) return false;
     } else if (strcmp(key, "name") == 0 && c.p < c.e && *c.p == '"') {
-      if (!str(c, name, sizeof(name))) return false;
+      if (!str(c, name, STEP_LEN)) return false;
     } else if (strcmp(key, "itemListElement") == 0) {
       hadList = true;
       if (!instructions(c, r, depth + 1)) return false;
@@ -367,15 +377,22 @@ inline bool instructions(P& c, Recipe& r, int depth) {
     // One string. Newlines were collapsed to spaces by str(), so split on
     // sentence-ish boundaries is a guess not worth making: one block step
     // beats wrongly chopped ones. (Sites that publish steps publish arrays.)
-    char big[STEP_LEN * 2];
-    if (!str(c, big, sizeof(big))) return false;
+    struct Buf {
+      char* p = (char*)malloc(STEP_LEN * 4);
+      ~Buf() { free(p); }
+    } bb, pb;
+    if (!bb.p) return false;
+    char* big = bb.p;
+    if (!str(c, big, STEP_LEN * 4)) return false;
     if ((int)strlen(big) < STEP_LEN) {
       addStep(r, big);
     } else {
       // Too long for one step: break at the space nearest each cap.
       const char* q = big;
       while (*q && r.nSteps < MAX_STEPS) {
-        char piece[STEP_LEN];
+        if (!pb.p) pb.p = (char*)malloc(STEP_LEN);
+        if (!pb.p) break;
+        char* piece = pb.p;
         int n = (int)strlen(q);
         if (n >= STEP_LEN) {
           n = STEP_LEN - 1;

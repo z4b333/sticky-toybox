@@ -1407,6 +1407,16 @@ class EpubTool : public ToolApp {
         flushLine();
         break;
       }
+      if (tok == epubc::TOK_IMAGE && artDecor(_book.imageName())) {
+        // A scene-break ornament: the space of a paragraph, not a page.
+        if (!started) continue;
+        if (!flushLine()) {
+          _atEnd = false;
+          break;
+        }
+        y += epubui::paraPx(_para) * 2;
+        continue;
+      }
       if (tok == epubc::TOK_IMAGE) {
         if (!started) {
           // A fresh page: this one is the picture (its first part).
@@ -1649,7 +1659,7 @@ class EpubTool : public ToolApp {
         _atEnd = true;
         break;
       }
-      if (wantImage && tok == epubc::TOK_IMAGE && off >= target) {
+      if (wantImage && tok == epubc::TOK_IMAGE && off >= target && !artDecor(_book.imageName())) {
         // A landscape picture is several pages: step over whole pictures,
         // then land on the right part of this one.
         const int parts = artParts(_book.imageName());
@@ -1832,7 +1842,12 @@ class EpubTool : public ToolApp {
   // plate) when it could not be.
   int artParts(const char* name) const {
     const ArtRec* r = artFor(name);
-    return r && r->parts ? r->parts : 1;
+    return r && r->parts && r->parts != epubart::DECOR ? r->parts : 1;
+  }
+  // A small ornament: stepped over, with a paragraph's space in its place.
+  bool artDecor(const char* name) const {
+    const ArtRec* r = artFor(name);
+    return r && r->parts == epubart::DECOR;
   }
 
   // On every open: which of the book's pictures are on the card already (one
@@ -1872,15 +1887,26 @@ class EpubTool : public ToolApp {
     {
       epubart::Prepared* idx =
           (epubart::Prepared*)malloc(sizeof(epubart::Prepared) * epubart::INDEX_MAX);
-      const int ni = idx ? epubart::indexRead(host(), file, idx, epubart::INDEX_MAX) : -1;
+      bool decorChecked = false;
+      const int ni =
+          idx ? epubart::indexRead(host(), file, idx, epubart::INDEX_MAX, &decorChecked) : -1;
       for (int i = 0; i < _artN; i++) {
         for (int j = 0; j < ni; j++)
           if (idx[j].key == _art[i].key && idx[j].usize == _art[i].usize &&
-              idx[j].parts <= epubart::MAX_PARTS) {
+              idx[j].parts <= epubart::DECOR) {
             _art[i].parts = idx[j].parts;
             _art[i].known = true;
             break;
           }
+        if (_art[i].known && _art[i].parts == 1 && ni >= 0 && !decorChecked) {
+          // Prepared before ornaments were recognised: its header says
+          // whether it is one; the picture already made simply goes unused.
+          int w = 0, h = 0;
+          if (epubart::probeSize(_book, names.name[i], w, h) && epubart::isDecoration(w, h)) {
+            _art[i].parts = (uint8_t)epubart::DECOR;
+          }
+          moved = true;  // rewrite the index at the new revision
+        }
         if (_art[i].known) continue;
         const int old = epubart::adoptOld(host(), file, _art[i].key, _art[i].usize);
         if (old >= 0) {

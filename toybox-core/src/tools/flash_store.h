@@ -16,9 +16,15 @@
 
 namespace fcard {
 
-constexpr int MAX_CARDS = 200;
-constexpr int FRONT_LEN = 64;
-constexpr int BACK_LEN = 96;
+// Owner, 24 Nov: 300 cards a deck, longer faces, and a face is never cut --
+// the card shrinks its type to fit instead (tool_flash.h drawWrapped). The
+// limits count characters; the buffers hold them in UTF-8, three bytes each
+// for Thai or Chinese. 300 cards is ~350 KB, which lives in PSRAM.
+constexpr int MAX_CARDS = 300;
+constexpr int FRONT_CHARS = 128;
+constexpr int BACK_CHARS = 256;
+constexpr int FRONT_LEN = FRONT_CHARS * 3;
+constexpr int BACK_LEN = BACK_CHARS * 3;
 constexpr int NAME_LEN = 24;
 constexpr int MAX_DECKS = 12;
 constexpr uint8_t MAX_BOX = 4;  // Leitner boxes 0..4; 4 == mastered
@@ -84,6 +90,22 @@ inline void unquote(char* s) {
   *w = 0;
 }
 
+// Copies at most `n` bytes of `src`, cut on a codepoint boundary after
+// `maxChars` characters or `cap` bytes, whichever comes first.
+inline void clipCopy(char* dst, const char* src, int n, int maxChars, int cap) {
+  int at = 0, chars = 0;
+  while (at < n && src[at] && chars < maxChars) {
+    const char* q = src + at;
+    uni::next(q);
+    const int len = (int)(q - (src + at));
+    if (at + len > n || at + len > cap) break;
+    at += len;
+    chars++;
+  }
+  memcpy(dst, src, at);
+  dst[at] = 0;
+}
+
 // Split one line into front/back. Returns false for blank or unsplittable lines.
 // Separator precedence follows how ambiguous each one is: a tab or a pipe is
 // almost never part of the content, whereas a comma or a dash often is, so
@@ -116,12 +138,10 @@ inline bool splitLine(const char* line, char* front, char* back) {
   }
   if (sep == nullptr) return false;
 
-  int fn = (int)(sep - line);
-  if (fn > FRONT_LEN) fn = FRONT_LEN;
-  memcpy(front, line, fn);
-  front[fn] = 0;
-  strncpy(back, sep + sepLen, BACK_LEN);
-  back[BACK_LEN] = 0;
+  // Quotes and spaces around a field are counted before they are trimmed, so
+  // a little slack: a quoted 128-character front still arrives whole.
+  clipCopy(front, line, (int)(sep - line), FRONT_CHARS + 4, FRONT_LEN);
+  clipCopy(back, sep + sepLen, 1 << 30, BACK_CHARS + 4, BACK_LEN);
 
   trim(front);
   trim(back);
@@ -150,13 +170,18 @@ inline int parseDeck(const char* text, Card* out, int maxCards) {
   int n = 0;
   bool first = true;
   const char* p = text;
-  char line[FRONT_LEN + BACK_LEN + 8];
+  // A line longer than any card could hold keeps its start; the rest of it is
+  // skipped rather than read as the next card.
+  constexpr int LINE_CAP = FRONT_LEN + BACK_LEN + 64;
+  char* line = (char*)malloc(LINE_CAP);
+  if (!line) return 0;
   while (*p && n < maxCards) {
     int len = 0;
-    while (p[len] && p[len] != '\n' && len < (int)sizeof(line) - 1) len++;
+    while (p[len] && p[len] != '\n' && len < LINE_CAP - 1) len++;
     memcpy(line, p, len);
     line[len] = 0;
     p += len;
+    while (*p && *p != '\n') p++;
     while (*p == '\n' || *p == '\r') p++;
 
     if (splitLine(line, out[n].front, out[n].back)) {
@@ -169,6 +194,7 @@ inline int parseDeck(const char* text, Card* out, int maxCards) {
       n++;
     }
   }
+  free(line);
   return n;
 }
 
@@ -222,7 +248,7 @@ inline bool saveDeck(const char* name, const Card* cards, int count) {
 inline bool saveBoxes(const char* name, const Card* cards, int count) {
   char path[64];
   deckPath(path, sizeof(path), name, ".box");
-  uint8_t buf[MAX_CARDS];  // 200 bytes: cheap enough to keep on the stack
+  uint8_t buf[MAX_CARDS];  // 300 bytes: cheap enough to keep on the stack
   const int n = count > MAX_CARDS ? MAX_CARDS : count;
   for (int i = 0; i < n; i++) buf[i] = cards[i].box;
   return fsWrite(path, (const char*)buf, (size_t)n);
@@ -278,7 +304,7 @@ struct ImportScratch {
 
 inline int importDeck(const char* rawName, const char* text, char* savedName) {
   sanitizeName(rawName, savedName);
-  ImportScratch* sc = (ImportScratch*)malloc(sizeof(ImportScratch));
+  ImportScratch* sc = (ImportScratch*)ps_malloc(sizeof(ImportScratch));  // ~350 KB
   if (!sc) return 0;
   int imported = 0;
 

@@ -13,37 +13,29 @@
 #include "help.h"
 #include "flash_store.h"
 #include "flash_web.h"
+#include "import_screen.h"
 #include "tools_draw.h"
 
 namespace fcui {
-// deck list
-inline constexpr int LIST_X = 20, LIST_Y = 56, LIST_W = 440;
-inline constexpr int DEL_W = 34;
+// v2 (kit "Flashcards"): decks as rows with a bar, how to study, two ways to
+// add a deck; the card with Put back / Flip / Next under it; 24 px hints.
+inline constexpr int LIST_X = 20, LIST_Y = 96, LIST_W = 440;
+inline constexpr int DEL_W = 120;
 inline constexpr int PANEL_X = 20, PANEL_W = 440;
-// Two doors, as in the notes tool and for the same reason: a phone, or a file
-// already on the card. IMPORT keeps the wider half.
-inline constexpr TRect IMPORT_BTN{PANEL_X, 480, 268, 68};
-inline constexpr TRect CARD_BTN{PANEL_X + 280, 480, 160, 68};
+// How to study: two choices, the chosen one outlined thick.
+inline constexpr TRect SRS_BTN{PANEL_X, 560, 214, 56};
+inline constexpr TRect FLIP_BTN{PANEL_X + 226, 560, 214, 56};
+// Adding a deck: from a phone (the wider door), or a file on the card.
+inline constexpr TRect IMPORT_BTN{PANEL_X, 664, 260, 64};
+inline constexpr TRect CARD_BTN{PANEL_X + 272, 664, 168, 64};
 
-// the card list: rows under a line naming the folder they were read from.
-inline constexpr int CARD_CAP_Y = 56, CARD_Y = 96, CARD_ROW_H = 46;
+// the card list
+inline constexpr int CARD_CAP_Y = 56, CARD_Y = 100, CARD_ROW_H = 56;
 inline constexpr TRect CARD_DONE{PANEL_X, 700, PANEL_W, 72};
 inline TRect cardRow(int i) { return TRect{LIST_X, CARD_Y + i * CARD_ROW_H, LIST_W, CARD_ROW_H - 6}; }
-// Two buttons for two modes rather than one button that renames itself. The
-// timer and the randomiser already offer their modes this way, and a toggle
-// whose label is the state you are not in is a puzzle every time.
-inline constexpr TRect SRS_BTN{PANEL_X, 584, 216, 54};
-inline constexpr TRect FLIP_BTN{PANEL_X + 224, 584, 216, 54};
 
-// The list has to hold every deck the storage layer allows, and twelve rows at
-// a comfortable height do not fit above the buttons. Rows give up height as
-// they crowd rather than running underneath IMPORT, which is what they used to
-// do past the eighth deck.
-inline constexpr int LIST_BOTTOM = 468;
-// 56, not 46: a 24 px name plus the progress bar under it needs 44, and at 46
-// the bar was silently dropped on every row -- the guard below is for hosts
-// with a much taller face, not for the device's own default.
-inline constexpr int ROW_MAX = 56, ROW_MIN = 34;
+inline constexpr int LIST_BOTTOM = 520;
+inline constexpr int ROW_MAX = 78, ROW_MIN = 40;
 inline int rowH(int n) {
   if (n <= 0) return ROW_MAX;
   const int fits = (LIST_BOTTOM - LIST_Y) / n;
@@ -52,36 +44,29 @@ inline int rowH(int n) {
 }
 
 // study
-// The card gets the room. It used to stop 340 px down an 800 px panel, with the
-// grading buttons floating in the middle and a quarter of the screen blank
-// beneath them; a card is the one thing on this screen worth looking at, and the
-// buttons belong where a thumb already is.
-inline constexpr TRect CARD_BOX{20, 60, 440, 470};
-inline constexpr int ACT_Y = 596, ACT_H = 88;
-inline constexpr TRect AGAIN_BTN{20, ACT_Y, 210, ACT_H};
-inline constexpr TRect GOOD_BTN{250, ACT_Y, 210, ACT_H};
-inline constexpr TRect NEXT_BTN{120, ACT_Y, 240, ACT_H};
-inline constexpr TRect RESTART_BTN{60, ACT_Y, 150, ACT_H};
-inline constexpr TRect DECKS_BTN{270, ACT_Y, 150, ACT_H};
+inline constexpr TRect CARD_BOX{24, 112, 424, 456};
+inline constexpr int ACT_Y = 600, ACT_H = 72;
+inline constexpr TRect AGAIN_BTN{24, ACT_Y, 136, ACT_H};   // Put back
+inline constexpr TRect TURN_BTN{172, ACT_Y, 136, ACT_H};   // Flip
+inline constexpr TRect GOOD_BTN{320, ACT_Y, 136, ACT_H};   // Next
+inline constexpr TRect NEXT_BTN = GOOD_BTN;
+// done
+inline constexpr TRect DECKS_BTN{24, 700, 196, 72};
+inline constexpr TRect RESTART_BTN{232, 700, 224, 72};  // Study more
 
-// import: a single centred QR keeps the screen quiet. The link QR is a
-// fallback behind a button rather than a second thing to read.
-inline constexpr int QR_X = 110, QR_Y = 140, QR_SIZE = 260;
-// Same bottom band as the notes tool's pairing screen: these two flows look
-// alike and are reached the same way, so the buttons land under the same thumb.
-inline constexpr TRect ALT_BTN{40, 588, 400, 60};
-inline constexpr TRect DONE_BTN{40, 672, 400, 72};
+// import
+inline constexpr int QR_X = importui::QR_X, QR_Y = importui::QR_Y, QR_SIZE = importui::QR_SIZE;
+inline constexpr TRect ALT_BTN = importui::ALT_BTN;
+inline constexpr TRect DONE_BTN = importui::DONE_BTN;
 
 inline TRect rowRect(int i, int n) {
   const int h = rowH(n);
   return TRect{LIST_X, LIST_Y + i * h, LIST_W, h - 6};
 }
+// The Delete key a held row shows at its right end.
 inline TRect delRect(int i, int n) {
-  // Capped: on a tall row a full-height delete key is a stripe down the side,
-  // and a bigger target for the one tap nobody wants to make by accident.
-  const int h = rowH(n);
-  const int dh = (h - 12) > 40 ? 40 : (h - 12);
-  return TRect{LIST_X + LIST_W - DEL_W - 4, LIST_Y + i * h + 6, DEL_W, dh};
+  const TRect r = rowRect(i, n);
+  return TRect{r.x + r.w - DEL_W, r.y + 4, DEL_W, r.h - 8};
 }
 inline int listBottom(int n) { return LIST_Y + n * rowH(n); }
 }  // namespace fcui
@@ -91,8 +76,8 @@ class FlashTool : public ToolApp {
   int fontSlot() const override { return ToolsHost::FONT_CARDS; }
   const char* title() const override {
     switch (_screen) {
-      case Screen::Study: return _deckName;
-      case Screen::Import: return "IMPORT";
+      case Screen::Study: return "FLASHCARDS";
+      case Screen::Import: return "ADD A DECK";
       case Screen::Card: return "FROM THE CARD";
       default: return "FLASHCARDS";
     }
@@ -151,9 +136,9 @@ class FlashTool : public ToolApp {
       return true;
     }
     if (b == SideBtn::Down)
-      advance(0);
+      gradeGood();
     else
-      unreveal();
+      gradeAgain();
     return true;
   }
 
@@ -239,6 +224,19 @@ class FlashTool : public ToolApp {
     }
   }
 
+ public:
+  const char* hostDeckName() const { return _screen == Screen::Study ? _deckName : ""; }
+  // The last face drawn: did all of it fit, and at what size.
+  static bool hostFitAll() { return s_fitAll; }
+  static int hostFitSize() { return s_fitSize; }
+  int hostCardCount() const { return _cardCount; }
+  bool hostHelp() const { return _help; }
+  const char* hostFace(bool back) const {
+    if (_screen != Screen::Study || !_cards || _qLen == 0) return "";
+    const fcard::Card& k = _cards[_queue[_pos < _qLen ? _pos : 0]];
+    return back ? k.back : k.front;
+  }
+
  private:
   enum class Screen : uint8_t { Decks, Study, Import, Card };
 
@@ -247,94 +245,86 @@ class FlashTool : public ToolApp {
 
   void renderDecks(ToolsCanvas& c) {
     using namespace fcui;
-    const int capH = c.textHeight(TS_MED);
-    char buf[40];
+    char buf[48];
+    int totalCards = 0;
+    for (int i = 0; i < _deckCount; i++) totalCards += _decks[i].cards;
+    c.text(LIST_X, 60, "DECKS", TS_MED, true, true);
+    snprintf(buf, sizeof(buf), "%d cards", totalCards);
+    c.text(LIST_X + LIST_W - c.textWidth(buf, TS_MED), 60, buf, TS_MED, true);
+    c.fillRect(LIST_X, 90, LIST_W, 1, true);
 
-    if (_deckCount == 0) {
-      c.drawRect(LIST_X, LIST_Y, LIST_W, LIST_BOTTOM - LIST_Y, 1, true);
-      c.textInBox(LIST_X, LIST_Y, LIST_W, LIST_BOTTOM - LIST_Y, "no decks yet", TS_LARGE, true,
-                  true);
-    }
+    if (_deckCount == 0)
+      c.textInBox(LIST_X, LIST_Y, LIST_W, 200, "no decks yet", TS_LARGE, true, true);
 
     for (int i = 0; i < _deckCount; i++) {
       const TRect r = rowRect(i, _deckCount);
-      const TRect d = delRect(i, _deckCount);
-      // How far the whole deck has come, not how many cards finished it. A
-      // card is mastered only at the top of four boxes, so a bar drawn from the
-      // mastered count sits flat at zero for three sessions and then leaps --
-      // which reads as a deck that is not being learned at all.
       const int permille = fcard::boxPermille(_decks[i].boxSum, _decks[i].cards);
-
-      // A rule between rows rather than a box around each one. Every deck used
-      // to be drawn as a button, which put three heavy outlines above IMPORT
-      // and made the list compete with the thing you actually press.
+      const bool armed = i == _delArm;
+      if (armed) c.fillRect(r.x, r.y, r.w, r.h, true);
       const TSize nsz = scriptFloor(_decks[i].name, TS_MED);
-      c.text(r.x + 6, r.y + 4, _decks[i].name, nsz, true);
-      // The row's number matches the bar beside it. It used to be
-      // mastered-over-cards, which read "0/8" against a bar that was visibly a
-      // third full -- two different questions answered in one row.
-      snprintf(buf, sizeof(buf), "%d%%", permille / 10);
-      const int tw = c.textWidth(buf, TS_SMALL);
-      // Centred on the delete key beside it rather than on the name above it:
-      // the two sit on the same edge of the row and a few pixels of daylight
-      // between them reads as a mistake.
-      c.text(r.x + r.w - DEL_W - 12 - tw, d.y + (d.h - c.textHeight(TS_SMALL)) / 2, buf,
-             TS_SMALL, true);
-      // The bar goes under the name, if the name leaves room for it. A host
-      // with a taller face (the CrossPoint port's is half again as tall) would
-      // otherwise push it through the row's own separator; there the count on
-      // the right says the same thing in less space.
-      const int barY = r.y + 8 + c.textHeight(nsz) + 4;
-      if (barY + 8 <= r.y + r.h)
-        tdraw::progressBar(c, r.x + 6, barY, r.w - DEL_W - 20, 8, permille);
-      c.textInBox(d.x, d.y, d.w, d.h, "x", TS_MED, true);
-
-      // Only between rows: the last one is closed by the summary rule below,
-      // and two lines four pixels apart read as a mistake.
-      if (i + 1 < _deckCount)
-        c.drawLine(r.x, r.y + r.h + 2, r.x + r.w, r.y + r.h + 2, 1, true);
-    }
-
-    // A rule and a count close the list off, so the room left under it reads as
-    // space for more decks rather than as a hole in the middle of the screen.
-    if (_deckCount > 0) {
-      int totalCards = 0;
-      for (int i = 0; i < _deckCount; i++) totalCards += _decks[i].cards;
-      const int y = listBottom(_deckCount) + 6;
-      if (y + capH + 10 < IMPORT_BTN.y) {
-        c.drawLine(PANEL_X, y, PANEL_X + IMPORT_BTN.w, y, 1, true);
-        snprintf(buf, sizeof(buf), "%d deck%s   %d cards", _deckCount,
-                 _deckCount == 1 ? "" : "s", totalCards);
-        c.text(PANEL_X, y + 8, buf, TS_MED, true);
+      c.textClipped(r.x + 8, r.y + 6, r.w - (armed ? DEL_W : 40), _decks[i].name, nsz, !armed, true);
+      const int lineY = r.y + 6 + c.textHeight(nsz) + 6;
+      if (lineY + 24 <= r.y + r.h) {
+        if (!armed) tdraw::progressBar(c, r.x + 8, lineY + 8, 120, 10, permille);
+        if (armed) snprintf(buf, sizeof(buf), "%d cards", _decks[i].cards);
+        else snprintf(buf, sizeof(buf), "%d cards  -  %d%% known", _decks[i].cards, permille / 10);
+        c.text(r.x + (armed ? 8 : 140), lineY, buf, TS_MED, !armed);
       }
+      if (armed) {
+        const TRect d = delRect(i, _deckCount);
+        c.fillRect(d.x, d.y, d.w, d.h, false);
+        c.textInBox(d.x, d.y, d.w, d.h, "Delete", TS_MED, true, true);
+      } else {
+        c.text(r.x + r.w - 20, r.y + (r.h - c.textHeight(TS_MED)) / 2, ">", TS_MED, true, true);
+      }
+      c.fillRect(r.x, r.y + r.h + 2, r.w, 1, true);
     }
 
-    // The caption hangs off the button beneath it rather than the one above:
-    // it labels the import flow, and the gap that has to survive is the one
-    // that would otherwise be an overlap when a taller face is used.
-    c.button(IMPORT_BTN.x, IMPORT_BTN.y, IMPORT_BTN.w, IMPORT_BTN.h, "IMPORT", true, TS_LARGE);
-    c.button(CARD_BTN.x, CARD_BTN.y, CARD_BTN.w, CARD_BTN.h, "CARD", false, TS_LARGE);
-    c.text(PANEL_X, SRS_BTN.y - capH - 6, "a QR, or /decks on the card", TS_MED, true);
+    c.text(PANEL_X, SRS_BTN.y - 32, "HOW TO STUDY", TS_MED, true, true);
+    choice(c, SRS_BTN, "Spaced repeat", _srs);
+    choice(c, FLIP_BTN, "Just flip", !_srs);
+    c.text(PANEL_X, IMPORT_BTN.y - 32, "ADD A DECK", TS_MED, true, true);
+    c.button(IMPORT_BTN.x, IMPORT_BTN.y, IMPORT_BTN.w, IMPORT_BTN.h, "From your phone", false, TS_MED);
+    c.button(CARD_BTN.x, CARD_BTN.y, CARD_BTN.w, CARD_BTN.h, "From card", false, TS_MED);
+    c.textCentered(c.width() / 2, 748, _deckCount ? "hold a deck to delete it" : "add one from your phone",
+                   TS_MED, true);
+  }
 
-    c.button(SRS_BTN.x, SRS_BTN.y, SRS_BTN.w, SRS_BTN.h, "SPACED REPEAT", _srs, TS_MED);
-    c.button(FLIP_BTN.x, FLIP_BTN.y, FLIP_BTN.w, FLIP_BTN.h, "JUST FLIP", !_srs, TS_MED);
-    c.text(PANEL_X, SRS_BTN.y + SRS_BTN.h + 8,
-           _srs ? "hard cards come back until you know them" : "shuffle and flip, nothing kept",
-           TS_MED, true);
+  // A choice of two: the chosen one outlined thick, nothing filled black.
+  static void choice(ToolsCanvas& c, const TRect& r, const char* label, bool on) {
+    c.drawRect(r.x, r.y, r.w, r.h, on ? 3 : 1, true);
+    c.textInBox(r.x, r.y, r.w, r.h, label, TS_MED, true, on);
+  }
+
+  void onHold(int x, int y) override {
+    if (_screen != Screen::Decks || _help) return;
+    for (int i = 0; i < _deckCount; i++)
+      if (fcui::rowRect(i, _deckCount).hit(x, y)) {
+        _delArm = i;
+        host().beep(1);
+        host().refresh(false);
+        return;
+      }
   }
 
   void tapDecks(int x, int y) {
     using namespace fcui;
-    for (int i = 0; i < _deckCount; i++) {
+    if (_delArm >= 0) {
+      // A held row offers Delete; any other tap puts it back.
+      const int i = _delArm;
+      _delArm = -1;
       if (delRect(i, _deckCount).hit(x, y)) {
         fcard::deleteDeck(_decks[i].name);
         refreshDeckList();
         host().beep(2);
-        host().refreshUi();
-        return;
+      } else {
+        host().beep(0);
       }
-      if (rowRect(i, _deckCount).hit(x, y)) return startStudy(i);
+      host().refresh(false);
+      return;
     }
+    for (int i = 0; i < _deckCount; i++)
+      if (rowRect(i, _deckCount).hit(x, y)) return startStudy(i);
     if (IMPORT_BTN.hit(x, y)) return openImport();
     if (CARD_BTN.hit(x, y)) return openCard();
     if (SRS_BTN.hit(x, y) || FLIP_BTN.hit(x, y)) {
@@ -383,27 +373,25 @@ class FlashTool : public ToolApp {
 
   void renderCard(ToolsCanvas& c) {
     using namespace fcui;
-    c.text(LIST_X, CARD_CAP_Y, "/decks on the card", TS_MED, true);
-    c.drawLine(LIST_X, CARD_Y - 12, LIST_X + LIST_W, CARD_Y - 12, 1, true);
+    c.text(LIST_X, CARD_CAP_Y, "ON THE CARD, /decks", TS_MED, true, true);
+    c.fillRect(LIST_X, CARD_Y - 10, LIST_W, 1, true);
     if (_fileCount < 0) {
       c.textInBox(LIST_X, CARD_Y, LIST_W, 200, "no card", TS_LARGE, true, true);
-      c.textInBox(LIST_X, CARD_Y + 120, LIST_W, 80, "put a FAT32 card in the slot", TS_MED,
-                  true);
+      c.textInBox(LIST_X, CARD_Y + 120, LIST_W, 80, "put a FAT32 card in the slot", TS_MED, true);
     } else if (_fileCount == 0) {
       c.textInBox(LIST_X, CARD_Y, LIST_W, 200, "no files here", TS_LARGE, true, true);
-      c.textInBox(LIST_X, CARD_Y + 120, LIST_W, 80, "decks are .tsv, .csv or .txt", TS_MED,
-                  true);
+      c.textInBox(LIST_X, CARD_Y + 120, LIST_W, 80, "decks are .tsv, .csv or .txt", TS_MED, true);
     }
     for (int i = 0; i < _fileCount; i++) {
       const TRect r = cardRow(i);
-      if (i + 1 < _fileCount) c.drawLine(r.x, r.y + r.h + 2, r.x + r.w, r.y + r.h + 2, 1, true);
+      if (r.y + r.h > CARD_DONE.y - 100) break;
+      c.fillRect(r.x, r.y + r.h + 2, r.w, 1, true);
       const TSize nsz = scriptFloor(_cardFiles[i], TS_MED);
-      c.text(r.x + 10, r.y + (r.h - c.textHeight(nsz)) / 2, _cardFiles[i], nsz, true);
+      c.textClipped(r.x + 8, r.y + (r.h - c.textHeight(nsz)) / 2, r.w - 16, _cardFiles[i], nsz, true);
     }
-
-    if (_cardMsg) c.textInBox(PANEL_X, CARD_DONE.y - 88, fcui::PANEL_W, 40, _cardMsg, TS_MED, true);
-    c.text(PANEL_X, CARD_DONE.y - 40, "one card a line: front then back", TS_MED, true);
-    c.button(CARD_DONE.x, CARD_DONE.y, CARD_DONE.w, CARD_DONE.h, "DONE", true, TS_LARGE);
+    if (_cardMsg) c.textInBox(PANEL_X, CARD_DONE.y - 92, fcui::PANEL_W, 40, _cardMsg, TS_MED, true, true);
+    c.textCentered(c.width() / 2, CARD_DONE.y - 44, "one card a line: front, then back", TS_MED, true);
+    c.button(CARD_DONE.x, CARD_DONE.y, CARD_DONE.w, CARD_DONE.h, "Done", true, TS_LARGE);
   }
 
   void tapCard(int x, int y) {
@@ -462,7 +450,7 @@ class FlashTool : public ToolApp {
   void startStudy(int deckIdx) {
     strncpy(_deckName, _decks[deckIdx].name, fcard::NAME_LEN);
     _deckName[fcard::NAME_LEN] = 0;
-    if (!_cards) _cards = (fcard::Card*)malloc(sizeof(fcard::Card) * fcard::MAX_CARDS);
+    if (!_cards) _cards = (fcard::Card*)ps_malloc(sizeof(fcard::Card) * fcard::MAX_CARDS);
     if (!_cards) {
       host().beep(2);
       return;
@@ -473,6 +461,7 @@ class FlashTool : public ToolApp {
       host().beep(2);
       return;
     }
+    _known = _putBack = 0;
     buildQueue();
     _pos = 0;
     _flipped = false;
@@ -508,74 +497,90 @@ class FlashTool : public ToolApp {
   void renderStudy(ToolsCanvas& c) {
     using namespace fcui;
     if (_pos >= _qLen) return renderSessionDone(c);
-
-    const fcard::Card& card = _cards[_queue[_pos]];
-    c.drawRect(CARD_BOX.x, CARD_BOX.y, CARD_BOX.w, CARD_BOX.h, _flipped ? 4 : 2, true);
-    {
-      // What is written on the card, in the face chosen for flashcards. The
-      // box around it, the buttons and the count below stay the firmware's.
-      ContentFace cf(host());
-      drawWrapped(c, _flipped ? card.back : card.front, CARD_BOX);
-    }
-
-    if (!_flipped) {
-      // Sat in the band the buttons will occupy, so the answer appears where the
-      // eye is already waiting rather than somewhere new.
-      c.textInBox(NEXT_BTN.x, ACT_Y, NEXT_BTN.w, ACT_H, "tap the card, or press DOWN", TS_MED,
-                  true);
-    } else if (_srs) {
-      c.button(AGAIN_BTN.x, AGAIN_BTN.y, AGAIN_BTN.w, AGAIN_BTN.h, "AGAIN", false, TS_LARGE);
-      c.button(GOOD_BTN.x, GOOD_BTN.y, GOOD_BTN.w, GOOD_BTN.h, "GOT IT", true, TS_LARGE);
-      // Which side button does which, over the button it does -- in the gap
-      // between the card and the buttons, not under them, where the count and
-      // the box number already are. Smallest size on the screen: it is a thing
-      // to learn on the first card and never read again.
-      c.textInBox(AGAIN_BTN.x, ACT_Y - 30, AGAIN_BTN.w, 26, "side UP", TS_SMALL, true);
-      c.textInBox(GOOD_BTN.x, ACT_Y - 30, GOOD_BTN.w, 26, "side DOWN", TS_SMALL, true);
-    } else {
-      c.button(NEXT_BTN.x, NEXT_BTN.y, NEXT_BTN.w, NEXT_BTN.h, "NEXT", true, TS_LARGE);
-      c.textInBox(NEXT_BTN.x, ACT_Y - 30, NEXT_BTN.w, 26, "side DOWN", TS_SMALL, true);
-    }
-
-    // Where you are in the deck is the least urgent thing here, so it takes the
-    // strip below the buttons rather than a slot beside the card.
     char buf[48];
-    snprintf(buf, sizeof(buf), "%d of %d", _pos + 1, _qLen);
-    c.text(20, 706, buf, TS_MED, true);
+    const fcard::Card& card = _cards[_queue[_pos]];
+
+    // The deck, where you are in it, and a bar of the session.
+    snprintf(buf, sizeof(buf), "%d / %d", _pos + 1, _qLen);
+    const int cw = c.textWidth(buf, TS_MED);
+    c.textClipped(24, 52, 432 - cw - 16, _deckName, scriptFloor(_deckName, TS_MED), true, true);
+    c.text(456 - cw, 52, buf, TS_MED, true);
+    sessionBar(c, 24, 86, 432);
+
+    // The card, with two more behind it.
+    const TRect k = CARD_BOX;
+    c.drawRect(k.x + 8, k.y + 8, k.w, k.h, 1, true);
+    c.drawRect(k.x + 4, k.y + 4, k.w, k.h, 1, true);
+    c.fillRect(k.x, k.y, k.w, k.h, false);
+    c.drawRect(k.x, k.y, k.w, k.h, 3, true);
+    if (!_flipped) {
+      ContentFace cf(host());
+      drawWrapped(c, card.front, k);
+    } else {
+      c.textTrackedCentered(k.x + k.w / 2, k.y + 14, "BACK", TS_SMALL, true, true, 3);
+      {
+        ContentFace cf(host());
+        drawWrapped(c, card.back, TRect{k.x, k.y + 40, k.w, k.h - 40 - 60});
+      }
+      c.fillRect(k.x + 60, k.y + k.h - 58, k.w - 120, 1, true);
+      ContentFace cf(host());
+      c.textClipped(k.x + 24, k.y + k.h - 46, k.w - 48, card.front, scriptFloor(card.front, TS_MED), true);
+    }
+
+    c.button(AGAIN_BTN.x, AGAIN_BTN.y, AGAIN_BTN.w, AGAIN_BTN.h, "Put back", false, TS_MED);
+    c.button(TURN_BTN.x, TURN_BTN.y, TURN_BTN.w, TURN_BTN.h, "Flip", false, TS_MED);
+    c.button(GOOD_BTN.x, GOOD_BTN.y, GOOD_BTN.w, GOOD_BTN.h, "Next", true, TS_MED);
+    c.textCentered(c.width() / 2, 700, "UP put back  -  DOWN flip, then next", TS_MED, true);
     if (_srs) {
-      snprintf(buf, sizeof(buf), "box %d/%d", card.box, fcard::MAX_BOX);
-      c.text(160, 706, buf, TS_MED, true);
-      tdraw::progressBar(c, 20, 744, 250, 18, progressPermille());
-      snprintf(buf, sizeof(buf), "%d%% learned", progressPermille() / 10);
-      c.text(286, 742, buf, TS_MED, true);
+      snprintf(buf, sizeof(buf), "box %d of %d  -  %d%% known", card.box, fcard::MAX_BOX,
+               progressPermille() / 10);
+      c.textCentered(c.width() / 2, 740, buf, TS_MED, true);
+    }
+  }
+
+  // Segments for a short session, a plain bar for a long one.
+  void sessionBar(ToolsCanvas& c, int x, int y, int w) const {
+    if (_qLen <= 20) {
+      const int gap = 4, seg = (w - (_qLen - 1) * gap) / (_qLen ? _qLen : 1);
+      for (int i = 0; i < _qLen; i++) {
+        const int sx = x + i * (seg + gap);
+        if (i < _pos) c.fillRect(sx, y, seg, 8, true);
+        else c.drawRect(sx, y, seg, 8, 1, true);
+      }
+    } else {
+      tdraw::progressBar(c, x, y, w, 8, _qLen ? _pos * 1000 / _qLen : 0);
     }
   }
 
   void renderSessionDone(ToolsCanvas& c) {
     using namespace fcui;
-    c.drawRect(CARD_BOX.x, CARD_BOX.y, CARD_BOX.w, CARD_BOX.h, 3, true);
-    c.textInBox(CARD_BOX.x, CARD_BOX.y - 40, CARD_BOX.w, CARD_BOX.h, "DECK COMPLETE", TS_HUGE,
-                true, true);
     char buf[48];
-    // Two numbers, because they answer different questions: how far the deck
-    // has come overall, and how many cards are actually finished with. The
-    // second used to be the only one, and after a good first session it still
-    // read "0 of 8 cards mastered" -- true, and no use to anybody.
-    snprintf(buf, sizeof(buf), "%d%% learned", progressPermille() / 10);
-    c.textCentered(c.width() / 2, CARD_BOX.y + CARD_BOX.h / 2 + 30, buf, TS_LARGE, true);
-    tdraw::progressBar(c, CARD_BOX.x + 100, CARD_BOX.y + CARD_BOX.h / 2 + 70, CARD_BOX.w - 200,
-                       26, progressPermille());
-    snprintf(buf, sizeof(buf), "%d of %d cards mastered", masteredCount(), _cardCount);
-    c.textCentered(c.width() / 2, CARD_BOX.y + CARD_BOX.h / 2 + 116, buf, TS_MED, true);
-    c.button(RESTART_BTN.x, RESTART_BTN.y, RESTART_BTN.w, RESTART_BTN.h, "AGAIN", true,
-             TS_LARGE);
-    c.button(DECKS_BTN.x, DECKS_BTN.y, DECKS_BTN.w, DECKS_BTN.h, "DECKS", false, TS_LARGE);
+    c.textTrackedCentered(c.width() / 2, 200, _deckName, TS_MED, true, true, 2);
+    snprintf(buf, sizeof(buf), "%d / %d", _known, _known + _putBack);
+    c.textCentered(c.width() / 2, 248, buf, TS_HUGE, true, true);
+    c.textCentered(c.width() / 2, 306, "known this time", TS_MED, true);
+    // Three numbers, the first one dark.
+    const int bw = 136, bx = 24, by = 370, bh = 100;
+    struct S { int n; const char* l; } st[3] = {{_known, "known"}, {_putBack, "put back"},
+                                               {progressPermille() / 10, _srs ? "% learned" : "cards"}};
+    if (!_srs) st[2].n = _cardCount;
+    for (int i = 0; i < 3; i++) {
+      const int x = bx + i * (bw + 12);
+      if (i == 0) c.fillRect(x, by, bw, bh, true);
+      else c.drawRect(x, by, bw, bh, 2, true);
+      snprintf(buf, sizeof(buf), "%d", st[i].n);
+      c.textCentered(x + bw / 2, by + 14, buf, TS_LARGE, i != 0, true);
+      c.textCentered(x + bw / 2, by + 60, st[i].l, TS_MED, i != 0);
+    }
+    c.button(DECKS_BTN.x, DECKS_BTN.y, DECKS_BTN.w, DECKS_BTN.h, "Decks", false, TS_MED);
+    c.button(RESTART_BTN.x, RESTART_BTN.y, RESTART_BTN.w, RESTART_BTN.h, "Study more", true, TS_MED);
   }
 
   // --- the things the study screen can do --------------------------------
   // Named, because the buttons down the side reach them too, and a hit test is
   // not something a button can call.
   void restart() {
+    _known = _putBack = 0;
     buildQueue();
     _pos = 0;
     _flipped = false;
@@ -604,9 +609,12 @@ class FlashTool : public ToolApp {
     host().refreshUi();
   }
 
+  // Put back: the card comes round again a few later. Spaced repeat also
+  // sends it back to the first box; Just flip keeps nothing.
   void gradeAgain() {
     fcard::Card& card = _cards[_queue[_pos]];
-    card.box = 0;
+    if (_srs) card.box = 0;
+    _putBack++;
     // Re-queue it a few cards later so it comes back this session.
     if (_qLen < fcard::MAX_CARDS) {
       const uint16_t idx = _queue[_pos];
@@ -620,7 +628,8 @@ class FlashTool : public ToolApp {
 
   void gradeGood() {
     fcard::Card& card = _cards[_queue[_pos]];
-    if (card.box < fcard::MAX_BOX) card.box++;
+    if (_srs && card.box < fcard::MAX_BOX) card.box++;
+    _known++;
     advance(1);
   }
 
@@ -634,17 +643,9 @@ class FlashTool : public ToolApp {
       return;
     }
 
-    if (!_flipped) {
-      if (CARD_BOX.hit(x, y)) reveal();
-      return;
-    }
-
-    if (_srs) {
-      if (AGAIN_BTN.hit(x, y)) return gradeAgain();
-      if (GOOD_BTN.hit(x, y)) return gradeGood();
-    } else if (NEXT_BTN.hit(x, y)) {
-      advance(0);
-    }
+    if (CARD_BOX.hit(x, y) || TURN_BTN.hit(x, y)) return _flipped ? unreveal() : reveal();
+    if (AGAIN_BTN.hit(x, y)) return gradeAgain();
+    if (GOOD_BTN.hit(x, y)) return gradeGood();
   }
 
   void advance(uint8_t beepKind) {
@@ -683,48 +684,60 @@ class FlashTool : public ToolApp {
     _cardCount = 0;
   }
 
-  // Word-wrap into the box, stepping the type size down until it fits.
-  static void drawWrapped(ToolsCanvas& c, const char* text, const TRect& box) {
-    const TSize sizes[3] = {TS_HUGE, TS_LARGE, TS_MED};
-    char lines[6][80];
-    int count = 0;
-    TSize used = TS_MED;
+  // Word-wrap into the box, stepping the type size down until it fits. A face
+  // is never cut (owner, 24 Nov): big type while it is short, then smaller,
+  // down to TS_MED; a script whose floor is higher stays at its floor while
+  // that still fits. Only a face that fits nowhere else goes to TS_SMALL.
+  static constexpr int WRAP_LINES = 16, WRAP_BYTES = 96;
+  static inline bool s_fitAll = true;
+  static inline int s_fitSize = TS_HUGE;
+  static TSize drawWrapped(ToolsCanvas& c, const char* text, const TRect& box) {
+    static char lines[WRAP_LINES][WRAP_BYTES];
     const int maxW = box.w - 40;
-    const int maxLines = 5;
-
-    // The ladder stops at the script's readable floor: a long Thai answer takes
-    // more lines at TS_LARGE rather than shrinking into a size it cannot be
-    // read at. Latin still gets all three steps.
     const TSize floorSz = scriptFloor(text, TS_MED);
-    for (int s = 0; s < 3; s++) {
-      if (sizes[s] < floorSz && count > 0) break;
-      count = wrap(c, text, maxW, sizes[s], lines, maxLines);
-      used = sizes[s];
-      if (count > 0 && count <= (s == 0 ? 2 : (s == 1 ? 3 : maxLines))) break;
-      if (sizes[s] == floorSz) break;
+    struct Step {
+      TSize sz;
+      int prefer;  // most lines this size is worth using for
+    };
+    const Step steps[] = {{TS_HUGE, 3}, {TS_LARGE, WRAP_LINES}, {TS_MED, WRAP_LINES}, {TS_SMALL, WRAP_LINES}};
+    int count = 0;
+    TSize used = TS_SMALL;
+    bool fitAll = false;
+    for (const Step& st : steps) {
+      const int lh = c.textHeight(st.sz) + (st.sz >= TS_LARGE ? 8 : 6);
+      int fit = (box.h - 16) / lh;
+      if (fit > st.prefer && st.sz != floorSz) fit = st.prefer;
+      if (fit > WRAP_LINES) fit = WRAP_LINES;
+      count = wrap(c, text, maxW, st.sz, lines, fit, &fitAll);
+      used = st.sz;
+      if (fitAll) break;
     }
-
-    const int lh = c.textHeight(used) + 8;
+    s_fitAll = fitAll;
+    s_fitSize = used;
+    const int lh = c.textHeight(used) + (used >= TS_LARGE ? 8 : 6);
     int y = box.y + (box.h - count * lh) / 2;
     for (int i = 0; i < count; i++) {
-      c.textCentered(box.x + box.w / 2, y, lines[i], used, true, true);
+      c.textCentered(box.x + box.w / 2, y, lines[i], used, true, used >= TS_MED);
       y += lh;
     }
+    return used;
   }
 
-  static int wrap(ToolsCanvas& c, const char* text, int maxW, TSize sz, char lines[][80],
-                  int maxLines) {
+  static int wrap(ToolsCanvas& c, const char* text, int maxW, TSize sz, char lines[][WRAP_BYTES],
+                  int maxLines, bool* all = nullptr) {
     // Chinese and Thai cards have no spaces to break on, so the cut falls at
     // the last position uni::breakBefore allowed -- any character boundary for
     // han, cluster boundaries for Thai -- with spaces still preferred when the
     // text has them. The probe walks codepoints, never splitting inside one.
     int n = 0;
     const char* p = text;
+    if (all) *all = false;
+    while (*p == ' ') p++;
     while (*p && n < maxLines) {
       int take = 0, lastCut = -1;
       uint32_t prev = 0;
-      char probe[80];
-      while (p[take] && take < 76) {
+      char probe[WRAP_BYTES];
+      while (p[take] && take < WRAP_BYTES - 5) {
         const char* q = p + take;
         const uint32_t cp = uni::next(q);
         const int cn = (int)(q - (p + take));
@@ -742,6 +755,7 @@ class FlashTool : public ToolApp {
         memcpy(lines[n], p, take);
         lines[n][take] = 0;
         n++;
+        p += take;
         break;
       }
       const int cut = (lastCut > 0) ? lastCut : (take > 0 ? take : 1);
@@ -751,6 +765,7 @@ class FlashTool : public ToolApp {
       p += cut;
       while (*p == ' ') p++;
     }
+    if (all) *all = !*p;
     return n;
   }
 
@@ -759,7 +774,19 @@ class FlashTool : public ToolApp {
     _screen = Screen::Import;
     _importShown = false;
     _altQr = false;
-    _netOk = _net.start();
+    // The home Wi-Fi first when one is saved (owner): the phone keeps its own
+    // network. The Sticky's own access point is the backup.
+    _netNote = nullptr;
+    _netOk = false;
+    if (homenet::haveWifi(prefs())) {
+      homenet::wifiName(prefs(), _joinName, sizeof(_joinName));
+      _joining = true;
+      host().refresh(false);  // "Joining ..." while the radio looks
+      _netOk = _net.startHome(prefs(), "/cards");
+      _joining = false;
+      if (!_netOk) _netNote = "the home Wi-Fi did not answer";
+    }
+    if (!_netOk) _netOk = _net.start();
     host().beep(_netOk ? 1 : 2);
     host().refresh(true);
   }
@@ -774,32 +801,17 @@ class FlashTool : public ToolApp {
 
   void renderImport(ToolsCanvas& c) {
     using namespace fcui;
+    if (_joining) return importui::drawJoining(c, _joinName);
     if (!_netOk) {
-      c.textCentered(c.width() / 2, 300, "could not start wifi", TS_LARGE, true, true);
-      c.button(DONE_BTN.x, DONE_BTN.y, DONE_BTN.w, DONE_BTN.h, "BACK", true, TS_LARGE);
+      c.textCentered(c.width() / 2, 300, "could not start Wi-Fi", TS_LARGE, true, true);
+      c.button(DONE_BTN.x, DONE_BTN.y, DONE_BTN.w, DONE_BTN.h, "Back", true, TS_LARGE);
       return;
     }
     if (_net.received()) return renderImportDone(c);
-
-    char buf[64];
-    if (_altQr) {
-      c.textCentered(c.width() / 2, 60, "phone joined", TS_MED, true);
-      fqr::draw(c, QR_X, QR_Y, QR_SIZE, _net.url());
-      c.textCentered(c.width() / 2, 390, "Open this in your browser", TS_MED, true, true);
-      c.textCentered(c.width() / 2, 428, _net.url(), TS_MED, true);
-      c.button(ALT_BTN.x, ALT_BTN.y, ALT_BTN.w, ALT_BTN.h, "BACK TO WIFI", false, TS_MED);
-    } else {
-      c.textCentered(c.width() / 2, 60, "the page opens by itself", TS_MED,
-                     true);
-      const String wifi = _net.wifiPayload();
-      fqr::draw(c, QR_X, QR_Y, QR_SIZE, wifi.c_str());
-      c.textCentered(c.width() / 2, 390, "Scan with your phone camera", TS_MED, true, true);
-      snprintf(buf, sizeof(buf), "%s   key %s", _net.ssid(), _net.password());
-      c.textCentered(c.width() / 2, 428, buf, TS_MED, true);
-      c.button(ALT_BTN.x, ALT_BTN.y, ALT_BTN.w, ALT_BTN.h, "PAGE DIDN'T OPEN?", false,
-               TS_MED);
-    }
-    c.button(DONE_BTN.x, DONE_BTN.y, DONE_BTN.w, DONE_BTN.h, "DONE", false, TS_LARGE);
+    static const importui::Words W{"Scan to add cards on your phone",
+                                   {"Paste two columns: front, back", "One card a line, tab or comma",
+                                    "The deck appears here at once"}};
+    importui::draw(c, _net, _altQr, W, _netNote);
   }
 
   void renderImportDone(ToolsCanvas& c) {
@@ -810,18 +822,28 @@ class FlashTool : public ToolApp {
     // top of an otherwise empty panel.
     snprintf(buf, sizeof(buf), "%d", _net.count());
     tdraw::seg7Centered(c, c.width() / 2, 200, 140, buf, true);
-    c.textCentered(c.width() / 2, 372, "cards added to", TS_LARGE, true, true);
+    c.textCentered(c.width() / 2, 372, "cards added to", TS_MED, true);
     snprintf(buf, sizeof(buf), "%s", _net.deckName());
     c.textCentered(c.width() / 2, 414, buf, TS_LARGE, true, true);
     decor::ornament(c, c.width() / 2, 472, 300, true);
     c.textCentered(c.width() / 2, 500, "send more from the same page,", TS_MED, true);
     c.textCentered(c.width() / 2, 528, "or tap DONE", TS_MED, true);
-    c.button(DONE_BTN.x, DONE_BTN.y, DONE_BTN.w, DONE_BTN.h, "DONE", true, TS_LARGE);
+    c.button(DONE_BTN.x, DONE_BTN.y, DONE_BTN.w, DONE_BTN.h, "Done", true, TS_LARGE);
   }
 
   void tapImport(int x, int y) {
     if (fcui::DONE_BTN.hit(x, y)) return closeImport();
     if (!_net.received() && _netOk && fcui::ALT_BTN.hit(x, y)) {
+    if (_net.home()) {
+      // Backup: the Sticky's own access point.
+      _net.stop();
+      _netNote = nullptr;
+      _altQr = false;
+      _netOk = _net.start();
+      host().beep(_netOk ? 1 : 2);
+      host().refresh(true);
+      return;
+    }
       _altQr = !_altQr;
       host().beep(0);
       host().refresh(true);
@@ -850,6 +872,12 @@ class FlashTool : public ToolApp {
   int _cardCount = 0;
   uint16_t _queue[fcard::MAX_CARDS] = {};
   int _qLen = 0, _pos = 0, _graded = 0;
+  int _known = 0, _putBack = 0;  // this session
+  int _delArm = -1;              // the deck a hold offered to delete
+  bool _joining = false;
+  const char* _netNote = nullptr;
+  char _joinName[34] = {};
+
   bool _flipped = false;
 
   fweb::ImportServer _net;

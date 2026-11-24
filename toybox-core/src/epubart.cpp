@@ -448,7 +448,8 @@ void paths(const char* bookFile, const char* entry, uint32_t usize, int part, ch
 // u32 key, u32 usize, u8 parts. One read on every open instead of one per
 // picture -- 28 pictures cost 1.2 s of .inf reads on glass.
 
-int indexRead(ToolsHost& host, const char* bookFile, Prepared* out, int max) {
+int indexRead(ToolsHost& host, const char* bookFile, Prepared* out, int max, bool* decorChecked) {
+  if (decorChecked) *decorChecked = false;
   char p[bstore::PATH_CAP];
   bstore::file(bookFile, "art.idx", p, sizeof(p));
   const int cap = 8 + INDEX_MAX * 9;
@@ -458,6 +459,7 @@ int indexRead(ToolsHost& host, const char* bookFile, Prepared* out, int max) {
   int n = -1;
   if (got >= 8 && memcmp(buf, "TBA1", 4) == 0 && buf[4] == PIPELINE) {
     n = buf[6] | (buf[7] << 8);
+    if (decorChecked) *decorChecked = buf[5] >= 1;
     if (n > max) n = max;
     if (got < 8 + n * 9) n = -1;  // short: not trusted
     for (int i = 0; i < n; i++) {
@@ -480,7 +482,7 @@ bool indexWrite(ToolsHost& host, const char* bookFile, const Prepared* recs, int
   if (!buf) return false;
   memcpy(buf, "TBA1", 4);
   buf[4] = (uint8_t)PIPELINE;
-  buf[5] = 0;
+  buf[5] = 1;  // revision: decorations recognised
   buf[6] = (uint8_t)(n & 255);
   buf[7] = (uint8_t)(n >> 8);
   for (int i = 0; i < n; i++) {
@@ -506,7 +508,7 @@ int adoptOld(ToolsHost& host, const char* bookFile, uint32_t entryKey, uint32_t 
   const uint32_t pk = picKey(entryKey, usize);
   snprintf(from, sizeof(from), "%s/%08lx.inf", od, (unsigned long)pk);
   uint8_t n = 0xFF;
-  if (host.sdReadFile(from, &n, 1) != 1 || n > MAX_PARTS) return -1;
+  if (host.sdReadFile(from, &n, 1) != 1 || n > MAX_PARTS) return -1;  // old art: never DECOR
   stemK(bookFile, entryKey, usize, st, sizeof(st));
   static const char* const kExt[2] = {"g2", "b1"};
   for (int part = 0; part < n; part++)
@@ -527,6 +529,58 @@ void dropOldDir(ToolsHost& host, const char* bookFile) {
     snprintf(od, sizeof(od), "/.toybox/art%d", PIPELINE);
     host.sdRmdir(od);
   }
+}
+
+bool probeSize(epubc::Book& book, const char* entry, int& w, int& h) {
+  w = h = 0;
+  if (!book.blobOpen(entry)) return false;
+  uint8_t b[32];
+  auto rd = [&](uint8_t* p, int n) {
+    int got = 0;
+    while (got < n) {
+      const int r = book.blobRead(p + got, n - got);
+      if (r <= 0) return false;
+      got += r;
+    }
+    return true;
+  };
+  bool ok = false;
+  if (rd(b, 2)) {
+    if (b[0] == 0x89 && b[1] == 'P') {
+      if (rd(b + 2, 22) && b[12] == 'I' && b[13] == 'H' && b[14] == 'D' && b[15] == 'R') {
+        w = (b[16] << 24) | (b[17] << 16) | (b[18] << 8) | b[19];
+        h = (b[20] << 24) | (b[21] << 16) | (b[22] << 8) | b[23];
+        ok = w > 0 && h > 0;
+      }
+    } else if (b[0] == 0xFF && b[1] == 0xD8) {
+      // Markers until a start-of-frame; a few dozen at most before it.
+      for (int guard = 0; guard < 64 && rd(b, 4); guard++) {
+        if (b[0] != 0xFF) break;
+        const uint8_t m = b[1];
+        const int len = (b[2] << 8) | b[3];
+        if (len < 2) break;
+        const bool sof = m >= 0xC0 && m <= 0xCF && m != 0xC4 && m != 0xC8 && m != 0xCC;
+        if (sof) {
+          if (rd(b, 5)) {
+            h = (b[1] << 8) | b[2];
+            w = (b[3] << 8) | b[4];
+            ok = w > 0 && h > 0;
+          }
+          break;
+        }
+        // Skip the segment's body.
+        int left = len - 2;
+        while (left > 0) {
+          const int n = left > (int)sizeof(b) ? (int)sizeof(b) : left;
+          if (!rd(b, n)) break;
+          left -= n;
+        }
+        if (left > 0) break;
+      }
+    }
+  }
+  book.blobClose();
+  return ok;
 }
 
 namespace {
@@ -619,6 +673,10 @@ int prepare(ToolsHost& host, epubc::Book& book, const char* bookFile, const char
   if (transient) *transient = false;
   Src src;
   if (!decodePicture(book, entry, src, transient)) return 0;
+  if (isDecoration(src.w, src.h)) {
+    src.release();
+    return DECOR;  // no page of its own; nothing written to the card
+  }
 
   // Landscape art, turned: worth it when turning makes the picture clearly
   // bigger on the panel (a near-square gains nothing and would only make the

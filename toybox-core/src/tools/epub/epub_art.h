@@ -41,6 +41,19 @@ inline constexpr int PIPELINE = 2;
 // panel is held, at a size where its detail survives.
 inline constexpr int MAX_PARTS = 6;
 
+// A picture too small to be an illustration -- a scene-break ornament, a
+// fleuron, a divider rule -- is not given a page of its own (owner, 24 Nov:
+// a 30x34 ornament filled a page). prepare() answers DECOR for it, and the
+// index remembers that, so the page layout simply steps over it.
+inline constexpr int DECOR = MAX_PARTS + 1;
+inline constexpr int DECOR_MAX_SIDE = 100;  // both sides under this: decoration
+inline bool isDecoration(int w, int h) {
+  if (w < DECOR_MAX_SIDE && h < DECOR_MAX_SIDE) return true;
+  // A rule: thin and long, whatever its length.
+  const int lo = w < h ? w : h, hi = w < h ? h : w;
+  return lo < 40 && hi >= lo * 6;
+}
+
 // Where one illustration's prepared pictures live: the book's own folder
 // (book_store.h), named from the picture's path inside the zip and its
 // uncompressed size, so a book replaced by a different edition does not
@@ -60,7 +73,11 @@ struct Prepared {
 inline constexpr int INDEX_MAX = 256;
 // The records, or -1 when there is no index (or one from another pipeline,
 // whose pictures look different and are prepared again).
-int indexRead(ToolsHost& host, const char* bookFile, Prepared* out, int max);
+// `decorChecked` says the index was written after small decorations were
+// recognised (24 Nov); an older one may hold an ornament as a 1-part picture,
+// which the reader re-checks by size (probeSize) once, without re-preparing.
+int indexRead(ToolsHost& host, const char* bookFile, Prepared* out, int max,
+              bool* decorChecked = nullptr);
 bool indexWrite(ToolsHost& host, const char* bookFile, const Prepared* recs, int n);
 
 // Pictures prepared before the per-book folders, under /.toybox/art<N>/:
@@ -83,6 +100,10 @@ int prepare(ToolsHost& host, epubc::Book& book, const char* bookFile, const char
 // progressive decode, levels, area-weighted fit, unsharp mask) and fitted
 // upright into the 480x800 grey page `g`, letterboxed white. False as for
 // prepare(), with `transient` meaning memory rather than the picture.
+// A picture's pixel size from its header alone (JPEG SOF, any kind; PNG IHDR),
+// reading only as far as the header -- false when it is neither.
+bool probeSize(epubc::Book& book, const char* entry, int& w, int& h);
+
 bool coverGrey(epubc::Book& book, uint8_t* g, bool* transient = nullptr);
 
 // A grey page to one bit at `path` on the card, the way a picture page's .b1

@@ -19,14 +19,17 @@
 #include "reader_menu.h"
 #include "recipe_web.h"
 #include "tools_ui.h"
+#include "unicode.h"
 
 namespace rcpui {
 // the list
-inline constexpr TRect PHONE_BTN{20, 64, 440, 56};
-inline constexpr int LIST_Y0 = 148, LIST_ROW = 84, LIST_PER = 6;
-inline constexpr int DEL_W = 44;
-inline TRect listRect(int i) { return TRect{0, LIST_Y0 + i * LIST_ROW, 480 - DEL_W, LIST_ROW}; }
-inline TRect delRect(int i) { return TRect{480 - DEL_W, LIST_Y0 + i * LIST_ROW, DEL_W, LIST_ROW}; }
+// v2 (kit "Recipes"): rows with a chevron, the phone at the foot; hold a
+// row from the phone to delete it (a card file is the card's business).
+inline constexpr TRect PHONE_BTN{20, 664, 440, 64};
+inline constexpr int LIST_Y0 = 60, LIST_ROW = 84, LIST_PER = 6;
+inline constexpr int DEL_W = 120;
+inline TRect listRect(int i) { return TRect{0, LIST_Y0 + i * LIST_ROW, 480, LIST_ROW}; }
+inline TRect delRect(int i) { return TRect{480 - 16 - DEL_W, LIST_Y0 + i * LIST_ROW + 10, DEL_W, LIST_ROW - 24}; }
 // The recipe page and the cooking page are the two you read with your hands
 // busy, so both take a text size and a rotation. Neither can keep a constant
 // row height or a constant number of rows: bigger type means fewer, and a
@@ -45,9 +48,8 @@ inline TSize stepSize(int i) { return i <= 0 ? TS_LARGE : TS_HUGE; }
 inline constexpr int COOK_FOOT = 96;
 // the phone page (same geometry as the flashcards import, deliberately: one
 // pairing screen to learn)
-inline constexpr int QR_X = 110, QR_Y = 140, QR_SIZE = 260;
-inline constexpr TRect ALT_BTN{40, 588, 400, 60};
-inline constexpr TRect DONE_BTN{40, 672, 400, 72};
+inline constexpr TRect ALT_BTN = importui::ALT_BTN;
+inline constexpr TRect DONE_BTN = importui::DONE_BTN;
 }  // namespace rcpui
 
 class RecipeTool : public ToolApp {
@@ -138,8 +140,8 @@ class RecipeTool : public ToolApp {
     }
     if (_menu) return false;  // the panel is a list of rows, not a pager
     if (_screen == Screen::Cook) {
-      if (b == SideBtn::Up) stepTo(_step - 1);
-      else if (b == SideBtn::Down) stepTo(_step + 1);
+      if (b == SideBtn::Up) back();
+      else if (b == SideBtn::Down) forward();
       else return false;
       return true;
     }
@@ -184,6 +186,18 @@ class RecipeTool : public ToolApp {
 
 #ifdef TOYBOX_HOST
   int hostScreen() const { return (int)_screen; }
+  // Opens a recipe from JSON straight into cooking, at its first step.
+  bool hostCook(const char* json) {
+    if (!rcp::parse(json, strlen(json), _r)) return false;
+    _screen = Screen::Cook;
+    _menu = false;
+    _step = _part = 0;
+    _partAt[0] = 0;
+    return true;
+  }
+  int hostPart() const { return _part; }
+  bool hostMore() const { return _more; }
+  void hostForward() { forward(); }
   // The geometry the guards aim at: computed now, so a guard that wrote the
   // old constants down would tap empty panel the first time the size or the
   // rotation moved.
@@ -238,7 +252,7 @@ class RecipeTool : public ToolApp {
   // The bottom of the list: above the pager line, which is itself above the
   // COOK button when there is one. Measured, because the pager is set in the
   // smallest face and the smallest face has moved once already.
-  int pagerH() { return host().canvas().textHeight(TS_SMALL) + 14; }
+  int pagerH() { return host().canvas().textHeight(TS_MED) + 14; }
   int ingBottom() {
     ToolsCanvas& c = host().canvas();
     const int below = (_r.nSteps > 0 ? 88 + 16 : 8) + pagerH();
@@ -284,15 +298,12 @@ class RecipeTool : public ToolApp {
   void renderList(ToolsCanvas& c) {
     using namespace rcpui;
     host().topBar("RECIPES", true);
-    c.button(PHONE_BTN.x, PHONE_BTN.y, PHONE_BTN.w, PHONE_BTN.h, "GET FROM THE PHONE", false,
-             TS_MED);
     const int total = _nFlash + _nCard;
     if (total == 0) {
-      c.textCentered(c.width() / 2, 330, _cardOk ? "no recipes yet" : "no card found", TS_LARGE,
-                     true);
-      c.textCentered(c.width() / 2, 378, "save a recipe page's .json into", TS_SMALL, true);
-      c.textCentered(c.width() / 2, 404, "/recipes on the card, or use the", TS_SMALL, true);
-      c.textCentered(c.width() / 2, 430, "phone button above", TS_SMALL, true);
+      c.textCentered(c.width() / 2, 250, _cardOk ? "no recipes yet" : "no card found", TS_LARGE, true, true);
+      c.textCentered(c.width() / 2, 310, "add one from your phone,", TS_MED, true);
+      c.textCentered(c.width() / 2, 344, "or save a recipe page's .json", TS_MED, true);
+      c.textCentered(c.width() / 2, 378, "in /recipes on the card", TS_MED, true);
     }
     for (int k = 0; k < LIST_PER; k++) {
       const int idx = _page * LIST_PER + k;
@@ -304,19 +315,41 @@ class RecipeTool : public ToolApp {
       const size_t L = strlen(nm);
       if (!flash && L > 5 && strcasecmp(nm + L - 5, ".json") == 0) nm[L - 5] = 0;
       const int y = LIST_Y0 + k * LIST_ROW;
-      c.textClipped(24, y + 12, c.width() - 48 - (flash ? DEL_W : 0), nm, TS_MED, true);
-      c.text(24, y + 46, flash ? "from the phone" : "on the card", TS_SMALL, true);
-      if (flash) c.textCentered(delRect(k).x + DEL_W / 2, y + 24, "x", TS_MED, true);
-      if (k + 1 < LIST_PER && idx + 1 < total)
-        c.fillRect(16, y + LIST_ROW - 4, c.width() - 32, 1, true);
+      const bool armed = flash && idx == _delArm;
+      if (armed) c.fillRect(8, y + 4, c.width() - 16, LIST_ROW - 8, true);
+      c.textClipped(24, y + 10, c.width() - 72 - (armed ? DEL_W : 0), nm, scriptFloor(nm, TS_MED), !armed, true);
+      c.text(24, y + 44, flash ? "from the phone" : "on the card", TS_MED, !armed);
+      if (armed) {
+        const TRect d = delRect(k);
+        c.fillRect(d.x, d.y, d.w, d.h, false);
+        c.textInBox(d.x, d.y, d.w, d.h, "Delete", TS_MED, true, true);
+      } else {
+        c.text(c.width() - 36, y + 26, ">", TS_MED, true, true);
+      }
+      c.fillRect(16, y + LIST_ROW - 2, c.width() - 32, 1, true);
     }
     if (listPages() > 1) {
-      char buf[24];
-      snprintf(buf, sizeof(buf), "page %d of %d", _page + 1, listPages());
-      c.textCentered(c.width() / 2, 700, buf, TS_SMALL, true);
-      c.textCentered(c.width() / 2, 726, "side buttons turn the page", TS_SMALL, true);
+      char buf[40];
+      snprintf(buf, sizeof(buf), "page %d of %d - side buttons turn", _page + 1, listPages());
+      c.textCentered(c.width() / 2, 584, buf, TS_MED, true);
     }
-    if (_note) c.textCentered(c.width() / 2, 768, _note, TS_SMALL, true);
+    c.button(PHONE_BTN.x, PHONE_BTN.y, PHONE_BTN.w, PHONE_BTN.h, "Add from your phone", false, TS_MED);
+    if (_note) c.textCentered(c.width() / 2, 620, _note, TS_MED, true);
+    else if (_nFlash) c.textCentered(c.width() / 2, 750, "hold one from the phone to delete it", TS_MED, true);
+  }
+
+  void onHold(int x, int y) override {
+    if (_screen != Screen::List || _help) return;
+    for (int k = 0; k < rcpui::LIST_PER; k++) {
+      const int idx = _page * rcpui::LIST_PER + k;
+      if (idx >= _nFlash) break;
+      if (rcpui::listRect(k).hit(x, y)) {
+        _delArm = idx;
+        host().beep(1);
+        host().refresh(false);
+        return;
+      }
+    }
   }
 
   void tapList(int x, int y) {
@@ -328,6 +361,21 @@ class RecipeTool : public ToolApp {
       host().refreshUi();
       return;
     }
+    if (_delArm >= 0) {
+      // A held row offers Delete; any other tap puts it back.
+      const int idx = _delArm, k = idx - _page * LIST_PER;
+      _delArm = -1;
+      if (k >= 0 && k < LIST_PER && delRect(k).hit(x, y)) {
+        rstore::remove(_slots[idx]);
+        reload();
+        if (_page >= listPages()) _page = listPages() - 1;
+        host().beep(2);
+      } else {
+        host().beep(0);
+      }
+      host().refresh(false);
+      return;
+    }
     if (PHONE_BTN.hit(x, y)) {
       openImport();
       return;
@@ -336,15 +384,6 @@ class RecipeTool : public ToolApp {
     for (int k = 0; k < LIST_PER; k++) {
       const int idx = _page * LIST_PER + k;
       if (idx >= total) break;
-      const bool flash = idx < _nFlash;
-      if (flash && delRect(k).hit(x, y)) {
-        rstore::remove(_slots[idx]);
-        reload();
-        if (_page >= listPages()) _page = listPages() - 1;
-        host().beep(2);
-        host().refreshUi();
-        return;
-      }
       if (!listRect(k).hit(x, y)) continue;
       openRecipe(idx);
       return;
@@ -405,13 +444,13 @@ class RecipeTool : public ToolApp {
     rmenu::drawStepper(c, stepperY(0), "Text size", rcpui::sizeName(_size));
     rmenu::drawStepper(c, stepperY(1), "Line spacing", rmenu::leadName(_lead));
     c.fillRect(24, rotY() - 8, c.width() - 48, 1, true);
-    c.text(28, rotY() + 14, "Rotation", TS_SMALL, true);
+    c.text(28, rotY() + 10, "Rotation", TS_MED, true);
     // The turn waits for the panel to close, so the panel is never asked to
     // draw itself sideways.
     for (int k = 0; k < 3; k++) {
       static const char* kLab[3] = {"< LEFT", "PORTRAIT", "RIGHT >"};
       const TRect b = rotRect(k);
-      c.button(b.x, b.y, b.w, b.h, kLab[k], _rot == rmenu::ROT_BTN[k], TS_SMALL);
+      c.button(b.x, b.y, b.w, b.h, kLab[k], _rot == rmenu::ROT_BTN[k], TS_MED);
     }
     // A sample, for the same reason the reader has one: nobody can picture
     // "largest, airy" from the words. Two lines, because two lines is what a
@@ -425,9 +464,8 @@ class RecipeTool : public ToolApp {
       c.textClipped(72, sy, c.width() - 96, "2-2 ⅓ cups all-purpose", its, true);
       c.textClipped(72, sy + lh + air(), c.width() - 96, "flour, divided", its, true);
     }
-    c.textCentered(c.width() / 2, c.height() - 96, "these apply to the recipe and the steps",
-                   TS_SMALL, true);
-    c.textCentered(c.width() / 2, c.height() - 64, "the OK button closes this", TS_SMALL, true);
+    c.textCentered(c.width() / 2, c.height() - 100, "for the recipe and its steps", TS_MED, true);
+    c.textCentered(c.width() / 2, c.height() - 64, "the OK button closes this", TS_MED, true);
   }
 
   TRect rotRect(int k) {
@@ -508,7 +546,7 @@ class RecipeTool : public ToolApp {
     if (!land) {
       char head[48];
       rcp::headline(_r, head, sizeof(head));
-      if (head[0]) c.textCentered(c.width() / 2, 158, head, TS_SMALL, true);
+      if (head[0]) c.textCentered(c.width() / 2, 158, head, TS_MED, true);
     }
     c.textTracked(16, top - 34, "INGREDIENTS", TS_MED, true, false, 1);
     c.fillRect(16, top - 8, c.width() - 32, 1, true);
@@ -546,6 +584,7 @@ class RecipeTool : public ToolApp {
       // One line where a row is one line high, two where it is two. A second
       // line drawn into a landscape row would sit on top of the row below it.
       const int lh = c.textHeight(its);
+      if (k + 1 < per && i + 1 < _r.nIng) c.fillRect(64, y + rowH - 2, c.width() - 84, 1, true);
       if (land) {
         c.textClipped(tx, y + (rowH - lh) / 2, tw, line, its, true);
       } else {
@@ -556,12 +595,12 @@ class RecipeTool : public ToolApp {
     const int pages = ingPages();
     if (pages > 1) {
       char buf[40];
-      snprintf(buf, sizeof(buf), "%d of %d - side buttons page", _ingPage + 1, pages);
-      c.textCentered(c.width() / 2, ingBottom() + 6, buf, TS_SMALL, true);
+      snprintf(buf, sizeof(buf), "%d of %d - side buttons turn", _ingPage + 1, pages);
+      c.textCentered(c.width() / 2, ingBottom() + 6, buf, TS_MED, true);
     }
     if (_r.nSteps > 0) {
       const TRect b = cookBtn();
-      c.button(b.x, b.y, b.w, b.h, "COOK - STEP BY STEP", true, TS_LARGE);
+      c.button(b.x, b.y, b.w, b.h, "Start cooking", true, TS_LARGE);
     }
   }
 
@@ -576,6 +615,8 @@ class RecipeTool : public ToolApp {
     }
     if (_r.nSteps > 0 && cookBtn().hit(x, y)) {
       _step = 0;
+      _part = 0;
+      _partAt[0] = 0;
       _screen = Screen::Cook;
       host().beep(1);
       host().refreshUi();
@@ -596,6 +637,42 @@ class RecipeTool : public ToolApp {
 
   // --- cooking ----------------------------------------------------------------
 
+  // Centred text on up to `maxLines` lines, broken at a space where one fits
+  // (else between characters, for scripts without spaces); the last line
+  // ends in dots when there is still more.
+  static void nameLines(ToolsCanvas& c, int cx, int y, int maxW, const char* s, TSize want, int maxLines) {
+    const TSize sz = scriptFloor(s, want);
+    const int step = c.textHeight(sz) + 8;
+    char buf[160];
+    for (int line = 0; line < maxLines && *s; line++) {
+      if (line == maxLines - 1 || c.textWidth(s, sz, true) <= maxW) {
+        if (c.textWidth(s, sz, true) <= maxW) c.textCentered(cx, y, s, sz, true, true);
+        else c.textClipped(cx - maxW / 2, y, maxW, s, sz, true, true);
+        return;
+      }
+      int n = 0, lastSpace = -1;
+      const char* p = s;
+      while (*p) {
+        const char* q = p;
+        uni::next(q);
+        const int add = (int)(q - p);
+        if (n + add >= (int)sizeof(buf)) break;
+        memcpy(buf + n, p, (size_t)add);
+        buf[n + add] = 0;
+        if (c.textWidth(buf, sz, true) > maxW) break;
+        if (*p == ' ') lastSpace = n;
+        n += add;
+        p = q;
+      }
+      const int cut = (*p && lastSpace > 0) ? lastSpace : n;
+      buf[cut] = 0;
+      c.textCentered(cx, y, buf, sz, true, true);
+      s += cut;
+      while (*s == ' ') s++;
+      y += step;
+    }
+  }
+
   void stepTo(int s) {
     if (s < 0) return;
     if (s >= _r.nSteps) {
@@ -606,34 +683,84 @@ class RecipeTool : public ToolApp {
       return;
     }
     _step = s;
+    _part = 0;
+    _partAt[0] = 0;
     host().beep(0);
     host().refreshUi();
   }
 
+  // A step longer than the screen goes on over more screens (owner, 24 Nov):
+  // forward shows the rest of it before the next step, back the part before.
+  void forward() {
+    if (_more && _part + 1 < MAX_PARTS) {
+      _part++;
+      host().beep(0);
+      host().refreshUi();
+      return;
+    }
+    stepTo(_step + 1);
+  }
+  void back() {
+    if (_part > 0) {
+      _part--;
+      host().beep(0);
+      host().refreshUi();
+      return;
+    }
+    stepTo(_step - 1);
+  }
+
   void renderCook(ToolsCanvas& c) {
     using namespace rcpui;
-    char bar[24];
-    snprintf(bar, sizeof(bar), "STEP %d OF %d", _step + 1, (int)_r.nSteps);
+    char bar[32];
+    if (_part > 0) snprintf(bar, sizeof(bar), "STEP %d OF %d, GOING ON", _step + 1, (int)_r.nSteps);
+    else snprintf(bar, sizeof(bar), "STEP %d OF %d", _step + 1, (int)_r.nSteps);
     host().topBar(bar, false, "RECIPE");
-    // The step itself is the recipe talking; the bar above it is the device.
-    ContentFace cf(host());
-    // The step, large, wrapped over the whole page -- read from arm's length
+    const bool land = landscape();
+    // The recipe's name and a bar of the steps, under the title (kit).
+    int y0 = 48;
+    if (!land) {
+      c.textClipped(24, y0, c.width() - 48, _r.name, scriptFloor(_r.name, TS_MED), true);
+      y0 += 36;
+    }
+    {
+      const int n = _r.nSteps, gap = 4, w = c.width() - 48;
+      const int seg = n <= 24 ? (w - (n - 1) * gap) / n : 0;
+      for (int i = 0; seg && i < n; i++) {
+        const int sx = 24 + i * (seg + gap);
+        if (i <= _step) c.fillRect(sx, y0, seg, 8, true);
+        else c.drawRect(sx, y0, seg, 8, 1, true);
+      }
+      y0 += 24;
+    }
+    // The step number, big, then the step itself -- read from arm's length
     // with wet hands, which is why its smallest size is the recipe page's
-    // largest. The line step follows the face rather than a written-down 46:
-    // at the biggest size that number overlapped every line with the next.
+    // largest. The line step follows the face.
+    char num[8];
+    snprintf(num, sizeof(num), "%d", _step + 1);
+    if (_part == 0) c.text(24, y0, num, TS_HUGE, true, true);
+    ContentFace cf(host());
     {
       const TSize sts = rcpui::stepSize(_size);
       const int lineH = c.textHeight(sts) + air();
       char line[96] = "", cand[96 + 4];
-      int y = landscape() ? 88 : 130;
-      const int w = c.width() - 56;
+      int y = y0 + 6;
+      const int x0 = 24 + c.textWidth(num, TS_HUGE, true) + 18;
+      const int w = c.width() - x0 - 24;
       const int floorY = c.height() - COOK_FOOT - lineH;
-      for (const char* p = _r.steps[_step]; *p && y < floorY;) {
+      const char* const step = _r.steps[_step];
+      const char* p = step + _partAt[_part];
+      _more = false;
+      for (; *p;) {
+        if (y >= floorY) {  // the screen is full: the rest is the next part
+          _more = true;
+          break;
+        }
         const char* e = p;
         while (*e && *e != ' ') e++;
         snprintf(cand, sizeof(cand), "%s%s%.*s", line, line[0] ? " " : "", (int)(e - p), p);
         if (line[0] && c.textWidth(cand, sts) > w) {
-          c.text(28, y, line, sts, true);
+          c.text(x0, y, line, sts, true);
           y += lineH;
           line[0] = 0;
           continue;  // the word that did not fit starts the next line
@@ -642,14 +769,31 @@ class RecipeTool : public ToolApp {
         p = e;
         while (*p == ' ') p++;
       }
-      if (line[0] && y < floorY) c.text(28, y, line, sts, true);
+      // Where this part stopped is where the next one starts: the line in
+      // hand was not drawn, so it goes back to the start of its first word.
+      if (_more) {
+        const char* back = p - strlen(line);
+        if (back < step + _partAt[_part]) back = step + _partAt[_part];
+        if (_part + 1 < MAX_PARTS) _partAt[_part + 1] = (uint16_t)(back - step);
+      } else if (line[0]) {
+        c.text(x0, y, line, sts, true);
+      }
     }
-    // The footer: two tap zones a knuckle can hit.
-    const int fy = c.height() - COOK_FOOT;
-    c.fillRect(16, fy, c.width() - 32, 1, true);
-    if (_step > 0) c.text(28, fy + 34, "< back", TS_MED, true);
-    const char* fwd = _step + 1 < _r.nSteps ? "next >" : "done";
-    c.text(c.width() - 28 - c.textWidth(fwd, TS_MED, true), fy + 34, fwd, TS_MED, true, true);
+    // The foot: two buttons a knuckle can hit, the way on dark.
+    const int fy = c.height() - COOK_FOOT + 14;
+    const int bw = (c.width() - 48 - 12) / 2;
+    char lab[24];
+    if (_part > 0) {
+      snprintf(lab, sizeof(lab), "< Back");
+      c.button(24, fy, bw, 68, lab, false, TS_MED);
+    } else if (_step > 0) {
+      snprintf(lab, sizeof(lab), "< Step %d", _step);
+      c.button(24, fy, bw, 68, lab, false, TS_MED);
+    }
+    if (_more) snprintf(lab, sizeof(lab), "Go on >");
+    else if (_step + 1 < _r.nSteps) snprintf(lab, sizeof(lab), "Step %d >", _step + 2);
+    else snprintf(lab, sizeof(lab), "Done");
+    c.button(24 + bw + 12, fy, bw, 68, lab, true, TS_MED);
   }
 
   void tapCook(int x, int y) {
@@ -660,10 +804,10 @@ class RecipeTool : public ToolApp {
       return;
     }
     if (y < host().canvas().height() - rcpui::COOK_FOOT) return;
-    if (x < host().canvas().width() / 3)
-      stepTo(_step - 1);
+    if (x < host().canvas().width() / 2 && (_step > 0 || _part > 0))
+      back();
     else
-      stepTo(_step + 1);
+      forward();
   }
 
   // --- the phone --------------------------------------------------------------
@@ -672,7 +816,19 @@ class RecipeTool : public ToolApp {
     _screen = Screen::Import;
     _gotShown = false;
     _altQr = false;
-    _netOk = _net.start();
+    // The home Wi-Fi first when one is saved (owner): the phone keeps its own
+    // network. The Sticky's own access point is the backup.
+    _netNote = nullptr;
+    _netOk = false;
+    if (homenet::haveWifi(prefs())) {
+      homenet::wifiName(prefs(), _joinName, sizeof(_joinName));
+      _joining = true;
+      host().refresh(false);  // "Joining ..." while the radio looks
+      _netOk = _net.startHome(prefs(), "/recipes");
+      _joining = false;
+      if (!_netOk) _netNote = "the home Wi-Fi did not answer";
+    }
+    if (!_netOk) _netOk = _net.start();
     host().beep(_netOk ? 1 : 2);
     host().refresh(true);  // a clean panel under a QR a camera has to read
   }
@@ -688,44 +844,44 @@ class RecipeTool : public ToolApp {
 
   void renderImport(ToolsCanvas& c) {
     using namespace rcpui;
-    host().topBar("FROM THE PHONE", false, "RECIPES");
+    host().topBar("ADD A RECIPE", false, "RECIPES");
+    if (_joining) return importui::drawJoining(c, _joinName);
     if (!_netOk) {
-      c.textCentered(c.width() / 2, 300, "could not start wifi", TS_LARGE, true, true);
-      c.button(DONE_BTN.x, DONE_BTN.y, DONE_BTN.w, DONE_BTN.h, "BACK", true, TS_LARGE);
+      c.textCentered(c.width() / 2, 300, "could not start Wi-Fi", TS_LARGE, true, true);
+      c.button(DONE_BTN.x, DONE_BTN.y, DONE_BTN.w, DONE_BTN.h, "Back", true, TS_LARGE);
       return;
     }
     if (_net.received()) {
-      c.textCentered(c.width() / 2, 260, "KEPT", TS_HUGE, true, true);
-      c.textCentered(c.width() / 2, 340, _net.recipeName(), TS_LARGE, true, true);
+      c.textCentered(c.width() / 2, 240, "Kept", TS_HUGE, true, true);
+      // The whole name, on up to two lines (owner: a long one ran off both
+      // sides).
+      nameLines(c, c.width() / 2, 300, c.width() - 48, _net.recipeName(), TS_LARGE, 2);
       decor::ornament(c, c.width() / 2, 400, 300, true);
-      c.textCentered(c.width() / 2, 440, "send another from the same page,", TS_MED, true);
-      c.textCentered(c.width() / 2, 468, "or tap DONE", TS_MED, true);
-      c.button(DONE_BTN.x, DONE_BTN.y, DONE_BTN.w, DONE_BTN.h, "DONE", true, TS_LARGE);
+      c.textCentered(c.width() / 2, 436, "send another from the same page,", TS_MED, true);
+      c.textCentered(c.width() / 2, 470, "or tap Done", TS_MED, true);
+      c.button(DONE_BTN.x, DONE_BTN.y, DONE_BTN.w, DONE_BTN.h, "Done", true, TS_LARGE);
       return;
     }
-    char buf[64];
-    if (_altQr) {
-      c.textCentered(c.width() / 2, 100, "if it did not open by itself", TS_MED, true);
-      fqr::draw(c, QR_X, QR_Y, QR_SIZE, _net.url());
-      c.textCentered(c.width() / 2, 440, "Open this in your browser", TS_MED, true, true);
-      c.textCentered(c.width() / 2, 478, _net.url(), TS_MED, true);
-      c.button(ALT_BTN.x, ALT_BTN.y, ALT_BTN.w, ALT_BTN.h, "BACK TO WIFI", false, TS_MED);
-    } else {
-      c.textCentered(c.width() / 2, 100, "the page opens by itself", TS_MED, true);
-      const String wifi = _net.wifiPayload();
-      fqr::draw(c, QR_X, QR_Y, QR_SIZE, wifi.c_str());
-      c.textCentered(c.width() / 2, 440, "Scan with your phone camera", TS_MED, true, true);
-      snprintf(buf, sizeof(buf), "%s   key %s", _net.ssid(), _net.password());
-      c.textCentered(c.width() / 2, 478, buf, TS_MED, true);
-      c.button(ALT_BTN.x, ALT_BTN.y, ALT_BTN.w, ALT_BTN.h, "PAGE DIDN'T OPEN?", false, TS_MED);
-    }
-    c.button(DONE_BTN.x, DONE_BTN.y, DONE_BTN.w, DONE_BTN.h, "DONE", false, TS_LARGE);
+    static const importui::Words W{"Scan to paste a recipe",
+                                   {"Paste the recipe page's text", "Check the ingredients and steps",
+                                    "It is kept here at once"}};
+    importui::draw(c, _net, _altQr, W, _netNote);
   }
 
   void tapImport(int x, int y) {
     using namespace rcpui;
     if (DONE_BTN.hit(x, y) || host().isBackTap(x, y)) return closeImport();
     if (!_net.received() && _netOk && ALT_BTN.hit(x, y)) {
+    if (_net.home()) {
+      // Backup: the Sticky's own access point.
+      _net.stop();
+      _netNote = nullptr;
+      _altQr = false;
+      _netOk = _net.start();
+      host().beep(_netOk ? 1 : 2);
+      host().refresh(true);
+      return;
+    }
       _altQr = !_altQr;
       host().beep(0);
       host().refresh(true);  // QR pages stay clean
@@ -744,10 +900,10 @@ class RecipeTool : public ToolApp {
                                   ".json file in /recipes on",
                                   "the SD card...",
                                   "",
-                                  "...or GET FROM THE PHONE and",
-                                  "paste the page over WiFi.",
+                                  "...or Add from your phone",
+                                  "and paste the page there.",
                                   "",
-                                  "Tick, then COOK, step by step.",
+                                  "Tick, then Start cooking.",
                               },
                               false,
                               11};
@@ -766,11 +922,20 @@ class RecipeTool : public ToolApp {
   int _slots[rstore::SLOTS];
   int _nFlash = 0;
   int _page = 0;
+  int _delArm = -1;  // the row a hold offered to delete
+  bool _joining = false;
+  const char* _netNote = nullptr;
+  char _joinName[34] = {};
+
 
   rcp::Recipe _r{};
   bool _tick[rcp::MAX_ING] = {};
   int _ingPage = 0;
   int _step = 0;
+  static constexpr int MAX_PARTS = 8;
+  int _part = 0;
+  uint16_t _partAt[MAX_PARTS] = {};
+  bool _more = false;  // set by the render: this part did not reach the end
 
   rweb::RecipeServer _net;
   bool _netOk = false, _altQr = false, _gotShown = false;

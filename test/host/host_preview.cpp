@@ -82,6 +82,7 @@ static FakeOta g_fakeOta;
 #include "nonogram.h"
 #include "tools/note_store.h"
 #include "tools/tool_dice.h"
+#include "tools/tool_coin.h"
 #include "tools/bookmarks.h"
 #include "tools/book_store.h"
 #include "tools/epub/epub_art.h"
@@ -1209,6 +1210,191 @@ static void checkThaiLines() {
   sdcard::hostClearBooks();
   printf("thai lines ok (%d sizes, %d lines, words whole, no mark starts a line, no space added)\n", sizes,
          lines);
+}
+
+// --- small decorations are not pages ------------------------------------------
+// Owner, 24 Nov: a 30x34 scene-break ornament filled a page of its own. The
+// fixture has the book's two ornaments (30x34, 58x57), a thin divider rule
+// and one real illustration; only the illustration may become a page, and
+// every word of the chapter still has to be there.
+static void checkDecorations() {
+  std::vector<uint8_t> book;
+  {
+    const char* tries[] = {"fixtures/decor.epub", "test/host/fixtures/decor.epub"};
+    for (const char* t : tries) {
+      FILE* f = fopen(t, "rb");
+      if (!f) continue;
+      fseek(f, 0, SEEK_END);
+      book.resize((size_t)ftell(f));
+      fseek(f, 0, SEEK_SET);
+      if (fread(book.data(), 1, book.size(), f) != book.size()) book.clear();
+      fclose(f);
+      break;
+    }
+  }
+  if (book.empty()) {
+    printf("DECOR FAIL: fixtures/decor.epub not found (run from test/host)\n");
+    abort();
+  }
+  if (!epubart::isDecoration(30, 34) || !epubart::isDecoration(58, 57) || !epubart::isDecoration(600, 20) ||
+      epubart::isDecoration(1800, 651) || epubart::isDecoration(600, 900) || epubart::isDecoration(120, 90)) {
+    printf("DECOR FAIL: the size rule is wrong\n");
+    abort();
+  }
+  const char* path = "/books/decor.epub";
+  sdcard::hostPutCardFile(path, book.data(), (int)book.size());
+  sdcard::hostAddBook(path);
+  toybox.goHub();
+  toybox.hostHub().goHome();
+  toybox.onTap(80 + 2 * 160, hubui::DOCK_Y + 30);  // STUDY
+  toybox.onTap(hubui::cellCx(0), hubui::cellTop(0) + hubui::ROW_STEP / 2);
+  if (!toybox.hostInApp() || strcmp(toybox.activeTitle(), "EPUB") != 0) {
+    printf("DECOR FAIL: the EPUB app did not open\n");
+    abort();
+  }
+  auto* et = static_cast<EpubTool*>(toybox.hostActive());
+  int idx = -1;
+  for (int i = 0; i < et->hostBookCount(); i++) {
+    char f[160];
+    et->hostFile(i, f, sizeof(f));
+    if (strstr(f, "decor.epub")) idx = i;
+  }
+  if (idx < 0) {
+    printf("DECOR FAIL: the planted book is not on the shelf\n");
+    abort();
+  }
+  et->hostOpen(idx);
+  if (et->hostArtParts("OEBPS/Images/pic.jpg") != 1) {
+    printf("DECOR FAIL: the illustration was not prepared (%d)\n", et->hostArtParts("OEBPS/Images/pic.jpg"));
+    abort();
+  }
+  et->hostGoto(0, 0);
+  int picPages = 0, decorPages = 0, words = 0;
+  for (int page = 0; page < 40; page++) {
+    const char* im = et->hostPageImage();
+    if (im && im[0]) {
+      if (strstr(im, "pic.jpg")) picPages++;
+      else decorPages++;
+    }
+    for (int i = 0; i < et->hostLineCount(); i++)
+      for (const char* p = et->hostLine(i); *p; p++) words += *p == ' ';
+    if (page == 1) {
+      g_dumpEnabled = true;
+      setScreen("tool_epub_decor_gap");
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
+    }
+    const int sp = et->hostSpine(), pg = et->hostPage();
+    toybox.onButton(SideBtn::Down);
+    if (et->hostSpine() != sp || et->hostPage() == pg) break;
+  }
+  if (decorPages || picPages != 1) {
+    printf("DECOR FAIL: %d ornament pages, %d illustration pages (want 0 and 1)\n", decorPages, picPages);
+    abort();
+  }
+  // A book opened before this change: its index has the ornaments as 1-part
+  // pictures and no revision. Opening it again must learn they are
+  // decorations from their headers alone, not prepare everything again.
+  {
+    epubart::Prepared recs[16];
+    bool checked = false;
+    const int n = epubart::indexRead(stickyHost, path, recs, 16, &checked);
+    int dec = 0;
+    for (int i = 0; i < n; i++)
+      if (recs[i].parts == epubart::DECOR) {
+        recs[i].parts = 1;
+        dec++;
+      }
+    if (n != 4 || !checked || dec != 3) {
+      printf("DECOR FAIL: index n=%d checked=%d decorations=%d (want 4, 1, 3)\n", n, checked, dec);
+      abort();
+    }
+    epubart::indexWrite(stickyHost, path, recs, n);
+    char ip[bstore::PATH_CAP];
+    bstore::file(path, "art.idx", ip, sizeof(ip));
+    uint8_t raw[8 + 16 * 9];
+    const int got = stickyHost.sdReadFile(ip, raw, sizeof(raw));
+    raw[5] = 0;  // the old revision
+    stickyHost.sdWriteFileAtomic(ip, raw, got);
+    toybox.goHub();
+    toybox.hostHub().goHome();
+    toybox.onTap(80 + 2 * 160, hubui::DOCK_Y + 30);
+    toybox.onTap(hubui::cellCx(0), hubui::cellTop(0) + hubui::ROW_STEP / 2);
+    et = static_cast<EpubTool*>(toybox.hostActive());
+    for (int i = 0; i < et->hostBookCount(); i++) {
+      char f[160];
+      et->hostFile(i, f, sizeof(f));
+      if (strstr(f, "decor.epub")) et->hostOpen(i);
+    }
+    const int nn = epubart::indexRead(stickyHost, path, recs, 16, &checked);
+    dec = 0;
+    for (int i = 0; i < nn; i++) dec += recs[i].parts == epubart::DECOR;
+    if (!checked || dec != 3 || et->hostArtParts("OEBPS/Images/pic.jpg") != 1) {
+      printf("DECOR FAIL: an old index was not upgraded (checked=%d decorations=%d)\n", checked, dec);
+      abort();
+    }
+  }
+  toybox.goHub();
+  sdcard::hostClearBooks();
+  // Optional, never committed: a real book named by TOYBOX_DECOR_BOOK, read
+  // through its first chapters, reporting every picture page it made.
+  if (const char* real = getenv("TOYBOX_DECOR_BOOK")) {
+    FILE* f = fopen(real, "rb");
+    std::vector<uint8_t> rb;
+    if (f) {
+      fseek(f, 0, SEEK_END);
+      rb.resize((size_t)ftell(f));
+      fseek(f, 0, SEEK_SET);
+      if (fread(rb.data(), 1, rb.size(), f) != rb.size()) rb.clear();
+      fclose(f);
+    }
+    sdcard::hostPutCardFile("/books/real.epub", rb.data(), (int)rb.size());
+    sdcard::hostAddBook("/books/real.epub");
+    toybox.goHub();
+    toybox.hostHub().goHome();
+    toybox.onTap(80 + 2 * 160, hubui::DOCK_Y + 30);
+    toybox.onTap(hubui::cellCx(0), hubui::cellTop(0) + hubui::ROW_STEP / 2);
+    auto* rt = static_cast<EpubTool*>(toybox.hostActive());
+    for (int i = 0; i < rt->hostBookCount(); i++) {
+      char fn[160];
+      rt->hostFile(i, fn, sizeof(fn));
+      if (strstr(fn, "real.epub")) rt->hostOpen(i);
+    }
+    for (int sp = 0; sp < 12; sp++) {
+      rt->hostGoto(sp, 0);
+      for (int page = 0; page < 80; page++) {
+        const char* im = rt->hostPageImage();
+        if (im && im[0]) printf("  real: spine %d page %d picture %s\n", sp, rt->hostPage(), im);
+        const int s0 = rt->hostSpine(), pg = rt->hostPage();
+        toybox.onButton(SideBtn::Down);
+        if (rt->hostSpine() != s0 || rt->hostPage() == pg) break;
+      }
+    }
+    toybox.goHub();
+    {
+      struct RIO : epubc::IO {
+        int read(uint32_t pos, void* dst, uint32_t n) override {
+          return stickyHost.epubRead(pos, dst, n);
+        }
+        uint32_t size() override { return stickyHost.epubSize(); }
+      } rio;
+      const bool fo = stickyHost.epubOpen("/books/real.epub");
+      epubc::Book bk;
+      const bool bo = fo && bk.open(rio);
+      if (!bo) printf("  real: probe open failed (file %d, book %s)\n", fo, bk.error());
+      if (bo) {
+        const char* names[] = {"OEBPS/Images/Art_sborn.jpg", "OEBPS/Images/Art_sborn1.jpg",
+                               "OEBPS/Images/Art_ch1.jpg", "OEBPS/Images/Art_insert1.jpg"};
+        for (const char* nm : names) {
+          int w = 0, h = 0;
+          const bool ok = epubart::probeSize(bk, nm, w, h);
+          printf("  real: probe %s %d %dx%d decor=%d\n", nm, ok, w, h, epubart::isDecoration(w, h));
+        }
+      }
+    }
+    sdcard::hostClearBooks();
+  }
+  printf("decorations ok (ornaments and the rule stepped over, the illustration kept)\n");
 }
 
 // --- Thai marks in a card face ------------------------------------------------
@@ -6948,6 +7134,52 @@ int main() {
     }
     toybox.onTap(50, 26);  // back to the list
 
+    // A step longer than the screen goes on over a second one, and none of
+    // it is lost (owner: a 400-character step stopped mid-word).
+    {
+      std::string longStep;
+      while (longStep.size() < 900) longStep += "While stirring, slowly pour in half the stock and keep going. ";
+      std::string json = std::string("{\"@type\":\"Recipe\",\"name\":\"Country Pork Meatballs with Onion Gravy and a Very Long Name\",\"recipeInstructions\":[\"Short first.\",\"") +
+                         longStep + "END.\",\"Last.\"]}";
+      g_dumpEnabled = false;
+      if (!rt->hostCook(json.c_str()) || (int)strlen(rt->hostRecipe().steps[1]) < 880) {
+        printf("RECIPE FAIL: a 900-character step was not kept whole (%d)\n", (int)strlen(rt->hostRecipe().steps[1]));
+        abort();
+      }
+      rt->hostForward();  // to step 2
+      g_dumpEnabled = true;
+      setScreen("tool_recipe_long_step");
+      stickyHost.refresh(true);
+      if (!rt->hostMore()) {
+        printf("RECIPE FAIL: a long step did not say it goes on\n");
+        abort();
+      }
+      int parts = 1;
+      g_dumpEnabled = false;
+      while (rt->hostMore() && parts < 8) {
+        rt->hostForward();
+        stickyHost.refresh(true);
+        parts++;
+      }
+      g_dumpEnabled = true;
+      setScreen("tool_recipe_long_step_end");
+      stickyHost.refresh(true);
+      if (rt->hostStep() != 1 || rt->hostMore()) {
+        printf("RECIPE FAIL: long step parts %d, step %d\n", parts, rt->hostStep());
+        abort();
+      }
+      g_dumpEnabled = false;
+      rt->hostForward();
+      if (rt->hostStep() != 2) {
+        printf("RECIPE FAIL: after the long step's last part, forward did not reach step 3\n");
+        abort();
+      }
+      toybox.onTap(50, 26);  // cooking -> the recipe
+      toybox.onTap(50, 26);  // -> the list again, as the tests below expect
+      g_dumpEnabled = true;
+      printf("recipe long step ok (%d screens)\n", parts);
+    }
+
     // The phone route, through the same store the real page posts to.
     toybox.onTap(240, rcpui::PHONE_BTN.y + 20);
     if (rt->hostScreen() != 3) {
@@ -7129,6 +7361,7 @@ int main() {
     }
 
     toybox.onTap(50, 26);  // back to the list
+    toybox.onHold(240, rcpui::LIST_Y0 + 30);                          // hold it: Delete
     toybox.onTap(rcpui::delRect(0).x + 20, rcpui::delRect(0).y + 20);  // delete it
     if (rt->hostCount() != 2) {  // the two on the card, which no x can remove
       printf("RECIPE FAIL: delete left %d recipes\n", rt->hostCount());
@@ -7605,25 +7838,49 @@ int main() {
   g_dumpEnabled = false;
   toybox.open(false, 0);
     g_dumpEnabled = true;
-  toybox.onTap(240, 410 + 42);  // FLIP
+  tapRect(coinui::FLIP1);  // Flip
 
   setScreen("tool_coin_multi");
-  toybox.onTap(250 + 85, 506 + 28);  // FLIP x10
+  tapRect(coinui::FLIP10);  // x10
+  {
+    // The coin repeats the last kind of flip; the third box opens History.
+    CoinTool* coin = static_cast<CoinTool*>(toybox.hostActive());
+    g_dumpEnabled = false;
+    const int before = coin->hostFlips();
+    tapRect(coinui::COIN);
+    if (coin->hostBatch() != 10 || coin->hostFlips() != before + 10) {
+      printf("COIN FAIL: tapping the coin after x10 flipped %d\n", coin->hostFlips() - before);
+      abort();
+    }
+    tapRect(coinui::FLIP1);
+    tapRect(coinui::FLIP5);
+    tapRect(coinui::HIST_BOX);
+    if (!coin->hostHistory()) {
+      printf("COIN FAIL: the history box did not open History\n");
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_coin_history");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    toybox.onTap(0, 0);  // back to the coin
+    g_dumpEnabled = true;
+  }
 
   setScreen("tool_dice");
   g_dumpEnabled = false;
   toybox.open(false, 1);
-    quietTap(40 + 5 * 80, 50 + 44);  // D20, last of the six wireframes
-  quietTap(380 + 20, 166 + 20);          // count +
-  quietTap(380 + 20, 166 + 20);
-  quietTap(380 + 20, 212 + 20);  // mod +
-  quietTap(380 + 20, 212 + 20);
+  tapRect(diceui::typeRect(5));  // D20
+  tapRect(diceui::CNT_UP);
+  tapRect(diceui::CNT_UP);
+  tapRect(diceui::MOD_UP);
+  tapRect(diceui::MOD_UP);
   g_dumpEnabled = true;
   toybox.onTap(240, 262 + 38);  // ROLL
 
   setScreen("tool_dice_d6");
   g_dumpEnabled = false;
-  quietTap(40 + 1 * 80, 50 + 44);  // D6
+  tapRect(diceui::typeRect(1));  // D6
   g_dumpEnabled = true;
   toybox.onTap(240, 262 + 38);
 
@@ -7633,6 +7890,77 @@ int main() {
     quietTap(20 + 112 + 52, 372 + 26);  // 25 min preset (row 1, col 1)
   g_dumpEnabled = true;
   tapRect(timerui::CD_START);
+
+  // The time typed on a keypad, and kept as a preset (owner, 24 Nov).
+  {
+    g_dumpEnabled = false;
+    auto* tt = static_cast<TimerTool*>(toybox.hostActive());
+    tapRect(timerui::CD_START);  // pause, so the time can be typed
+    auto key = [&](int k) { tapRect(numpad::key(k)); };
+    tapRect(timerui::TIME_TAP);
+    key(1);  // 2
+    key(2);  // 3
+    key(numpad::ZERO);
+    g_dumpEnabled = true;
+    setScreen("tool_timer_keypad");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    key(numpad::DONE);
+    if (tt->hostTyping() || tt->hostSetSec() != 150) {
+      printf("TIMER FAIL: 2 3 0 set %d s (want 150)\n", tt->hostSetSec());
+      abort();
+    }
+    // 9 0 is a minute and a half; 3 alone is too short and stays on the keypad.
+    tapRect(timerui::TIME_TAP);
+    key(2);  // 3
+    key(numpad::DONE);
+    if (!tt->hostTyping() || tt->hostSetSec() != 150) {
+      printf("TIMER FAIL: 3 s was taken\n");
+      abort();
+    }
+    key(numpad::CLEAR);
+    key(8);  // 9
+    key(numpad::ZERO);
+    key(numpad::DONE);
+    if (tt->hostSetSec() != 90) {
+      printf("TIMER FAIL: 9 0 set %d s (want 90)\n", tt->hostSetSec());
+      abort();
+    }
+    // Eight presets: Save waits until one is held and removed.
+    tapRect(timerui::SAVE_BTN);
+    if (tt->hostPresets() != 8) {
+      printf("TIMER FAIL: a ninth preset was saved\n");
+      abort();
+    }
+    {
+      const TRect r = timerui::presetRect(7);  // 60 min
+      toybox.onHold(r.x + r.w / 2, r.y + r.h / 2);
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_timer_remove");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    tapRect(timerui::presetRect(7));
+    tapRect(timerui::SAVE_BTN);
+    if (tt->hostPresets() != 8 || tt->hostPreset(1) != 90 || tt->hostPreset(7) != 30 * 60) {
+      printf("TIMER FAIL: presets after remove+save: %d, [1]=%d [7]=%d\n", tt->hostPresets(), tt->hostPreset(1),
+             tt->hostPreset(7));
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_timer_saved");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    toybox.goHub();
+    toybox.open(false, 2);
+    tt = static_cast<TimerTool*>(toybox.hostActive());
+    if (tt->hostPresets() != 8 || tt->hostPreset(1) != 90 || tt->hostSetSec() != 90) {
+      printf("TIMER FAIL: presets not kept across a restart\n");
+      abort();
+    }
+    g_dumpEnabled = true;
+    printf("timer keypad ok (typed 2:30 and 1:30, 3 s refused, preset saved in order and kept)\n");
+  }
 
   // The other half of the same tool. It had never been rendered here, so the
   // lap list below the clock had never been looked at at all.
@@ -7652,7 +7980,34 @@ int main() {
   g_dumpEnabled = false;
   toybox.open(false, 3);
     g_dumpEnabled = true;
-  toybox.onTap(240 + 100, 560 + 31);  // DRAW
+  // From typed on the keypad: 5, then To 50; No repeats on.
+  {
+    stickyHost.refresh(true);  // the fresh screen, presets and all
+    g_dumpEnabled = false;
+    RandomTool* rnd = static_cast<RandomTool*>(toybox.hostActive());
+    tapRect(randui::FROM_BOX);
+    tapRect(numpad::key(4));  // 5
+    tapRect(numpad::key(numpad::DONE));
+    tapRect(randui::TO_BOX);
+    tapRect(numpad::key(4));  // 5
+    tapRect(numpad::key(numpad::ZERO));
+    g_dumpEnabled = true;
+    setScreen("tool_random_keypad");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    tapRect(numpad::key(numpad::DONE));
+    tapRect(randui::UNIQUE);
+    if (rnd->hostMin() != 5 || rnd->hostMax() != 50 || !rnd->hostUnique()) {
+      printf("RANDOM FAIL: typed 5 to 50 with no repeats, got %d to %d (%d)\n", rnd->hostMin(), rnd->hostMax(),
+             rnd->hostUnique());
+      abort();
+    }
+    tapRect(randui::DRAW_NUM);
+    tapRect(randui::DRAW_NUM);
+    g_dumpEnabled = true;
+    setScreen("tool_random_norepeat");
+  }
+  tapRect(randui::DRAW_NUM);  // Draw
 
   setScreen("tool_card");
   g_dumpEnabled = false;
@@ -7669,42 +8024,93 @@ int main() {
   setScreen("tool_picker_kb");
   g_dumpEnabled = false;
   toybox.open(false, 4);
-    auto typeItem = [&](const char* s) {
-    quietTap(20 + 107, 452 + 25);  // ADD ITEM
-    for (const char* p = s; *p; p++) {
-      const char* r1 = "QWERTYUIOP";
-      const char* r2 = "ASDFGHJKL";
-      const char* r3 = "ZXCVBNM";
-      int kx = -1, ky = -1;
-      if (*p == ' ') { quietTap(160 + 80, 540 + 28); continue; }
-      for (int i = 0; r1[i]; i++)
-        if (r1[i] == *p) kx = 2 + i * 48 + 22, ky = 340 + 28;
-      for (int i = 0; r2[i]; i++)
-        if (r2[i] == *p) kx = 26 + i * 48 + 22, ky = 404 + 28;
-      for (int i = 0; r3[i]; i++)
-        if (r3[i] == *p) kx = 74 + i * 48 + 22, ky = 468 + 28;
-      if (kx >= 0) quietTap(kx, ky);
+  PickerTool* pk = static_cast<PickerTool*>(toybox.hostActive());
+  tapRect(pickui::LIST_BTN);
+  // Types with the shared keyboard: finds each letter's key, shifting first
+  // for capitals (the keyboard starts shifted on an empty line).
+  auto oskType = [&](const char* text, osk::State& st) {
+    for (const char* p = text; *p; p++) {
+      bool hit = false;
+      for (int attempt = 0; attempt < 2 && !hit; attempt++) {
+        for (int row = 0; row < osk::ROWS && !hit; row++)
+          for (int col = 0;; col++) {
+            TRect r;
+            int code;
+            if (!osk::keyAt(st, row, col, r, code)) break;
+            if (code == (unsigned char)*p || (*p == ' ' && code == osk::K_SPACE)) {
+              toybox.onTap(r.x + r.w / 2, r.y + r.h / 2);
+              if (*p != ' ') st.shift = false;
+              hit = true;
+              break;
+            }
+          }
+        if (!hit) {
+          TRect r;
+          int code;
+          osk::keyAt(st, 2, 0, r, code);  // shift
+          toybox.onTap(r.x + r.w / 2, r.y + r.h / 2);
+          st.shift = !st.shift;
+        }
+      }
+      if (!hit) {
+        printf("PICKER FAIL: no key for '%c'\n", *p);
+        abort();
+      }
     }
   };
-  const int PK_DEL_X = 330 + 65, PK_DEL_Y = 540 + 28;
-  const int PK_OK_X = 20 + 220, PK_OK_Y = 540 + 72 + 32;
-  typeItem("ALICE");
+  auto oskDone = [&](const osk::State& st) {
+    for (int row = 0; row < osk::ROWS; row++)
+      for (int col = 0;; col++) {
+        TRect r;
+        int code;
+        if (!osk::keyAt(st, row, col, r, code)) break;
+        if (code == osk::K_DONE) {
+          toybox.onTap(r.x + r.w / 2, r.y + r.h / 2);
+          return;
+        }
+      }
+  };
+  const char* names[3] = {"Alice", "Bob", "Charlie"};
+  for (int i = 0; i < 3; i++) {
+    tapRect(pickui::ADD_BTN);
+    osk::State st;
+    st.shift = true;
+    oskType(names[i], st);
+    if (i == 2) {
+      g_dumpEnabled = true;
+      stickyHost.refresh(true);  // the keyboard, mid-word
+      g_dumpEnabled = false;
+    }
+    oskDone(st);
+  }
+  if (pk->hostCount() != 3) {
+    printf("PICKER FAIL: typed 3 choices, list has %d\n", pk->hostCount());
+    abort();
+  }
   g_dumpEnabled = true;
-  toybox.onTap(2 + 22, 340 + 28);  // one more key, to capture the keyboard
+  setScreen("tool_picker_list");
+  stickyHost.refresh(true);
   g_dumpEnabled = false;
-  quietTap(PK_DEL_X, PK_DEL_Y);  // DEL the stray key
-  quietTap(PK_OK_X, PK_OK_Y);    // OK
-  typeItem("BOB");
-  quietTap(PK_OK_X, PK_OK_Y);
-  typeItem("CHARLIE");
-  quietTap(PK_OK_X, PK_OK_Y);
+  toybox.onTap(0, 0);  // back to the reel
+  tapRect(pickui::SPIN);
+  for (int i = 0; i < 20 && pk->hostRolling(); i++) {
+    g_millis += 200;
+    toybox.tick();
+  }
+  if (pk->hostRolling() || pk->hostPicked() < 0) {
+    printf("PICKER FAIL: the reel did not stop on a pick\n");
+    abort();
+  }
   g_dumpEnabled = true;
   setScreen("tool_picker");
-  toybox.onTap(20 + 220, 676 + 35);  // PICK ONE
+  stickyHost.refresh(true);
 
   // The picker can also take its list from a phone.
+  g_dumpEnabled = false;
+  tapRect(pickui::LIST_BTN);
+  g_dumpEnabled = true;
   setScreen("tool_picker_phone");
-  toybox.onTap(245 + 107, 444 + 23);  // FROM PHONE
+  tapRect(pickui::PHONE_BTN);
 
   setScreen("tool_picker_phone_done");
   g_dumpEnabled = false;
@@ -7715,6 +8121,45 @@ int main() {
 
   setScreen("tool_picker_after");
   tapRect(pickui::DONE_BTN);  // DONE -> back to the list
+
+  // With a home Wi-Fi saved the phone page moves onto it (toybox.local),
+  // the Sticky's own access point one tap away as the backup; and when the
+  // router does not answer, the backup is what comes up.
+  {
+    g_dumpEnabled = false;
+    homenet::saveWifi(stickyHost.prefs(), "Home-2.4", "secret123");
+    homenet::g_hostNet = homenet::Result::Ok;
+    tapRect(pickui::PHONE_BTN);
+    if (!pk->hostNetHome()) {
+      printf("PICKER FAIL: a saved home Wi-Fi did not carry the phone page\n");
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_picker_home");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    tapRect(pickui::ALT_BTN);  // the backup
+    if (pk->hostNetHome() || !pk->hostNetUp()) {
+      printf("PICKER FAIL: 'Use the Sticky's own Wi-Fi' did not switch to the access point\n");
+      abort();
+    }
+    tapRect(pickui::DONE_BTN);
+    homenet::g_hostNet = homenet::Result::NotFound;  // the router is away
+    tapRect(pickui::PHONE_BTN);
+    if (pk->hostNetHome() || !pk->hostNetUp()) {
+      printf("PICKER FAIL: no fallback to the access point when home did not answer\n");
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_picker_home_fallback");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    tapRect(pickui::DONE_BTN);
+    homenet::forgetWifi(stickyHost.prefs());
+    homenet::g_hostNet = homenet::Result::Ok;
+    g_dumpEnabled = true;
+    printf("home wifi ok (phone page on toybox.local, own access point as backup)\n");
+  }
 
   {
     // What arrives from the phone has to arrive whole. This used to fold every
@@ -7747,6 +8192,149 @@ int main() {
       q = r;
     }
     printf("picker text ok (UTF-8 survives, the cut falls between characters)\n");
+  }
+
+  // Named lists, 50 choices a list in pages, and a no-repeats round per list
+  // (owner, 24 Nov: "B with named lists").
+  {
+    g_dumpEnabled = false;
+    toybox.goHub();
+    toybox.open(false, 4);
+    pk = static_cast<PickerTool*>(toybox.hostActive());
+    if (pk->hostLists() != 1 || strcmp(pk->hostListName(0), "My list") != 0) {
+      printf("PICKER FAIL: %d lists, the first \"%s\" (want 1, My list)\n", pk->hostLists(), pk->hostListName(0));
+      abort();
+    }
+    auto spin = [&] {
+      tapRect(pickui::SPIN);
+      for (int i = 0; i < 20 && pk->hostRolling(); i++) {
+        g_millis += 200;
+        toybox.tick();
+      }
+    };
+    std::string many;
+    for (int i = 1; i <= 55; i++) many += "Choice " + std::to_string(i) + "\n";
+    pk->hostPhoneSave(many.c_str(), -2, "");
+    if (pk->hostCount() != 50) {
+      printf("PICKER FAIL: 55 sent, %d kept (want 50)\n", pk->hostCount());
+      abort();
+    }
+    tapRect(pickui::LIST_BTN);
+    g_dumpEnabled = true;
+    setScreen("tool_picker_page1");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    toybox.onButton(SideBtn::Down);
+    toybox.onSwipe(-200, 0);
+    if (pk->hostPage() != 2) {
+      printf("PICKER FAIL: DOWN and a swipe left went to page %d (want 3)\n", pk->hostPage() + 1);
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_picker_page3");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    tapRect(pickui::PG_PREV);
+    if (pk->hostPage() != 1) {
+      printf("PICKER FAIL: < went to page %d (want 2)\n", pk->hostPage() + 1);
+      abort();
+    }
+    // The name in the bar opens the lists; a new one comes onto the screen.
+    tapRect(pickui::BAR_TAP);
+    tapRect(pickui::NEW_BTN);
+    pk->hostTypeName("Lunch");
+    oskDone(osk::State{});
+    if (pk->hostLists() != 2 || pk->hostCur() != 1 || pk->hostCount() != 0 ||
+        strcmp(pk->hostListName(1), "Lunch") != 0) {
+      printf("PICKER FAIL: new list: %d lists, on %d, %d choices\n", pk->hostLists(), pk->hostCur(), pk->hostCount());
+      abort();
+    }
+    pk->hostPhoneSave("Pizza\nSushi\nTacos\n", -2, "");
+    toybox.onTap(0, 0);  // the reel
+    g_dumpEnabled = true;
+    setScreen("tool_picker_lunch");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    // A round is its list's own.
+    tapRect(pickui::NOREP_BTN);
+    spin();
+    spin();
+    if (pk->hostRemaining() != 1) {
+      printf("PICKER FAIL: two no-repeat spins left %d of 3\n", pk->hostRemaining());
+      abort();
+    }
+    tapRect(pickui::BAR_TAP);
+    tapRect(pickui::lrowRect(0));
+    spin();
+    if (pk->hostCur() != 0 || pk->hostRemaining() != 49) {
+      printf("PICKER FAIL: the first list's round: on %d, %d left (want 0, 49)\n", pk->hostCur(), pk->hostRemaining());
+      abort();
+    }
+    tapRect(pickui::BAR_TAP);
+    tapRect(pickui::lrowRect(1));
+    toybox.goHub();
+    toybox.open(false, 4);
+    pk = static_cast<PickerTool*>(toybox.hostActive());
+    if (pk->hostCur() != 1 || pk->hostRemaining() != 1) {
+      printf("PICKER FAIL: back on Lunch after a restart: on %d, %d left (want 1, 1)\n", pk->hostCur(),
+             pk->hostRemaining());
+      abort();
+    }
+    tapRect(pickui::KEEP_BTN);  // back to any of them
+    // Hold a list: Rename and Delete.
+    tapRect(pickui::BAR_TAP);
+    {
+      const TRect r = pickui::lrowRect(1);
+      toybox.onHold(r.x + 40, r.y + r.h / 2);
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_picker_lists");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    tapRect(pickui::lrenRect(1));
+    pk->hostTypeName("Dinner");
+    oskDone(osk::State{});
+    if (strcmp(pk->hostListName(1), "Dinner") != 0 || pk->hostCount() != 3) {
+      printf("PICKER FAIL: rename gave \"%s\" with %d choices\n", pk->hostListName(1), pk->hostCount());
+      abort();
+    }
+    {
+      const TRect r = pickui::lrowRect(1);
+      toybox.onHold(r.x + 40, r.y + r.h / 2);
+    }
+    tapRect(pickui::ldelRect(1));
+    if (pk->hostLists() != 1 || pk->hostCur() != 0 || pk->hostCount() != 50) {
+      printf("PICKER FAIL: delete left %d lists, on %d with %d\n", pk->hostLists(), pk->hostCur(), pk->hostCount());
+      abort();
+    }
+    // A new list straight from the phone, by name.
+    const auto sv = pk->hostPhoneSave("Chess\nGo\n", -1, "Games");
+    const String js = pk->hostListsJson();
+    if (sv.list != 1 || sv.n != 2 || pk->hostCur() != 1 || strstr(js.c_str(), "\"name\":\"Games\",\"n\":2") == nullptr) {
+      printf("PICKER FAIL: phone new list: went to %d with %d; lists %s\n", sv.list, sv.n, js.c_str());
+      abort();
+    }
+    toybox.onTap(0, 0);
+    g_dumpEnabled = true;
+    setScreen("tool_picker_lists_after");
+    tapRect(pickui::BAR_TAP);
+    g_dumpEnabled = false;
+    toybox.goHub();
+    // The list from before named lists becomes "My list".
+    tfs::remove("/picker/0.txt");
+    tfs::remove("/picker/1.txt");
+    stickyHost.prefs().putString("pk_items", "Old one\nOld two\n");
+    toybox.open(false, 4);
+    pk = static_cast<PickerTool*>(toybox.hostActive());
+    if (pk->hostLists() != 1 || pk->hostCount() != 2 || strcmp(pk->hostListName(0), "My list") != 0 ||
+        stickyHost.prefs().isKey("pk_items")) {
+      printf("PICKER FAIL: migration: %d lists, %d choices, \"%s\"\n", pk->hostLists(), pk->hostCount(),
+             pk->hostListName(0));
+      abort();
+    }
+    toybox.goHub();
+    g_dumpEnabled = true;
+    printf("picker lists ok (50 a list in pages, named lists, a round per list, old list migrated)\n");
   }
 
   // --- flashcards --------------------------------------------------------
@@ -7830,6 +8418,15 @@ int main() {
     g_dumpEnabled = true;
     printf("side buttons ok (grade a card, and nothing anywhere else)\n");
   }
+  {
+    // Through the deck: one put back, the rest known, to the session's end.
+    g_dumpEnabled = false;
+    tapRect(fcui::AGAIN_BTN);
+    for (int i = 0; i < 12; i++) tapRect(fcui::GOOD_BTN);
+    g_dumpEnabled = true;
+    setScreen("tool_flash_session_done");
+    stickyHost.refresh(true);
+  }
 
   setScreen("tool_flash_import");
   g_dumpEnabled = false;
@@ -7858,17 +8455,109 @@ int main() {
 
   // Deleting the last deck is the only way to see an empty list: the sample
   // deck is recreated on enter(), not on every paint. It had never been drawn.
-  setScreen("tool_flash_empty");
   g_dumpEnabled = false;
   tapRect(fcui::DONE_BTN);
   {
     using namespace fcard;
     DeckInfo d[MAX_DECKS];
     for (int n = listDecks(d, MAX_DECKS); n > 0; n = listDecks(d, MAX_DECKS))
+    {
+      const TRect r = fcui::rowRect(0, n);
+      toybox.onHold(r.x + 40, r.y + r.h / 2);  // hold a deck: it offers Delete
+      if (n == 1) {
+        g_dumpEnabled = true;
+        setScreen("tool_flash_delete");
+        stickyHost.refresh(true);
+        g_dumpEnabled = false;
+      }
       tapRect(fcui::delRect(0, n));
+    }
   }
   g_dumpEnabled = true;
+  setScreen("tool_flash_empty");
   stickyHost.refresh(true);
+
+  // 300 cards, and the longest faces whole (owner, 24 Nov): a 128-character
+  // front and a 256-character back, in English and in Thai, never cut.
+  {
+    std::string body;
+    const char* enF = "Which process in the leaves of green plants turns sunlight, water and carbon dioxide into sugar and oxygen for the whole plant?";
+    const char* enB = "Photosynthesis. In the chloroplasts, chlorophyll captures light energy, which splits water and releases oxygen; that energy is then used in the Calvin cycle to fix carbon dioxide into glucose, which the plant stores as starch or burns for growth and repair";
+    const char* thF = "กระบวนการใดในใบของพืชสีเขียวที่เปลี่ยนแสงแดด น้ำ และคาร์บอนไดออกไซด์ ให้เป็นน้ำตาลและออกซิเจนสำหรับพืชทั้งต้นได้อย่างไรกันนะครับ";
+    const char* thB = "การสังเคราะห์ด้วยแสง ในคลอโรพลาสต์ คลอโรฟิลล์จะดูดกลืนพลังงานแสง ซึ่งใช้แยกน้ำและปล่อยออกซิเจนออกมา จากนั้นพลังงานนั้นถูกใช้ในวัฏจักรคัลวินเพื่อตรึงคาร์บอนไดออกไซด์ให้เป็นกลูโคส ซึ่งพืชเก็บไว้เป็นแป้งหรือใช้เพื่อการเจริญเติบโตและซ่อมแซมเซลล์ต่างๆ ภายในต้น";
+    auto chars = [](const char* t) {
+      int n = 0;
+      for (const char* p = t; *p;) {
+        uni::next(p);
+        n++;
+      }
+      return n;
+    };
+    printf("  flash: en %d/%d chars, th %d/%d chars\n", chars(enF), chars(enB), chars(thF), chars(thB));
+    for (int i = 0; i < 300; i++) {
+      body += (i % 2) ? thF : enF;
+      body += '\t';
+      body += (i % 2) ? thB : enB;
+      body += '\n';
+    }
+    char saved[fcard::NAME_LEN + 1];
+    const int got = fcard::importDeck("long cards", body.c_str(), saved);
+    fcard::Card* deck = (fcard::Card*)malloc(sizeof(fcard::Card) * fcard::MAX_CARDS);
+    const int n = fcard::loadDeck("long cards", deck, fcard::MAX_CARDS);
+    const bool whole = n == 300 && strcmp(deck[0].front, enF) == 0 && strcmp(deck[0].back, enB) == 0 &&
+                       strcmp(deck[1].front, thF) == 0 && strcmp(deck[1].back, thB) == 0;
+    free(deck);
+    if (got != 300 || !whole) {
+      printf("FLASH LONG FAIL: imported %d, loaded %d, whole %d\n", got, n, whole);
+      abort();
+    }
+    g_dumpEnabled = false;
+    toybox.goHub();
+    toybox.open(false, 5);
+    auto* ft = static_cast<FlashTool*>(toybox.hostActive());
+    if (ft->hostHelp()) tapRect(help::OK_BTN);
+    fcard::DeckInfo d[fcard::MAX_DECKS];
+    const int nd = fcard::listDecks(d, fcard::MAX_DECKS);
+    int row = -1;
+    for (int i = 0; i < nd; i++)
+      if (strcmp(d[i].name, "long cards") == 0) row = i;
+    tapRect(fcui::rowRect(row, nd));
+    if (ft->hostCardCount() != 300) {
+      printf("FLASH LONG FAIL: the deck opened with %d cards\n", ft->hostCardCount());
+      abort();
+    }
+    bool seenEn = false, seenTh = false;
+    for (int k = 0; k < 8; k++) {
+      const bool th = strcmp(ft->hostFace(false), thF) == 0;
+      const bool dump = th ? !seenTh : !seenEn;
+      g_dumpEnabled = dump;
+      if (dump) setScreen(th ? "tool_flash_long_th_front" : "tool_flash_long_en_front");
+      stickyHost.refresh(true);
+      if (!FlashTool::hostFitAll() || FlashTool::hostFitSize() < TS_MED) {
+        printf("FLASH LONG FAIL: %s front cut or too small (size %d)\n", th ? "Thai" : "English",
+               FlashTool::hostFitSize());
+        abort();
+      }
+      if (dump) setScreen(th ? "tool_flash_long_th_back" : "tool_flash_long_en_back");
+      toybox.onTap(240, 300);  // flip
+      if (!FlashTool::hostFitAll() || FlashTool::hostFitSize() < TS_MED) {
+        printf("FLASH LONG FAIL: %s back cut or too small (size %d)\n", th ? "Thai" : "English",
+               FlashTool::hostFitSize());
+        abort();
+      }
+      (th ? seenTh : seenEn) = true;
+      g_dumpEnabled = false;
+      tapRect(fcui::GOOD_BTN);
+    }
+    if (!seenEn || !seenTh) {
+      printf("FLASH LONG FAIL: did not meet both kinds of card\n");
+      abort();
+    }
+    toybox.goHub();
+    fcard::deleteDeck("long cards");
+    g_dumpEnabled = true;
+    printf("flash long ok (300 cards, 128/256-character faces whole at TS_MED or larger)\n");
+  }
 
   // --- battleship (solo) --------------------------------------------------
   setScreen("help_ships");
@@ -8818,11 +9507,11 @@ int main() {
         const int n = listDecks(d, MAX_DECKS);
         for (int row = 0; row < n; row++) {
           tapRect(fcui::rowRect(row, n));
-          if (strcmp(toybox.activeTitle(), "hanzi") == 0) break;
+          if (strcmp(static_cast<FlashTool*>(toybox.hostActive())->hostDeckName(), "hanzi") == 0) break;
           toybox.onTap(0, 0);  // back to the deck list
         }
       }
-      if (strcmp(toybox.activeTitle(), "hanzi") != 0) {
+      if (strcmp(static_cast<FlashTool*>(toybox.hostActive())->hostDeckName(), "hanzi") != 0) {
         printf("INTL FAIL: could not open the CJK deck\n");
         abort();
       }
@@ -9318,6 +10007,7 @@ int main() {
   }
 
   checkThaiLines();
+  checkDecorations();
   screenPaintCheck();  // the last screen has nothing after it to catch it
 
   if (gfx::g_overflowCount) {

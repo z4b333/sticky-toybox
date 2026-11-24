@@ -20,9 +20,17 @@ inline void path(int slot, char* out, int cap) { snprintf(out, (size_t)cap, "/rc
 
 // One shared scratch Recipe for name-peeking and validation: 10 KB is too
 // much to give every caller its own, and nothing here is re-entrant.
+// ~26 KB since a step may run to 1000 characters: PSRAM, made on first use,
+// rather than internal RAM for the life of the firmware.
 inline rcp::Recipe& scratch() {
-  static rcp::Recipe r;
-  return r;
+  // ps_malloc falls back to internal RAM by itself; 8 MB of PSRAM does not
+  // run out of 26 KB at the first recipe.
+  static rcp::Recipe* r = nullptr;
+  if (!r) {
+    r = (rcp::Recipe*)ps_malloc(sizeof(rcp::Recipe));
+    memset((void*)r, 0, sizeof(rcp::Recipe));
+  }
+  return *r;
 }
 
 // The stored JSON, parsed. False for an empty or unreadable slot.

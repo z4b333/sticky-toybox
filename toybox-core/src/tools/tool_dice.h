@@ -8,19 +8,18 @@
 #include "tools_draw.h"
 
 namespace diceui {
-// Portrait: controls at the top where the thumb is, results filling the page.
-// The six die types sit in one row as wireframe solids rather than two rows of
-// text -- a shape is recognised before a label is read, and one row costs less
-// height than the two it replaces.
-inline constexpr int TYPE_W = 76, TYPE_H = 88, TYPE_GAP = 4;
+// v2 (kit "Dice"): the kind as a row of chips, how many and what to add,
+// the dice large, the total under them, earlier rolls as small chips.
+inline constexpr int TYPE_W = 70, TYPE_H = 52, TYPE_GAP = 4;
 inline constexpr int TYPE_X0 = (480 - (6 * TYPE_W + 5 * TYPE_GAP)) / 2;
-inline constexpr int TYPE_Y0 = 50;
-inline constexpr int STEP = 40;
-inline constexpr TRect ROLL{60, 262, 360, 76};
-inline constexpr TRect CNT_DN{240, 166, STEP, STEP};
-inline constexpr TRect CNT_UP{380, 166, STEP, STEP};
-inline constexpr TRect MOD_DN{240, 212, STEP, STEP};
-inline constexpr TRect MOD_UP{380, 212, STEP, STEP};
+inline constexpr int TYPE_Y0 = 52;
+inline constexpr int STEP = 52;
+inline constexpr TRect CNT_DN{240, 120, STEP, STEP};
+inline constexpr TRect CNT_UP{408, 120, STEP, STEP};
+inline constexpr TRect MOD_DN{240, 180, STEP, STEP};
+inline constexpr TRect MOD_UP{408, 180, STEP, STEP};
+inline constexpr TRect BAND{20, 248, 440, 290};
+inline constexpr TRect ROLL{20, 724, 440, 64};
 
 inline constexpr int SIDES[6] = {4, 6, 8, 10, 12, 20};
 
@@ -49,85 +48,75 @@ class DiceTool : public ToolApp {
     using namespace diceui;
     host().topBar(title());
     const int sides = SIDES[_typeIdx];
+    char buf[24];
 
-    // --- dice faces --------------------------------------------------------
-    // The faces get whatever room is left between the formula and the total,
-    // so one die is drawn large and six are drawn small rather than one die
-    // sitting in the corner of a grid built for six. The band never moves, so
-    // the total below it never moves either.
-    constexpr int BAND_Y = 372, BAND_H = 248, GAP = 10, MAX_CELL = 200;
+    // --- the kind of die ---------------------------------------------------
+    for (int i = 0; i < 6; i++) {
+      const TRect r = typeRect(i);
+      const bool on = i == _typeIdx;
+      c.drawRect(r.x, r.y, r.w, r.h, on ? 3 : 1, true);
+      snprintf(buf, sizeof(buf), "D%d", SIDES[i]);
+      c.textInBox(r.x, r.y, r.w, r.h, buf, TS_MED, true, on);
+    }
+    // --- how many, and what to add ----------------------------------------
+    c.text(20, CNT_DN.y + 12, "How many", TS_MED, true);
+    c.stepper(CNT_DN.x, CNT_DN.y, STEP, "-", _count > 1);
+    snprintf(buf, sizeof(buf), "%d", _count);
+    c.textInBox(CNT_DN.x + STEP, CNT_DN.y, CNT_UP.x - CNT_DN.x - STEP, STEP, buf, TS_LARGE, true, true);
+    c.stepper(CNT_UP.x, CNT_UP.y, STEP, "+", _count < 6);
+    c.text(20, MOD_DN.y + 12, "Add", TS_MED, true);
+    c.stepper(MOD_DN.x, MOD_DN.y, STEP, "-", _mod > -10);
+    snprintf(buf, sizeof(buf), "%+d", _mod);
+    c.textInBox(MOD_DN.x + STEP, MOD_DN.y, MOD_UP.x - MOD_DN.x - STEP, STEP, buf, TS_LARGE, true, true);
+    c.stepper(MOD_UP.x, MOD_UP.y, STEP, "+", _mod < 10);
+
+    // --- the dice ----------------------------------------------------------
+    // One die drawn large, six drawn small; the band never moves, so the
+    // total below it never moves either.
+    constexpr int GAP = 12, MAX_CELL = 180;
     const int n = _rolled > 0 ? _rolled : _count;
     const int cols = n < 3 ? n : 3;
     const int rows = (n + 2) / 3;
-    int cell = (440 - (cols - 1) * GAP) / cols;
-    const int fits = (BAND_H - (rows - 1) * GAP) / rows;
+    int cell = (BAND.w - (cols - 1) * GAP) / cols;
+    const int fits = (BAND.h - (rows - 1) * GAP) / rows;
     if (fits < cell) cell = fits;
     if (cell > MAX_CELL) cell = MAX_CELL;
-    const int gw = cols * cell + (cols - 1) * GAP;
-    const int gh = rows * cell + (rows - 1) * GAP;
-    const int GX = (480 - gw) / 2;
-    const int GY = BAND_Y + (BAND_H - gh) / 2;
-
+    const int gw = cols * cell + (cols - 1) * GAP, gh = rows * cell + (rows - 1) * GAP;
+    const int GX = BAND.x + (BAND.w - gw) / 2, GY = BAND.y + (BAND.h - gh) / 2;
     if (_rolled == 0) {
-      c.drawRect(GX, GY, gw, gh, 1, true);
-      c.textInBox(GX, GY, gw, gh, "tap ROLL", TS_LARGE, true);
+      for (int i = 0; i < n; i++) {
+        const int x = GX + (i % cols) * (cell + GAP), y = GY + (i / cols) * (cell + GAP);
+        tdraw::roundRect(c, x, y, cell, cell, cell / 6, 1, true);
+      }
+      c.textCentered(c.width() / 2, BAND.y + BAND.h / 2 - 14, "tap to roll", TS_LARGE, true);
     }
     for (int i = 0; i < _rolled; i++) {
-      const int x = GX + (i % cols) * (cell + GAP);
-      const int y = GY + (i / cols) * (cell + GAP);
+      const int x = GX + (i % cols) * (cell + GAP), y = GY + (i / cols) * (cell + GAP);
       drawDie(c, x, y, cell, _values[i], sides);
     }
 
-    // --- total -------------------------------------------------------------
+    // --- total, and what came before --------------------------------------
     if (_rolled > 0) {
-      c.text(24, 630, "TOTAL", TS_MED, true);
-      char buf[12];
+      c.textTrackedCentered(c.width() / 2, 548, "TOTAL", TS_MED, true, true, 3);
       snprintf(buf, sizeof(buf), "%d", _total);
-      tdraw::seg7Text(c, 24, 658, 92, buf, true);
+      c.textCentered(c.width() / 2, 578, buf, TS_HUGE, true, true);
     }
-
-    // --- roll history ------------------------------------------------------
-    if (_histN > 0) {
-      c.text(250, 630, "RECENT", TS_MED, true);
-      for (int i = 0; i < _histN && i < 5; i++)
-        c.text(250, 660 + i * 24, _hist[i], TS_MED, true);
-    }
-
-    // --- panel: die type ---------------------------------------------------
-    // Drawn by hand rather than through c.button(): the selected key inverts,
-    // and the wireframe has to invert with it or it would vanish into the fill.
-    char lbl[8];
-    for (int i = 0; i < 6; i++) {
-      const TRect r = typeRect(i);
-      const bool on = (i == _typeIdx);
-      if (on)
-        tdraw::fillRound(c, r.x, r.y, r.w, r.h, 8, true);
-      else
-        tdraw::roundRect(c, r.x, r.y, r.w, r.h, 8, 2, true);
-      dshape::draw(c, i, r.x + r.w / 2, r.y + 30, 22, 2, !on);
-      snprintf(lbl, sizeof(lbl), "D%d", SIDES[i]);
-      c.textCentered(r.x + r.w / 2, r.y + 60, lbl, TS_MED, !on);
-    }
-
-    // --- panel: count & modifier ------------------------------------------
-    char buf[16];
-    c.text(24, 176, "DICE", TS_MED, true);
-    c.stepper(CNT_DN.x, CNT_DN.y, STEP, "-", _count > 1);
-    snprintf(buf, sizeof(buf), "%d", _count);
-    c.textInBox(CNT_DN.x + STEP, CNT_DN.y, CNT_UP.x - CNT_DN.x - STEP, STEP, buf, TS_LARGE,
-                true, true);
-    c.stepper(CNT_UP.x, CNT_UP.y, STEP, "+", _count < 6);
-
-    c.text(24, 222, "MOD", TS_MED, true);
-    c.stepper(MOD_DN.x, MOD_DN.y, STEP, "-", _mod > -10);
-    snprintf(buf, sizeof(buf), "%+d", _mod);
-    c.textInBox(MOD_DN.x + STEP, MOD_DN.y, MOD_UP.x - MOD_DN.x - STEP, STEP, buf, TS_LARGE,
-                true, true);
-    c.stepper(MOD_UP.x, MOD_UP.y, STEP, "+", _mod < 10);
-
-    c.button(ROLL.x, ROLL.y, ROLL.w, ROLL.h, "ROLL", true, TS_HUGE);
     formula(buf, sizeof(buf));
-    c.textCentered(c.width() / 2, 348, buf, TS_LARGE, true, true);
+    c.textCentered(c.width() / 2, 632, buf, TS_MED, true);
+    if (_histN > 1) {
+      int x = 20;
+      c.text(x, 676, "earlier", TS_MED, true);
+      x += c.textWidth("earlier", TS_MED) + 12;
+      for (int i = 1; i < _histN && x < 440; i++) {
+        snprintf(buf, sizeof(buf), "%d", _histTotal[i]);
+        const int w = c.textWidth(buf, TS_MED) + 18;
+        if (x + w > 460) break;
+        c.drawRect(x, 672, w, 36, 1, true);
+        c.textInBox(x, 672, w, 36, buf, TS_MED, true);
+        x += w + 8;
+      }
+    }
+    c.button(ROLL.x, ROLL.y, ROLL.w, ROLL.h, "Roll", true, TS_LARGE);
   }
 
   void onTap(int x, int y) override {
@@ -151,7 +140,14 @@ class DiceTool : public ToolApp {
     if (CNT_UP.hit(x, y) && _count < 6) return setCount(_count + 1);
     if (MOD_DN.hit(x, y) && _mod > -10) return setMod(_mod - 1);
     if (MOD_UP.hit(x, y) && _mod < 10) return setMod(_mod + 1);
-    if (ROLL.hit(x, y)) return roll();
+    if (ROLL.hit(x, y) || BAND.hit(x, y)) return roll();
+  }
+
+  // DOWN rolls, as the kit's foot says.
+  bool onButton(SideBtn b) override {
+    if (b != SideBtn::Down) return false;
+    roll();
+    return true;
   }
 
  private:
@@ -190,6 +186,8 @@ class DiceTool : public ToolApp {
     char f[16];
     formula(f, sizeof(f));
     snprintf(_hist[0], sizeof(_hist[0]), "%s = %d", f, _total);
+    for (int i = kHist - 1; i > 0; i--) _histTotal[i] = _histTotal[i - 1];
+    _histTotal[0] = _total;
     if (_histN < kHist) _histN++;
 
     bool crit = false;
@@ -228,5 +226,6 @@ class DiceTool : public ToolApp {
   int _values[6] = {};
   int _rolled = 0, _total = 0;
   char _hist[kHist][20] = {};
+  int _histTotal[kHist] = {};
   int _histN = 0;
 };

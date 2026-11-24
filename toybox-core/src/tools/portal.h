@@ -10,6 +10,7 @@
 // open at a time, so a single instance is enough. The AP lives only while that
 // screen is open and the password is regenerated every session.
 #pragma once
+#include "lan_web.h"
 #include <Arduino.h>
 
 #ifndef TOYBOX_HOST
@@ -32,7 +33,21 @@ class Portal {
     _running = true;
     return true;
   }
-  void end() { _running = false; _fakeClient = false; }
+  bool beginHome(Preferences& p, const char* path) {
+    if (!lanweb::join(p)) return false;
+    _running = _home = true;
+    snprintf(_homeUrl, sizeof(_homeUrl), "http://toybox.local%s", path);
+    lanweb::ipUrl(path, _ipUrl, sizeof(_ipUrl));
+    return true;
+  }
+  bool home() const { return _home; }
+  const char* homeUrl() const { return _homeUrl; }
+  const char* ipUrl() const { return _ipUrl; }
+  void end() {
+    if (_home) lanweb::leave();
+    _running = _home = false;
+    _fakeClient = false;
+  }
   void loop() {}
   bool running() const { return _running; }
   bool hasClient() const { return _fakeClient; }
@@ -47,6 +62,8 @@ class Portal {
  private:
   bool _running = false, _fakeClient = false;
   char _ssid[20] = {}, _pass[12] = {};
+  bool _home = false;
+  char _homeUrl[40] = {}, _ipUrl[40] = {};
 };
 
 #else
@@ -89,7 +106,27 @@ class Portal {
     return true;
   }
 
+  // On the home Wi-Fi: the same server at toybox.local<path>, no DNS, no AP.
+  bool beginHome(Preferences& p, const char* path) {
+    if (_running) end();
+    if (!lanweb::join(p)) return false;
+    _server.begin();
+    _home = _running = true;
+    snprintf(_homeUrl, sizeof(_homeUrl), "http://toybox.local%s", path);
+    lanweb::ipUrl(path, _ipUrl, sizeof(_ipUrl));
+    return true;
+  }
+  bool home() const { return _home; }
+  const char* homeUrl() const { return _homeUrl; }
+  const char* ipUrl() const { return _ipUrl; }
+
   void end() {
+    if (_home) {
+      _server.stop();
+      lanweb::leave();
+      _home = _running = false;
+      return;
+    }
     if (!_running) {
       // Nothing ran, but a DNS server may still have been built by a begin()
       // that failed later; it has to go while the stack is still up.
@@ -109,9 +146,13 @@ class Portal {
   // Has anything joined the access point? The pairing screens ask this so they
   // can move on by themselves rather than asking the person whether something
   // happened that the device can see for itself.
-  bool hasClient() const { return _running && WiFi.softAPgetStationNum() > 0; }
+  bool hasClient() const { return _running && !_home && WiFi.softAPgetStationNum() > 0; }
 
   void loop() {
+    if (_running && _home) {
+      _server.handleClient();
+      return;
+    }
     if (!_running || !_dns) return;
     _dns->processNextRequest();
     _server.handleClient();
@@ -149,6 +190,8 @@ class Portal {
   bool _running = false;
   char _ssid[20] = {}, _pass[12] = {};
   char _url[24] = "http://192.168.4.1";
+  bool _home = false;
+  char _homeUrl[40] = {}, _ipUrl[40] = {};
 };
 
 #endif
