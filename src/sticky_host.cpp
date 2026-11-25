@@ -53,6 +53,19 @@ void StickyHost::setSoundLevel(int lv) {
   ::prefs.putBool("sound", lv > 0);
 }
 
+// C6 battery care. Read once, then cached: main.cpp asks every few seconds.
+namespace {
+int8_t g_care = -1;  // -1 = not read yet
+}
+bool StickyHost::batteryCare() const {
+  if (g_care < 0) g_care = ::prefs.getBool("bat_care", true) ? 1 : 0;
+  return g_care == 1;
+}
+void StickyHost::setBatteryCare(bool on) {
+  g_care = on ? 1 : 0;
+  ::prefs.putBool("bat_care", on);
+}
+
 int StickyHost::sdWallpapers(char names[][SD_NAME_LEN], int max) {
   static_assert(SD_NAME_LEN == 40, "sdcard::listTbi fills 40-byte names");
   return sdcard::listTbi(names, max);

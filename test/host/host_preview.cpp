@@ -2235,6 +2235,28 @@ int main() {
     printf("SETTINGS FAIL: the switch did not mute\n");
     abort();
   }
+  // C6: battery care is on out of the box, and its switch flips it both ways.
+  if (!stickyHost.batteryCare()) {
+    printf("SETTINGS FAIL: battery care should default on\n");
+    abort();
+  }
+  tapAct(setui::ACT_CARE);
+  if (stickyHost.batteryCare()) {
+    printf("SETTINGS FAIL: battery care switch did not turn off\n");
+    abort();
+  }
+  {
+    const bool wasDump = g_dumpEnabled;
+    g_dumpEnabled = true;
+    setScreen("settings_device");
+    tapAct(setui::ACT_CARE);
+    stickyHost.refresh(true);
+    g_dumpEnabled = wasDump;
+  }
+  if (!stickyHost.batteryCare()) {
+    printf("SETTINGS FAIL: battery care switch did not turn back on\n");
+    abort();
+  }
 
   // --- v2 setup steps ---------------------------------------------------------
   // From Settings > DEVICE > Setup: four steps, each drawn; sleep and beep

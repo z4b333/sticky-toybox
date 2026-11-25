@@ -165,6 +165,11 @@ inline void draw(ToolsCanvas& c, int act, int cx, int cy, bool dark) {
     case ACT_FONT:  // a letter, which is the only honest icon for a typeface
       c.textInBox(cx - 14, cy - 15, 28, 30, "Aa", TS_MED, dark, true);
       break;
+    case ACT_CARE:  // a battery, most of the way full
+      c.drawRect(cx - 14, cy - 8, 26, 16, 2, dark);
+      c.fillRect(cx + 12, cy - 4, 3, 8, dark);
+      c.fillRect(cx - 10, cy - 4, 15, 8, dark);
+      break;
     case ACT_UPDATE:  // an arrow coming down into a tray
       c.drawLine(cx, cy - 14, cx, cy + 4, 2, dark);
       c.drawLine(cx - 7, cy - 3, cx, cy + 4, 2, dark);
@@ -1074,15 +1079,16 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
       {ACT_VOLUME, "Volume", "", false},
       {ACT_SETUP, "Setup", "run again", true},
       {ACT_UPDATE, "Update & about", upV, true},
+      {ACT_CARE, "Battery care 80%", "", false},
   };
   (void)soundV;
   for (const Row& r : rows) {
     if (TAB_OF[r.act] != _tab) continue;
     const TRect a = actionRect(r.act);
     c.fillRect(a.x, a.y + a.h + (BTN_STEP - a.h) / 2, a.w, 1, true);  // the row's hairline
-    if (r.act == ACT_SOUND) {
+    if (r.act == ACT_SOUND || r.act == ACT_CARE) {
       // A switch: filled track with the knob right when on.
-      const bool on = host.soundLevel() > 0;
+      const bool on = r.act == ACT_SOUND ? host.soundLevel() > 0 : host.batteryCare();
       const int tw = 64, th = 32, tx = a.x + a.w - tw - 4, ty = a.y + (a.h - th) / 2;
       if (on) c.fillRect(tx, ty, tw, th, true);
       else c.drawRect(tx, ty, tw, th, 2, true);
@@ -1593,6 +1599,14 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
     const int n = host.soundLevels();
     if (host.soundLevel() > 0) host.setSoundLevel(0);
     else host.setSoundLevel(n > 2 ? 2 : n - 1);
+    host.beep(1);
+    return true;
+  }
+  if (rowHit(ACT_CARE)) {
+    // C6: stop charging at 80 %, start again below 75 %. Only while awake;
+    // the note says so, because a Sticky left off on the cable fills up.
+    host.setBatteryCare(!host.batteryCare());
+    _note = host.batteryCare() ? "holds 80% while the screen is on" : "charges to 100%";
     host.beep(1);
     return true;
   }

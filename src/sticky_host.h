@@ -151,6 +151,8 @@ class StickyHost : public ToolsHost {
   int contentTop() const override { return TOPBAR_H + 4; }
   int batteryPercent() const override { return sensors::batteryPercent(); }
   bool charging() const override { return sensors::charging(); }
+  bool batteryCare() const override;
+  void setBatteryCare(bool on) override;
   ota::Device* otaDevice() override;
   bool soundOn() const override { return buzzer::enabled(); }
   void setSoundOn(bool on) override;

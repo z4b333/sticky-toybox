@@ -364,6 +364,9 @@ class ToolsHost {
   // other screen would rather spend the pixels on its own content.
   virtual int batteryPercent() const { return -1; }
   virtual bool charging() const { return false; }
+  // C6 battery care: stop charging at 80 % while awake. On by default.
+  virtual bool batteryCare() const { return false; }
+  virtual void setBatteryCare(bool on) { (void)on; }
 
   // Whether the device beeps at all. It belongs to the host: the reader has its
   // own idea about sound, and the standalone firmware keeps it in its own NVS.

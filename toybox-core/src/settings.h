@@ -31,6 +31,7 @@ enum Action : int {
   ACT_FONT,
   ACT_VOLUME,  // v2: Low / Mid / High beside the Sound switch
   ACT_SETUP,   // v2: run the setup steps again
+  ACT_CARE,    // C6: battery care, stop charging at 80 %
   ACT_COUNT
 };
 // Visual order groups the rows by what they are about (LOOK first -- the
@@ -48,9 +49,9 @@ enum Action : int {
 // and the rows of the open tab under them. The enum order stays put so a
 // caller aiming at a row by name never has to care which tab it sits in.
 inline constexpr int TAB_LOOK = 0, TAB_CONNECT = 1, TAB_DEVICE = 2, TAB_COUNT = 3;
-//                                      APPS WALL LOCK FILES SOUND UPDATE CLOCK FONT VOLUME SETUP
-inline constexpr int TAB_OF[ACT_COUNT] = {2,   0,   0,   1,    2,    2,     1,    0,   2,     2};
-inline constexpr int TAB_POS[ACT_COUNT] = {3,  0,   1,   0,    0,    4,     1,    2,   1,     2};
+//                                      APPS WALL LOCK FILES SOUND UPDATE CLOCK FONT VOLUME SETUP CARE
+inline constexpr int TAB_OF[ACT_COUNT] = {2,   0,   0,   1,    2,    2,     1,    0,   2,     2,    2};
+inline constexpr int TAB_POS[ACT_COUNT] = {4,  0,   1,   0,    0,    5,     1,    2,   1,     3,    2};
 inline constexpr int TAB_Y = TOPBAR_H + 12, TAB_H = 48, TAB_GAP = 8;
 inline constexpr int TAB_W = (SCREEN_W - 32 - 2 * TAB_GAP) / TAB_COUNT;
 inline constexpr int TAB_ROWS_Y = TAB_Y + TAB_H + 14;

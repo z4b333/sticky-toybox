@@ -497,6 +497,29 @@ void showBatteryBanner(int pct) {
   buzzer::tap();
 }
 
+// C6 battery care: with the setting on, charging stops at 80 % and starts
+// again below 75 %, through the charger's /CE pin. Only while awake -- a
+// powered-off Sticky on the cable is not running to watch, so the sleep path
+// re-allows charging (charger::beforeDeepSleep). USB still powers the device
+// while charging is held off; only the cell is left alone.
+constexpr int CARE_STOP_PCT = 80, CARE_RESUME_PCT = 75;
+void handleBatteryCare() {
+  static uint32_t last = 0;
+  static bool first = true;
+  if (!first && millis() - last < 10000) return;
+  first = false;
+  last = millis();
+  const int pct = sensors::batteryPercent();
+  bool allow = charger::allowed();
+  if (!stickyHost.batteryCare() || pct < 0) allow = true;
+  else if (pct >= CARE_STOP_PCT) allow = false;
+  else if (pct < CARE_RESUME_PCT) allow = true;
+  if (allow != charger::allowed()) {
+    charger::allow(allow);
+    TB_LOG("battery care: %d%%, charging %s\n", pct, allow ? "on" : "held");
+  }
+}
+
 void handleLowBattery() {
   if (millis() - g_lastBatteryCheck < 60000) return;
   g_lastBatteryCheck = millis();
@@ -881,6 +904,7 @@ void loop() {
   handleSideButtons();
   handlePowerButton();
   handleLowBattery();
+  handleBatteryCare();
   handleIdleSleep();
   // v2: a running timer is the one thing that held the chip fully awake for
   // minutes on end (~20-40 mA). Once nobody has touched it for a few
