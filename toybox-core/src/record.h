@@ -24,6 +24,15 @@ inline constexpr const char* G2048[] = {"t_best", "t_tile"};
 inline constexpr const char* XO[] = {"x_w", "x_l", "x_d", "x_strk", "x_best"};
 inline constexpr const char* SUDOKU[] = {"sd_w0", "sd_w1", "sd_w2"};
 inline constexpr const char* SHIPS[] = {"bs_w", "bs_l", "bs_strk", "bs_shots", "bs_hits"};
+// C4
+inline constexpr const char* FOURROW[] = {"c4_w0", "c4_w1", "c4_w2", "c4_l0", "c4_l1",
+                                          "c4_l2", "c4_d0", "c4_d1", "c4_d2"};
+inline constexpr const char* BLACKJACK[] = {"bj_w", "bj_l", "bj_p", "bj_best"};
+inline constexpr const char* HILO[] = {"hl_best", "hl_runs"};
+inline constexpr const char* CODE[] = {"cb_g0", "cb_g1", "cb_g2", "cb_w0", "cb_w1",
+                                       "cb_w2", "cb_b0", "cb_b1", "cb_b2"};
+inline constexpr const char* HANOI[] = {"hn_b3", "hn_b4", "hn_b5", "hn_b6", "hn_b7", "hn_won"};
+inline constexpr const char* MEMORY[] = {"mp_w0", "mp_w1", "mp_w2", "mp_b0", "mp_b1", "mp_b2"};
 
 // Removed, not zeroed, so a cleared record reads exactly like a new device's.
 template <size_t N>
@@ -39,6 +48,12 @@ inline void clearAll(Preferences& p) {
   clear(p, XO);
   clear(p, SUDOKU);
   clear(p, SHIPS);
+  clear(p, FOURROW);
+  clear(p, BLACKJACK);
+  clear(p, HILO);
+  clear(p, CODE);
+  clear(p, HANOI);
+  clear(p, MEMORY);
 }
 
 // One button, two taps. The first only changes the label, so a stray tap on a

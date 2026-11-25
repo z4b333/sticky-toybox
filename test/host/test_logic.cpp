@@ -13,6 +13,13 @@
 #include "tools/sea_net.h"
 #include "tools/sudoku_gen.h"
 #include "tools/mines_rules.h"
+// C4
+#include "tools/blackjack_rules.h"
+#include "tools/code_rules.h"
+#include "tools/deck.h"
+#include "tools/fourrow_rules.h"
+#include "tools/hanoi_rules.h"
+#include "tools/memory_rules.h"
 
 static std::mt19937 rng(12345);
 static uint32_t rnd32() { return rng(); }
@@ -1009,6 +1016,338 @@ static void testXoLevels() {
   printf("xo levels ok (normal always blocks; easy blocked %d of 1000)\n", easyBlocks);
 }
 
+// --- C4 ----------------------------------------------------------------------
+
+static void testFourRow() {
+  using namespace c4;
+  std::mt19937 r(11);
+  auto rnd = [&r] { return (uint32_t)r(); };
+  // Wins in all four directions, for either side.
+  {
+    Game g;
+    reset(g, 0);
+    for (int col : {0, 6, 0, 6, 0, 6}) assert(play(g, col));
+    assert(winner(g) < 0);
+    assert(play(g, 0) && winner(g) == 0);  // upright
+    assert(!play(g, 1) && "a decided game took another disc");
+    int wc[4], wr[4];
+    assert(winLine(g, wc, wr) && wc[0] == 0 && wr[0] == 0 && wr[3] == 3);
+  }
+  {
+    Game g;
+    reset(g, 1);  // the Sticky opens: its discs are player 1's
+    for (int col : {0, 0, 1, 1, 2, 2}) play(g, col);
+    assert(play(g, 3) && winner(g) == 1);  // across
+  }
+  {
+    Game g;
+    reset(g, 0);
+    // A rising slant for player 0: (0,0) (1,1) (2,2) (3,3)
+    for (int col : {0, 1, 1, 2, 2, 3, 2, 3, 3, 6}) play(g, col);
+    assert(winner(g) < 0);
+    assert(play(g, 3) && winner(g) == 0);
+  }
+  {
+    Game g;
+    reset(g, 0);
+    // A falling slant for player 0: (3,0) (2,1) (1,2) (0,3)
+    for (int col : {3, 2, 2, 1, 1, 0, 1, 0, 0, 6}) play(g, col);
+    assert(winner(g) < 0);
+    assert(play(g, 0) && winner(g) == 0);
+  }
+  // A full column refuses; Undo puts the board back bit for bit.
+  {
+    Game g;
+    reset(g, 0);
+    for (int i = 0; i < H; i++) assert(play(g, 4));
+    assert(!canPlay(g, 4) && !play(g, 4));
+    Game before = g;
+    play(g, 2);
+    play(g, 5);
+    assert(undo(g) && undo(g));
+    assert(before.pos[0] == g.pos[0] && before.pos[1] == g.pos[1] && before.moves == g.moves &&
+           memcmp(before.height, g.height, sizeof(g.height)) == 0);
+    Game e;
+    reset(e, 0);
+    assert(!undo(e));
+  }
+  // A full board with no four is a draw. Columns filled in pairs so the
+  // colours alternate in blocks that never line up four.
+  {
+    Game g;
+    reset(g, 0);
+    const int order[W] = {0, 1, 4, 5, 2, 3, 6};
+    for (int k = 0; k < W; k++)
+      for (int i = 0; i < H; i++) play(g, order[k]);
+    if (winner(g) < 0) assert(full(g) && over(g));
+  }
+  // Every level takes a win on the board and blocks one -- Easy always takes,
+  // and blocks three times in four.
+  for (int lvl = 0; lvl < LEVELS; lvl++) {
+    Game g;
+    reset(g, 0);  // you open; after five discs the Sticky (player 1) is to move
+    for (int col : {0, 6, 1, 6, 2}) play(g, col);  // you threaten 3; Sticky has two in 6
+    assert(toMove(g) == 1);
+    int blocks = 0;
+    for (int t = 0; t < 40; t++) blocks += bestMove(g, lvl, rnd) == 3;
+    if (lvl == EASY) {
+      if (!(blocks > 20 && blocks < 40)) printf("easy blocks %d\n", blocks);
+      assert(blocks > 20 && blocks < 40);
+    }
+    else
+      assert(blocks == 40);
+    Game w;
+    reset(w, 1);
+    for (int col : {6, 0, 6, 1, 6, 0}) play(w, col);  // Sticky has three up column 6
+    assert(toMove(w) == 1);
+    for (int t = 0; t < 10; t++) assert(bestMove(w, lvl, rnd) == 6);
+  }
+  // Normal and Hard answer the same board the same way every time.
+  for (int lvl = NORMAL; lvl <= HARD; lvl++) {
+    Game g;
+    reset(g, 0);
+    for (int col : {3, 3, 2}) play(g, col);
+    const int a = bestMove(g, lvl, rnd);
+    for (int t = 0; t < 5; t++) assert(bestMove(g, lvl, rnd) == a);
+  }
+  // Hard beats Normal more than it loses, and stays inside its budget.
+  int hardWins = 0, normalWins = 0;
+  long maxNodes = 0;
+  for (int game = 0; game < 30; game++) {
+    Game g;
+    reset(g, game & 1);
+    play(g, (int)(rnd() % W));
+    while (!over(g)) {
+      long n = 0;
+      const int side = toMove(g);
+      const int c = bestMove(g, side == 1 ? HARD : NORMAL, rnd, &n);
+      if (side == 1 && n > maxNodes) maxNodes = n;
+      assert(play(g, c));
+    }
+    hardWins += winner(g) == 1;
+    normalWins += winner(g) == 0;
+  }
+  assert(hardWins > normalWins);
+  assert(maxNodes <= BUDGET[HARD] + 1);
+  printf("four in a row ok (4 directions, full column, undo, draw, win/block at 3 levels, hard %d-%d, %ld nodes max)\n",
+         hardWins, normalWins, maxNodes);
+}
+
+static void testCards() {
+  using namespace cards;
+  std::mt19937 r(5);
+  auto rnd = [&r] { return (uint32_t)r(); };
+  Deck d;
+  shuffle(d, rnd);
+  bool seen[DECK] = {};
+  for (int i = 0; i < DECK; i++) {
+    const int c = deal(d);
+    assert(c >= 0 && c < DECK && !seen[c]);
+    seen[c] = true;
+  }
+  assert(left(d) == 0 && deal(d) == -1);
+  // Aces high; the same rank pushes.
+  assert(judge(0, 12, true) == -1 && judge(12, 0, true) == 1);  // K then A: higher
+  assert(judge(1, 14, true) == 0);                               // 2 and 2
+  assert(judge(5, 2, false) == 1 && judge(5, 2, true) == -1);
+  printf("deck ok (52 distinct, aces high, pushes)\n");
+}
+
+static void testBlackjack() {
+  using namespace bj;
+  std::mt19937 r(9);
+  auto rnd = [&r] { return (uint32_t)r(); };
+  auto hand = [](std::initializer_list<int> cs) {
+    Hand h{};
+    for (int c : cs) h.c[h.n++] = (uint8_t)c;
+    return h;
+  };
+  bool soft = false;
+  assert(value(hand({0, 12}), &soft) == 21 && soft);  // A K
+  assert(natural(hand({0, 12})));
+  assert(value(hand({0, 0, 8}), &soft) == 21 && soft);  // A A 9
+  assert(value(hand({0, 5, 9}), &soft) == 17 && !soft);  // A 6 10
+  assert(value(hand({11, 12, 1}), &soft) == 22 && !soft);  // Q K 2
+  assert(bust(hand({11, 12, 1})));
+  // Payouts: 3:2 rounded up, a win doubles, a push returns the stake.
+  for (int bet : BETS) {
+    Table t{};
+    t.chips = 0;
+    t.bet = (int16_t)bet;
+    settle(t, BLACKJACK);
+    assert(t.chips == bet + (bet * 3 + 1) / 2);
+  }
+  {
+    Table t{};
+    t.bet = 10;
+    settle(t, WIN);
+    assert(t.chips == 20);
+    t.chips = 0;
+    settle(t, PUSH);
+    assert(t.chips == 10);
+    t.chips = 0;
+    settle(t, LOSE);
+    assert(t.chips == 0);
+  }
+  // Thousands of hands with a simple player: the dealer always ends on 17+
+  // or bust, chips only move by settled hands, and the arithmetic balances.
+  Table t;
+  reset(t, rnd);
+  long hands = 0;
+  for (int i = 0; i < 20000; i++) {
+    if (t.chips < BETS[0]) reset(t, rnd);
+    const int bet = BETS[i % 3] <= t.chips ? BETS[i % 3] : BETS[0];
+    const int32_t before = t.chips;
+    assert(deal(t, bet, rnd));
+    if (t.phase == PLAYING && (i % 7) == 0 && canDouble(t)) {
+      doubleDown(t);
+    } else {
+      while (t.phase == PLAYING && value(t.you) < 17) hit(t);
+      stand(t);
+    }
+    // The dealer's turn comes a card at a time; nothing can be dealt meanwhile.
+    if (t.phase == DEALER) assert(!canDeal(t, BETS[0]));
+    finishDealer(t);
+    assert(t.phase == DONE);
+    if (!bust(t.you) && !natural(t.dealer) && !natural(t.you)) {
+      const int dv = value(t.dealer);
+      assert(dv >= 17);
+    }
+    const int staked = t.bet;
+    assert(t.chips == before - staked + t.paid);
+    hands++;
+  }
+  printf("blackjack ok (soft aces, 3:2 up, %ld hands balance, dealer stands on 17)\n", hands);
+}
+
+static void testCode() {
+  using namespace cb;
+  std::mt19937 r(13);
+  auto rnd = [&r] { return (uint32_t)r(); };
+  int e, n;
+  const uint8_t s1[4] = {0, 1, 2, 3};
+  const uint8_t g1[4] = {3, 2, 1, 0};
+  score(s1, g1, 4, e, n);
+  assert(e == 0 && n == 4);
+  // Repeats: the classic traps.
+  const uint8_t s2[4] = {0, 0, 1, 1};
+  const uint8_t g2[4] = {0, 1, 0, 2};
+  score(s2, g2, 4, e, n);
+  assert(e == 1 && n == 2);
+  const uint8_t s3[4] = {0, 1, 2, 3};
+  const uint8_t g3[4] = {0, 0, 0, 0};
+  score(s3, g3, 4, e, n);
+  assert(e == 1 && n == 0);
+  const uint8_t s4[5] = {5, 5, 5, 4, 4};
+  const uint8_t g4[5] = {4, 5, 4, 5, 0};
+  score(s4, g4, 5, e, n);
+  assert(e == 1 && n == 3);
+  // Easy never repeats a symbol; Hard hides five.
+  for (int i = 0; i < 200; i++) {
+    Game g;
+    reset(g, 0, rnd);
+    bool used[SYMS] = {};
+    for (int k = 0; k < g.slots; k++) {
+      assert(!used[g.secret[k]]);
+      used[g.secret[k]] = true;
+    }
+  }
+  Game h;
+  reset(h, 2, rnd);
+  assert(h.slots == 5);
+  // A game played to the end: ten wrong rows run out; the code itself breaks.
+  Game g;
+  reset(g, 1, rnd);
+  for (int row = 0; row < TRIES; row++) {
+    assert(!submit(g));  // empty
+    for (int k = 0; k < g.slots; k++) g.guess[g.row][k] = (uint8_t)((g.secret[k] + 1) % SYMS);
+    assert(submit(g));
+  }
+  assert(g.done == 2 && !submit(g));
+  reset(g, 1, rnd);
+  memcpy(g.guess[0], g.secret, g.slots);
+  assert(submit(g) && g.done == 1 && g.exact[0] == 4);
+  printf("codebreaker ok (exact and near with repeats, easy unique, hard five, out of tries)\n");
+}
+
+static void testMemory() {
+  using namespace mp;
+  std::mt19937 r(17);
+  auto rnd = [&r] { return (uint32_t)r(); };
+  for (int size = 0; size < SIZES; size++) {
+    Game g;
+    reset(g, size, rnd);
+    int count[12] = {}, blanks = 0;
+    for (int k = 0; k < cellsFor(size); k++) {
+      if (isBlank(g, k)) {
+        blanks++;
+        assert(k == 12 && size == 2);
+        continue;
+      }
+      count[g.sym[k]]++;
+    }
+    assert(blanks == (size == 2 ? 1 : 0));
+    int pairs = 0;
+    for (int s = 0; s < 12; s++) {
+      assert(count[s] == 0 || count[s] == 2);
+      pairs += count[s] == 2;
+    }
+    assert(pairs == pairsFor(size));
+    // An odd pair stays up, then the next tap turns it back.
+    int a = isBlank(g, 0) ? 1 : 0, b = a + 1;
+    while (g.sym[b] == g.sym[a] || isBlank(g, b)) b++;
+    assert(tap(g, a) == TURNED && tap(g, b) == MISS);
+    assert(g.st[a] == UP && g.st[b] == UP);
+    assert(tap(g, a) == BACK && g.st[a] == DOWN && g.st[b] == DOWN);
+    // Playing perfectly finishes in exactly two flips a pair.
+    reset(g, size, rnd);
+    for (int k = 0; k < cellsFor(size); k++) {
+      if (isBlank(g, k) || g.st[k] != DOWN) continue;
+      for (int j = k + 1; j < cellsFor(size); j++)
+        if (g.sym[j] == g.sym[k]) {
+          assert(tap(g, k) == TURNED && tap(g, j) == PAIR);
+          break;
+        }
+    }
+    assert(won(g) && g.flips == 2 * pairsFor(size));
+    assert(tap(g, 0) == NOTHING);
+  }
+  printf("memory ok (every symbol twice, 5x5 blank centre, odd pair back on the next tap, perfect = 2 a pair)\n");
+}
+
+static void testHanoi() {
+  using namespace hn;
+  for (int d = MIN_DISCS; d <= MAX_DISCS; d++) {
+    Game g;
+    reset(g, d);
+    std::function<void(int, int, int, int)> solve = [&](int n, int a, int b, int c) {
+      if (!n) return;
+      solve(n - 1, a, c, b);
+      assert(tap(g, a) && tap(g, c));
+      solve(n - 1, b, a, c);
+    };
+    solve(d, 0, 1, 2);
+    assert(solved(g) && g.moves == minMoves(d));
+  }
+  Game g;
+  reset(g, 4);
+  assert(!tap(g, 1));               // nothing to lift
+  assert(tap(g, 0) && tap(g, 2));   // 1 to the goal
+  assert(tap(g, 0) && !tap(g, 2));  // 2 onto 1: refused, still held
+  assert(g.held == 0 && tap(g, 0)); // put it back down
+  assert(g.moves == 1);
+  Game before = g;
+  assert(tap(g, 0) && tap(g, 1));
+  assert(undo(g));
+  for (int p = 0; p < PEGS; p++) {
+    assert(g.n[p] == before.n[p]);
+    for (int i = 0; i < g.n[p]; i++) assert(g.peg[p][i] == before.peg[p][i]);
+  }
+  assert(g.moves == 1);
+  assert(undo(g) && !undo(g) && g.n[0] == 4);
+  printf("hanoi ok (3-7 discs in the minimum, bigger on smaller refused, undo)\n");
+}
+
 int main() {
   testWordle();
   test2048();
@@ -1019,6 +1358,12 @@ int main() {
   testDuel();
   testSudoku();
   testMines();
+  testFourRow();
+  testCards();
+  testBlackjack();
+  testCode();
+  testMemory();
+  testHanoi();
   printf("ALL TESTS PASSED\n");
   return 0;
 }

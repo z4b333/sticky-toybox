@@ -82,8 +82,12 @@ Everything can be tested on a PC. There are two host-side programs in
 
 `test_logic.cpp` covers game logic: Wordle scoring, 2048 moves, Sudoku
 uniqueness, Mines (first tap safe, flood, flags, chords), Battleship rules, its
-three opponent levels and its network protocol (fire-again rule included), and
-the XO game-tree proof.
+three opponent levels and its network protocol (fire-again rule included), the
+XO game-tree proof, and the C4 games: Four in a Row (wins in every direction,
+Undo, the three levels' win/block and node budget), the deck and Blackjack
+(soft aces, payouts, 20,000 hands that balance), Codebreaker scoring with
+repeats, Memory's deal and turning rules, and Tower of Hanoi (3-7 discs in
+the minimum, Undo).
 
 ```
 cd test/host

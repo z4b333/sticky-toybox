@@ -20,6 +20,13 @@
 #include "xo.h"
 #include "tools/tool_calendar.h"
 #include "tools/tool_focus.h"
+// C4 games (tool indexes 14..19)
+#include "tools/tool_blackjack.h"
+#include "tools/tool_code.h"
+#include "tools/tool_fourrow.h"
+#include "tools/tool_hanoi.h"
+#include "tools/tool_hilo.h"
+#include "tools/tool_memory.h"
 
 Toybox toybox;
 
@@ -51,6 +58,12 @@ bool Toybox::build(bool game, int idx) {
       case 11: _active = new RecipeTool(); break;
       case 12: _active = new CalendarTool(); break;
       case 13: _active = new FocusTool(); break;
+      case 14: _active = new FourRowTool(); break;
+      case 15: _active = new BlackjackTool(); break;
+      case 16: _active = new HiLoTool(); break;
+      case 17: _active = new CodeTool(); break;
+      case 18: _active = new HanoiTool(); break;
+      case 19: _active = new MemoryTool(); break;
       default: _active = new EpubTool(); break;
     }
   }

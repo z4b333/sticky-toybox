@@ -12,13 +12,13 @@
 
 namespace {
 
-// Two columns of checkboxes, on their own page now, so the rows got their
-// height back: 52 px is 5.6 mm -- still under the 7 mm a fingertip wants --
-// but the row is 216 px wide and a miss only ticks a neighbouring box, which
-// is visible immediately and undone by tapping it again.
+// Two columns of checkboxes, on their own page. C4 filled PLAY to twelve, so
+// the rows gave back 6 px: 46 px is 5 mm -- under the 7 mm a fingertip
+// wants -- but the row is 216 px wide and a miss only ticks a neighbouring
+// box, which is visible immediately and undone by tapping it again.
 constexpr int COL_X[2] = {16, 248};
 constexpr int COL_W = 216;
-constexpr int ROW_H = 52, BOX = 28;
+constexpr int ROW_H = 46, BOX = 28;
 constexpr int HEAD_H = 26, GROUP_GAP = 14;
 constexpr int LIST_TOP = 92;
 
@@ -26,8 +26,9 @@ constexpr int LIST_TOP = 92;
 // Group 0 fills the left column and everything after it stacks down the right.
 // Three groups is what there is; a fourth would go on the right too and want
 // the row height trimmed.
-// v2: PLAY and STUDY on the left, UTILITY (eight apps now) on the right.
-int columnOf(int g) { return g == 1 ? 1 : 0; }
+// C4: PLAY (twelve) has the left column to itself; UTILITY and STUDY stack
+// down the right.
+int columnOf(int g) { return g == 0 ? 0 : 1; }
 
 //   f(item, group, headTop, rowTop, col)
 template <typename F>
@@ -165,8 +166,11 @@ inline void draw(ToolsCanvas& c, int act, int cx, int cy, bool dark) {
 // Must match the names the apps pass to help::suppressed(). The flashcards
 // and reader cards live here too: the row says "how to play", but what it
 // means is "show me the first-time cards again", all of them.
-constexpr const char* HELP_KEYS[] = {"h_wrd", "h_non", "h_g20", "h_xo",
-                                     "h_sea", "h_sud", "h_fc",  "h_bk", "h_ep"};
+// Every rules card's "don't show again". C3 renamed Nonogram's to Mines'
+// ("h_mns"), and C4 adds the six new games.
+constexpr const char* HELP_KEYS[] = {"h_wrd", "h_mns", "h_g20", "h_xo", "h_sea", "h_sud",
+                                     "h_fc",  "h_bk",  "h_ep",  "h_rcp", "h_c4", "h_bj",
+                                     "h_hl",  "h_cb",  "h_hn",  "h_mp"};
 
 }  // namespace
 

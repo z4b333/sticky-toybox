@@ -95,16 +95,21 @@ struct Pen {
 
 namespace ticons {
 
-inline constexpr int COUNT = 14;
+inline constexpr int COUNT = 20;
 inline const char* const NAMES[COUNT] = {"COIN",  "DICE",   "TIMER", "RANDOM",
                                          "PICKER", "FLASHCARDS", "NOTES",  "SHIPS",
                                          "SUDOKU", "MANGA", "BOOKS", "RECIPES",
-                                         "CALENDAR", "FOCUS"};
+                                         "CALENDAR", "FOCUS",
+                                         // C4: the new games, PLAY's second page
+                                         "FOUR IN A ROW", "BLACKJACK", "HIGHER LOWER",
+                                         "CODEBREAKER", "HANOI", "MEMORY"};
 // Kept short: a hub tile is 140 px, which is about twelve characters.
 inline const char* const DESCS[COUNT] = {"heads/tails", "D4 - D20",   "countdown", "number/card",
                                          "from a list", "flashcards", "from phone", "battleship",
                                          "9x9 numbers", "removed", "ebooks", "what to cook",
-                                         "the month", "no countdown"};
+                                         "the month", "no countdown", "drop four",
+                                         "beat the dealer", "next card", "crack the code",
+                                         "move the tower", "find pairs"};
 
 using icons::Pen;
 
@@ -223,6 +228,77 @@ inline void calendar(ToolsCanvas& c, int cx, int cy, int s) {
   p.line(17, 3, 17, 7);
 }
 
+// --- C4 games ---------------------------------------------------------------
+// Four in a Row: the upright frame, open at the top, two rows of discs in
+// it and one on its way down.
+inline void fourRow(ToolsCanvas& c, int cx, int cy, int s) {
+  Pen p(c, cx, cy, s, 26);
+  p.line(3, 8, 3, 23);
+  p.line(23, 8, 23, 23);
+  p.line(3, 23, 23, 23);
+  p.dot(8, 18.5f, 2.8f);
+  p.circle(13, 18.5f, 1.8f);
+  p.dot(18, 18.5f, 2.8f);
+  p.circle(8, 12.5f, 1.8f);
+  p.dot(13, 12.5f, 2.8f);
+  p.dot(18, 4, 2.8f);
+}
+
+// Blackjack: two cards fanned, the front one with an ace's diamond.
+inline void blackjack(ToolsCanvas& c, int cx, int cy, int s) {
+  Pen p(c, cx, cy, s, 26);
+  p.rrect(3, 6, 11, 16, 1.5f);
+  c.fillRect(p.X(11) - p.t / 2, p.Y(4) - p.t / 2, p.X(23) - p.X(11) + p.t, p.Y(20) - p.Y(4) + p.t,
+             false);
+  p.rrect(11, 4, 12, 16, 1.5f);
+  const float q[] = {17, 8, 20, 12, 17, 16, 14, 12};
+  p.poly(q, 4, true);
+}
+
+// Higher or Lower: a card and the two ways the next one can go.
+inline void hiLo(ToolsCanvas& c, int cx, int cy, int s) {
+  Pen p(c, cx, cy, s, 26);
+  p.rrect(3, 4, 12, 18, 1.5f);
+  const float up[] = {17.5f, 10, 20.5f, 6.5f, 23.5f, 10};
+  const float dn[] = {17.5f, 16, 20.5f, 19.5f, 23.5f, 16};
+  p.poly(up, 3, false);
+  p.poly(dn, 3, false);
+}
+
+// Codebreaker: a row of three tokens and the pegs that answer it.
+inline void codebreaker(ToolsCanvas& c, int cx, int cy, int s) {
+  Pen p(c, cx, cy, s, 26);
+  p.dot(5.5f, 9, 3);
+  p.circle(13, 9, 2.2f);
+  p.fill(18, 6, 5, 6);
+  p.line(2, 15.5f, 24, 15.5f);
+  p.dot(8, 20.5f, 1.7f);
+  p.dot(13, 20.5f, 1.7f);
+  p.circle(18, 20.5f, 1);
+}
+
+// Tower of Hanoi: a pole on a floor and three solid discs, largest at the
+// bottom.
+inline void hanoi(ToolsCanvas& c, int cx, int cy, int s) {
+  Pen p(c, cx, cy, s, 26);
+  p.line(2, 23, 24, 23);
+  p.line(13, 3, 13, 23);
+  p.fill(5, 18, 16, 2);
+  p.fill(7.5f, 13, 11, 2);
+  p.fill(10, 8, 6, 2);
+}
+
+// Memory: four cards, two turned up showing the same mark.
+inline void memory(ToolsCanvas& c, int cx, int cy, int s) {
+  Pen p(c, cx, cy, s, 26);
+  p.rrect(3, 3, 8.5f, 8.5f, 1.5f);
+  p.rrect(14.5f, 3, 8.5f, 8.5f, 1.5f);
+  p.rrect(3, 14.5f, 8.5f, 8.5f, 1.5f);
+  p.rrect(14.5f, 14.5f, 8.5f, 8.5f, 1.5f);
+  p.dot(7.25f, 7.25f, 2);
+  p.dot(18.75f, 18.75f, 2);
+}
+
 // A sprout (kit "Focus"), drawn in a 64-unit box.
 inline void focus(ToolsCanvas& c, int cx, int cy, int s) {
   Pen p(c, cx, cy, s, 64);
@@ -249,7 +325,14 @@ inline void draw(ToolsCanvas& c, int idx, int cx, int cy, int s) {
     case 12: calendar(c, cx, cy, s); break;
     case 13: focus(c, cx, cy, s); break;
     case 10: books(c, cx, cy, s); break;
-    default: recipes(c, cx, cy, s); break;
+    case 11: recipes(c, cx, cy, s); break;
+    case 14: fourRow(c, cx, cy, s); break;
+    case 15: blackjack(c, cx, cy, s); break;
+    case 16: hiLo(c, cx, cy, s); break;
+    case 17: codebreaker(c, cx, cy, s); break;
+    case 18: hanoi(c, cx, cy, s); break;
+    case 19: memory(c, cx, cy, s); break;
+    default: break;  // 9, the removed manga reader: no icon
   }
 }
 

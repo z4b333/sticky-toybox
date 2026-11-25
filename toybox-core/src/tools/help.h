@@ -96,6 +96,41 @@ inline Tap hit(int x, int y) {
   return Tap::None;
 }
 
+// The same card on a landscape screen (C4: Hanoi is played on its side): the
+// emblem on the left, the rules beside it, the two buttons side by side along
+// the foot. A card of up to nine lines fits under the heading.
+inline constexpr TRect OK_WIDE{40, 392, 344, 60};
+inline constexpr TRect NEVER_WIDE{416, 392, 344, 60};
+inline void renderWide(ToolsCanvas& c, const Text& t, const char* heading, const char* way_back) {
+  c.textCentered(c.width() / 2, 46, heading, TS_LARGE, true, true);
+  decor::ornament(c, c.width() / 2, 80, 300, true);
+  constexpr int TOP = 100, LINE = 30, ICON = 120;
+  int lines = 0;
+  for (int i = 0; i < MAX_LINES && t.lines[i]; i++) lines++;
+  int y = TOP + (OK_WIDE.y - 12 - TOP - lines * LINE) / 2;
+  if (y < TOP) y = TOP;
+  if (t.icon >= 0) {
+    const int iy = TOP + (OK_WIDE.y - 12 - TOP) / 2;
+    if (t.game)
+      gicons::draw(c, t.icon, 150, iy, ICON);
+    else
+      ticons::draw(c, t.icon, 150, iy, ICON);
+  }
+  for (int i = 0; i < lines; i++) {
+    if (t.lines[i][0]) c.text(290, y, t.lines[i], TS_MED, true);
+    y += LINE;
+  }
+  c.button(OK_WIDE.x, OK_WIDE.y, OK_WIDE.w, OK_WIDE.h, "GOT IT", true, TS_LARGE);
+  c.button(NEVER_WIDE.x, NEVER_WIDE.y, NEVER_WIDE.w, NEVER_WIDE.h, "DON'T SHOW AGAIN", false,
+           TS_MED);
+  c.textCentered(c.width() / 2, OK_WIDE.y + OK_WIDE.h + 6, way_back, TS_SMALL, true);
+}
+inline Tap hitWide(int x, int y) {
+  if (OK_WIDE.hit(x, y)) return Tap::Dismiss;
+  if (NEVER_WIDE.hit(x, y)) return Tap::Never;
+  return Tap::None;
+}
+
 // --- the cards ---------------------------------------------------------------
 // Kept to about 26 characters a line, which is what fits at this text size
 // without the eye having to track back across the whole panel.
@@ -248,5 +283,100 @@ inline constexpr Text SUDOKU{{
 },
                             false,
                             8};
+
+// --- C4 ------------------------------------------------------------------------
+
+inline constexpr Text FOURROW{{
+    "Drop discs into the seven",
+    "columns. Four of yours in",
+    "a row wins: across, up or",
+    "on a slant.",
+    "",
+    "Tap a column to drop. The",
+    "Sticky answers at once.",
+    "",
+    "Undo takes back your move",
+    "and the Sticky's reply.",
+},
+                             false,
+                             14};
+
+inline constexpr Text BLACKJACK{{
+    "Get nearer 21 than the",
+    "dealer without going over.",
+    "Picture cards count 10,",
+    "aces 1 or 11.",
+    "",
+    "Hit takes a card, Stand",
+    "keeps your total. Double",
+    "doubles the bet for one",
+    "more card.",
+    "",
+    "The dealer draws to 17.",
+    "A blackjack pays 3 to 2.",
+},
+                               false,
+                               15};
+
+inline constexpr Text HILO{{
+    "One card is showing. Will",
+    "the next be higher or",
+    "lower?",
+    "",
+    "Aces are high. The same",
+    "rank is a push: the run",
+    "goes on.",
+    "",
+    "One wrong guess ends the",
+    "run. How long a streak",
+    "can you make?",
+},
+                          false,
+                          16};
+
+inline constexpr Text CODE{{
+    "The Sticky hides a row of",
+    "symbols. Find it in ten",
+    "tries.",
+    "",
+    "Fill a row, then Check.",
+    "A solid peg: right symbol,",
+    "right place. A ring: right",
+    "symbol, wrong place.",
+    "",
+    "Easy never repeats a",
+    "symbol; Hard hides five.",
+},
+                          false,
+                          17};
+
+// Shown on its side: nine lines at most, and wider ones.
+inline constexpr Text HANOI{{
+    "Move the whole tower to the",
+    "goal peg on the right.",
+    "",
+    "Tap a peg to lift its top disc,",
+    "then tap another to put it down.",
+    "A disc never goes on a smaller one.",
+    "",
+    "Four discs take 15 moves at best;",
+    "every disc more doubles it.",
+},
+                           false,
+                           18};
+
+inline constexpr Text MEMORY{{
+    "Every symbol is on two",
+    "cards. Turn two at a time.",
+    "",
+    "A pair stays face up. Two",
+    "that differ go back down",
+    "on your next tap.",
+    "",
+    "Find every pair in as few",
+    "flips as you can.",
+},
+                            false,
+                            19};
 
 }  // namespace help

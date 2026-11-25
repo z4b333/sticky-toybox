@@ -86,12 +86,14 @@ inline void stripes(ToolsCanvas& c, int x, int y, int w, int h) {
 }
 
 // One short hint at the foot of the screen, under a dotted rule.
+// Measured from the canvas's own foot, so a game turned on its side (Hanoi)
+// gets its hint at the bottom of the landscape screen too.
 inline constexpr int FOOT_Y = SCREEN_H - 46;
 inline void foot(ToolsCanvas& c, const char* text) {
-  chrome2::dottedRule(c, 0, FOOT_Y, c.width());
+  const int fy = c.height() - 46;
+  chrome2::dottedRule(c, 0, fy, c.width());
   if (text && text[0])
-    c.textCentered(c.width() / 2, FOOT_Y + (46 - c.textHeight(TS_MED)) / 2 + 1, text, TS_MED,
-                   true);
+    c.textCentered(c.width() / 2, fy + (46 - c.textHeight(TS_MED)) / 2 + 1, text, TS_MED, true);
 }
 
 // The black slab a verdict sits on: white bold text, padded to its width.
@@ -112,11 +114,15 @@ struct Row {
 };
 inline constexpr int MENU_Y = TOPBAR_H + 16, MENU_ROW = 76, MENU_X = 20;
 inline constexpr int MENU_MAX = 8;
-inline TRect menuRect(int i) { return TRect{MENU_X, MENU_Y + i * MENU_ROW, SCREEN_W - 2 * MENU_X, MENU_ROW - 6}; }
+// `w` is the canvas width: a landscape game (Hanoi) gets rows across its
+// 800 px. Five rows still fit under the bar of a 480 px tall screen.
+inline TRect menuRect(int i, int w = SCREEN_W) {
+  return TRect{MENU_X, MENU_Y + i * MENU_ROW, w - 2 * MENU_X, MENU_ROW - 6};
+}
 inline void menu(ToolsHost& h, ToolsCanvas& c, const char* title, const Row* rows, int n) {
   h.topBar(title, false);
   for (int i = 0; i < n && i < MENU_MAX; i++) {
-    const TRect r = menuRect(i);
+    const TRect r = menuRect(i, c.width());
     if (rows[i].armed) {
       c.drawRect(r.x, r.y, r.w, r.h, 3, true);
       c.textInBox(r.x, r.y, r.w, r.h, "Tap again to clear", TS_MED, true, true);
@@ -135,9 +141,9 @@ inline void menu(ToolsHost& h, ToolsCanvas& c, const char* title, const Row* row
   }
   foot(c, "tap a row");
 }
-inline int menuHit(int x, int y, int n) {
+inline int menuHit(int x, int y, int n, int w = SCREEN_W) {
   for (int i = 0; i < n && i < MENU_MAX; i++)
-    if (menuRect(i).hit(x, y)) return i;
+    if (menuRect(i, w).hit(x, y)) return i;
   return -1;
 }
 

@@ -9,6 +9,7 @@
 #include <cstring>
 #include <utility>
 #include <vector>
+#include <functional>
 
 #include "appvis.h"
 #include "board_pins.h"
@@ -103,6 +104,12 @@ static FakeOta g_fakeOta;
 #include "tools/tool_timer.h"
 #include "tools/tool_sea.h"
 #include "tools/tool_sudoku.h"
+#include "tools/tool_blackjack.h"
+#include "tools/tool_code.h"
+#include "tools/tool_fourrow.h"
+#include "tools/tool_hanoi.h"
+#include "tools/tool_hilo.h"
+#include "tools/tool_memory.h"
 #include "touch.h"
 #include "tools/help.h"
 #include "tools/decor.h"
@@ -375,9 +382,12 @@ static void hostLockInfo(lock::Info& i) {
 // the centred block -- so the two can disagree loudly rather than quietly.
 static void checkHubRouting(const char* label) {
   struct Want { bool game; int idx; };
-  struct Grp { Want items[8]; int n; };
+  struct Grp { Want items[12]; int n; };
   const Grp ALL[3] = {
-      {{{true, 0}, {true, 1}, {true, 2}, {true, 3}, {false, 7}, {false, 8}}, 6},
+      // C4: PLAY is full at twelve -- nine on the first page, three on the second.
+      {{{true, 0}, {true, 1}, {true, 2}, {true, 3}, {false, 7}, {false, 8}, {false, 14},
+        {false, 15}, {false, 16}, {false, 17}, {false, 18}, {false, 19}},
+       12},
       {{{false, 0}, {false, 1}, {false, 3}, {false, 4}, {false, 2}, {false, 11}, {false, 12},
         {false, 13}},
        8},
@@ -454,12 +464,24 @@ static void checkHubRouting(const char* label) {
 
     // The drawer's grid (v2): three columns hanging from the bar, touch by
     // column slice and row -- hubui's cell helpers are the authority.
-    const int rows = (cells + hubui::COLS - 1) / hubui::COLS;
+    // Nine tiles to a page; past that the header's ">" turns to the next
+    // (hub.cpp fpageNextRect), and the drawer keeps its page across an app.
+    constexpr int PER = 9;
+    const int lastPageCells = cells - ((cells - 1) / PER) * PER;
+    const int rows = (lastPageCells + hubui::COLS - 1) / hubui::COLS;
     const int y0 = hubui::FOLDER_TOP;
     for (int ii = 0; ii < G[gi].n; ii++) {
-      const int col = hubui::cellCol(ii);
-      const int cx = hubui::cellCx(ii);
-      const int rowTop = hubui::cellTop(ii);
+      if (ii > 0 && ii % PER == 0) {
+        toybox.onTap(EPD_W - 24 - 75, hubui::FOLDER_TOP + 3 * hubui::ROW_STEP + 12 + 38);  // ">"
+        if (toybox.hostInApp() || toybox.hostInSettings()) {
+          printf("HUB ROUTING FAIL: the page arrow in drawer %d opened something\n", gi);
+          abort();
+        }
+      }
+      const int slot = ii % PER;
+      const int col = hubui::cellCol(slot);
+      const int cx = hubui::cellCx(slot);
+      const int rowTop = hubui::cellTop(slot);
       const Want& w = G[gi].items[ii];
       routesTo(cx, rowTop + hubui::ROW_STEP / 2, w, "centre", gi, ii);
       routesTo(cx, rowTop + 1, w, "top edge", gi, ii);
@@ -471,7 +493,8 @@ static void checkHubRouting(const char* label) {
     if (hasAdd) {
       // The ghost cell itself: it must open settings, and leaving settings
       // must come back to the hub with the drawer still selected.
-      toybox.onTap(hubui::cellCx(G[gi].n), hubui::cellTop(G[gi].n) + hubui::ROW_STEP / 2);
+      if (G[gi].n > 0 && G[gi].n % PER == 0) toybox.onTap(EPD_W - 24 - 75, hubui::FOLDER_TOP + 3 * hubui::ROW_STEP + 12 + 38);
+      toybox.onTap(hubui::cellCx(G[gi].n % PER), hubui::cellTop(G[gi].n % PER) + hubui::ROW_STEP / 2);
       if (!toybox.hostInSettings()) {
         printf("HUB ROUTING FAIL: + add in drawer %d did not open settings\n", gi);
         abort();
@@ -484,7 +507,7 @@ static void checkHubRouting(const char* label) {
     }
     // A short last row leaves empty slices; nothing may open there.
     if (cells % hubui::COLS != 0) {
-      toybox.onTap(hubui::cellCx(cells), hubui::cellTop(cells) + hubui::ROW_STEP / 2);
+      toybox.onTap(hubui::cellCx(cells % PER), hubui::cellTop(cells % PER) + hubui::ROW_STEP / 2);
       if (toybox.hostInApp() || toybox.hostInSettings()) {
         printf("HUB ROUTING FAIL: empty cell in folder %d opened something\n", gi);
         abort();
@@ -2067,6 +2090,10 @@ int main() {
       g_dumpEnabled = true;
       setScreen(kFolderShots[f]);
       toybox.onTap(80 + f * 160, hubui::DOCK_Y + hubui::DOCK_H / 2);
+      if (f == 0) {  // C4: PLAY's second page, behind the header's ">"
+        setScreen("hub_play_2");
+        toybox.onTap(EPD_W - 24 - 75, hubui::FOLDER_TOP + 3 * hubui::ROW_STEP + 12 + 38);
+      }
     }
     g_dumpEnabled = false;
     toybox.onTap(50, 26);  // back to the picture
@@ -2176,7 +2203,7 @@ int main() {
   // level by its segment, and the screen below drawn muted.
   const int levels = stickyHost.soundLevels();
   tapRect(setui::tabRect(setui::TAB_DEVICE));
-  if (appvis::shown() != appvis::COUNT - 4) {
+  if (appvis::shown() != appvis::COUNT - 1 - 4) {  // no tile for tool 9
     printf("SETTINGS FAIL: taps did not land (%d shown)\n", appvis::shown());
     abort();
   }
@@ -8852,6 +8879,492 @@ int main() {
   g_dumpEnabled = false;
   toybox.onTap(BACK_W / 2, TOPBAR_H / 2);
   g_dumpEnabled = true;
+
+  // --- C4 games (tool indexes 14..19) -------------------------------------------
+  {
+    auto more = [] { toybox.onTap(EPD_W - 28, 20); };
+    auto back = [] { toybox.onTap(BACK_W / 2, TOPBAR_H / 2); };
+    auto inTool = [](int idx) { return toybox.hostInApp() && !toybox.hostIsGame() && toybox.hostIdx() == idx; };
+
+    // ---- Four in a Row ----
+    for (const char* k : {"c4_game", "c4_mode", "c4_lvl", "c4_who", "c4_next", "h_c4"}) prefs.remove(k);
+    setScreen("help_fourrow");
+    toybox.open(false, 14);
+    auto* fr = static_cast<FourRowTool*>(toybox.hostActive());
+    if (!fr->hostInRules()) {
+      printf("FOUR ROW FAIL: the rules card did not open first\n");
+      abort();
+    }
+    setScreen("tool_fourrow");
+    tapRect(help::OK_BTN);
+    {
+      c4::Game& g = fr->hostGame();
+      // Take turns: you open the first game.
+      if (g.moves != 0 || c4::toMove(g) != 0) {
+        printf("FOUR ROW FAIL: the first game did not open with you (moves %d)\n", g.moves);
+        abort();
+      }
+      g_dumpEnabled = false;
+      tapRect(c4ui::colRect(3));
+      tapRect(c4ui::colRect(2));
+      if (g.moves != 4 || c4::toMove(g) != 0) {
+        printf("FOUR ROW FAIL: two drops gave %d discs (want 4: each answered)\n", g.moves);
+        abort();
+      }
+      g_dumpEnabled = true;
+      setScreen("tool_fourrow_play");
+      tapRect(c4ui::colRect(4));
+      // Undo takes back the pair.
+      const int before = g.moves;
+      setScreen("tool_fourrow_undo");
+      tapRect(c4ui::UNDO);
+      if (g.moves != before - 2 || c4::toMove(g) != 0) {
+        printf("FOUR ROW FAIL: Undo left %d discs (want %d), turn %d\n", g.moves, before - 2,
+               c4::toMove(g));
+        abort();
+      }
+      // A win: three of yours on the bottom row with the fourth open.
+      g_dumpEnabled = false;
+      c4::reset(g, 0);
+      for (int col : {0, 6, 1, 6, 2, 5}) c4::play(g, col);
+      g_dumpEnabled = true;
+      const int wonBefore = prefs.getInt("c4_w1", 0);
+      setScreen("tool_fourrow_won");
+      tapRect(c4ui::colRect(3));
+      if (c4::winner(g) != 0 || prefs.getInt("c4_w1", 0) != wonBefore + 1) {
+        printf("FOUR ROW FAIL: the four did not win or was not recorded\n");
+        abort();
+      }
+      // Undo is shut once the result is written.
+      tapRect(c4ui::UNDO);
+      if (c4::winner(g) != 0) {
+        printf("FOUR ROW FAIL: Undo reopened a finished game\n");
+        abort();
+      }
+      // The board starts the next game; the Sticky opens it (take turns).
+      setScreen("tool_fourrow_sticky_opens");
+      tapRect(c4ui::colRect(0));
+      if (g.moves != 1 || g.first != 1) {
+        printf("FOUR ROW FAIL: the second game did not open with the Sticky's disc\n");
+        abort();
+      }
+      if (!fr->hostVsSticky()) abort();
+      // Its opening disc cannot be undone.
+      tapRect(c4ui::UNDO);
+      if (g.moves != 1) {
+        printf("FOUR ROW FAIL: Undo removed the Sticky's opening disc\n");
+        abort();
+      }
+      // Two players: a full column refuses.
+      setScreen("tool_fourrow_2p");
+      tapRect(c4ui::CHIP_FRIEND);
+      g_dumpEnabled = false;
+      for (int i = 0; i < 6; i++) tapRect(c4ui::colRect(0));
+      const int full = g.moves;
+      tapRect(c4ui::colRect(0));
+      if (full != 6 || g.moves != 6) {
+        printf("FOUR ROW FAIL: a full column took a disc (%d -> %d)\n", full, g.moves);
+        abort();
+      }
+      // Undo in two-player takes one disc back.
+      tapRect(c4ui::UNDO);
+      if (g.moves != 5) {
+        printf("FOUR ROW FAIL: two-player Undo took %d back\n", 6 - g.moves);
+        abort();
+      }
+      g_dumpEnabled = true;
+      setScreen("tool_fourrow_buttons");
+      toybox.onButton(SideBtn::Up);   // the pointer appears
+      g_dumpEnabled = false;
+      toybox.onButton(SideBtn::Ok);   // and drops
+      if (g.moves != 6) {
+        printf("FOUR ROW FAIL: OK did not drop at the pointer\n");
+        abort();
+      }
+      g_dumpEnabled = true;
+    }
+    setScreen("tool_fourrow_more");
+    more();
+    if (!fr->hostInMenu()) abort();
+    g_dumpEnabled = false;
+    back();
+    tapRect(c4ui::CHIP_AI);  // back to the Sticky for the next visit
+    back();
+    if (toybox.hostInApp()) {
+      printf("FOUR ROW FAIL: Back did not leave for the hub\n");
+      abort();
+    }
+    g_dumpEnabled = true;
+    printf("four in a row ok (drop and answer, undo pair, win recorded, full column, 2 players)\n");
+
+    // ---- Blackjack ----
+    for (const char* k : {"bj_tab", "bj_bet", "h_bj"}) prefs.remove(k);
+    setScreen("help_blackjack");
+    toybox.open(false, 15);
+    auto* bjt = static_cast<BlackjackTool*>(toybox.hostActive());
+    setScreen("tool_blackjack");
+    tapRect(help::OK_BTN);
+    {
+      bj::Table& t = bjt->hostTable();
+      if (t.chips != bj::START_CHIPS || t.phase != bj::BETTING) {
+        printf("BLACKJACK FAIL: a new table has %ld chips, phase %d\n", (long)t.chips, t.phase);
+        abort();
+      }
+      g_dumpEnabled = false;
+      // Deal until a hand is in play (a natural settles at once).
+      for (int i = 0; i < 20 && t.phase != bj::PLAYING; i++) tapRect(bjui::DEAL);
+      g_dumpEnabled = true;
+      if (t.phase != bj::PLAYING) {
+        printf("BLACKJACK FAIL: twenty deals and never a hand to play\n");
+        abort();
+      }
+      setScreen("tool_blackjack_hand");
+      stickyHost.refresh(false);
+      const int cardsBefore = t.you.n;
+      setScreen("tool_blackjack_hit");
+      tapRect(bjui::HIT);
+      if (t.you.n != cardsBefore + 1) {
+        printf("BLACKJACK FAIL: Hit did not add a card\n");
+        abort();
+      }
+      // The hit may have ended the hand: deal on until there is one to stand on.
+      g_dumpEnabled = false;
+      for (int i = 0; i < 30 && t.phase != bj::PLAYING; i++) tapRect(bjui::DEAL);
+      g_dumpEnabled = true;
+      if (t.phase == bj::PLAYING) {
+        setScreen("tool_blackjack_dealer");
+        tapRect(bjui::STAND);
+        if (t.phase != bj::DEALER && t.phase != bj::DONE) abort();
+      }
+      if (t.phase == bj::DEALER) {
+        tapRect(bjui::DEAL);  // nothing answers during the dealer's turn
+        if (t.phase != bj::DEALER) {
+          printf("BLACKJACK FAIL: a tap cut the dealer's turn short\n");
+          abort();
+        }
+        g_dumpEnabled = false;
+        for (int i = 0; i < bjui::DEALER_BEAT - 1; i++) toybox.tick();
+        g_dumpEnabled = true;
+        setScreen("tool_blackjack_dealer_draw");
+        bjt->hostDealerDone();
+      }
+      if (t.phase != bj::DONE) {
+        printf("BLACKJACK FAIL: Stand did not settle the hand\n");
+        abort();
+      }
+      const int won = prefs.getInt("bj_w", 0), lost = prefs.getInt("bj_l", 0),
+                push = prefs.getInt("bj_p", 0);
+      if (won + lost + push < 1) {
+        printf("BLACKJACK FAIL: the settled hand was not recorded\n");
+        abort();
+      }
+      // The bet button walks 5 / 10 / 25.
+      tapRect(bjui::BET);
+      if (prefs.getInt("bj_bet", 1) != 2) {
+        printf("BLACKJACK FAIL: Bet did not move to 25\n");
+        abort();
+      }
+      // Out of chips: the one button left starts again with 100.
+      t.chips = 3;
+      setScreen("tool_blackjack_broke");
+      stickyHost.refresh(false);
+      tapRect(bjui::DEAL);  // Deal is gone; the whole row restarts
+      if (t.chips != bj::START_CHIPS || t.phase != bj::BETTING) {
+        printf("BLACKJACK FAIL: Start again did not refill the chips\n");
+        abort();
+      }
+    }
+    setScreen("tool_blackjack_more");
+    more();
+    g_dumpEnabled = false;
+    back();
+    back();
+    g_dumpEnabled = true;
+    printf("blackjack ok (deal, hit, stand, recorded, bet, out of chips)\n");
+
+    // ---- Higher or Lower ----
+    for (const char* k : {"hl_state", "h_hl"}) prefs.remove(k);
+    setScreen("help_hilo");
+    toybox.open(false, 16);
+    auto* hl = static_cast<HiLoTool*>(toybox.hostActive());
+    setScreen("tool_hilo");
+    tapRect(help::OK_BTN);
+    {
+      // Guess right three times (the next card is known here), then wrong.
+      g_dumpEnabled = false;
+      int right = 0;
+      for (int i = 0; i < 40 && right < 3; i++) {
+        const int a = cards::highValue(hl->hostShown()), b = cards::highValue(hl->hostNext());
+        if (a == b) {
+          tapRect(hlui::HIGHER);  // a push: the run goes on
+          continue;
+        }
+        tapRect(b > a ? hlui::HIGHER : hlui::LOWER);
+        right++;
+      }
+      g_dumpEnabled = true;
+      if (hl->hostStreak() != 3 || hl->hostOver()) {
+        printf("HILO FAIL: three right guesses gave a streak of %d\n", hl->hostStreak());
+        abort();
+      }
+      setScreen("tool_hilo_right");
+      stickyHost.refresh(false);
+      g_dumpEnabled = false;
+      for (int i = 0; i < 40 && !hl->hostOver(); i++) {
+        const int a = cards::highValue(hl->hostShown()), b = cards::highValue(hl->hostNext());
+        if (a == b) {
+          tapRect(hlui::HIGHER);
+          continue;
+        }
+        g_dumpEnabled = true;
+        setScreen("tool_hilo_over");
+        tapRect(b > a ? hlui::LOWER : hlui::HIGHER);
+      }
+      g_dumpEnabled = true;
+      if (!hl->hostOver() || prefs.getInt("hl_best", 0) != 3) {
+        printf("HILO FAIL: the wrong guess did not end the run (best %d)\n",
+               prefs.getInt("hl_best", 0));
+        abort();
+      }
+      setScreen("tool_hilo_again");
+      tapRect(hlui::AGAIN);
+      if (hl->hostOver() || hl->hostStreak() != 0) abort();
+    }
+    g_dumpEnabled = false;
+    back();
+    g_dumpEnabled = true;
+    printf("higher or lower ok (right, push, wrong ends the run, best kept)\n");
+
+    // ---- Codebreaker ----
+    for (const char* k : {"cb_state", "cb_lvl", "h_cb"}) prefs.remove(k);
+    setScreen("help_code");
+    toybox.open(false, 17);
+    auto* cbt = static_cast<CodeTool*>(toybox.hostActive());
+    setScreen("tool_code");
+    tapRect(help::OK_BTN);
+    {
+      cb::Game& g = cbt->hostGame();
+      // Two wrong-ish tries, then the code itself.
+      g_dumpEnabled = false;
+      for (int r = 0; r < 2; r++) {
+        for (int i = 0; i < g.slots; i++) {
+          int sym = (g.secret[i] + 1 + r + i) % cb::SYMS;
+          // Easy refuses a symbol twice in a row: take the next one allowed.
+          while (!cb::allowed(g, i, sym)) sym = (sym + 1) % cb::SYMS;
+          tapRect(cbui::palRect(sym));
+        }
+        tapRect(cbui::CHECK);
+      }
+      if (g.row != 2) {
+        printf("CODE FAIL: two checked rows gave row %d\n", g.row);
+        abort();
+      }
+      // A half-filled row: Check refuses.
+      tapRect(cbui::palRect(g.secret[0]));
+      tapRect(cbui::CHECK);
+      if (g.row != 2) abort();
+      g_dumpEnabled = true;
+      setScreen("tool_code_play");
+      stickyHost.refresh(false);
+      g_dumpEnabled = false;
+      tapRect(cbui::DEL);
+      for (int i = 0; i < g.slots; i++) tapRect(cbui::palRect(g.secret[i]));
+      g_dumpEnabled = true;
+      setScreen("tool_code_won");
+      tapRect(cbui::CHECK);
+      if (g.done != 1 || prefs.getInt("cb_w0", 0) != 1 || prefs.getInt("cb_b0", 0) != 3) {
+        printf("CODE FAIL: the code was not broken in 3 (done %d, best %d)\n", g.done,
+               prefs.getInt("cb_b0", 0));
+        abort();
+      }
+      // Hard: five slots.
+      g_dumpEnabled = false;
+      more();
+      tapRect(gk::menuRect(2));  // Level -> Normal
+      tapRect(gk::menuRect(2));  // -> Hard
+      tapRect(gk::menuRect(1));  // New game
+      g_dumpEnabled = true;
+      if (g.slots != 5) {
+        printf("CODE FAIL: Hard did not hide five\n");
+        abort();
+      }
+      setScreen("tool_code_hard");
+      g_dumpEnabled = false;
+      for (int i = 0; i < 3; i++) tapRect(cbui::palRect(i));
+      g_dumpEnabled = true;
+      stickyHost.refresh(false);
+    }
+    setScreen("tool_code_more");
+    more();
+    g_dumpEnabled = false;
+    back();
+    back();
+    g_dumpEnabled = true;
+    printf("codebreaker ok (scored rows, half row refused, broken in 3, hard has five)\n");
+
+    // ---- Tower of Hanoi (landscape) ----
+    for (const char* k : {"hn_state", "hn_n", "h_hn"}) prefs.remove(k);
+    setScreen("help_hanoi");
+    toybox.open(false, 18);
+    auto* hnt = static_cast<HanoiTool*>(toybox.hostActive());
+    if (stickyHost.canvasRotation() != 1 && stickyHost.canvasRotation() != 3) {
+      printf("HANOI FAIL: opened at rotation %d, not on its side\n", stickyHost.canvasRotation());
+      abort();
+    }
+    setScreen("tool_hanoi");
+    tapRect(help::OK_WIDE);
+    {
+      hn::Game& g = hnt->hostGame();
+      auto peg = [](int p) { toybox.onTap(hnui::pegX(p), 300); };
+      setScreen("tool_hanoi_lift");
+      peg(0);
+      if (g.held != 0) {
+        printf("HANOI FAIL: a tap on the left peg did not lift its disc\n");
+        abort();
+      }
+      g_dumpEnabled = false;
+      peg(2);  // smallest to the goal
+      peg(0);
+      peg(2);  // the next one onto it: refused
+      if (g.moves != 1 || g.n[2] != 1) {
+        printf("HANOI FAIL: a bigger disc went on a smaller (moves %d)\n", g.moves);
+        abort();
+      }
+      peg(1);  // put it on the middle instead
+      g_dumpEnabled = true;
+      setScreen("tool_hanoi_two");
+      stickyHost.refresh(false);
+      setScreen("tool_hanoi_undo");
+      tapRect(hnui::UNDO);
+      if (g.moves != 1 || g.n[0] != 3) {
+        printf("HANOI FAIL: Undo did not put the disc back\n");
+        abort();
+      }
+      // Solve it the textbook way from the start: 15 moves for four discs.
+      // All but the last move off camera; the last one lands on the frame.
+      tapRect(hnui::RESTART);
+      std::vector<std::pair<int, int>> mv;
+      std::function<void(int, int, int, int)> solve = [&](int n, int a, int b, int c) {
+        if (!n) return;
+        solve(n - 1, a, c, b);
+        mv.push_back({a, c});
+        solve(n - 1, b, a, c);
+      };
+      solve(4, 0, 1, 2);
+      g_dumpEnabled = false;
+      for (size_t i = 0; i + 1 < mv.size(); i++) {
+        peg(mv[i].first);
+        peg(mv[i].second);
+      }
+      peg(mv.back().first);
+      g_dumpEnabled = true;
+      setScreen("tool_hanoi_solved");
+      peg(mv.back().second);
+      if (!hn::solved(g) || prefs.getInt("hn_b4", 0) != 15) {
+        printf("HANOI FAIL: the textbook solution did not solve in 15 (best %d, moves %d)\n",
+               prefs.getInt("hn_b4", 0), g.moves);
+        abort();
+      }
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_hanoi_more");
+    toybox.onTap(800 - 28, 20);
+    if (!hnt->hostInMenu()) {
+      printf("HANOI FAIL: More in the landscape corner did not open\n");
+      abort();
+    }
+    g_dumpEnabled = false;
+    back();
+    back();
+    g_dumpEnabled = true;
+    if (toybox.hostInApp() || stickyHost.canvasRotation() != 0) {
+      printf("HANOI FAIL: leaving did not stand the panel back up (rotation %d)\n",
+             stickyHost.canvasRotation());
+      abort();
+    }
+    printf("hanoi ok (sideways, lift and place, bigger-on-smaller refused, undo, 15 moves)\n");
+
+    // ---- Memory ----
+    for (const char* k : {"mp_state", "mp_size", "h_mp"}) prefs.remove(k);
+    setScreen("help_memory");
+    toybox.open(false, 19);
+    auto* mpt = static_cast<MemoryTool*>(toybox.hostActive());
+    setScreen("tool_memory");
+    tapRect(help::OK_BTN);
+    {
+      mp::Game& g = mpt->hostGame();
+      // Two that do not match.
+      int a = 0, b = 1;
+      while (g.sym[b] == g.sym[a]) b++;
+      g_dumpEnabled = false;
+      tapRect(mpui::cellRect(g.size, a));
+      g_dumpEnabled = true;
+      setScreen("tool_memory_miss");
+      tapRect(mpui::cellRect(g.size, b));
+      if (g.a != a || g.b != b) abort();
+      // The next tap turns them back and turns its own card.
+      int c = 2;
+      while (c == a || c == b) c++;
+      g_dumpEnabled = false;
+      tapRect(mpui::cellRect(g.size, c));
+      if (g.st[a] != mp::DOWN || g.st[b] != mp::DOWN || g.st[c] != mp::UP) {
+        printf("MEMORY FAIL: the odd pair did not go back on the next tap\n");
+        abort();
+      }
+      // Now find every pair: the card left up first, then the rest in order.
+      for (int guard = 0; guard < 64 && !mp::won(g); guard++) {
+        int k = g.a;
+        if (k < 0)
+          for (int i = 0; i < mp::cellsFor(g.size) && k < 0; i++)
+            if (!mp::isBlank(g, i) && g.st[i] == mp::DOWN) k = i;
+        int j = -1;
+        for (int i = 0; i < mp::cellsFor(g.size) && j < 0; i++)
+          if (i != k && g.sym[i] == g.sym[k]) j = i;
+        if (g.st[k] == mp::DOWN) tapRect(mpui::cellRect(g.size, k));
+        if (mp::pairsFor(g.size) - g.found == 1) {
+          g_dumpEnabled = true;
+          setScreen("tool_memory_done");
+        }
+        tapRect(mpui::cellRect(g.size, j));
+      }
+      g_dumpEnabled = true;
+      if (!mp::won(g) || !mpt->hostResult() || prefs.getInt("mp_w1", 0) != 1) {
+        printf("MEMORY FAIL: every pair found but no result (found %d)\n", g.found);
+        abort();
+      }
+      setScreen("tool_memory_board");
+      tapRect(gk::RES_LEFT);  // Close: the finished board
+      // 5x5, with its blank middle.
+      g_dumpEnabled = false;
+      toybox.onTap(BACK_W / 2, TOPBAR_H / 2);
+      toybox.open(false, 19);
+      mpt = static_cast<MemoryTool*>(toybox.hostActive());
+      tapRect(help::OK_BTN);  // the card comes back on every open until "don't show"
+      more();
+      tapRect(gk::menuRect(2));  // Grid -> 5 x 5 (nothing turned: at once)
+      g_dumpEnabled = true;
+      setScreen("tool_memory_5x5");
+      back();
+      if (mpt->hostGame().size != 2 || !mp::isBlank(mpt->hostGame(), 12)) {
+        printf("MEMORY FAIL: 5 x 5 did not deal with a blank centre (size %d, sym12 %d, flips %d, mp_size %d)\n", mpt->hostGame().size, mpt->hostGame().sym[12], mpt->hostGame().flips, prefs.getInt("mp_size", -1));
+        abort();
+      }
+      g_dumpEnabled = false;
+      more();
+      tapRect(gk::menuRect(2));  // -> 3 x 4
+      g_dumpEnabled = true;
+      setScreen("tool_memory_3x4");
+      back();
+    }
+    setScreen("tool_memory_more");
+    more();
+    g_dumpEnabled = false;
+    back();
+    back();
+    g_dumpEnabled = true;
+    if (inTool(19)) abort();
+    printf("memory ok (odd pair back on the next tap, all pairs, 5x5 blank, 3x4)\n");
+  }
 
   // --- notes -------------------------------------------------------------
   {

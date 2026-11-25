@@ -15,7 +15,7 @@
 namespace appvis {
 
 constexpr int GAMES = 4;   // wordle, mines (was nonogram), 2048, xo
-constexpr int TOOLS = 14;  // the tool shell's own apps, in ticons order
+constexpr int TOOLS = 20;  // the tool shell's own apps, in ticons order (C4: +6 games)
 constexpr int COUNT = GAMES + TOOLS;
 constexpr uint32_t ALL = (1u << COUNT) - 1;
 
@@ -30,10 +30,12 @@ inline bool visible(bool game, int idx) {
   return (g_mask & (1u << bitOf(game, idx))) != 0;
 }
 
+// Tool 9 was the manga reader (removed in v2): its bit is still set on old
+// devices and on new ones (ALL), but there is no tile for it to count.
 inline int shown() {
   int n = 0;
   for (int i = 0; i < COUNT; i++)
-    if (g_mask & (1u << i)) n++;
+    if ((g_mask & (1u << i)) && i != bitOf(false, 9)) n++;
   return n;
 }
 

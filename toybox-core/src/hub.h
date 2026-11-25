@@ -42,7 +42,11 @@ inline TRect dueDone(int bottom) {
 // gutter between two tiles still lands on one of them.
 inline constexpr int COLS = 3;
 inline constexpr int CELL_W = SCREEN_W / COLS;  // 160, the touch slice
-inline constexpr int FOLDER_TOP = TOPBAR_H + 14;  // 54
+// The drawer's name stands large under the bar (owner, 25 Nov), and the grid
+// hangs below it: three rows end at 610, the page turn under them at 622,
+// the dock at 728.
+inline constexpr int FOLDER_HEAD_Y = TOPBAR_H + 14;  // 54
+inline constexpr int FOLDER_TOP = TOPBAR_H + 78;     // 118
 inline constexpr int FOLDER_BOTTOM = DOCK_Y - 8;
 inline constexpr int TILE = 64;            // icon size inside a tile (pre-C3)
 inline constexpr int TILE_ICON = 68;       // v2 line icons (kit: 44; owner: bigger)

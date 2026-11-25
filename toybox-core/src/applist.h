@@ -24,7 +24,12 @@ struct Group {
 };
 
 inline constexpr Group GROUPS[] = {
-    {"PLAY", {{true, 0}, {true, 1}, {true, 2}, {true, 3}, {false, 7}, {false, 8}}, 6},
+    // Full at twelve (C4): the six C3 games, then the six new ones on the
+    // drawer's second page.
+    {"PLAY",
+     {{true, 0}, {true, 1}, {true, 2}, {true, 3}, {false, 7}, {false, 8}, {false, 14},
+      {false, 15}, {false, 16}, {false, 17}, {false, 18}, {false, 19}},
+     12},
     // The everyday instruments: coin, dice, picker, timer -- things you
     // consult and put down -- and recipes, whose "what should we cook" is
     // answered the same way. (STUDY's drawer is full: a fifth tile there

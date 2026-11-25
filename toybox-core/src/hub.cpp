@@ -196,20 +196,22 @@ void drawRecentStrip(ToolsCanvas& c, int stripTop, const recents::Entry* rec, in
   }
 }
 
-// The page arrows in a drawer's header corner, drawn (and hit) only when the
-// drawer has more than one page of tiles. A guest's corner already carries
-// the gear, so its pager sits just left of it.
-// Clear of the corner: the gear (guest) or More (standalone) lives there.
-TRect fpagePrevRect(bool guest) { return TRect{SCREEN_W - (guest ? 300 : 246), 4, 56, 56}; }
-TRect fpageNextRect(bool guest) { return TRect{SCREEN_W - (guest ? 176 : 122), 4, 56, 56}; }
+// The page turn, drawn (and hit) only when a drawer has more than one page
+// of tiles (C4: PLAY's twelve). Under the grid, at the same place on every
+// page, as two big targets a thumb finds without looking up at the header
+// (owner, 25 Nov): three rows of tiles end at 610, the dock starts at 728.
+inline constexpr int FPAGE_Y = hubui::FOLDER_TOP + 3 * hubui::ROW_STEP + 12;  // 622
+TRect fpagePrevRect(bool) { return TRect{24, FPAGE_Y, 150, 76}; }
+TRect fpageNextRect(bool) { return TRect{SCREEN_W - 24 - 150, FPAGE_Y, 150, 76}; }
 
 void drawFolderPager(ToolsCanvas& c, bool guest, int page, int pages) {
   const TRect pv = fpagePrevRect(guest), nx = fpageNextRect(guest);
-  if (page > 0) c.text(pv.x + 18, pv.y + 12, "<", TS_LARGE, true, true);
-  if (page < pages - 1) c.text(nx.x + 18, nx.y + 12, ">", TS_LARGE, true, true);
+  // Bare bold arrows, no box (owner): the whole rect is still the target.
+  if (page > 0) c.textInBox(pv.x, pv.y, pv.w, pv.h, "<<", TS_HUGE, true, true);
+  if (page < pages - 1) c.textInBox(nx.x, nx.y, nx.w, nx.h, ">>", TS_HUGE, true, true);
   char b[8];
-  snprintf(b, sizeof(b), "%d/%d", page + 1, pages);
-  c.textCentered((pv.x + nx.x + 56) / 2, 24, b, TS_SMALL, true);
+  snprintf(b, sizeof(b), "%d / %d", page + 1, pages);
+  c.textCentered(SCREEN_W / 2, pv.y + (pv.h - c.textHeight(TS_MED)) / 2, b, TS_MED, true);
 }
 
 void renderFolder(ToolsHost& host, ToolsCanvas& c, int folder, int page,
@@ -222,7 +224,9 @@ void renderFolder(ToolsHost& host, ToolsCanvas& c, int folder, int page,
   const int cellCount = folderCells(folder, guest);
   const int pages = folderPagesOf(cellCount);
   page = clampFolderPage(page, cellCount);
-  host.topBar(grp.name);
+  // The bar keeps Back and More; the name is the page's heading, large.
+  host.topBar("");
+  c.textTrackedCentered(SCREEN_W / 2, FOLDER_HEAD_Y, grp.name, TS_HUGE, true, true, 6);
   if (guest)
     decor::gear(c, SCREEN_W - 30, TOPBAR_H / 2, 12, 8, true);
   else
