@@ -112,6 +112,12 @@ inline TRect fontPagerNext() { return TRect{SCREEN_W - 16 - 130, fontPagerY(), 1
 
 // The how-to cards, on the apps page now.
 inline TRect appsCardsRect() { return TRect{16, 700, SCREEN_W - 32, 56}; }
+// C5: the app list is two pages; the turn sits above the cards button.
+inline TRect appsPrevRect() { return TRect{16, 612, 150, 76}; }
+inline TRect appsNextRect() { return TRect{SCREEN_W - 16 - 150, 612, 150, 76}; }
+// Where app i of group g is listed (applist order), and on which page.
+TRect appsItemRect(int group, int i);
+int appsPageOf(int group);
 
 // The clock page: the same two pairing steps as the files page, at the same
 // coordinates, because it is the same act. What differs is the end -- the

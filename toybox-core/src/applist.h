@@ -17,26 +17,26 @@ struct Item {
 };
 struct Group {
   const char* name;
-  // Room for twelve: a drawer shows six tiles to a page and grows page
-  // arrows in its header corner past that (hub.cpp walkFolder).
-  Item items[12];
+  // A drawer shows nine tiles to a page and turns pages past that
+  // (hub.cpp walkFolder).
+  Item items[16];
   uint8_t n;
 };
 
 inline constexpr Group GROUPS[] = {
-    // Full at twelve (C4): the six C3 games, then the six new ones on the
-    // drawer's second page.
+    // C4 filled it to twelve; C5 (owner, 25 Nov) brought Coin and Dice over
+    // from UTILITY, so fourteen: nine on the first page, five on the second.
     {"PLAY",
      {{true, 0}, {true, 1}, {true, 2}, {true, 3}, {false, 7}, {false, 8}, {false, 14},
-      {false, 15}, {false, 16}, {false, 17}, {false, 18}, {false, 19}},
-     12},
-    // The everyday instruments: coin, dice, picker, timer -- things you
-    // consult and put down -- and recipes, whose "what should we cook" is
-    // answered the same way. (STUDY's drawer is full: a fifth tile there
-    // would push the recently-read covers off the panel.)
+      {false, 15}, {false, 16}, {false, 17}, {false, 18}, {false, 19}, {false, 0},
+      {false, 1}},
+     14},
+    // The everyday instruments: picker, random, timer -- things you consult
+    // and put down -- recipes, the calendar and focus, and C5's Level and
+    // Climate (indexes 20, 21).
     {"UTILITY",
-     {{false, 0}, {false, 1}, {false, 3}, {false, 4}, {false, 2}, {false, 11}, {false, 12},
-      {false, 13}},
+     {{false, 3}, {false, 4}, {false, 2}, {false, 11}, {false, 12}, {false, 13}, {false, 20},
+      {false, 21}},
      8},
     // The reader first: the drawer was drawn around "the thing you were
     // reading on top". (Index 9 was the .tbk manga reader, removed in v2;

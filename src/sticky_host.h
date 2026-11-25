@@ -140,6 +140,9 @@ class StickyHost : public ToolsHost {
   int deviceOrientation() override {
     return sensors::imuPresent() ? sensors::orientation() : -1;
   }
+  bool accel3(int& x, int& y, int& z) override { return sensors::readAccel3(x, y, z); }
+  bool climate(int& tDeciC, int& rh) override { return sensors::readClimate(tDeciC, rh); }
+  bool batteryTemp(int& deciC) override { return sensors::batteryTemp(deciC); }
   void topBar(const char* t, bool withHelp, const char* backLabel, const char* corner) override {
     drawTopBar(_canvas, t, withHelp, backLabel, corner);
   }

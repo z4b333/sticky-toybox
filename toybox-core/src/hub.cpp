@@ -103,7 +103,7 @@ int clampFolderPage(int page, int cells) {
 template <typename F>
 void walkFolder(int folder, bool guest, bool topAnchor, int page, F f) {
   const Group& grp = GROUPS[folder];
-  Item vis[13];
+  Item vis[17];
   int n = 0;
   for (int i = 0; i < grp.n; i++)
     if (appvis::visible(grp.items[i].game, grp.items[i].idx)) vis[n++] = grp.items[i];

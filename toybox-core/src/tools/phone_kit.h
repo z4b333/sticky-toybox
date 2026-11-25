@@ -17,8 +17,9 @@ font:500 16px/1.45 "Noto Sans","Noto Sans Thai Looped",system-ui,-apple-system,s
 .mono,.eye,.lab,.badge,.tag{font-family:"Noto Sans Mono",ui-monospace,Menlo,Consolas,monospace}
 header{position:sticky;top:0;z-index:2;height:60px;display:flex;align-items:center;gap:12px;background:#fff;
 border-bottom:2px solid #111;padding:0 14px}
-.mark{width:36px;height:30px;background:#111;color:#fff;font:800 13px system-ui;display:flex;align-items:center;
-justify-content:center;letter-spacing:1px}
+.mark{width:40px;height:40px;flex:none;background:#FFD84D;border:2px solid #111;border-radius:9px;box-shadow:2px 2px 0 #111;
+display:flex;align-items:center;justify-content:center}
+.mark svg{display:block}
 header .t{flex:1;display:flex;flex-direction:column;min-width:0}
 .eye{font-size:10px;font-weight:600;letter-spacing:2px;text-transform:uppercase}
 header h1{margin:0;font-size:19px;font-weight:700;line-height:1.2}
@@ -66,7 +67,7 @@ inline void begin(Server& s, const char* title, const char* eyebrow, const char*
   head += F("</title><style>");
   s.sendContent(head);
   s.sendContent_P(CSS);
-  String bar = F("</style></head><body><header><div class=\"mark\" aria-hidden=\"true\">TB</div><div class=\"t\">"
+  String bar = F("</style></head><body><header><span class=\"mark\" role=\"img\" aria-label=\"Toybox\"><svg width=\"30\" height=\"30\" viewBox=\"0 0 100 100\"><path d=\"M48 4Q48 19 63 19Q48 19 48 34Q48 19 33 19Q48 19 48 4Z\" fill=\"#111\"/><path d=\"M76 19Q76 30 87 30Q76 30 76 41Q76 30 65 30Q76 30 76 19Z\" fill=\"#111\"/><path d=\"M20 22Q20 31 29 31Q20 31 20 40Q20 31 11 31Q20 31 20 22Z\" fill=\"#111\"/><path d=\"M12 46H84L78 90H18Z\" fill=\"#111\" stroke=\"#111\" stroke-width=\"7\" stroke-linejoin=\"round\"/><path d=\"M12 46L3 32M84 46L93 32\" stroke=\"#111\" stroke-width=\"7\" stroke-linecap=\"round\"/><g transform=\"translate(47 69) scale(0.85) translate(-48 -71)\" fill=\"none\" stroke=\"#FFD84D\" stroke-width=\"6.5\" stroke-linecap=\"square\"><path d=\"M25 58H45M35 58V84\"/><path d=\"M53 58V84M53 58H62.5a6 6 0 0 1 0 12H53M53 70H64a7 7 0 0 1 0 14H53\" stroke-linejoin=\"round\"/></g></svg></span><div class=\"t\">"
                  "<span class=\"eye\">");
   bar += eyebrow;
   bar += F("</span><h1>");

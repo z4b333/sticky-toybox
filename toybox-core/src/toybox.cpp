@@ -27,6 +27,9 @@
 #include "tools/tool_hanoi.h"
 #include "tools/tool_hilo.h"
 #include "tools/tool_memory.h"
+// C5 (tool indexes 20, 21)
+#include "tools/tool_climate.h"
+#include "tools/tool_level.h"
 
 Toybox toybox;
 
@@ -64,6 +67,8 @@ bool Toybox::build(bool game, int idx) {
       case 17: _active = new CodeTool(); break;
       case 18: _active = new HanoiTool(); break;
       case 19: _active = new MemoryTool(); break;
+      case 20: _active = new LevelTool(); break;
+      case 21: _active = new ClimateTool(); break;
       default: _active = new EpubTool(); break;
     }
   }

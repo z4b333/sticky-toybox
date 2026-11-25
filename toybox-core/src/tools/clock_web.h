@@ -15,6 +15,7 @@
 #include "kosync.h"
 #include "portal.h"
 #include "tools_ui.h"
+#include "weather.h"
 
 namespace cweb {
 
@@ -53,6 +54,7 @@ class ClockServer {
     if (ok) _wifiSaved = true;
     return ok;
   }
+  bool hostSendPlace(const char* city) { return _prefs && wx::saveCity(*_prefs, city); }
   bool hostSendAccount(const char* server, const char* user, const char* pass) {
     return _prefs && kosync::saveAccount(*_prefs, server, user, pass);
   }
@@ -87,6 +89,7 @@ class ClockServer {
     _portal.on("/t", HTTP_POST, [this] { takeTime(); });
     _portal.on("/w", HTTP_POST, [this] { takeWifi(); });
     _portal.on("/k", HTTP_POST, [this] { takeAccount(); });
+    _portal.on("/l", HTTP_POST, [this] { takePlace(); });
     _portal.on("/s", HTTP_GET, [this] { sendScan(); });
     // The networks around, for the page's pick list: the station half of the
     // radio scans while the access point keeps serving. Started now, so the
@@ -137,6 +140,13 @@ class ClockServer {
                     homenet::saveWifi(*_prefs, s.arg("s").c_str(),
                                       s.hasArg("p") ? s.arg("p").c_str() : "", slot);
     if (ok) _wifiSaved = true;
+    s.send(200, "application/json", ok ? "{\"ok\":1}" : "{\"ok\":0}");
+  }
+
+  // Climate's weather place (C5): a name, looked up on the first fetch.
+  void takePlace() {
+    WebServer& s = _portal.server();
+    const bool ok = _prefs && s.hasArg("c") && wx::saveCity(*_prefs, s.arg("c").c_str());
     s.send(200, "application/json", ok ? "{\"ok\":1}" : "{\"ok\":0}");
   }
 
@@ -257,6 +267,10 @@ can join are listed.</p>
 <input id="bs" placeholder="Wi-Fi name" autocapitalize="off" autocomplete="off" maxlength="32">
 <input id="bp" type="password" placeholder="Password" autocomplete="off" maxlength="63">
 <button>Save backup Wi-Fi</button></form><div id="bm"></div>
+<h2>Weather place <span>(optional)</span></h2>
+<p>For Climate's outdoor reading: a town or city name.</p>
+<form id="lf"><input id="lc" placeholder="City, e.g. Bangkok" autocomplete="off" maxlength="47">
+<button>Save place</button></form><div id="lm"></div>
 <h2>Other sync server <span>(optional)</span></h2>
 <p>For Readest, skip this: on the device open a book, then Options &rarr;
 Sync position, and scan its code. Here only for a KOReader sync server
@@ -308,6 +322,14 @@ document.getElementById('kf').addEventListener('submit',function(e){
   body:'u='+encodeURIComponent(u)+'&p='+encodeURIComponent(k)+'&s='+encodeURIComponent(v)})
  .then(function(r){return r.json()}).then(function(j){m.textContent=j.ok?
   'Saved. Open a book, then Options \u2192 Sync position.':'The device did not accept that.'})
+ .catch(function(){m.textContent='Could not reach the device. Still connected to its wifi?'})});
+document.getElementById('lf').addEventListener('submit',function(e){
+ e.preventDefault();var m=document.getElementById('lm'),c=document.getElementById('lc').value.trim();
+ if(!c){m.textContent='Type a place first.';return}
+ fetch('/l',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
+  body:'c='+encodeURIComponent(c)})
+ .then(function(r){return r.json()}).then(function(j){m.textContent=j.ok?
+  'Saved. In Climate, tap Refresh to fetch the weather there.':'The device did not accept that name.'})
  .catch(function(){m.textContent='Could not reach the device. Still connected to its wifi?'})});
 function wifiForm(f,ns,ps,ms,b){
 document.getElementById(f).addEventListener('submit',function(e){

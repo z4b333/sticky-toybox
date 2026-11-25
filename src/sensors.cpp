@@ -130,8 +130,47 @@ bool readClock(Clock& out) {
 void hostSetClock(bool on) { g_hostClockSet = on; }
 bool setClock(const Clock&) { return false; }
 bool setClockFromEpochMs(int64_t) { return false; }
-bool readClimate(int&, int&) { return false; }
-bool readAccel(int&, int&) { return false; }
+static bool g_hostSht = false, g_hostBatT = false;
+static int g_hostT = 0, g_hostRh = 0, g_hostBt = 0;
+static int g_hax = 0, g_hay = -16384, g_haz = 0;
+void hostSetClimate(bool on, int t, int rh) {
+  g_hostSht = on;
+  g_hostT = t;
+  g_hostRh = rh;
+}
+void hostSetBatteryTemp(bool on, int t) {
+  g_hostBatT = on;
+  g_hostBt = t;
+}
+bool batteryTemp(int& t) {
+  if (!g_hostBatT) return false;
+  t = g_hostBt;
+  return true;
+}
+bool readClimate(int& t, int& rh) {
+  if (!g_hostSht) return false;
+  t = g_hostT;
+  rh = g_hostRh;
+  return true;
+}
+void hostSetAccel(int ax, int ay, int az) {
+  g_hax = ax;
+  g_hay = ay;
+  g_haz = az;
+}
+bool readAccel(int& ax, int& ay) {
+  if (!g_imu) return false;
+  ax = g_hax;
+  ay = g_hay;
+  return true;
+}
+bool readAccel3(int& ax, int& ay, int& az) {
+  if (!g_imu) return false;
+  ax = g_hax;
+  ay = g_hay;
+  az = g_haz;
+  return true;
+}
 int orientation() { return g_orientation; }
 void hostSetOrientation(int o) { g_orientation = o; }
 void hostSetImu(bool on) { g_imu = on; }
@@ -233,6 +272,24 @@ bool readClimate(int& tempDeciC, int& rhPercent) {
   rhPercent = -6 + (int)((125LL * hRaw) / 65535);
   if (rhPercent < 0) rhPercent = 0;
   if (rhPercent > 100) rhPercent = 100;
+  return true;
+}
+
+bool readAccel3(int& ax, int& ay, int& az) {
+  if (!g_imu) return false;
+  uint8_t b[6];
+  if (!readRegs(ADDR_IMU, 0x28, b, 6)) return false;  // OUTX_L_XL .. OUTZ_H_XL
+  ax = (int16_t)(b[0] | (b[1] << 8));
+  ay = (int16_t)(b[2] | (b[3] << 8));
+  az = (int16_t)(b[4] | (b[5] << 8));
+  return true;
+}
+
+bool batteryTemp(int& deciC) {
+  if (!g_gauge) return false;
+  const int k = gauge16(0x06);  // Temperature, 0.1 K
+  if (k <= 0) return false;
+  deciC = k - 2732;
   return true;
 }
 

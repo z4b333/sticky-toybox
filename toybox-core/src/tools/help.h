@@ -379,4 +379,39 @@ inline constexpr Text MEMORY{{
                             false,
                             19};
 
+// --- C5 ------------------------------------------------------------------------
+
+inline constexpr Text LEVEL{{
+    "Lay the Sticky flat: the",
+    "bubble shows both ways it",
+    "leans.",
+    "",
+    "Stand it on an edge: one",
+    "angle, and the screen",
+    "turns to read upright.",
+    "",
+    "Set zero makes the surface",
+    "it is on the level one.",
+    "OK on the side does it too.",
+},
+                           false,
+                           20};
+
+inline constexpr Text CLIMATE{{
+    "The room: temperature,",
+    "humidity, dew point, how",
+    "warm it feels.",
+    "",
+    "The Sticky runs a little",
+    "warm: More > Offset trims",
+    "it.",
+    "",
+    "For the weather outside:",
+    "More > Outdoor place sets",
+    "it from your phone, then",
+    "tap Refresh.",
+},
+                             false,
+                             21};
+
 }  // namespace help

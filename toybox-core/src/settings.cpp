@@ -12,37 +12,56 @@
 
 namespace {
 
-// Two columns of checkboxes, on their own page. C4 filled PLAY to twelve, so
-// the rows gave back 6 px: 46 px is 5 mm -- under the 7 mm a fingertip
-// wants -- but the row is 216 px wide and a miss only ticks a neighbouring
-// box, which is visible immediately and undone by tapping it again.
+// Two columns of checkboxes, on two pages (owner, C5): PLAY's fourteen on the
+// first, seven a column; UTILITY and STUDY side by side on the second. The
+// rows keep their 52 px (5.6 mm) -- splitting the list is what bought them
+// back after C4 had squeezed them to 46.
 constexpr int COL_X[2] = {16, 248};
 constexpr int COL_W = 216;
-constexpr int ROW_H = 46, BOX = 28;
-constexpr int HEAD_H = 26, GROUP_GAP = 14;
+constexpr int ROW_H = 52, BOX = 28;
+constexpr int HEAD_H = 26;
 constexpr int LIST_TOP = 92;
+constexpr int APPS_PAGES = 2;
+int g_appsPage = 0;
 
+// Which page a group is listed on, and which column it starts in.
+int pageOf(int g) { return g == 0 ? 0 : 1; }
+int columnOf(int g) { return g == 2 ? 1 : 0; }
 
-// Group 0 fills the left column and everything after it stacks down the right.
-// Three groups is what there is; a fourth would go on the right too and want
-// the row height trimmed.
-// C4: PLAY (twelve) has the left column to itself; UTILITY and STUDY stack
-// down the right.
-int columnOf(int g) { return g == 0 ? 0 : 1; }
-
-//   f(item, group, headTop, rowTop, col)
+//   f(item, group, headTop, rowTop, col, firstOfColumn)
 template <typename F>
-void walkList(F f) {
-  int y[2] = {LIST_TOP, LIST_TOP};
+void walkList(int page, F f) {
   for (int g = 0; g < applist::NGROUPS; g++) {
+    if (pageOf(g) != page) continue;
     const applist::Group& grp = applist::GROUPS[g];
-    const int col = columnOf(g);
-    const int headTop = y[col];
-    for (int i = 0; i < grp.n; i++)
-      f(grp.items[i], grp, headTop, headTop + HEAD_H + i * ROW_H, col);
-    y[col] = headTop + HEAD_H + grp.n * ROW_H + GROUP_GAP;
+    // A group too long for one column (PLAY) carries on at the top of the next.
+    const int perCol = grp.n > 8 ? (grp.n + 1) / 2 : grp.n;
+    for (int i = 0; i < grp.n; i++) {
+      const int col = columnOf(g) + i / perCol, k = i % perCol;
+      f(grp.items[i], grp, LIST_TOP, LIST_TOP + HEAD_H + k * ROW_H, col, k == 0);
+    }
   }
 }
+
+}  // namespace
+
+namespace setui {
+TRect appsItemRect(int group, int i) {
+  int k = i;  // its place among everything listed on that page
+  for (int g = 0; g < group; g++)
+    if (pageOf(g) == pageOf(group)) k += applist::GROUPS[g].n;
+  TRect r{0, 0, 0, 0};
+  int n = 0;
+  walkList(pageOf(group),
+           [&](const applist::Item&, const applist::Group&, int, int rowTop, int col, bool) {
+             if (n++ == k) r = TRect{COL_X[col], rowTop, COL_W, ROW_H};
+           });
+  return r;
+}
+int appsPageOf(int group) { return pageOf(group); }
+}  // namespace setui
+
+namespace {
 
 void checkbox(ToolsCanvas& c, int x, int y, bool on) {
   if (!on) {
@@ -170,7 +189,7 @@ inline void draw(ToolsCanvas& c, int act, int cx, int cy, bool dark) {
 // ("h_mns"), and C4 adds the six new games.
 constexpr const char* HELP_KEYS[] = {"h_wrd", "h_mns", "h_g20", "h_xo", "h_sea", "h_sud",
                                      "h_fc",  "h_bk",  "h_ep",  "h_rcp", "h_c4", "h_bj",
-                                     "h_hl",  "h_cb",  "h_hn",  "h_mp"};
+                                     "h_hl",  "h_cb",  "h_hn",  "h_mp",  "h_lv", "h_cl"};
 
 }  // namespace
 
@@ -1111,10 +1130,10 @@ void SettingsScreen::renderApps(ToolsHost& host, ToolsCanvas& c) {
 
   c.textTracked(16, 56, "SHOW ON THE HUB", TS_MED, true, false, 1);
 
-  walkList([&c](const applist::Item& it, const applist::Group& grp, int headTop, int rowTop,
-                int col) {
+  walkList(g_appsPage, [&c](const applist::Item& it, const applist::Group& grp, int headTop,
+                            int rowTop, int col, bool first) {
     const int x = COL_X[col];
-    if (rowTop == headTop + HEAD_H) {
+    if (first) {
       // Same weight and rule as the hub's group headings, so the checkbox list
       // reads as the hub in another form rather than as a separate inventory.
       c.textTracked(x, headTop, grp.name, TS_MED, true, false, 1);
@@ -1123,6 +1142,14 @@ void SettingsScreen::renderApps(ToolsHost& host, ToolsCanvas& c) {
     checkbox(c, x, rowTop + (ROW_H - BOX) / 2, appvis::visible(it.game, it.idx));
     c.text(x + BOX + 12, rowTop + (ROW_H - c.textHeight(TS_MED)) / 2, nameOf(it), TS_MED, true);
   });
+
+  // The page turn: the drawers' bold arrows, the page between them.
+  const TRect pv = setui::appsPrevRect(), nx = setui::appsNextRect();
+  if (g_appsPage > 0) c.textInBox(pv.x, pv.y, pv.w, pv.h, "<<", TS_HUGE, true, true);
+  if (g_appsPage < APPS_PAGES - 1) c.textInBox(nx.x, nx.y, nx.w, nx.h, ">>", TS_HUGE, true, true);
+  char pg[8];
+  snprintf(pg, sizeof(pg), "%d / %d", g_appsPage + 1, APPS_PAGES);
+  c.textCentered(SCREEN_W / 2, pv.y + (pv.h - c.textHeight(TS_MED)) / 2, pg, TS_MED, true);
 
   // The cards row came off the settings page: it is a row about apps, and this
   // is the page about apps.
@@ -1139,8 +1166,19 @@ bool SettingsScreen::tapApps(ToolsHost& host, int x, int y) {
     host.beep(1);
     return true;
   }
+  if (g_appsPage > 0 && setui::appsPrevRect().hit(x, y)) {
+    g_appsPage--;
+    host.beep(0);
+    return true;
+  }
+  if (g_appsPage < APPS_PAGES - 1 && setui::appsNextRect().hit(x, y)) {
+    g_appsPage++;
+    host.beep(0);
+    return true;
+  }
   bool hit = false;
-  walkList([&](const applist::Item& it, const applist::Group&, int, int rowTop, int col) {
+  walkList(g_appsPage, [&](const applist::Item& it, const applist::Group&, int, int rowTop, int col,
+                           bool) {
     if (hit || !inRect(x, y, COL_X[col], rowTop, COL_W, ROW_H)) return;
     hit = true;
     appvis::toggle(it.game, it.idx);
@@ -1478,6 +1516,7 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
   auto rowHit = [&](int act) { return TAB_OF[act] == _tab && actionRect(act).hit(x, y); };
   if (rowHit(ACT_APPS)) {
     _page = 3;
+    g_appsPage = 0;  // the list opens on PLAY
     host.beep(1);
     return true;
   }

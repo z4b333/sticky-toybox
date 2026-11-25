@@ -28,9 +28,11 @@ class KitGame : public ToolApp {
     if (_view == View::Rules) {
       gk::bar(host(), c, title());
       if (wide())
-        help::renderWide(c, rulesText(), "HOW TO PLAY", "More > How to play brings this back");
+        help::renderWide(c, rulesText(), isGame() ? "HOW TO PLAY" : "HOW TO USE",
+                         isGame() ? "More > How to play brings this back"
+                                  : "More > How to use brings this back");
       else
-        gk::rules(c, rulesText());
+        gk::rules(c, rulesText(), isGame());
       return;
     }
     if (_view == View::Menu) {
@@ -99,6 +101,9 @@ class KitGame : public ToolApp {
   virtual void tapPlay(int x, int y) = 0;
   virtual const char* corner() { return nullptr; }
   virtual bool wide() const { return false; }
+  // Level and Climate are apps: their card and More row say "How to use".
+  virtual bool isGame() const { return true; }
+  const char* howLabel() const { return isGame() ? "How to play" : "How to use"; }
   // More's rows after How to play: settings and actions, then Clear record
   // only when there is a record to clear (hasRecord).
   virtual int extraRows(gk::Row* rows) = 0;
@@ -118,7 +123,7 @@ class KitGame : public ToolApp {
 
   int menuRows(gk::Row* rows) {
     int n = 0;
-    rows[n++] = {"How to play", nullptr, false};
+    rows[n++] = {howLabel(), nullptr, false};
     n += extraRows(rows + n);
     if (hasRecord() && n < gk::MENU_MAX) rows[n++] = {"Clear record", nullptr, _armedClear};
     return n;
@@ -135,7 +140,7 @@ class KitGame : public ToolApp {
       return;
     }
     const char* what = rows[i].label;
-    if (!strcmp(what, "How to play")) {
+    if (!strcmp(what, howLabel())) {
       _view = View::Rules;
       _rulesFromMore = true;
     } else if (!strcmp(what, "Clear record")) {

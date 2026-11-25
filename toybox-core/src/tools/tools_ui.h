@@ -327,6 +327,22 @@ class ToolsHost {
   // on the board, or a host with no board at all -- and callers fall back to
   // asking with a button.
   virtual int deviceOrientation() { return -1; }
+  // C5 (Level, Climate): the raw sensors. Accelerometer counts on three axes
+  // at +/-2 g (16384 = 1 g), the SHT40's temperature (tenths of a degree C)
+  // and humidity (%), the battery's own temperature. False when a chip did
+  // not answer.
+  virtual bool accel3(int& x, int& y, int& z) {
+    (void)x, (void)y, (void)z;
+    return false;
+  }
+  virtual bool climate(int& tDeciC, int& rh) {
+    (void)tDeciC, (void)rh;
+    return false;
+  }
+  virtual bool batteryTemp(int& deciC) {
+    (void)deciC;
+    return false;
+  }
   // `corner` is a short string for the bar's right end -- the clock, so far,
   // and only on screens that are redrawn often enough for one to be true. It
   // shares the corner with the "?", which wins: a screen with rules keeps its

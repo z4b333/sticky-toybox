@@ -20,6 +20,10 @@
 #include "tools/fourrow_rules.h"
 #include "tools/hanoi_rules.h"
 #include "tools/memory_rules.h"
+// C5
+#include "tools/climate_calc.h"
+#include "tools/level_calc.h"
+#include "tools/weather.h"
 
 static std::mt19937 rng(12345);
 static uint32_t rnd32() { return rng(); }
@@ -1348,6 +1352,94 @@ static void testHanoi() {
   printf("hanoi ok (3-7 discs in the minimum, bigger on smaller refused, undo)\n");
 }
 
+// --- C5 ----------------------------------------------------------------------
+
+static void testLevel() {
+  using namespace lvl;
+  const int G = 16384;
+  Reading r = read(0, 0, G);
+  assert(r.mode == FLAT && r.x == 0 && r.y == 0 && isLevel(r));
+  // Tilted 3 degrees along x: sin 3 deg of g on x.
+  r = read((int)(G * sinf(3 * 0.0174533f)), 0, (int)(G * cosf(3 * 0.0174533f)));
+  assert(r.mode == FLAT && (r.x == -30 || r.x == -29 || r.x == -31) && r.y == 0 && !isLevel(r));
+  assert(isLevel(r, r.x, r.y));  // zeroed there, it is level
+  // Upright portrait, then each other edge: the rotation sensors.cpp uses.
+  assert(read(0, -G, 0).mode == EDGE && read(0, -G, 0).rot == 0 && read(0, -G, 0).edge == 0);
+  assert(read(0, G, 0).rot == 2);
+  assert(read(-G, 0, 0).rot == 1);
+  assert(read(G, 0, 0).rot == 3);
+  // A degree off upright.
+  r = read((int)(G * sinf(0.0174533f)), -(int)(G * cosf(0.0174533f)), 0);
+  assert(r.mode == EDGE && r.rot == 0 && r.edge >= 9 && r.edge <= 11);
+  // Hysteresis: at 45 degrees it stays whichever it was.
+  const int h = (int)(G * 0.7071f);
+  assert(read(0, -h, h, FLAT).mode == FLAT && read(0, -h, h, EDGE).mode == EDGE);
+  printf("level ok (flat angles, zero, four edges, edge tilt, hysteresis)\n");
+}
+
+static void testClimate() {
+  using namespace clim;
+  // Dew point: 25 C at 50 % is 13.9 C in the usual tables.
+  const int dp = dewPoint(250, 50);
+  assert(dp >= 137 && dp <= 141);
+  assert(dewPoint(200, 100) >= 198 && dewPoint(200, 100) <= 202);
+  // Heat index: 32 C at 70 % feels about 41 C (NWS chart: 90 F / 70 % -> 106 F).
+  const int hi = feelsLike(322, 70);
+  assert(hi >= 400 && hi <= 420);
+  assert(feelsLike(220, 50) == 220);  // cool rooms feel like themselves
+  // An offset of -1 C raises the humidity a few points (same water, cooler air).
+  const int rh = correctedRh(250, 50, -10);
+  assert(rh >= 52 && rh <= 54 && correctedRh(250, 50, 0) == 50);
+  assert(!strcmp(comfort(225, 50), "Comfortable") && !strcmp(comfort(225, 20), "Dry") &&
+         !strcmp(comfort(225, 75), "Humid") && !strcmp(comfort(310, 50), "Hot"));
+  assert(toF(0) == 320 && toF(1000) == 2120 && toF(-400) == -400);
+  char b[12];
+  fmt1(b, sizeof(b), -5);
+  assert(!strcmp(b, "-0.5"));
+  fmt1(b, sizeof(b), 243);
+  assert(!strcmp(b, "24.3"));
+  printf("climate ok (dew point, heat index, offset humidity, comfort, F)\n");
+}
+
+static void testWeather() {
+  using namespace wx;
+  // Trimmed real replies from Open-Meteo's two APIs.
+  const char* geoJson =
+      "{\"results\":[{\"id\":1609350,\"name\":\"Bangkok\",\"latitude\":13.75398,"
+      "\"longitude\":100.50144,\"elevation\":4.0,\"country_code\":\"TH\"}],\"generationtime_ms\":0.5}";
+  Geo g{};
+  assert(parseGeo(geoJson, g) && g.lat == 137540 && g.lon == 1005014 && !strcmp(g.found, "Bangkok"));
+  assert(!parseGeo("{\"generationtime_ms\":0.2}", g));  // nothing found
+  const char* nowJson =
+      "{\"latitude\":13.75,\"longitude\":100.5,\"current_units\":{\"time\":\"iso8601\","
+      "\"temperature_2m\":\"\xc2\xb0" "C\",\"relative_humidity_2m\":\"%\",\"apparent_temperature\":"
+      "\"\xc2\xb0" "C\",\"weather_code\":\"wmo code\"},\"current\":{\"time\":\"2026-11-25T18:15\","
+      "\"interval\":900,\"temperature_2m\":29.4,\"relative_humidity_2m\":74,"
+      "\"apparent_temperature\":34.1,\"weather_code\":2}}";
+  Now n{};
+  assert(parseNow(nowJson, n));
+  assert(n.t == 294 && n.rh == 74 && n.feels == 341 && n.code == 2 && n.hhmm == 1815);
+  const char* cold = "{\"current\":{\"time\":\"2026-01-02T07:00\",\"temperature_2m\":-3.5,"
+                     "\"relative_humidity_2m\":88,\"weather_code\":71}}";
+  assert(parseNow(cold, n) && n.t == -35 && n.feels == -35 && !strcmp(codeWord(n.code), "Snow"));
+  char enc[64];
+  urlEncode("Ho Chi Minh", enc, sizeof(enc));
+  assert(!strcmp(enc, "Ho%20Chi%20Minh"));
+  urlEncode("Z\xc3\xbcrich", enc, sizeof(enc));
+  assert(!strcmp(enc, "Z%C3%BCrich"));
+  // A place picked on the phone keeps its coordinates; a typed one does not.
+  Preferences pr;
+  pr.begin("wxtest", false);
+  assert(savePlace(pr, "Springfield", 397990, -896440, "Springfield, United States"));
+  Geo gg{};
+  assert(geo(pr, gg) && gg.lat == 397990 && gg.lon == -896440 && !strcmp(gg.city, "Springfield") &&
+         !strcmp(gg.found, "Springfield, United States"));
+  assert(saveCity(pr, "Paris") && !geo(pr, gg));  // a new name forgets the old spot
+  assert(!saveCity(pr, "   "));
+  pr.end();
+  printf("weather ok (geocode reply, current block not units, negative, url encoding, picked place)\n");
+}
+
 int main() {
   testWordle();
   test2048();
@@ -1364,6 +1456,9 @@ int main() {
   testCode();
   testMemory();
   testHanoi();
+  testLevel();
+  testClimate();
+  testWeather();
   printf("ALL TESTS PASSED\n");
   return 0;
 }

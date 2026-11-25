@@ -149,8 +149,12 @@ inline int menuHit(int x, int y, int n, int w = SCREEN_W) {
 
 // --- How to play ---------------------------------------------------------------
 // The rules card, with More named as the way back to it.
-inline void rules(ToolsCanvas& c, const help::Text& t) {
-  help::render(c, t, "HOW TO PLAY", "More > How to play brings this back");
+// An app that is not a game (Level, Climate) calls it "How to use".
+inline void rules(ToolsCanvas& c, const help::Text& t, bool game = true) {
+  if (game)
+    help::render(c, t, "HOW TO PLAY", "More > How to play brings this back");
+  else
+    help::render(c, t, "HOW TO USE", "More > How to use brings this back");
 }
 
 // --- the result screen -----------------------------------------------------------

@@ -27,6 +27,9 @@ int batteryPercent();      // 0..100, or -1 when absent
 void hostSetBattery(int pct, bool charging);
 #endif
 int batteryMillivolts();   // or -1
+// The cell's own temperature from the gauge (C5, Climate), tenths of a
+// degree C. False without a gauge.
+bool batteryTemp(int& deciC);
 bool charging();           // CHARGE_STATE pin from the charger, gauge or not
 
 // --- clock (PCF8563) -----------------------------------------------------
@@ -54,6 +57,10 @@ bool climatePresent();
 // Blocking single measurement, ~10 ms. Returns false when absent or on a
 // checksum error. Temperature in tenths of a degree C, humidity in percent.
 bool readClimate(int& tempDeciC, int& rhPercent);
+#ifdef TOYBOX_HOST
+void hostSetClimate(bool on, int tempDeciC = 0, int rh = 0);
+void hostSetBatteryTemp(bool on, int deciC = 0);
+#endif
 
 // --- accelerometer (LSM6DS3TR-C) ------------------------------------------
 bool imuPresent();
@@ -67,6 +74,11 @@ void hostSetOrientation(int o);  // ...held whichever way the guard says
 // board no datasheet answers, and four readings from a device being turned
 // settle it in a way that guessing at signs never has.
 bool readAccel(int& ax, int& ay);
+// All three axes (C5, Level): flat on a table, gravity is on z.
+bool readAccel3(int& ax, int& ay, int& az);
+#ifdef TOYBOX_HOST
+void hostSetAccel(int ax, int ay, int az);
+#endif
 // Which edge of the panel currently points down, as a display rotation:
 // 0 = normal portrait, 1 = 90 cw, 2 = upside down, 3 = 90 ccw.
 // Returns the last confident answer; a flat-on-the-table device keeps

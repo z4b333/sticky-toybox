@@ -110,6 +110,8 @@ static FakeOta g_fakeOta;
 #include "tools/tool_hanoi.h"
 #include "tools/tool_hilo.h"
 #include "tools/tool_memory.h"
+#include "tools/tool_climate.h"
+#include "tools/tool_level.h"
 #include "touch.h"
 #include "tools/help.h"
 #include "tools/decor.h"
@@ -382,14 +384,16 @@ static void hostLockInfo(lock::Info& i) {
 // the centred block -- so the two can disagree loudly rather than quietly.
 static void checkHubRouting(const char* label) {
   struct Want { bool game; int idx; };
-  struct Grp { Want items[12]; int n; };
+  struct Grp { Want items[16]; int n; };
   const Grp ALL[3] = {
-      // C4: PLAY is full at twelve -- nine on the first page, three on the second.
+      // C5: PLAY is fourteen -- nine on the first page, five on the second
+      // (Coin and Dice came over from UTILITY).
       {{{true, 0}, {true, 1}, {true, 2}, {true, 3}, {false, 7}, {false, 8}, {false, 14},
-        {false, 15}, {false, 16}, {false, 17}, {false, 18}, {false, 19}},
-       12},
-      {{{false, 0}, {false, 1}, {false, 3}, {false, 4}, {false, 2}, {false, 11}, {false, 12},
-        {false, 13}},
+        {false, 15}, {false, 16}, {false, 17}, {false, 18}, {false, 19}, {false, 0},
+        {false, 1}},
+       14},
+      {{{false, 3}, {false, 4}, {false, 2}, {false, 11}, {false, 12}, {false, 13}, {false, 20},
+        {false, 21}},
        8},
       {{{false, 10}, {false, 5}, {false, 6}}, 3},  // 9 was the manga reader (removed in v2)
   };
@@ -2195,9 +2199,17 @@ int main() {
   // exactly what a finger would have hidden. STUDY's heading sits at
   // 92 + 26 + 8*52 + 14 = 548 with UTILITY's eight rows above it (v2 added
   // CALENDAR and FOCUS).
+  // C5: two pages -- PLAY on the first, UTILITY and STUDY on the second.
   g_dumpEnabled = false;
-  for (auto rc : {setRow(0, 92, 0), setRow(0, 92, 2), setRow(1, 92, 1), setRow(0, 444, 2)})
-    toybox.onTap(rc.first, rc.second);
+  (void)setRow;
+  tapRect(setui::appsItemRect(0, 0));   // Wordle
+  tapRect(setui::appsItemRect(0, 2));   // 2048
+  tapRect(setui::appsItemRect(0, 13));  // Dice, now in PLAY (right column)
+  g_dumpEnabled = true;
+  setScreen("settings_apps_2");
+  tapRect(setui::appsNextRect());
+  g_dumpEnabled = false;
+  tapRect(setui::appsItemRect(2, 2));   // Notes
   toybox.onTap(BACK_W / 2, TOPBAR_H / 2);  // back up to the buttons page
   // v2: Sound is a switch, Volume is Low / Mid / High. Off, on (at Mid), a
   // level by its segment, and the screen below drawn muted.
@@ -9364,6 +9376,197 @@ int main() {
     g_dumpEnabled = true;
     if (inTool(19)) abort();
     printf("memory ok (odd pair back on the next tap, all pairs, 5x5 blank, 3x4)\n");
+  }
+
+
+  // --- C5: Level and Climate (tool indexes 20, 21) --------------------------------
+  {
+    auto more = [] { toybox.onTap(EPD_W - 28, 20); };
+    auto back = [] { toybox.onTap(BACK_W / 2, TOPBAR_H / 2); };
+    // ---- Level ----
+    for (const char* k : {"lv_ox", "lv_oy", "lv_oe", "lv_rate", "h_lv"}) prefs.remove(k);
+    sensors::hostSetImu(true);
+    sensors::hostSetAccel(0, 0, 16384);  // flat on a table, dead level
+    setScreen("help_level");
+    toybox.open(false, 20);
+    auto* lv = static_cast<LevelTool*>(toybox.hostActive());
+    setScreen("tool_level_flat");
+    tapRect(help::OK_BTN);
+    if (lv->hostReading().mode != lvl::FLAT || !lvl::isLevel(lv->hostReading())) {
+      printf("LEVEL FAIL: flat and level did not read as such\n");
+      abort();
+    }
+    sensors::hostSetAccel(900, -600, 16300);  // tilted a few degrees
+    setScreen("tool_level_flat_tilt");
+    lv->hostSample();
+    lv->hostSample();
+    if (lvl::isLevel(lv->hostReading())) {
+      printf("LEVEL FAIL: a 3 degree tilt read as level\n");
+      abort();
+    }
+    setScreen("tool_level_zero");
+    tapRect(lvui::zeroRect(EPD_W, EPD_H));
+    if (!prefs.isKey("lv_ox")) {
+      printf("LEVEL FAIL: Set zero kept nothing\n");
+      abort();
+    }
+    // Standing on its bottom edge (portrait), a degree off.
+    sensors::hostSetAccel(290, -16380, 0);
+    setScreen("tool_level_edge");
+    lv->hostSample();
+    lv->hostSample();
+    lv->hostSample();
+    if (lv->hostReading().mode != lvl::EDGE || stickyHost.canvasRotation() != 0) {
+      printf("LEVEL FAIL: standing upright did not read as an edge (rot %d)\n",
+             stickyHost.canvasRotation());
+      abort();
+    }
+    // On a long edge: the screen turns to match.
+    sensors::hostSetAccel(-16380, 200, 0);
+    setScreen("tool_level_edge_long");
+    for (int i = 0; i < 4; i++) lv->hostSample();
+    if (stickyHost.canvasRotation() != 1) {
+      printf("LEVEL FAIL: on its long edge the screen did not turn (rot %d)\n",
+             stickyHost.canvasRotation());
+      abort();
+    }
+    setScreen("tool_level_more");
+    toybox.onTap(800 - 28, 20);
+    if (!lv->hostInMenu()) {
+      printf("LEVEL FAIL: More did not open on its side\n");
+      abort();
+    }
+    g_dumpEnabled = false;
+    tapRect(gk::menuRect(1, 800));  // Redraw every -> 1 s
+    if (prefs.getInt("lv_rate", 0) != 1) {
+      printf("LEVEL FAIL: the redraw setting did not move\n");
+      abort();
+    }
+    back();
+    back();
+    g_dumpEnabled = true;
+    if (toybox.hostInApp() || stickyHost.canvasRotation() != 0) {
+      printf("LEVEL FAIL: leaving did not stand the panel back up\n");
+      abort();
+    }
+    sensors::hostSetImu(false);
+    g_dumpEnabled = false;
+    toybox.open(false, 20);
+    g_dumpEnabled = true;
+    setScreen("tool_level_none");
+    tapRect(help::OK_BTN);
+    g_dumpEnabled = false;
+    back();
+    g_dumpEnabled = true;
+    sensors::hostSetAccel(0, -16384, 0);
+    printf("level ok (flat, tilt, zero kept, upright edge, long edge turns the screen, rate, no sensor)\n");
+
+    // ---- Climate ----
+    const bool hadWifi = homenet::haveWifi(prefs);
+    for (const char* k : {"cl_unit", "cl_off", "h_cl", wx::K_CITY, wx::K_GEO, wx::K_NOW})
+      prefs.remove(k);
+    sensors::hostSetClimate(true, 252, 48);
+    sensors::hostSetBatteryTemp(true, 291);
+    setScreen("help_climate");
+    toybox.open(false, 21);
+    auto* cl = static_cast<ClimateTool*>(toybox.hostActive());
+    g_dumpEnabled = false;
+    tapRect(help::OK_BTN);
+    // Half an hour of a warming room.
+    for (int i = 0; i < 90; i++) {
+      sensors::hostSetClimate(true, 245 + (i * 13) / 90 + (i % 7 == 0 ? 2 : 0), 48 + i / 30);
+      cl->hostRead(1);
+    }
+    g_dumpEnabled = true;
+    if (cl->hostPoints() != 31) {  // the reading on opening, then 90 more
+      printf("CLIMATE FAIL: 90 readings made %d graph points (want 31)\n", cl->hostPoints());
+      abort();
+    }
+    setScreen("tool_climate");
+    stickyHost.refresh(false);
+    // Refresh with nowhere to look: it says so.
+    if (!hadWifi) homenet::saveWifi(prefs, "HomeNet", "password1");
+    setScreen("tool_climate_no_place");
+    tapRect(clui::REFRESH);
+    if (prefs.isKey(wx::K_NOW)) abort();
+    // The place from the phone (owner): More > Outdoor place serves the page
+    // on the home Wi-Fi.
+    g_dumpEnabled = false;
+    more();
+    g_dumpEnabled = true;
+    setScreen("tool_climate_phone");
+    tapRect(gk::menuRect(2));  // Outdoor place
+    if (!cl->hostPhone() || !cl->hostPhoneHome()) {
+      printf("CLIMATE FAIL: Outdoor place did not open the home Wi-Fi page\n");
+      abort();
+    }
+    setScreen("tool_climate_phone_saved");
+    // Picked from the suggestions: the coordinates come with it, so the
+    // fetch below must not need a lookup of its own.
+    if (!cl->hostPhonePick("Bangkok", 137540, 1005014, "Bangkok, Thailand") || !wx::haveCity(prefs) ||
+        !prefs.isKey(wx::K_GEO)) {
+      printf("CLIMATE FAIL: the phone's place was not kept\n");
+      abort();
+    }
+    g_dumpEnabled = false;
+    tapRect(importui::DONE_BTN);
+    g_dumpEnabled = true;
+    if (cl->hostPhone()) abort();
+    setScreen("tool_climate_outdoor");
+    tapRect(clui::REFRESH);
+    if (!prefs.isKey(wx::K_NOW) || !prefs.isKey(wx::K_GEO)) {
+      printf("CLIMATE FAIL: a fetch kept no reading\n");
+      abort();
+    }
+    // Battery: read the room every 30 s, and the outside every 10 min on
+    // its own while Climate is open.
+    g_dumpEnabled = false;
+    more();
+    tapRect(gk::menuRect(1));  // Read the room every -> 30 s
+    tapRect(gk::menuRect(3));  // Update outside -> every 10 min
+    back();
+    if (prefs.getInt("cl_int", 0) != 1 || prefs.getInt("cl_out", 0) != 1) {
+      printf("CLIMATE FAIL: the interval rows did not move\n");
+      abort();
+    }
+    {
+      const int before = wx::g_hostFetches;
+      for (int i = 0; i < 10 * 60 * 50 + 5; i++) toybox.tick();
+      if (wx::g_hostFetches != before + 1) {
+        printf("CLIMATE FAIL: ten minutes made %d fetches (want 1)\n", wx::g_hostFetches - before);
+        abort();
+      }
+    }
+    more();
+    tapRect(gk::menuRect(3));  // -> every 30 min
+    tapRect(gk::menuRect(3));  // -> manual
+    // Fahrenheit, through More.
+    tapRect(gk::menuRect(4));  // Units
+    back();
+    g_dumpEnabled = true;
+    setScreen("tool_climate_f");
+    stickyHost.refresh(false);
+    setScreen("tool_climate_more");
+    more();
+    g_dumpEnabled = false;
+    tapRect(gk::menuRect(4));  // back to C
+    back();
+    back();
+    g_dumpEnabled = true;
+    // No sensor at all.
+    sensors::hostSetClimate(false);
+    g_dumpEnabled = false;
+    toybox.open(false, 21);
+    g_dumpEnabled = true;
+    setScreen("tool_climate_none");
+    tapRect(help::OK_BTN);
+    g_dumpEnabled = false;
+    back();
+    g_dumpEnabled = true;
+    sensors::hostSetBatteryTemp(false);
+    for (const char* k : {wx::K_CITY, wx::K_GEO, wx::K_NOW}) prefs.remove(k);
+    if (!hadWifi) homenet::forgetWifi(prefs);
+    printf("climate ok (readings, graph points, no place, fetch kept, F, no sensor)\n");
   }
 
   // --- notes -------------------------------------------------------------

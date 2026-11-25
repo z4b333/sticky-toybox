@@ -95,21 +95,24 @@ struct Pen {
 
 namespace ticons {
 
-inline constexpr int COUNT = 20;
+inline constexpr int COUNT = 22;
 inline const char* const NAMES[COUNT] = {"COIN",  "DICE",   "TIMER", "RANDOM",
                                          "PICKER", "FLASHCARDS", "NOTES",  "SHIPS",
                                          "SUDOKU", "MANGA", "BOOKS", "RECIPES",
                                          "CALENDAR", "FOCUS",
                                          // C4: the new games, PLAY's second page
                                          "FOUR IN A ROW", "BLACKJACK", "HIGHER LOWER",
-                                         "CODEBREAKER", "HANOI", "MEMORY"};
+                                         "CODEBREAKER", "HANOI", "MEMORY",
+                                         // C5: UTILITY
+                                         "LEVEL", "CLIMATE"};
 // Kept short: a hub tile is 140 px, which is about twelve characters.
 inline const char* const DESCS[COUNT] = {"heads/tails", "D4 - D20",   "countdown", "number/card",
                                          "from a list", "flashcards", "from phone", "battleship",
                                          "9x9 numbers", "removed", "ebooks", "what to cook",
                                          "the month", "no countdown", "drop four",
                                          "beat the dealer", "next card", "crack the code",
-                                         "move the tower", "find pairs"};
+                                         "move the tower", "find pairs", "spirit level",
+                                         "room and outside"};
 
 using icons::Pen;
 
@@ -299,6 +302,30 @@ inline void memory(ToolsCanvas& c, int cx, int cy, int s) {
   p.dot(18.75f, 18.75f, 2);
 }
 
+// --- C5 -----------------------------------------------------------------------
+// Level: a spirit level's vial, the bubble between its two marks.
+inline void level(ToolsCanvas& c, int cx, int cy, int s) {
+  Pen p(c, cx, cy, s, 26);
+  p.rrect(2, 8.5f, 22, 9, 4.5f);
+  p.line(9.5f, 8.5f, 9.5f, 17.5f);
+  p.line(16.5f, 8.5f, 16.5f, 17.5f);
+  p.dot(13, 13, 2.2f);
+}
+
+// Climate: a thermometer and a drop.
+inline void climate(ToolsCanvas& c, int cx, int cy, int s) {
+  Pen p(c, cx, cy, s, 26);
+  p.line(8, 4, 8, 15);
+  p.line(12, 4, 12, 15);
+  p.arc(10, 4, 2, 180, 360);
+  p.circle(10, 19, 3.5f);
+  p.dot(10, 19, 1.6f);
+  const float drop[] = {19, 8, 22.5f, 14};
+  p.line(drop[0], drop[1], drop[2], drop[3]);
+  p.line(19, 8, 15.5f, 14);
+  p.arc(19, 15, 3.5f, 0, 180);
+}
+
 // A sprout (kit "Focus"), drawn in a 64-unit box.
 inline void focus(ToolsCanvas& c, int cx, int cy, int s) {
   Pen p(c, cx, cy, s, 64);
@@ -332,6 +359,8 @@ inline void draw(ToolsCanvas& c, int idx, int cx, int cy, int s) {
     case 17: codebreaker(c, cx, cy, s); break;
     case 18: hanoi(c, cx, cy, s); break;
     case 19: memory(c, cx, cy, s); break;
+    case 20: level(c, cx, cy, s); break;
+    case 21: climate(c, cx, cy, s); break;
     default: break;  // 9, the removed manga reader: no icon
   }
 }
