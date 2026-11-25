@@ -58,6 +58,16 @@ constexpr int PIN_SENS_SDA = 1;
 constexpr int PIN_SENS_SCL = 0;
 constexpr int PIN_CHARGE_STATE = 40;  // from the BQ25616 charger
 
+// --- Charger control (C6) ----------------------------------------------------
+// EN_BAT_CHGn on the V01 schematic: the BQ25616's /CE, active LOW. GPIO39 is
+// also the JTAG MTCK pin, whose internal pull-up is on from reset, and that
+// pull-up beats the board's 100k pull-down -- so a firmware that never drives
+// this pin leaves charging switched OFF. That is why a Sticky on Toybox did not
+// charge. Driven LOW at boot and held through sleep (charger.h).
+constexpr int PIN_CHG_ENn = 39;
+// VBUS sense: HIGH while a USB cable is giving power (for the C6 dashboard).
+constexpr int PIN_USB_IN = 9;
+
 // --- Display geometry --------------------------------------------------------
 // The panel itself is always 800x480 landscape; PANEL_* describe the hardware.
 constexpr int PANEL_W = 800;

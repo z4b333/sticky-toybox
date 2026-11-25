@@ -8,6 +8,7 @@
 #include <Preferences.h>
 #include <driver/gpio.h>
 #include <esp_sleep.h>
+#include "charger.h"
 #include <esp_system.h>
 
 #include "bmp_gray.h"
@@ -341,6 +342,7 @@ void powerOff(bool lowBattery = false, bool announce = false) {
   delay(100);
   // ...and if USB keeps us alive, deep-sleep with wake on the power button.
   esp_sleep_enable_ext0_wakeup((gpio_num_t)PIN_BTN_OK, 0);
+  charger::beforeDeepSleep();  // keep charging while asleep on the cable
   esp_deep_sleep_start();
 }
 
@@ -534,6 +536,8 @@ void setup() {
   pinMode(PIN_PWR_LOCK, OUTPUT);
   digitalWrite(PIN_PWR_HOLD, HIGH);
   digitalWrite(PIN_PWR_LOCK, HIGH);
+  // Then the charger: until this pin is driven LOW the battery never charges.
+  charger::begin();
 
   Serial.begin(115200);
 #if ARDUINO_USB_CDC_ON_BOOT
