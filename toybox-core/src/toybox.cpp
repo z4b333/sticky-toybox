@@ -3,7 +3,7 @@
 #include "tools/lock_image.h"
 
 #include "game2048.h"
-#include "nonogram.h"
+#include "mines.h"
 #include "tools/tool_coin.h"
 #include "tools/tool_epub.h"
 #include "tools/recents.h"
@@ -32,7 +32,7 @@ bool Toybox::build(bool game, int idx) {
   if (game) {
     switch (idx) {
       case 0: _active = new WordleApp(); break;
-      case 1: _active = new NonogramApp(); break;
+      case 1: _active = new MinesApp(); break;  // was Nonogram, removed in C3
       case 2: _active = new G2048App(); break;
       default: _active = new XoApp(); break;
     }
@@ -85,6 +85,14 @@ void Toybox::begin(ToolsHost& h) {
   uint32_t ns = h.prefs().getUInt("nt_size", 0);
   if (ns > 2) ns = 0;
   nmd::setBody((TSize)(TS_MED + ns));
+  // Nonogram left in C3 and Mines took its place. What it kept is cleared
+  // once, so nothing of a removed game lingers in NVS.
+  if (h.prefs().isKey("n_state") || h.prefs().isKey("n5_solved") || h.prefs().isKey("n10_solved") ||
+      h.prefs().isKey("n5_best") || h.prefs().isKey("n10_best") || h.prefs().isKey("h_non")) {
+    static const char* const GONE[] = {"n_state", "n5_best", "n10_best", "n5_solved", "n10_solved",
+                                       "h_non"};
+    for (const char* k : GONE) h.prefs().remove(k);
+  }
   _where = Where::Hub;
   _hub.goHome();
   release();

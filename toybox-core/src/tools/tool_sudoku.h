@@ -1,39 +1,39 @@
-// Sudoku. Tap a cell, tap a digit.
+// Sudoku (v2, kit "Sudoku"). Tap a cell, tap a digit.
 //
-// The grid's 48 px cells are 5.1 mm, under a fingertip -- but selecting a cell
-// commits nothing and shows you immediately what you picked, so a miss costs
-// one more tap. Every action that does commit goes through the number pad,
-// whose keys are 9 mm. The small target is deliberately on the reversible half.
+// The grid fills the panel's width: 50 px cells, 5.3 mm, still under a
+// fingertip -- but selecting a cell commits nothing and shows at once what
+// you picked, so a miss costs one more tap. Everything that commits goes
+// through the row of keys under it. Givens are bold and upright, your digits
+// slanted, pencil notes small in the cell's corners. Check marks the cells
+// that are wrong; level, new puzzle and the rules live in More.
 #pragma once
 #include <esp_random.h>
 
 #include "decor.h"
+#include "game_kit.h"
 #include "help.h"
 #include "record.h"
 #include "sudoku_gen.h"
 #include "tools_draw.h"
 
 namespace sdui {
-constexpr int CELL = 48;
-constexpr int GX = (480 - sud::N * CELL) / 2, GY = 80;
+constexpr int CELL = 50;
+constexpr int GX = (480 - sud::N * CELL) / 2, GY = 52;  // 15, 52
+constexpr int GRID = sud::N * CELL;                      // 450
 
-// The pad lost 8 px a key and the whole stack moved up, to open a strip at the
-// bottom for the clear. A key is still 68 px -- 7.3 mm, over the fingertip
-// minimum -- and it is the only row on this screen that commits anything.
-constexpr int PAD_W = 84, PAD_H = 68, PAD_GAP = 10;
-constexpr int PAD_X = (480 - (5 * PAD_W + 4 * PAD_GAP)) / 2;
-constexpr int PAD_Y1 = 524, PAD_Y2 = PAD_Y1 + PAD_H + PAD_GAP;
+constexpr int KEY_W = 48, KEY_H = 66, KEY_GAP = 4;
+constexpr int KEY_X = (480 - (9 * KEY_W + 8 * KEY_GAP)) / 2;  // 8
+constexpr int KEY_Y = GY + GRID + 18;                         // 520
 
-constexpr int BTN_Y = 682, BTN_H = 60, BTN_W = 105, BTN_GAP = 10;
-constexpr int BTN_X = (480 - (4 * BTN_W + 3 * BTN_GAP)) / 2;
+constexpr int BTN_Y = KEY_Y + KEY_H + 14, BTN_H = 64, BTN_W = 140, BTN_GAP = 10;
+constexpr int BTN_X = (480 - (3 * BTN_W + 2 * BTN_GAP)) / 2;  // 20
+constexpr int MSG_Y = BTN_Y + BTN_H + 22;
 
-inline constexpr TRect CLEAR_BTN{480 - 16 - record::BTN_W, 752, record::BTN_W, 44};
-
-inline TRect padRect(int i) {
-  return TRect{PAD_X + (i % 5) * (PAD_W + PAD_GAP), (i < 5) ? PAD_Y1 : PAD_Y2, PAD_W, PAD_H};
-}
-inline TRect btnRect(int i) {
-  return TRect{BTN_X + i * (BTN_W + BTN_GAP), BTN_Y, BTN_W, BTN_H};
+inline TRect keyRect(int i) { return TRect{KEY_X + i * (KEY_W + KEY_GAP), KEY_Y, KEY_W, KEY_H}; }
+inline TRect btnRect(int i) { return TRect{BTN_X + i * (BTN_W + BTN_GAP), BTN_Y, BTN_W, BTN_H}; }
+inline constexpr int B_NOTES = 0, B_ERASE = 1, B_CHECK = 2;
+inline TRect cellRect(int k) {
+  return TRect{GX + sud::colOf(k) * CELL, GY + sud::rowOf(k) * CELL, CELL, CELL};
 }
 }  // namespace sdui
 
@@ -43,189 +43,281 @@ class SudokuTool : public ToolApp {
 
   void enter(ToolsHost& h) override {
     ToolApp::enter(h);
+    _rulesFromMore = false;
     _armedClear = false;
-    _help = !help::suppressed(prefs(), "sud");
+    _view = help::suppressed(prefs(), "sud") ? View::Board : View::Rules;
     _level = (sud::Level)prefs().getInt("sd_lvl", sud::EASY);
     if (_level > sud::HARD) _level = sud::EASY;
-    // _started only survives while the tool object lives, and it is destroyed
-    // on the way back to the hub. The saved grid is what carries a half-solved
-    // puzzle across that, and across a power cycle.
+    // The saved grid is what carries a half-solved puzzle across leaving and
+    // a power cycle; _started only lives as long as this object.
     if (!_started && !loadState()) newPuzzle();
   }
 
   void render(ToolsCanvas& c) override {
     using namespace sdui;
-    host().topBar(title(), true);
-    if (_help) {
-      help::render(c, help::SUDOKU);
+    if (_view == View::Rules) {
+      gk::bar(host(), c, title());
+      gk::rules(c, help::SUDOKU);
       return;
     }
-    char buf[40];
-
-    // --- status ------------------------------------------------------------
-    if (_solved) {
-      c.text(GX, 56, "SOLVED", TS_MED, true, true);
-      snprintf(buf, sizeof(buf), "%s   %d done", sud::levelName(_level), solvedCount());
-      c.text(GX + 140, 56, buf, TS_MED, true);
-    } else if (_wrong > 0) {
-      snprintf(buf, sizeof(buf), "full, but %d %s wrong", _wrong, _wrong == 1 ? "cell is" : "cells are");
-      c.text(GX, 56, buf, TS_MED, true, true);
-    } else {
-      c.text(GX, 56, sud::levelName(_level), TS_MED, true, true);
-      snprintf(buf, sizeof(buf), "%d left", sud::remaining(_grid));
-      c.text(GX + 200, 56, buf, TS_MED, true);
+    if (_view == View::Menu) {
+      gk::Row rows[gk::MENU_MAX];
+      gk::menu(host(), c, title(), rows, menuRows(rows));
+      return;
     }
+    char buf[48];
+    if (_view == View::Result) {
+      gk::bar(host(), c, title());
+      char n0[8], n1[8], n2[8];
+      snprintf(n0, sizeof(n0), "%d", solvedAt(0));
+      snprintf(n1, sizeof(n1), "%d", solvedAt(1));
+      snprintf(n2, sizeof(n2), "%d", solvedAt(2));
+      const gk::Stat st[3] = {{n0, "easy"}, {n1, "medium"}, {n2, "hard"}};
+      snprintf(buf, sizeof(buf), "SUDOKU - %s", sud::levelName(_puzzleLevel));
+      gk::result(c, buf, "Solved", "every row, column and box", st, 3, "Close", "New puzzle");
+      gk::foot(c, "solved puzzles by level");
+      return;
+    }
+
+    snprintf(buf, sizeof(buf), "%d left", sud::remaining(_grid));
+    gk::bar(host(), c, title(), _solved ? "solved" : buf);
 
     // --- grid --------------------------------------------------------------
-    for (int i = 0; i <= sud::N; i++) {
-      const int t = (i % 3 == 0) ? 3 : 1;
-      c.fillRect(GX + i * CELL - t / 2, GY, t, sud::N * CELL + 1, true);
-      c.fillRect(GX, GY + i * CELL - t / 2, sud::N * CELL + 1, t, true);
-    }
-
     for (int k = 0; k < sud::CELLS; k++) {
-      if (!_grid[k]) continue;
-      const int x = GX + sud::colOf(k) * CELL, y = GY + sud::rowOf(k) * CELL;
-      const char s[2] = {(char)('0' + _grid[k]), 0};
-      // Givens print large and bold, the player's answers a size smaller. With
-      // one bit per pixel there is no grey to fall back on, and bold alone is
-      // far too subtle at this size -- size is the difference you can see at a
-      // glance, and it mirrors the ink-versus-pencil convention on paper.
-      const TSize sz = _given[k] ? TS_HUGE : TS_LARGE;
-      const int h = _given[k] ? 32 : 24;
-      c.textCentered(x + CELL / 2, y + (CELL - h) / 2, s, sz, true, _given[k]);
-    }
-
-    if (_sel >= 0) {
-      const int x = GX + sud::colOf(_sel) * CELL, y = GY + sud::rowOf(_sel) * CELL;
-      c.drawRect(x + 2, y + 2, CELL - 4, CELL - 4, 4, true);
-    }
-
-    // --- number pad --------------------------------------------------------
-    // Once the puzzle is out there is nothing left to type, so the pad's space
-    // goes to saying so instead of showing ten keys that do nothing.
-    if (_solved) {
-      decor::confetti(c, 20, PAD_Y1 - 10, 440, 2 * PAD_H + PAD_GAP + 20, 17, 18, true);
-      decor::banner(c, 70, PAD_Y1 + 30, 340, 76, "SOLVED", TS_HUGE, true);
-      drawLevelRow(c);
-      return;
-    }
-    const bool live = _sel >= 0 && !_given[_sel] && !_solved;
-    for (int i = 0; i < 10; i++) {
-      const TRect r = padRect(i);
-      if (i == 9) {
-        c.button(r.x, r.y, r.w, r.h, "CLR", false, TS_MED);
-      } else {
-        char lbl[2] = {(char)('1' + i), 0};
-        // A digit already used nine times has nowhere left to go; showing it
-        // spent saves the player counting the board.
-        c.button(r.x, r.y, r.w, r.h, lbl, live && placed(i + 1) == 9, TS_HUGE);
+      const TRect r = cellRect(k);
+      const bool sel = k == _sel;
+      if (sel) c.fillRect(r.x, r.y, CELL, CELL, true);
+      if (_grid[k]) {
+        const char s[2] = {(char)('0' + _grid[k]), 0};
+        // Kit: bold = given, slanted = yours. Same size for both, so a full
+        // row reads as one line of digits.
+        int l, rr, t, b;
+        c.textPad(s, TS_HUGE, l, rr, t, b);
+        const int tw = c.textWidth(s, TS_HUGE, _given[k], !_given[k]);
+        const int ty = r.y + (CELL - c.textHeight(TS_HUGE)) / 2 + (b - t) / 2;
+        c.text(r.x + (CELL - tw) / 2 + (rr - l) / 2, ty, s, TS_HUGE, !sel, _given[k], !_given[k]);
+        if (_marked[k] && _grid[k] != _solution[k]) {
+          // Check found this one wrong: a stroke through it, corner to corner.
+          c.drawLine(r.x + 6, r.y + CELL - 6, r.x + CELL - 6, r.y + 6, 3, !sel);
+        }
+      } else if (_notes[k]) {
+        // Pencil notes: each digit in its own third of the cell, 1 top-left
+        // to 9 bottom-right, the way they are written on paper.
+        for (int d = 1; d <= 9; d++) {
+          if (!(_notes[k] & (1 << d))) continue;
+          const char s[2] = {(char)('0' + d), 0};
+          const int sx = r.x + ((d - 1) % 3) * (CELL / 3) + CELL / 6;
+          const int sy = r.y + ((d - 1) / 3) * (CELL / 3) + 1;
+          c.textCentered(sx, sy, s, TS_SMALL, !sel);
+        }
       }
     }
-
-    drawLevelRow(c);
-  }
-
-  void drawLevelRow(ToolsCanvas& c) {
-    using namespace sdui;
-    // --- difficulty and new -------------------------------------------------
-    for (int i = 0; i < 3; i++) {
-      const TRect r = btnRect(i);
-      c.button(r.x, r.y, r.w, r.h, sud::levelName((sud::Level)i), i == (int)_level, TS_MED);
+    for (int i = 0; i <= sud::N; i++) {
+      const int t = (i % 3 == 0) ? 3 : 1;
+      c.fillRect(GX + i * CELL - t / 2, GY, t, GRID + 1, true);
+      c.fillRect(GX, GY + i * CELL - t / 2, GRID + 1, t, true);
     }
-    // Outlined, not filled: the filled one on this row is the chosen level, and
-    // two solid buttons side by side would read as two selections.
-    const TRect nb = btnRect(3);
-    c.button(nb.x, nb.y, nb.w, nb.h, "NEW", false, TS_MED);
 
-    if (anySolved())
-      c.button(CLEAR_BTN.x, CLEAR_BTN.y, CLEAR_BTN.w, CLEAR_BTN.h, record::label(_armedClear),
-               _armedClear, TS_MED);
+    // --- keys --------------------------------------------------------------
+    const int selDigit = (_sel >= 0) ? _grid[_sel] : 0;
+    for (int i = 0; i < 9; i++) {
+      const TRect r = keyRect(i);
+      const char lbl[2] = {(char)('1' + i), 0};
+      if (selDigit == i + 1) {  // the digit in the selected cell
+        c.fillRect(r.x, r.y, r.w, r.h, true);
+        c.textInBox(r.x, r.y, r.w, r.h, lbl, TS_LARGE, false, true);
+      } else if (placed(i + 1) >= 9) {  // spent: all nine are out
+        c.drawRect(r.x, r.y, r.w, r.h, 1, true);
+        c.textInBox(r.x, r.y, r.w, r.h, lbl, TS_LARGE, true);
+        c.fillRect(r.x + 10, r.y + r.h / 2 - 1, r.w - 20, 2, true);
+      } else {
+        c.drawRect(r.x, r.y, r.w, r.h, 2, true);
+        c.textInBox(r.x, r.y, r.w, r.h, lbl, TS_LARGE, true, true);
+      }
+    }
+    gk::choice(c, btnRect(B_NOTES), _notesMode ? "Notes on" : "Notes", _notesMode, TS_LARGE);
+    const TRect e = btnRect(B_ERASE), k = btnRect(B_CHECK);
+    c.button(e.x, e.y, e.w, e.h, "Erase", false, TS_LARGE);
+    c.button(k.x, k.y, k.w, k.h, "Check", false, TS_LARGE);
+
+    if (_msg[0]) c.textCentered(c.width() / 2, MSG_Y, _msg, TS_MED, true, true);
+    snprintf(buf, sizeof(buf), "%s - bold = given, slanted = yours",
+             _puzzleLevel == sud::EASY ? "easy" : _puzzleLevel == sud::MEDIUM ? "medium" : "hard");
+    gk::foot(c, buf);
   }
 
   void onTap(int x, int y) override {
     using namespace sdui;
     if (host().isBackTap(x, y)) {
       host().beep(1);
+      if (_view == View::Menu || (_view == View::Rules && _rulesFromMore)) {
+        _view = View::Board;
+        _armedClear = false;
+        host().refreshUi();
+        return;
+      }
       host().goHub();
       return;
     }
-    if (host().isHelpTap(x, y)) {
-      _help = !_help;
-      host().beep(1);
-      host().refreshUi();
-      return;
-    }
-    if (_help) {
+    if (_view == View::Rules) {
       const help::Tap t = help::hit(x, y);
       if (t == help::Tap::None) return;
       if (t == help::Tap::Never) help::suppress(prefs(), "sud");
-      _help = false;
+      _view = View::Board;
+      _rulesFromMore = false;
       host().beep(1);
       host().refreshUi();
       return;
     }
-
-    const bool wasArmed = _armedClear;
-    _armedClear = false;
-    if (CLEAR_BTN.hit(x, y) && anySolved()) {
-      if (wasArmed) {
-        record::clear(prefs(), record::SUDOKU);
+    if (_view == View::Menu) return tapMenu(x, y);
+    if (gk::isMore(host(), x, y)) {
+      _view = View::Menu;
+      _armedClear = false;
+      host().beep(1);
+      host().refreshUi();
+      return;
+    }
+    if (_view == View::Result) {
+      if (gk::RES_RIGHT.hit(x, y)) {
         host().beep(1);
-      } else {
-        _armedClear = true;
-        host().beep(2);
+        newPuzzle();
+        _view = View::Board;
+        host().refresh(true);
+      } else if (gk::RES_LEFT.hit(x, y)) {
+        host().beep(1);
+        _view = View::Board;
+        host().refresh(true);
       }
-      host().refresh(false);
-      return;
-    }
-    if (wasArmed) host().refresh(false);
-
-    // Difficulty picks the level for the next puzzle but never wipes this one;
-    // NEW is the only thing that throws work away.
-    for (int i = 0; i < 3; i++) {
-      if (!btnRect(i).hit(x, y)) continue;
-      if ((int)_level == i) return;
-      _level = (sud::Level)i;
-      prefs().putInt("sd_lvl", i);
-      host().beep(1);
-      host().refresh(false);
-      return;
-    }
-    if (btnRect(3).hit(x, y)) {
-      host().beep(1);
-      newPuzzle();
-      host().refresh(true);
       return;
     }
 
-    if (x >= GX && x < GX + sud::N * CELL && y >= GY && y < GY + sud::N * CELL) {
+    if (x >= GX && x < GX + GRID && y >= GY && y < GY + GRID) {
       const int k = (y - GY) / CELL * sud::N + (x - GX) / CELL;
       if (_given[k]) {
         host().beep(2);
         return;
       }
-      _sel = (_sel == k) ? -1 : k;  // tapping the selected cell again clears it
+      // Re-tapping the selected cell keeps it: on a slow panel a second tap
+      // from doubt is normal, and deselecting would make the next key do
+      // nothing.
+      if (_sel == k) return;
+      _sel = k;
+      _msg[0] = 0;
       host().beep(0);
       host().refresh(false);
       return;
     }
 
-    if (_sel < 0 || _given[_sel] || _solved) return;
-    for (int i = 0; i < 10; i++) {
-      if (!padRect(i).hit(x, y)) continue;
-      const uint8_t v = (i == 9) ? 0 : (uint8_t)(i + 1);
+    if (btnRect(B_NOTES).hit(x, y)) {
+      _notesMode = !_notesMode;
+      host().beep(1);
+      host().refresh(false);
+      return;
+    }
+    if (btnRect(B_CHECK).hit(x, y)) {
+      check();
+      return;
+    }
+    if (_solved) return;
+    if (btnRect(B_ERASE).hit(x, y)) {
+      if (_sel < 0 || _given[_sel] || (!_grid[_sel] && !_notes[_sel])) {
+        host().beep(2);
+        return;
+      }
+      _grid[_sel] = 0;
+      _notes[_sel] = 0;
+      _marked[_sel] = false;
+      _msg[0] = 0;
+      host().beep(1);
+      saveState();
+      host().refresh(false);
+      return;
+    }
+    for (int i = 0; i < 9; i++) {
+      if (!keyRect(i).hit(x, y)) continue;
+      if (_sel < 0 || _given[_sel]) {
+        host().beep(2);
+        return;
+      }
+      const uint8_t v = (uint8_t)(i + 1);
+      _msg[0] = 0;
+      if (_notesMode) {
+        if (_grid[_sel]) {  // notes are for empty cells
+          host().beep(2);
+          return;
+        }
+        _notes[_sel] ^= (uint16_t)(1 << v);
+        host().beep(0);
+        saveState();
+        host().refresh(false);
+        return;
+      }
       if (_grid[_sel] == v) return;
       _grid[_sel] = v;
-      host().beep(v ? 0 : 1);
+      _notes[_sel] = 0;
+      _marked[_sel] = false;
+      clearNotesAround(_sel, v);
+      host().beep(0);
       judge();
       saveState();
-      host().refresh(_solved);
+      if (_solved) {
+        _view = View::Result;
+        host().beep(3);
+        host().refresh(true);
+        return;
+      }
+      host().refresh(false);
       return;
     }
   }
 
  private:
+  enum class View : uint8_t { Board, Result, Menu, Rules };
+
+  int menuRows(gk::Row* rows) {
+    int n = 0;
+    rows[n++] = {"How to play", nullptr, false};
+    rows[n++] = {"New puzzle", nullptr, false};
+    rows[n++] = {"Level (next puzzle)", _level == sud::EASY ? "Easy" : _level == sud::MEDIUM ? "Medium" : "Hard", false};
+    if (anySolved()) rows[n++] = {"Clear record", nullptr, _armedClear};
+    return n;
+  }
+
+  void tapMenu(int x, int y) {
+    gk::Row rows[gk::MENU_MAX];
+    const int n = menuRows(rows);
+    const int i = gk::menuHit(x, y, n);
+    const bool wasArmed = _armedClear;
+    _armedClear = false;
+    if (i < 0) {
+      if (wasArmed) host().refresh(false);
+      return;
+    }
+    const char* what = rows[i].label;
+    if (!strcmp(what, "How to play")) {
+      _view = View::Rules;
+      _rulesFromMore = true;
+    } else if (!strcmp(what, "New puzzle")) {
+      newPuzzle();
+      _view = View::Board;
+    } else if (!strncmp(what, "Level", 5)) {
+      // The level picks the next puzzle; it never throws this one away.
+      _level = (sud::Level)(((int)_level + 1) % sud::LEVELS);
+      prefs().putInt("sd_lvl", (int)_level);
+    } else if (!strcmp(what, "Clear record")) {
+      if (!wasArmed) {
+        _armedClear = true;
+        host().beep(2);
+        host().refresh(false);
+        return;
+      }
+      record::clear(prefs(), record::SUDOKU);
+      _view = View::Board;
+    }
+    host().beep(1);
+    host().refreshUi();
+  }
+
   int placed(int digit) const {
     int n = 0;
     for (int k = 0; k < sud::CELLS; k++)
@@ -233,102 +325,162 @@ class SudokuTool : public ToolApp {
     return n;
   }
 
-  bool anySolved() {
-    for (int i = 0; i < sud::LEVELS; i++) {
-      char key[8];
-      snprintf(key, sizeof(key), "sd_w%d", i);
-      if (prefs().getInt(key, 0) > 0) return true;
+  // A digit written in a cell can no longer be a note anywhere it sees.
+  void clearNotesAround(int k, uint8_t v) {
+    const uint16_t bit = (uint16_t)(1 << v);
+    for (int j = 0; j < sud::CELLS; j++) {
+      if (sud::rowOf(j) == sud::rowOf(k) || sud::colOf(j) == sud::colOf(k) ||
+          sud::boxOf(j) == sud::boxOf(k))
+        _notes[j] &= (uint16_t)~bit;
     }
-    return false;
   }
 
-  int solvedCount() {
+  // Check: every digit of yours that disagrees with the answer gets struck
+  // through, and the count is said under the buttons. It shows mistakes, never
+  // the right digit.
+  void check() {
+    int wrong = 0, mine = 0;
+    for (int k = 0; k < sud::CELLS; k++) {
+      _marked[k] = false;
+      if (_given[k] || !_grid[k]) continue;
+      mine++;
+      if (_grid[k] != _solution[k]) {
+        _marked[k] = true;
+        wrong++;
+      }
+    }
+    if (mine == 0)
+      snprintf(_msg, sizeof(_msg), "nothing of yours to check yet");
+    else if (wrong == 0)
+      snprintf(_msg, sizeof(_msg), "all %d of yours are right", mine);
+    else
+      snprintf(_msg, sizeof(_msg), "%d %s wrong - struck through", wrong,
+               wrong == 1 ? "is" : "are");
+    host().beep(wrong ? 2 : 1);
+    host().refresh(false);
+  }
+
+  bool anySolved() {
+    for (int i = 0; i < sud::LEVELS; i++)
+      if (solvedAt(i) > 0) return true;
+    return false;
+  }
+  int solvedAt(int lvl) {
     char key[8];
-    snprintf(key, sizeof(key), "sd_w%d", (int)_level);
+    snprintf(key, sizeof(key), "sd_w%d", lvl);
     return prefs().getInt(key, 0);
   }
 
-  // With no per-entry error checking, the grid filling up is the only moment
-  // the player gets told anything. Saying how many cells are wrong -- but not
-  // which -- ends the puzzle honestly without handing back the answer.
+  // The grid filling up is the moment to say whether it is right; how many
+  // cells are wrong -- but not which -- unless Check is asked.
   void judge() {
-    _wrong = 0;
     _solved = false;
     if (!sud::complete(_grid)) return;
-    _wrong = sud::wrongCount(_grid, _solution);
-    if (_wrong > 0) return;
+    const int wrong = sud::wrongCount(_grid, _solution);
+    if (wrong > 0) {
+      snprintf(_msg, sizeof(_msg), "full, but %d %s wrong", wrong, wrong == 1 ? "cell is" : "cells are");
+      return;
+    }
     _solved = true;
+    _sel = -1;
     char key[8];
-    snprintf(key, sizeof(key), "sd_w%d", (int)_level);
+    snprintf(key, sizeof(key), "sd_w%d", (int)_puzzleLevel);
     prefs().putInt(key, prefs().getInt(key, 0) + 1);
   }
 
   void newPuzzle() {
+    _puzzleLevel = _level;
     sud::generate(_grid, _solution, _level, [] { return esp_random(); });
     for (int k = 0; k < sud::CELLS; k++) _given[k] = _grid[k] != 0;
+    memset(_notes, 0, sizeof(_notes));
+    memset(_marked, 0, sizeof(_marked));
     _sel = -1;
-    _wrong = 0;
+    _msg[0] = 0;
     _solved = false;
     _started = true;
     saveState();
   }
 
-  // A generated puzzle takes real work to produce and longer still to solve, so
-  // it is written out whenever a digit changes. NEW always generates instead.
+  // A generated puzzle takes real work to produce and longer to solve, so it
+  // is written out whenever anything on it changes.
+  struct SavedV1 {  // up to C2: no notes
+    uint8_t grid[sud::CELLS];
+    uint8_t solution[sud::CELLS];
+    uint8_t given[sud::CELLS];
+    uint8_t level, solved, pad[2];
+  };
+  struct Saved {
+    SavedV1 base;
+    uint16_t notes[sud::CELLS];
+  };
   void saveState() {
-    struct Saved {
-      uint8_t grid[sud::CELLS];
-      uint8_t solution[sud::CELLS];
-      uint8_t given[sud::CELLS];
-      uint8_t level, solved, pad[2];
-    } s;
-    memcpy(s.grid, _grid, sizeof(s.grid));
-    memcpy(s.solution, _solution, sizeof(s.solution));
-    for (int i = 0; i < sud::CELLS; i++) s.given[i] = _given[i] ? 1 : 0;
-    s.level = (uint8_t)_level;
-    s.solved = _solved ? 1 : 0;
-    s.pad[0] = s.pad[1] = 0;
+    Saved s;
+    memcpy(s.base.grid, _grid, sizeof(s.base.grid));
+    memcpy(s.base.solution, _solution, sizeof(s.base.solution));
+    for (int i = 0; i < sud::CELLS; i++) s.base.given[i] = _given[i] ? 1 : 0;
+    s.base.level = (uint8_t)_puzzleLevel;
+    s.base.solved = _solved ? 1 : 0;
+    s.base.pad[0] = s.base.pad[1] = 0;
+    memcpy(s.notes, _notes, sizeof(s.notes));
     prefs().putBytes("sd_state", &s, sizeof(s));
   }
 
   bool loadState() {
-    struct Saved {
-      uint8_t grid[sud::CELLS];
-      uint8_t solution[sud::CELLS];
-      uint8_t given[sud::CELLS];
-      uint8_t level, solved, pad[2];
-    } s;
-    if (prefs().getBytesLength("sd_state") != sizeof(s)) return false;
-    if (prefs().getBytes("sd_state", &s, sizeof(s)) != sizeof(s)) return false;
-    if (s.solved) return false;  // a finished board is not worth coming back to
-    memcpy(_grid, s.grid, sizeof(_grid));
-    memcpy(_solution, s.solution, sizeof(_solution));
-    for (int i = 0; i < sud::CELLS; i++) _given[i] = s.given[i] != 0;
-    _level = (sud::Level)(s.level <= sud::HARD ? s.level : sud::EASY);
+    Saved s;
+    memset(&s, 0, sizeof(s));
+    const size_t len = prefs().getBytesLength("sd_state");
+    if (len == sizeof(Saved)) {
+      if (prefs().getBytes("sd_state", &s, sizeof(s)) != sizeof(s)) return false;
+    } else if (len == sizeof(SavedV1)) {  // a puzzle from before notes existed
+      if (prefs().getBytes("sd_state", &s.base, sizeof(s.base)) != sizeof(s.base)) return false;
+    } else {
+      return false;
+    }
+    if (s.base.solved) return false;  // a finished board is not worth coming back to
+    memcpy(_grid, s.base.grid, sizeof(_grid));
+    memcpy(_solution, s.base.solution, sizeof(_solution));
+    for (int i = 0; i < sud::CELLS; i++) _given[i] = s.base.given[i] != 0;
+    memcpy(_notes, s.notes, sizeof(_notes));
+    _puzzleLevel = (sud::Level)(s.base.level <= sud::HARD ? s.base.level : sud::EASY);
+    memset(_marked, 0, sizeof(_marked));
     _solved = false;
     _started = true;
     _sel = -1;
-    _wrong = 0;
+    _msg[0] = 0;
     return true;
   }
 
   uint8_t _grid[sud::CELLS] = {};
   uint8_t _solution[sud::CELLS] = {};
   bool _given[sud::CELLS] = {};
+  uint16_t _notes[sud::CELLS] = {};  // bit d = pencil note d
+  bool _marked[sud::CELLS] = {};     // struck by the last Check
   int _sel = -1;
-  int _wrong = 0;
+  char _msg[40] = {};
+  bool _notesMode = false;
 #ifdef TOYBOX_HOST
  public:
   void hostSolve() {
     memcpy(_grid, _solution, sizeof(_grid));
     _sel = -1;
     judge();
+    if (_solved) _view = View::Result;
   }
+  void hostNotes() {  // a few pencil notes in the first empty cells
+    int done = 0;
+    for (int k = 0; k < sud::CELLS && done < 3; k++)
+      if (!_grid[k]) _notes[k] = (uint16_t)((done == 0 ? 0x3FE : 0) | (1 << (1 + done)) | (1 << 7)), done++;
+  }
+  int hostSel() const { return _sel; }
+  bool hostGiven(int k) const { return _given[k]; }
+  int hostSolution(int k) const { return _solution[k]; }
 
  private:
 #endif
-  bool _help = false;
+  View _view = View::Board;
   bool _armedClear = false;
   bool _solved = false, _started = false;
-  sud::Level _level = sud::EASY;
+  bool _rulesFromMore = false;  // the card came from More: Back returns to the game
+  sud::Level _level = sud::EASY;        // the next puzzle's
+  sud::Level _puzzleLevel = sud::EASY;  // the one on the board
 };

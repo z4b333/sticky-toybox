@@ -49,7 +49,8 @@ inline void suppress(Preferences& p, const char* game) {
 // The heading is a parameter because not every card is about a game: the
 // flashcards card explains a tool, and "HOW TO PLAY" over a study screen reads
 // like a mistake.
-inline void render(ToolsCanvas& c, const Text& t, const char* heading = "HOW TO PLAY") {
+inline void render(ToolsCanvas& c, const Text& t, const char* heading = "HOW TO PLAY",
+                   const char* way_back = "the ? above brings this back") {
   c.textCentered(c.width() / 2, 46, heading, TS_LARGE, true, true);
   decor::ornament(c, c.width() / 2, 80, 300, true);
 
@@ -86,8 +87,7 @@ inline void render(ToolsCanvas& c, const Text& t, const char* heading = "HOW TO 
   c.button(OK_BTN.x, OK_BTN.y, OK_BTN.w, OK_BTN.h, "GOT IT", true, TS_LARGE);
   c.button(NEVER_BTN.x, NEVER_BTN.y, NEVER_BTN.w, NEVER_BTN.h, "DON'T SHOW AGAIN", false,
            TS_MED);
-  c.textCentered(c.width() / 2, NEVER_BTN.y + NEVER_BTN.h + 8, "the ? above brings this back",
-                 TS_SMALL, true);
+  c.textCentered(c.width() / 2, NEVER_BTN.y + NEVER_BTN.h + 8, way_back, TS_SMALL, true);
 }
 
 inline Tap hit(int x, int y) {
@@ -102,29 +102,31 @@ inline Tap hit(int x, int y) {
 
 inline constexpr Text WORDLE{{
     "Guess the hidden 5-letter",
-    "word in six tries.",
+    "word in six tries. One word",
+    "a day; New word for more.",
     "",
     "After each guess:",
-    "solid tile - right letter,",
-    "right place",
-    "outlined - right letter,",
-    "wrong place",
-    "hatched - not in the word",
+    "black - right letter, right",
+    "place",
+    "striped - in the word, but",
+    "somewhere else",
+    "plain - not in the word",
 },
                             true,
                             0};
 
-inline constexpr Text NONOGRAM{{
-    "The numbers say how many",
-    "squares to fill in that",
-    "row or column, in order,",
-    "with a gap between runs.",
+inline constexpr Text MINES{{
+    "Clear every square that",
+    "has no mine under it.",
     "",
-    "Tap to fill. Switch to X",
-    "to mark squares you have",
-    "worked out are empty.",
+    "Tap to dig. A number says",
+    "how many mines touch it.",
+    "Hold to plant a flag.",
     "",
-    "HINT reveals one square.",
+    "Your first tap is always",
+    "safe. Tap a number whose",
+    "flags are all placed to dig",
+    "round it in one go.",
 },
                             true,
                             1};
@@ -147,13 +149,15 @@ inline constexpr Text G2048{{
 inline constexpr Text XO{{
     "Three in a row wins.",
     "",
-    "In 3 MARKS mode you only",
-    "ever have three marks on",
-    "the board. Place a fourth",
-    "and your oldest lifts off",
-    "- it is drawn faint for a",
-    "turn before it goes, so",
-    "you can plan around it.",
+    "Play the Sticky, or hand",
+    "it to a friend each turn.",
+    "",
+    "More > Rule: with 3 marks",
+    "you only ever have three",
+    "on the board. Place a",
+    "fourth and your oldest",
+    "lifts off - it is drawn",
+    "faint for a turn first.",
 },
                             true,
                             3};
@@ -162,13 +166,14 @@ inline constexpr Text SHIPS{{
     "Both fleets are hidden.",
     "Take turns firing.",
     "",
-    "Tap a square on ENEMY",
-    "WATERS to aim, then press",
-    "FIRE to commit. Aiming",
-    "costs nothing.",
+    "Place your five ships, or",
+    "Shuffle them. Then tap a",
+    "square to aim and tap it",
+    "again to fire.",
     "",
-    "Dot is a miss, block is a",
-    "hit. Sink all four ships.",
+    "Dot is a miss, black is a",
+    "hit. A hit fires again",
+    "(More can turn that off).",
 },
                             false,
                             7};
@@ -231,15 +236,15 @@ inline constexpr Text EPUB{{
 inline constexpr Text SUDOKU{{
     "Fill every empty square so",
     "that each row, column and",
-    "3x3 box holds 1 to 9 once",
-    "each.",
+    "3x3 box holds 1 to 9 once.",
     "",
-    "Tap a square, then tap a",
-    "number. CLR empties it.",
+    "Tap a square, then a digit.",
+    "Bold digits came with the",
+    "puzzle; yours are slanted.",
     "",
-    "Large bold digits came",
-    "with the puzzle and cannot",
-    "be changed.",
+    "Notes writes small pencil",
+    "digits. Check strikes",
+    "through any that are wrong.",
 },
                             false,
                             8};

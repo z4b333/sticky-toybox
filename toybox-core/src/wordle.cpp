@@ -8,34 +8,14 @@
 #include "tools/help.h"
 #include "wordlist.h"
 
-
 WordleApp wordleApp;
 
+using namespace wordui;
+
 namespace {
-// --- Layout (portrait 480x800) ----------------------------------------------
-// Board at the top, stats in the middle, keyboard along the bottom edge where
-// thumbs reach — the shape the game is normally played in.
-constexpr int TILE = 56, TGAP = 6;
-constexpr int BOARD_W = 5 * TILE + 4 * TGAP;          // 304
-constexpr int BOARD_X = (SCREEN_W - BOARD_W) / 2;        // 88
-constexpr int BOARD_Y = TOPBAR_H + 14;                // 54
-
-constexpr int PANEL_Y = BOARD_Y + 6 * TILE + 5 * TGAP + 12;  // 432
-constexpr int NEW_W = 120, NEW_H = 40;
-// Under the streak line, in the band that is only crowded once a game ends --
-// so the clear is offered between games, which is when it is wanted.
-constexpr int CLEAR_X = 16, CLEAR_Y = 556;
-constexpr int NEW_X = SCREEN_W - NEW_W - 16;
-
-constexpr int KEY_W = 44, KEY_H = 52, KGAP = 4;
-constexpr int ROW1_Y = 628, ROW2_Y = ROW1_Y + KEY_H + 6, ROW3_Y = ROW2_Y + KEY_H + 6;
 const char* ROW1 = "QWERTYUIOP";
 const char* ROW2 = "ASDFGHJKL";
 const char* ROW3 = "ZXCVBNM";
-constexpr int ROW1_X = (SCREEN_W - (10 * KEY_W + 9 * KGAP)) / 2;  // 2
-constexpr int ROW2_X = (SCREEN_W - (9 * KEY_W + 8 * KGAP)) / 2;   // 26
-constexpr int ENTER_W = 64;
-constexpr int ROW3_X = (SCREEN_W - (ENTER_W * 2 + 7 * KEY_W + 8 * KGAP)) / 2;  // 6
 
 bool wordInList(const char* w, const char* list, int count) {
   int lo = 0, hi = count - 1;
@@ -50,11 +30,45 @@ bool wordInList(const char* w, const char* list, int count) {
   }
   return false;
 }
+
+// Days from 1 Jan 2000 to y-m-d (proleptic Gregorian; the RTC never goes
+// near the edges of that).
+int daysFrom2000(int y, int m, int d) {
+  y -= m <= 2;
+  const int era = y / 400;
+  const int yoe = y - era * 400;
+  const int doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+  const int doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  return era * 146097 + doe - 730425;  // 730425 = days to 2000-01-01 from 0000-03-01
+}
+
+// The word of a day: a stride through the list, so consecutive days are far
+// apart in it and the order is the same on every device. 7919 is prime and
+// does not divide the list's length, so every word comes round once a cycle.
+int dailyIndex(int day) {
+  long v = ((long)day * 7919L) % WL_ANSWER_COUNT;
+  if (v < 0) v += WL_ANSWER_COUNT;
+  return (int)v;
+}
+
+struct Saved {
+  int32_t day;    // the day it is the word of, or -1 for an extra word
+  int16_t idx;    // into WL_ANSWERS
+  uint8_t row, col, over, won, pad[2];
+  char grid[6][5];
+  uint8_t score[6][5];
+};
 }  // namespace
 
-void WordleApp::newGame() {
-  const int idx = esp_random() % WL_ANSWER_COUNT;
-  memcpy(_answer, &WL_ANSWERS[idx * 5], 5);
+int WordleApp::today() {
+  int y = 0, m = 0, d = 0;
+  if (!host().clockDate(y, m, d) || y < 2020 || m < 1 || m > 12 || d < 1 || d > 31) return -1;
+  return daysFrom2000(y, m, d);
+}
+
+void WordleApp::begin(int answerIdx) {
+  _answerIdx = (int16_t)answerIdx;
+  memcpy(_answer, &WL_ANSWERS[answerIdx * 5], 5);
   for (int i = 0; i < 5; i++) _answer[i] = toupper(_answer[i]);
   _answer[5] = 0;
   memset(_grid, 0, sizeof(_grid));
@@ -62,15 +76,85 @@ void WordleApp::newGame() {
   memset(_keyState, 0, sizeof(_keyState));
   _row = _col = 0;
   _over = _won = false;
-  strcpy(_msg, "guess the word!");
+  _msg[0] = 0;
+  _view = View::Board;
+}
+
+void WordleApp::startDaily(int day) {
+  begin(dailyIndex(day));
+  _day = day;
+  _daily = true;
+  prefs().putInt("w_dday", day);
+  saveState();
+}
+
+void WordleApp::startExtra() {
+  // Never today's word again by chance: it would be no game at all.
+  const int t = today();
+  int idx;
+  do {
+    idx = (int)(esp_random() % WL_ANSWER_COUNT);
+  } while (t >= 0 && idx == dailyIndex(t));
+  begin(idx);
+  _day = -1;
+  _daily = false;
+  saveState();
+}
+
+void WordleApp::saveState() {
+  Saved s;
+  memset(&s, 0, sizeof(s));
+  s.day = _day;
+  s.idx = _answerIdx;
+  s.row = (uint8_t)_row;
+  s.col = (uint8_t)_col;
+  s.over = _over;
+  s.won = _won;
+  memcpy(s.grid, _grid, sizeof(s.grid));
+  memcpy(s.score, _score, sizeof(s.score));
+  prefs().putBytes("w_state", &s, sizeof(s));
+}
+
+bool WordleApp::loadState() {
+  Saved s;
+  if (prefs().getBytesLength("w_state") != sizeof(s)) return false;
+  if (prefs().getBytes("w_state", &s, sizeof(s)) != sizeof(s)) return false;
+  if (s.idx < 0 || s.idx >= WL_ANSWER_COUNT || s.row > 5 || s.col > 5) return false;
+  begin(s.idx);
+  _day = s.day;
+  _daily = s.day >= 0;
+  _row = s.row;
+  _col = s.col;
+  _over = s.over;
+  _won = s.won;
+  memcpy(_grid, s.grid, sizeof(_grid));
+  memcpy(_score, s.score, sizeof(_score));
+  for (int r = 0; r < 6; r++)
+    for (int i = 0; i < 5; i++) {
+      if (!_score[r][i] || !_grid[r][i]) continue;
+      const int li = _grid[r][i] - 'A';
+      if (li >= 0 && li < 26 && _score[r][i] > _keyState[li]) _keyState[li] = _score[r][i];
+    }
+  return true;
 }
 
 void WordleApp::enter(ToolsHost& h) {
   ToolApp::enter(h);
+  _rulesFromMore = false;
   _armedClear = false;
-  _help = !help::suppressed(prefs(), "wrd");
-  newGame();
+  const bool had = loadState();
+  const int t = today();
+  if (t >= 0) {
+    // Today's word comes first: once a day, whatever was left open before.
+    const bool todayPlayed = prefs().getInt("w_dday", -1) == t;
+    if (!had || (!todayPlayed && !(_daily && _day == t))) startDaily(t);
+  } else if (!had) {
+    startExtra();
+  }
+  _view = help::suppressed(prefs(), "wrd") ? View::Board : View::Rules;
 }
+
+// --- drawing -------------------------------------------------------------------
 
 void WordleApp::drawBoard(ToolsCanvas& c) {
   for (int r = 0; r < 6; r++) {
@@ -79,52 +163,74 @@ void WordleApp::drawBoard(ToolsCanvas& c) {
       const int y = BOARD_Y + r * (TILE + TGAP);
       const uint8_t st = _score[r][col];
       const char ch = _grid[r][col];
-      // Letters are centred in the tile by measurement rather than by a fixed
-      // offset: glyphs have their own widths now, so W and I do not agree.
       const char one[2] = {ch, 0};
-      c.fillRect(x, y, TILE, TILE, false);
-      if (st == 3) {  // correct: solid black, white letter
+      if (st == 3) {  // right place: solid black, white letter
         c.fillRect(x, y, TILE, TILE, true);
-        if (ch) c.textInBox(x, y, TILE, TILE, one, TS_HUGE, false, true);
-      } else if (st == 2) {  // present: double border, black letter
+        c.textInBox(x, y, TILE, TILE, one, TS_HUGE, false, true);
+      } else if (st == 2) {  // in the word: striped, the letter on a white patch
+        gk::stripes(c, x, y, TILE, TILE);
         c.drawRect(x, y, TILE, TILE, 2, true);
-        c.drawRect(x + 5, y + 5, TILE - 10, TILE - 10, 2, true);
-        if (ch) c.textInBox(x, y, TILE, TILE, one, TS_LARGE, true);
-      } else if (st == 1) {  // absent: thin border, small letter
-        c.drawRect(x, y, TILE, TILE, 1, true);
-        if (ch) c.textInBox(x, y, TILE, TILE, one, TS_LARGE, true);
-      } else {  // pending input
-        c.drawRect(x, y, TILE, TILE, ch ? 3 : 1, true);
-        if (ch) c.textInBox(x, y, TILE, TILE, one, TS_HUGE, true);
+        const int pw = c.textWidth(one, TS_HUGE, true) + 12, ph = c.textHeight(TS_HUGE);
+        c.fillRect(x + (TILE - pw) / 2, y + (TILE - ph) / 2, pw, ph, false);
+        c.textInBox(x, y, TILE, TILE, one, TS_HUGE, true, true);
+      } else if (st == 1) {  // not in it: plain frame
+        c.drawRect(x, y, TILE, TILE, 2, true);
+        c.textInBox(x, y, TILE, TILE, one, TS_HUGE, true, true);
+      } else if (r == _row && !_over) {  // the row being typed
+        c.drawRect(x, y, TILE, TILE, ch ? 3 : 2, true);
+        if (ch) c.textInBox(x, y, TILE, TILE, one, TS_HUGE, true, true);
+      } else {  // rows still to come: dashed, as the kit draws them
+        for (int i = 0; i < TILE; i += 10) {
+          const int len = i + 6 <= TILE ? 6 : TILE - i;
+          c.fillRect(x + i, y, len, 2, true);
+          c.fillRect(x + i, y + TILE - 2, len, 2, true);
+          c.fillRect(x, y + i, 2, len, true);
+          c.fillRect(x + TILE - 2, y + i, 2, len, true);
+        }
       }
     }
   }
 }
 
+// Under the board: what the marks mean, or what just went wrong.
+void WordleApp::drawLegend(ToolsCanvas& c) {
+  const int y = LEGEND_Y, h = c.textHeight(TS_SMALL);
+  if (_msg[0]) {
+    c.textCentered(c.width() / 2, y, _msg, TS_SMALL, true, true);
+    return;
+  }
+  const int sq = 16, sy = y + (h - sq) / 2;
+  int x = 30;
+  c.fillRect(x, sy, sq, sq, true);
+  x += sq + 6;
+  c.text(x, y, "right place", TS_SMALL, true);
+  x += c.textWidth("right place", TS_SMALL) + 18;
+  gk::stripes(c, x, sy, sq, sq);
+  c.drawRect(x, sy, sq, sq, 1, true);
+  x += sq + 6;
+  c.text(x, y, "in the word", TS_SMALL, true);
+  x += c.textWidth("in the word", TS_SMALL) + 18;
+  c.text(x, y, "struck: not in it", TS_SMALL, true);
+}
+
 void WordleApp::drawKeyboard(ToolsCanvas& c) {
   auto drawKey = [&](int x, int y, int w, const char* label, uint8_t st) {
-    const TSize sc = (strlen(label) > 1) ? TS_SMALL : TS_LARGE;  // ENTER/DEL smaller
-    c.fillRect(x, y, w, KEY_H, false);
-    if (st == 3) {  // correct
+    const TSize sz = strlen(label) > 1 ? TS_SMALL : TS_LARGE;
+    if (st == 3) {  // right place
       c.fillRect(x, y, w, KEY_H, true);
-      c.textCentered(x + w / 2, y + (KEY_H - c.textHeight(sc)) / 2, label, sc, false);
-    } else if (st == 2) {  // present
+      c.textInBox(x, y, w, KEY_H, label, sz, false, true);
+    } else if (st == 2) {  // in the word: a heavy frame
       c.drawRect(x, y, w, KEY_H, 3, true);
-      c.textCentered(x + w / 2, y + (KEY_H - c.textHeight(sc)) / 2, label, sc, true);
-    } else if (st == 1) {  // absent: hatched
+      c.textInBox(x, y, w, KEY_H, label, sz, true, true);
+    } else if (st == 1) {  // not in it: struck through
       c.drawRect(x, y, w, KEY_H, 1, true);
-      for (int d = 0; d < w + KEY_H; d += 7) {
-        for (int t = 0; t < KEY_H; t++) {
-          const int px = x + d - t;
-          if (px >= x && px < x + w) c.fillRect(px, y + t, 1, 1, true);
-        }
-      }
+      c.textInBox(x, y, w, KEY_H, label, sz, true);
+      c.fillRect(x + 8, y + KEY_H / 2 - 1, w - 16, 3, true);
     } else {
       c.drawRect(x, y, w, KEY_H, 2, true);
-      c.textCentered(x + w / 2, y + (KEY_H - c.textHeight(sc)) / 2, label, sc, true);
+      c.textInBox(x, y, w, KEY_H, label, sz, true, sz == TS_LARGE);
     }
   };
-
   char lbl[2] = {0, 0};
   for (int i = 0; ROW1[i]; i++) {
     lbl[0] = ROW1[i];
@@ -134,84 +240,116 @@ void WordleApp::drawKeyboard(ToolsCanvas& c) {
     lbl[0] = ROW2[i];
     drawKey(ROW2_X + i * (KEY_W + KGAP), ROW2_Y, KEY_W, lbl, _keyState[ROW2[i] - 'A']);
   }
-  drawKey(ROW3_X, ROW3_Y, ENTER_W, "ENTER", 0);
+  drawKey(ENTER.x, ENTER.y, ENTER.w, "ENTER", 0);
   for (int i = 0; ROW3[i]; i++) {
     lbl[0] = ROW3[i];
     drawKey(ROW3_X + ENTER_W + KGAP + i * (KEY_W + KGAP), ROW3_Y, KEY_W, lbl,
             _keyState[ROW3[i] - 'A']);
   }
-  drawKey(ROW3_X + ENTER_W + KGAP + 7 * (KEY_W + KGAP), ROW3_Y, ENTER_W, "<DEL", 0);
+  drawKey(DEL.x, DEL.y, DEL.w, "DEL", 0);
+}
+
+// Kit "Wordle, solved": the word on black tiles, then how many guesses every
+// win has taken, today's row filled.
+void WordleApp::renderResult(ToolsCanvas& c) {
+  const int w = c.width();
+  char buf[40];
+  if (_won)
+    snprintf(buf, sizeof(buf), "SOLVED IN %d", _row + 1);
+  else
+    snprintf(buf, sizeof(buf), "THE WORD WAS");
+  c.textTrackedCentered(w / 2, 130, buf, TS_SMALL, true, false, 3);
+  constexpr int T = 60, G = 8;
+  const int x0 = (w - (5 * T + 4 * G)) / 2;
+  for (int i = 0; i < 5; i++) {
+    const char one[2] = {_answer[i], 0};
+    c.fillRect(x0 + i * (T + G), 162, T, T, true);
+    c.textInBox(x0 + i * (T + G), 162, T, T, one, TS_HUGE, false, true);
+  }
+
+  c.textTrackedCentered(w / 2, 262, "GUESSES", TS_SMALL, true, false, 2);
+  const int gw = c.textTrackedWidth("GUESSES", TS_SMALL, false, 2);
+  chrome2::dottedRule(c, w / 2 - gw / 2, 262 + c.textHeight(TS_SMALL) + 4, gw);
+  int dist[6], maxd = 1;
+  for (int i = 0; i < 6; i++) {
+    char key[8];
+    snprintf(key, sizeof(key), "w_d%d", i + 1);
+    dist[i] = prefs().getInt(key, 0);
+    if (dist[i] > maxd) maxd = dist[i];
+  }
+  for (int i = 0; i < 6; i++) {
+    const int y = 306 + i * 44;
+    snprintf(buf, sizeof(buf), "%d", i + 1);
+    c.text(84, y + 4, buf, TS_MED, true);
+    const int bw = 40 + 260 * dist[i] / maxd;
+    const bool mine = _won && i == _row;
+    snprintf(buf, sizeof(buf), "%d", dist[i]);
+    if (mine) {
+      c.fillRect(116, y, bw, 32, true);
+      c.text(116 + bw - 10 - c.textWidth(buf, TS_MED, true), y + 4, buf, TS_MED, false, true);
+    } else {
+      c.drawRect(116, y, bw, 32, 2, true);
+      c.text(116 + bw - 10 - c.textWidth(buf, TS_MED), y + 4, buf, TS_MED, true);
+    }
+  }
+  snprintf(buf, sizeof(buf), "won %d of %d - best streak %d", prefs().getInt("w_wins", 0),
+           prefs().getInt("w_games", 0), prefs().getInt("w_max", 0));
+  c.textCentered(w / 2, 576, buf, TS_MED, true);
+  c.button(gk::RES_LEFT.x, gk::RES_LEFT.y, gk::RES_LEFT.w, gk::RES_LEFT.h, "Close", false,
+           TS_LARGE);
+  c.button(gk::RES_RIGHT.x, gk::RES_RIGHT.y, gk::RES_RIGHT.w, gk::RES_RIGHT.h, "New word", true,
+           TS_LARGE);
+  gk::foot(c, "a new word every day - or play more");
+}
+
+int WordleApp::menuRows(gk::Row* rows) {
+  int n = 0;
+  rows[n++] = {"How to play", nullptr, false};
+  rows[n++] = {"New word", nullptr, false};
+  if (_daily && _day >= 0 && _day != today() && today() >= 0)
+    rows[n++] = {"Today's word", nullptr, false};
+  if (prefs().getInt("w_games", 0) > 0) rows[n++] = {"Clear record", nullptr, _armedClear};
+  return n;
 }
 
 void WordleApp::render(ToolsCanvas& c) {
-  host().topBar("WORDLE", true);
-  if (_help) {
-    help::render(c, help::WORDLE);
+  if (_view == View::Rules) {
+    gk::bar(host(), c, "WORDLE");
+    gk::rules(c, help::WORDLE);
     return;
   }
+  if (_view == View::Menu) {
+    gk::Row rows[gk::MENU_MAX];
+    gk::menu(host(), c, "WORDLE", rows, menuRows(rows));
+    return;
+  }
+  char corner[16];
+  if (_view == View::Result) {
+    snprintf(corner, sizeof(corner), "streak %d", prefs().getInt("w_streak", 0));
+    gk::bar(host(), c, "WORDLE", corner);
+    renderResult(c);
+    return;
+  }
+  snprintf(corner, sizeof(corner), "%d/6", _over ? _row + 1 : _row + 1);
+  gk::bar(host(), c, "WORDLE", corner);
   drawBoard(c);
+  drawLegend(c);
   drawKeyboard(c);
-
-  // The band between the board and the keyboard. While a game is running it
-  // carries one line -- what just happened -- at a size you can read without
-  // leaning in. The record and the guess-distribution chart only appear once
-  // the game is over, which is when they are worth looking at; during play they
-  // were six rows of 8 px digits competing with the board for attention.
-  c.button(NEW_X, PANEL_Y - 4, NEW_W, NEW_H, "NEW", _over, TS_MED);
-
-  char buf[40];
-  if (!_over) {
-    // The message shares this line with the NEW button, so a long one steps
-    // down a size rather than sliding underneath it.
-    if (_msg[0]) {
-      const int roomForMsg = NEW_X - 32;
-      const TSize ms = c.textWidth(_msg, TS_LARGE) <= roomForMsg ? TS_LARGE : TS_MED;
-      c.text(16, PANEL_Y + 8 + (ms == TS_LARGE ? 0 : 4), _msg, ms, true);
-    }
-    snprintf(buf, sizeof(buf), "guess %d of 6", _row + 1);
-    c.text(16, PANEL_Y + 52, buf, TS_MED, true);
-    snprintf(buf, sizeof(buf), "streak %d", prefs().getInt("w_streak", 0));
-    c.text(16, PANEL_Y + 80, buf, TS_MED, true);
-    if (prefs().getInt("w_games", 0) > 0)
-      c.button(CLEAR_X, CLEAR_Y, record::BTN_W, record::BTN_H, record::label(_armedClear), _armedClear, TS_MED);
-    return;
-  }
-
-  // The verdict gets a plaque; it has to clear the NEW button, so it stops
-  // short of it rather than running the width of the panel.
-  decor::banner(c, 16, PANEL_Y - 4, NEW_X - 32, 44, _msg, TS_MED, _won);
-  const int games = prefs().getInt("w_games", 0);
-  const int wins = prefs().getInt("w_wins", 0);
-  snprintf(buf, sizeof(buf), "won %d of %d   streak %d", wins, games,
-           prefs().getInt("w_streak", 0));
-  c.text(16, PANEL_Y + 40, buf, TS_MED, true);
-
-  int maxd = 0;
-  int dist[6];
-  for (int i = 0; i < 6; i++) {
-    char key[12];
-    snprintf(key, sizeof(key), "w_d%d", i + 1);
-    dist[i] = prefs().getInt(key, 0);
-    maxd = max(maxd, dist[i]);
-  }
-  // Nothing won yet means six identical stubs with a 0 beside each, which is
-  // six rows of noise on the screen you are looking at because you just lost.
-  // The chart earns its space once there is a bar in it.
-  if (maxd == 0) return;
-  for (int i = 0; i < 6; i++) {
-    const int y = PANEL_Y + 72 + i * 20;
-    snprintf(buf, sizeof(buf), "%d", i + 1);
-    c.text(16, y, buf, TS_MED, true);
-    const int w = 16 + 300 * dist[i] / maxd;
-    c.fillRect(36, y, w, 14, true);
-    snprintf(buf, sizeof(buf), "%d", dist[i]);
-    c.text(36 + w + 8, y, buf, TS_MED, true);
+  char buf[48];
+  if (_over)
+    gk::foot(c, "tap the board for the result");
+  else {
+    snprintf(buf, sizeof(buf), "%s - streak %d - best %d", _daily ? "today's word" : "extra word",
+             prefs().getInt("w_streak", 0), prefs().getInt("w_max", 0));
+    gk::foot(c, buf);
   }
 }
 
+// --- playing -------------------------------------------------------------------
+
 void WordleApp::submitGuess() {
   if (_col < 5) {
-    strcpy(_msg, "too short!");
+    strcpy(_msg, "too short");
     host().beep(2);
     host().refresh(false);
     return;
@@ -219,13 +357,13 @@ void WordleApp::submitGuess() {
   char guess[6] = {};
   for (int i = 0; i < 5; i++) guess[i] = tolower(_grid[_row][i]);
   if (!wordInList(guess, WL_ALLOWED, WL_ALLOWED_COUNT)) {
-    strcpy(_msg, "not in word list");
+    strcpy(_msg, "not in the word list");
     host().beep(2);
     host().refresh(false);
     return;
   }
 
-  // Score: two-pass (correct first, then present with letter budget)
+  // Score: two-pass (right place first, then in the word with a letter budget).
   int counts[26] = {};
   for (int i = 0; i < 5; i++) counts[_answer[i] - 'A']++;
   for (int i = 0; i < 5; i++) {
@@ -253,12 +391,9 @@ void WordleApp::submitGuess() {
   for (int i = 0; i < 5; i++)
     if (_score[_row][i] != 3) allCorrect = false;
 
+  _msg[0] = 0;
   if (allCorrect) {
     _over = _won = true;
-    const char* praise[6] = {"GENIUS!",  "MAGNIFICENT!", "IMPRESSIVE!",
-                             "SPLENDID!", "GREAT!",       "PHEW!"};
-    strcpy(_msg, praise[_row]);
-    // stats
     prefs().putInt("w_games", prefs().getInt("w_games", 0) + 1);
     prefs().putInt("w_wins", prefs().getInt("w_wins", 0) + 1);
     const int streak = prefs().getInt("w_streak", 0) + 1;
@@ -267,24 +402,32 @@ void WordleApp::submitGuess() {
     char key[8];
     snprintf(key, sizeof(key), "w_d%d", _row + 1);
     prefs().putInt(key, prefs().getInt(key, 0) + 1);
+    saveState();
+    _view = View::Result;
     host().beep(3);
-  } else if (_row == 5) {
+    host().refresh(true);
+    return;
+  }
+  if (_row == 5) {
     _over = true;
-    snprintf(_msg, sizeof(_msg), "it was: %s", _answer);
     prefs().putInt("w_games", prefs().getInt("w_games", 0) + 1);
     prefs().putInt("w_streak", 0);
+    saveState();
+    _view = View::Result;
     host().beep(2);
-  } else {
-    _row++;
-    _col = 0;
-    strcpy(_msg, "");
-    host().beep(1);
+    host().refresh(true);
+    return;
   }
+  _row++;
+  _col = 0;
+  saveState();
+  host().beep(1);
   host().refresh(false);
 }
 
 void WordleApp::keyPressed(char c) {
   if (_over) return;
+  _msg[0] = 0;
   if (c == '\r') {
     submitGuess();
     return;
@@ -305,54 +448,87 @@ void WordleApp::keyPressed(char c) {
   }
 }
 
+void WordleApp::tapMenu(int x, int y) {
+  gk::Row rows[gk::MENU_MAX];
+  const int n = menuRows(rows);
+  const int i = gk::menuHit(x, y, n);
+  const bool wasArmed = _armedClear;
+  _armedClear = false;
+  if (i < 0) {
+    if (wasArmed) host().refresh(false);
+    return;
+  }
+  const char* what = rows[i].label;
+  if (!strcmp(what, "How to play")) {
+    _view = View::Rules;
+    _rulesFromMore = true;
+  } else if (!strcmp(what, "New word")) {
+    startExtra();
+  } else if (!strcmp(what, "Today's word")) {
+    startDaily(today());
+  } else if (!strcmp(what, "Clear record")) {
+    if (!wasArmed) {
+      _armedClear = true;
+      host().beep(2);
+      host().refresh(false);
+      return;
+    }
+    record::clear(prefs(), record::WORDLE);
+    _view = View::Board;
+  }
+  host().beep(1);
+  host().refresh(true);
+}
+
 void WordleApp::onTap(int x, int y) {
-  // Back comes before the rules card, not after it. A card that swallows
-  // "< HUB" leaves the only way out of the app behind a button you have to
-  // find first, and the sudoku and battleship screens never did that.
   if (host().isBackTap(x, y)) {
     host().beep(1);
+    if (_view == View::Menu || (_view == View::Rules && _rulesFromMore)) {
+      _view = View::Board;
+      _armedClear = false;
+      host().refreshUi();
+      return;
+    }
     host().goHub();
     return;
   }
-
-  if (host().isHelpTap(x, y)) {
-    _help = !_help;
-    host().beep(1);
-    host().refreshUi();
-    return;
-  }
-  if (_help) {
+  if (_view == View::Rules) {
     const help::Tap t = help::hit(x, y);
     if (t == help::Tap::None) return;
     if (t == help::Tap::Never) help::suppress(prefs(), "wrd");
-    _help = false;
+    _view = View::Board;
+    _rulesFromMore = false;
     host().beep(1);
     host().refreshUi();
     return;
   }
-
-  const bool wasArmed = _armedClear;
-  _armedClear = false;
-  if (!_over && prefs().getInt("w_games", 0) > 0 &&
-      inRect(x, y, CLEAR_X, CLEAR_Y, record::BTN_W, record::BTN_H)) {
-    if (wasArmed) {
-      record::clear(prefs(), record::WORDLE);
-      host().beep(1);
-    } else {
-      _armedClear = true;
-      host().beep(2);
-    }
-    host().refresh(false);
+  if (_view == View::Menu) return tapMenu(x, y);
+  if (gk::isMore(host(), x, y)) {
+    _view = View::Menu;
+    _armedClear = false;
+    host().beep(1);
+    host().refreshUi();
     return;
   }
-  if (wasArmed) {
-    host().refresh(false);
+  if (_view == View::Result) {
+    if (gk::RES_RIGHT.hit(x, y)) {
+      host().beep(1);
+      startExtra();
+      host().refresh(true);
+    } else if (gk::RES_LEFT.hit(x, y)) {
+      host().beep(1);
+      _view = View::Board;
+      host().refresh(true);
+    }
+    return;
   }
 
-  if (inRect(x, y, NEW_X, PANEL_Y - 4, NEW_W, NEW_H)) {
-    host().beep(1);
-    newGame();
-    host().refresh(true);  // fresh board: clean the ghosting too
+  if (_over) {
+    if (BOARD.hit(x, y)) {
+      host().beep(1);
+      _view = View::Result;
+      host().refresh(true);
+    }
     return;
   }
   // Keyboard rows
@@ -363,9 +539,9 @@ void WordleApp::onTap(int x, int y) {
     const int i = (x - ROW2_X) / (KEY_W + KGAP);
     if (i >= 0 && i < 9 && x >= ROW2_X) keyPressed(ROW2[i]);
   } else if (y >= ROW3_Y && y < ROW3_Y + KEY_H) {
-    if (x >= ROW3_X && x < ROW3_X + ENTER_W) {
+    if (ENTER.hit(x, y)) {
       keyPressed('\r');
-    } else if (x >= ROW3_X + ENTER_W + KGAP + 7 * (KEY_W + KGAP)) {
+    } else if (x >= DEL.x) {
       keyPressed('\b');
     } else {
       const int i = (x - ROW3_X - ENTER_W - KGAP) / (KEY_W + KGAP);

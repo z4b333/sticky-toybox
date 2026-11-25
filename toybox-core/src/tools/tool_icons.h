@@ -1,273 +1,314 @@
-// Hub tile icons for the utility apps, drawn from canvas primitives so the
-// standalone and CrossPoint hubs show the same artwork.
+// App icons for the drawers and the rules cards (v2, C3: kit "Play",
+// "Utility", "Study").
+//
+// Line drawings, as the kit draws them: each is the kit's own SVG -- mostly a
+// 26-unit box, a few 48 or 64 -- traced here with the canvas's lines,
+// circles and rectangles, so the drawer on the panel and the drawer in the kit
+// are the same picture. The stroke scales with the icon (2 units in 26), which
+// is 3-4 px in a drawer tile and heavier on the rules cards.
 #pragma once
+#include <math.h>
+
 #include "decor.h"
 #include "tools_draw.h"
+
+namespace icons {
+
+// A pen that draws in the kit's units, centred on (cx, cy), `s` px across.
+struct Pen {
+  ToolsCanvas& c;
+  int cx, cy, s;
+  float vb;  // the viewBox the kit drew in
+  int t;     // stroke, px
+  bool ink;
+  Pen(ToolsCanvas& c_, int cx_, int cy_, int s_, float vb_, bool ink_ = true)
+      : c(c_), cx(cx_), cy(cy_), s(s_), vb(vb_), ink(ink_) {
+    t = (int)lroundf((float)s * 2.0f / 26.0f);
+    if (t < 2) t = 2;
+  }
+  int X(float u) const { return cx + (int)lroundf((u - vb / 2) * (float)s / vb); }
+  int Y(float v) const { return cy + (int)lroundf((v - vb / 2) * (float)s / vb); }
+  int L(float u) const { return (int)lroundf(u * (float)s / vb); }
+
+  void line(float x1, float y1, float x2, float y2) const {
+    // The canvas widens a line across its shallower axis, so a diagonal comes
+    // out thinner than a straight one (by 1/sqrt 2 at 45 degrees). Scale the
+    // width back up so every stroke of an icon has the same weight.
+    const float ax = fabsf(x2 - x1), ay = fabsf(y2 - y1), mx = ax > ay ? ax : ay;
+    int w = t;
+    if (mx > 0) w = (int)lroundf((float)t * sqrtf(ax * ax + ay * ay) / mx);
+    c.drawLine(X(x1), Y(y1), X(x2), Y(y2), w, ink);
+    // Round the joint: lines meeting at a corner leave a notch otherwise.
+    if (t >= 3) {
+      c.fillCircle(X(x1), Y(y1), t / 2, ink);
+      c.fillCircle(X(x2), Y(y2), t / 2, ink);
+    }
+  }
+  void poly(const float* p, int n, bool closed) const {
+    for (int i = 0; i + 1 < n; i++) line(p[2 * i], p[2 * i + 1], p[2 * i + 2], p[2 * i + 3]);
+    if (closed) line(p[2 * n - 2], p[2 * n - 1], p[0], p[1]);
+  }
+  void rect(float x, float y, float w, float h) const {
+    const int x0 = X(x), y0 = Y(y), x1 = X(x + w), y1 = Y(y + h);
+    c.drawRect(x0 - t / 2, y0 - t / 2, x1 - x0 + t, y1 - y0 + t, t, ink);
+  }
+  void fill(float x, float y, float w, float h) const {
+    const int x0 = X(x), y0 = Y(y), x1 = X(x + w), y1 = Y(y + h);
+    c.fillRect(x0 - t / 2, y0 - t / 2, x1 - x0 + t, y1 - y0 + t, ink);
+  }
+  void rrect(float x, float y, float w, float h, float r) const {
+    const int x0 = X(x), y0 = Y(y), x1 = X(x + w), y1 = Y(y + h);
+    tdraw::roundRect(c, x0 - t / 2, y0 - t / 2, x1 - x0 + t, y1 - y0 + t, L(r) + t / 2, t, ink);
+  }
+  void circle(float x, float y, float r) const { c.drawCircle(X(x), Y(y), L(r) + t / 2, t, ink); }
+  void dot(float x, float y, float r) const { c.fillCircle(X(x), Y(y), L(r), ink); }
+  void tri(float x0, float y0, float x1, float y1, float x2, float y2) const {
+    decor::triangle(c, X(x0), Y(y0), X(x1), Y(y1), X(x2), Y(y2), ink);
+  }
+  // An arc of a circle, degrees, 0 = east, 90 = south (screen y down).
+  void arc(float x, float y, float r, float a0, float a1) const {
+    const int n = 16;
+    float px = x + r * cosf(a0 * 0.0174533f), py = y + r * sinf(a0 * 0.0174533f);
+    for (int i = 1; i <= n; i++) {
+      const float a = (a0 + (a1 - a0) * i / n) * 0.0174533f;
+      const float qx = x + r * cosf(a), qy = y + r * sinf(a);
+      line(px, py, qx, qy);
+      px = qx;
+      py = qy;
+    }
+  }
+  void cubic(float x0, float y0, float x1, float y1, float x2, float y2, float x3, float y3) const {
+    const int n = 16;
+    float px = x0, py = y0;
+    for (int i = 1; i <= n; i++) {
+      const float u = (float)i / n, v = 1 - u;
+      const float qx = v * v * v * x0 + 3 * v * v * u * x1 + 3 * v * u * u * x2 + u * u * u * x3;
+      const float qy = v * v * v * y0 + 3 * v * v * u * y1 + 3 * v * u * u * y2 + u * u * u * y3;
+      line(px, py, qx, qy);
+      px = qx;
+      py = qy;
+    }
+  }
+};
+
+}  // namespace icons
 
 namespace ticons {
 
 inline constexpr int COUNT = 14;
 inline const char* const NAMES[COUNT] = {"COIN",  "DICE",   "TIMER", "RANDOM",
                                          "PICKER", "FLASHCARDS", "NOTES",  "SHIPS",
-                                         "SUDOKU", "BOOKS", "EPUB", "RECIPES",
+                                         "SUDOKU", "MANGA", "BOOKS", "RECIPES",
                                          "CALENDAR", "FOCUS"};
 // Kept short: a hub tile is 140 px, which is about twelve characters.
 inline const char* const DESCS[COUNT] = {"heads/tails", "D4 - D20",   "countdown", "number/card",
                                          "from a list", "flashcards", "from phone", "battleship",
-                                         "9x9 numbers", "from the card", "ebooks", "what to cook",
+                                         "9x9 numbers", "removed", "ebooks", "what to cook",
                                          "the month", "no countdown"};
 
+using icons::Pen;
+
 inline void coin(ToolsCanvas& c, int cx, int cy, int s) {
-  c.drawCircle(cx, cy, s / 2, 3, true);
-  c.drawCircle(cx, cy, s / 2 - 6, 1, true);
-  c.textInBox(cx - s / 2, cy - s / 2, s, s, "H", TS_MED, true, true);
+  Pen p(c, cx, cy, s, 26);
+  p.circle(13, 13, 9);
+  p.circle(13, 13, 5);
 }
 
 inline void dice(ToolsCanvas& c, int cx, int cy, int s) {
-  // Same rounded face as the dice screen draws, so the icon and the thing it
-  // opens are recognisably the same object.
-  tdraw::roundRect(c, cx - s / 2, cy - s / 2, s, s, s / 6, 3, true);
-  tdraw::dicePips(c, cx - s / 2, cy - s / 2, s, 5, false);
+  Pen p(c, cx, cy, s, 26);
+  p.rrect(5, 5, 16, 16, 3);
+  p.dot(10, 10, 1.6f);
+  p.dot(13, 13, 1.6f);
+  p.dot(16, 16, 1.6f);
 }
 
 inline void timer(ToolsCanvas& c, int cx, int cy, int s) {
-  const int r = s / 2;
-  c.drawCircle(cx, cy + 2, r - 2, 3, true);
-  c.fillRect(cx - 8, cy - r - 6, 16, 6, true);          // crown
-  c.drawLine(cx, cy + 2, cx, cy - r / 2 + 2, 3, true);  // minute hand
-  c.drawLine(cx, cy + 2, cx + r / 2, cy + 2, 3, true);  // hour hand
+  Pen p(c, cx, cy, s, 26);
+  p.circle(13, 14, 9);
+  p.line(13, 9, 13, 14);
+  p.line(13, 14, 16, 16);
+  p.line(10, 3, 16, 3);
 }
 
 inline void randomIcon(ToolsCanvas& c, int cx, int cy, int s) {
-  // a card with a big numeral on it
-  const int w = (s * 3) / 4;
-  c.drawRect(cx - w / 2, cy - s / 2, w, s, 3, true);
-  char buf[2] = {'7', 0};
-  tdraw::seg7Centered(c, cx, cy - s / 4, s / 2, buf, true);
-  tdraw::diamond(c, cx, cy + s / 4, s / 4, true);
+  Pen p(c, cx, cy, s, 26);
+  static const float a[] = {4, 7, 8, 7, 18, 19, 22, 19};
+  static const float b[] = {4, 19, 8, 19, 18, 7, 22, 7};
+  static const float h1[] = {19, 4, 22, 7, 19, 10};
+  static const float h2[] = {19, 16, 22, 19, 19, 22};
+  p.poly(a, 4, false);
+  p.poly(b, 4, false);
+  p.poly(h1, 3, false);
+  p.poly(h2, 3, false);
 }
 
+// A list with a pointer at the line that was picked (owner's choice, 25 Nov).
 inline void picker(ToolsCanvas& c, int cx, int cy, int s) {
-  const int w = s, x = cx - s / 2;
-  for (int i = 0; i < 3; i++) {
-    const int y = cy - s / 2 + i * (s / 3);
-    const bool sel = (i == 1);
-    c.drawRect(x, y, w, s / 4, sel ? 3 : 1, true);
-    if (sel) c.fillRect(x, y, w, s / 4, true);
-  }
+  Pen p(c, cx, cy, s, 26);
+  p.tri(2, 9.5f, 2, 16.5f, 7, 13);
+  p.line(10, 6, 24, 6);
+  p.line(10, 13, 24, 13);
+  p.line(10, 20, 24, 20);
 }
 
-// A stack of cards, the top one flipped forward.
-inline void study(ToolsCanvas& c, int cx, int cy, int s) {
-  const int w = (s * 3) / 4, h = (s * 5) / 6;
-  c.drawRect(cx - w / 2 + 6, cy - h / 2 - 6, w, h, 2, true);   // card behind
-  c.fillRect(cx - w / 2 - 6, cy - h / 2 + 2, w, h, false);     // clear overlap
-  c.drawRect(cx - w / 2 - 6, cy - h / 2 + 2, w, h, 3, true);   // front card
-  c.fillRect(cx - w / 2 + 2, cy - 6, w - 16, 4, true);         // text lines
-  c.fillRect(cx - w / 2 + 2, cy + 4, w - 24, 4, true);
+// Two cards, the back one's top and right edges showing behind the front
+// (kit "Flashcards"), redrawn in the 26 box with room between the two so the
+// edges never touch at drawer size.
+inline void flashcards(ToolsCanvas& c, int cx, int cy, int s) {
+  Pen p(c, cx, cy, s, 26);
+  p.rrect(2.5f, 9, 16, 13, 2);
+  p.line(7, 4.5f, 21, 4.5f);
+  p.arc(21, 6.5f, 2, -90, 0);
+  p.line(23, 6.5f, 23, 17.5f);
 }
 
-// A sheet with a folded corner and a ticked line.
 inline void notes(ToolsCanvas& c, int cx, int cy, int s) {
-  const int w = (s * 3) / 4, h = s;
-  const int x = cx - w / 2, y = cy - h / 2;
-  const int fold = s / 4;
-  c.drawRect(x, y, w, h, 3, true);
-  c.fillRect(x + w - fold, y, fold, fold, false);   // clip the corner
-  c.drawLine(x + w - fold, y, x + w, y + fold, 3, true);
-  c.fillRect(x + 7, y + h / 2 - 6, w - 20, 3, true);
-  c.fillRect(x + 7, y + h / 2 + 4, w - 26, 3, true);
-  c.fillRect(x + 7, y + h / 2 + 14, w - 14, 3, true);
+  Pen p(c, cx, cy, s, 48);
+  p.rrect(11, 7, 26, 34, 3);
+  p.line(17, 17, 31, 17);
+  p.line(17, 24, 31, 24);
+  p.line(17, 31, 25, 31);
 }
 
-// A ship on the water: hull, bridge, mast, and two lines of sea beneath.
-inline void battleship(ToolsCanvas& c, int cx, int cy, int s) {
-  const int deckY = cy + s / 12;
-  const int hullH = s / 4;
-  c.fillRect(cx - s / 2, deckY - 3, s, 3, true);  // deck
-  for (int i = 0; i < hullH; i++) {               // hull tapering to the keel
-    const int inset = (i * (s / 3)) / hullH;
-    c.fillRect(cx - s / 2 + inset, deckY + i, s - 2 * inset, 1, true);
-  }
-  c.fillRect(cx - s / 8, deckY - 3 - s / 6, s / 4, s / 6, true);          // bridge
-  c.fillRect(cx - 1, deckY - 3 - s / 6 - s / 7, 3, s / 7, true);          // mast
-  for (int k = 0; k < 2; k++) {                                          // sea
-    const int y = deckY + hullH + 3 + k * 6;
-    for (int x = -s / 2; x < s / 2 - 2; x += 10) c.fillRect(cx + x, y, 6, 2, true);
-  }
+inline void ships(ToolsCanvas& c, int cx, int cy, int s) {
+  Pen p(c, cx, cy, s, 26);
+  static const float hull[] = {3, 16, 23, 16, 20, 21, 6, 21};
+  static const float cabin[] = {9, 16, 9, 9, 16, 9, 16, 16};
+  p.poly(hull, 4, true);
+  p.poly(cabin, 4, false);
+  p.line(12, 9, 12, 4);
 }
 
-// Three digits in a three-by-three frame: the box structure of the real grid,
-// with enough numerals to say which puzzle this is.
 inline void sudoku(ToolsCanvas& c, int cx, int cy, int s) {
-  const int cell = s / 3;
-  const int x0 = cx - (3 * cell) / 2, y0 = cy - (3 * cell) / 2;
-  for (int i = 0; i <= 3; i++) {
-    const int t = (i == 0 || i == 3) ? 3 : 2;
-    c.fillRect(x0 + i * cell - t / 2, y0, t, 3 * cell + 1, true);
-    c.fillRect(x0, y0 + i * cell - t / 2, 3 * cell + 1, t, true);
-  }
-  static const char* kD[3] = {"5", "3", "9"};
-  static const int kR[3] = {0, 1, 2}, kC[3] = {0, 2, 1};
-  for (int i = 0; i < 3; i++) {
-    const int w = c.textWidth(kD[i], TS_MED);
-    c.text(x0 + kC[i] * cell + (cell - w) / 2, y0 + kR[i] * cell + (cell - c.textHeight(TS_MED)) / 2, kD[i],
-           TS_MED, true);
-  }
+  Pen p(c, cx, cy, s, 26);
+  p.rect(4, 4, 18, 18);
+  p.line(10, 4, 10, 22);
+  p.line(16, 4, 16, 22);
+  p.line(4, 10, 22, 10);
+  p.line(4, 16, 22, 16);
 }
 
-// An open book, pages of text.
-inline void epub(ToolsCanvas& c, int cx, int cy, int s) {
-  const int w = s / 2 - 2, h = (s * 3) / 4;
-  const int y = cy - h / 2;
-  // two page panels meeting at the spine, slightly splayed
-  c.drawRect(cx - w - 2, y, w, h, 3, true);
-  c.drawRect(cx + 2, y, w, h, 3, true);
-  c.fillRect(cx - 1, y, 2, h, true);  // the spine
-  for (int k = 0; k < 3; k++) {
-    const int ly = y + 10 + k * 12;
-    c.fillRect(cx - w + 4, ly, w - 12, 3, true);
-    c.fillRect(cx + 8, ly, w - 12, 3, true);
-  }
+// An open book seen from the front: two pages whose top and bottom edges
+// curve down to the spine (owner's choice, 25 Nov).
+inline void books(ToolsCanvas& c, int cx, int cy, int s) {
+  Pen p(c, cx, cy, s, 26);
+  p.cubic(13, 7, 10, 4.5f, 5.5f, 4.5f, 2, 5.5f);
+  p.line(2, 5.5f, 2, 20);
+  p.cubic(2, 20, 5.5f, 19, 10, 19, 13, 21.5f);
+  p.cubic(13, 7, 16, 4.5f, 20.5f, 4.5f, 24, 5.5f);
+  p.line(24, 5.5f, 24, 20);
+  p.cubic(24, 20, 20.5f, 19, 16, 19, 13, 21.5f);
+  p.line(13, 7, 13, 21.5f);
 }
 
-// A pot on the boil: body, lid with a knob, two rising wisps of steam.
+// A bowl with steam (kit "Recipes").
 inline void recipes(ToolsCanvas& c, int cx, int cy, int s) {
-  const int w = s - 8, h = (s * 5) / 12;
-  const int x = cx - w / 2, y = cy + s / 2 - h - 4;
-  tdraw::roundRect(c, x, y, w, h, 6, 3, true);
-  c.fillRect(x - 6, y, w + 12, 4, true);              // the lid's brim
-  c.drawCircle(cx, y - 8, 5, 3, true);                // its knob
-  for (int k = 0; k < 2; k++) {                        // the steam
-    const int sx = cx - s / 6 + k * (s / 3);
-    c.fillRect(sx, y - 30, 3, 10, true);
-    c.fillRect(sx + 4, y - 44, 3, 10, true);
-  }
+  Pen p(c, cx, cy, s, 26);
+  p.line(5, 12, 21, 12);
+  p.line(21, 12, 21, 15);
+  p.arc(15, 15, 6, 0, 90);
+  p.line(15, 21, 11, 21);
+  p.arc(11, 15, 6, 90, 180);
+  p.line(5, 15, 5, 12);
+  p.line(9, 4, 9, 8);
+  p.line(13, 3, 13, 8);
+  p.line(17, 4, 17, 8);
 }
 
-// v2: a page of a wall calendar -- two rings, a header band, a grid of days.
 inline void calendar(ToolsCanvas& c, int cx, int cy, int s) {
-  const int w = s * 4 / 5, h = s * 4 / 5, x = cx - w / 2, y = cy - h / 2 + 4;
-  c.drawRect(x, y, w, h, 3, true);
-  c.fillRect(x, y, w, h / 4, true);
-  c.fillRect(x + w / 4 - 2, y - 8, 5, 14, true);
-  c.fillRect(x + 3 * w / 4 - 2, y - 8, 5, 14, true);
-  for (int r = 0; r < 3; r++)
-    for (int k = 0; k < 4; k++)
-      c.fillRect(x + 8 + k * (w - 16) / 4 + 2, y + h / 4 + 8 + r * (h * 3 / 4 - 12) / 3, 6, 5, true);
+  Pen p(c, cx, cy, s, 26);
+  p.rrect(4, 5, 18, 17, 2);
+  p.line(4, 10, 22, 10);
+  p.line(9, 3, 9, 7);
+  p.line(17, 3, 17, 7);
 }
 
-// v2: a circle with a dot in it -- attention on one point.
+// A sprout (kit "Focus"), drawn in a 64-unit box.
 inline void focus(ToolsCanvas& c, int cx, int cy, int s) {
-  c.drawCircle(cx, cy, s / 2 - 2, 3, true);
-  c.drawCircle(cx, cy, s / 4, 2, true);
-  c.fillCircle(cx, cy, s / 10, true);
+  Pen p(c, cx, cy, s, 64);
+  p.t = (int)lroundf((float)s * 2.4f / 64.0f * 1.6f);
+  if (p.t < 2) p.t = 2;
+  p.line(32, 56, 32, 30);
+  p.cubic(32, 34, 22, 34, 16, 26, 16, 16);
+  p.cubic(16, 16, 26, 16, 32, 24, 32, 34);
+  p.cubic(32, 30, 32, 20, 39, 13, 49, 13);
+  p.cubic(49, 13, 49, 23, 42, 30, 32, 30);
 }
 
 inline void draw(ToolsCanvas& c, int idx, int cx, int cy, int s) {
   switch (idx) {
-    case 12: calendar(c, cx, cy, s); break;
-    case 13: focus(c, cx, cy, s); break;
     case 0: coin(c, cx, cy, s); break;
     case 1: dice(c, cx, cy, s); break;
     case 2: timer(c, cx, cy, s); break;
     case 3: randomIcon(c, cx, cy, s); break;
     case 4: picker(c, cx, cy, s); break;
-    case 5: study(c, cx, cy, s); break;
+    case 5: flashcards(c, cx, cy, s); break;
     case 6: notes(c, cx, cy, s); break;
-    case 7: battleship(c, cx, cy, s); break;
+    case 7: ships(c, cx, cy, s); break;
     case 8: sudoku(c, cx, cy, s); break;
-    case 10: epub(c, cx, cy, s); break;
+    case 12: calendar(c, cx, cy, s); break;
+    case 13: focus(c, cx, cy, s); break;
+    case 10: books(c, cx, cy, s); break;
     default: recipes(c, cx, cy, s); break;
   }
 }
 
 }  // namespace ticons
 
-// Matching icon set for the four games, so both hub rows read the same way.
+// The games, in the same hand.
 namespace gicons {
 
 inline constexpr int COUNT = 4;
-inline const char* const NAMES[COUNT] = {"WORDLE", "NONOGRAM", "2048", "XO"};
-inline const char* const DESCS[COUNT] = {"guess the word", "picture logic",
+inline const char* const NAMES[COUNT] = {"WORDLE", "MINES", "2048", "XO"};
+inline const char* const DESCS[COUNT] = {"guess the word", "dig, flag, clear",
                                          "swipe to merge", "3 in a row"};
 
-// Two guess rows of letter tiles: solved letters filled, the rest still open.
+using icons::Pen;
+
+// Three letter tiles, the middle one solved (kit "Wordle"), set a little
+// further apart than the kit's so they stay three tiles at drawer size.
 inline void wordle(ToolsCanvas& c, int cx, int cy, int s) {
-  const int cw = s / 5;              // near-square tiles read as letters,
-  const int ch = (cw * 6) / 5;       // not as a barcode
-  const int gap = 3;
-  const int x0 = cx - (5 * cw) / 2;
-  const int y0 = cy - ch - gap / 2;
-  static const uint8_t kFilled[2] = {0b10100, 0b01001};
-  for (int r = 0; r < 2; r++)
-    for (int i = 0; i < 5; i++) {
-      const int x = x0 + i * cw;
-      const int y = y0 + r * (ch + gap);
-      if (kFilled[r] & (1 << (4 - i)))
-        c.fillRect(x, y, cw - 2, ch, true);
-      else
-        c.drawRect(x, y, cw - 2, ch, 2, true);
-    }
+  Pen p(c, cx, cy, s, 26);
+  p.rect(1.5f, 9, 6, 8);
+  p.fill(10, 9, 6, 8);
+  p.rect(18.5f, 9, 6, 8);
 }
 
-// A partly-solved 4x4 picture grid.
-inline void nonogram(ToolsCanvas& c, int cx, int cy, int s) {
-  const int cell = s / 4;
-  const int x0 = cx - 2 * cell, y0 = cy - 2 * cell;
-  static const uint8_t kPattern[4] = {0b0110, 0b1111, 0b0110, 0b0110};
-  for (int r = 0; r < 4; r++)
-    for (int col = 0; col < 4; col++)
-      if (kPattern[r] & (1 << (3 - col)))
-        c.fillRect(x0 + col * cell + 1, y0 + r * cell + 1, cell - 2, cell - 2, true);
-  for (int i = 0; i <= 4; i++) {
-    c.fillRect(x0 + i * cell, y0, 1, 4 * cell, true);
-    c.fillRect(x0, y0 + i * cell, 4 * cell, 1, true);
-  }
+// A framed square with a mine in it: a ball and four spikes. No kit artboard
+// for Mines, so it is drawn in the same hand as the Sudoku and 2048 icons.
+inline void mines(ToolsCanvas& c, int cx, int cy, int s) {
+  Pen p(c, cx, cy, s, 26);
+  p.rect(4, 4, 18, 18);
+  p.dot(13, 13, 3.6f);
+  p.line(13, 7.5f, 13, 18.5f);
+  p.line(7.5f, 13, 18.5f, 13);
+  p.line(9.3f, 9.3f, 16.7f, 16.7f);
+  p.line(16.7f, 9.3f, 9.3f, 16.7f);
 }
 
-// Four tiles, each a step heavier than the last — the merge ladder.
+// Four tiles, two solid (kit "2048").
 inline void g2048(ToolsCanvas& c, int cx, int cy, int s) {
-  const int cell = s / 2;
-  const int x0 = cx - cell, y0 = cy - cell;
-  const int weight[4] = {2, 4, 6, 0};  // 0 == solid; thin borders vanish at this size
-  for (int i = 0; i < 4; i++) {
-    const int x = x0 + (i % 2) * cell;
-    const int y = y0 + (i / 2) * cell;
-    if (weight[i] == 0)
-      c.fillRect(x + 1, y + 1, cell - 2, cell - 2, true);
-    else
-      c.drawRect(x + 1, y + 1, cell - 2, cell - 2, weight[i], true);
-  }
+  Pen p(c, cx, cy, s, 26);
+  p.rect(4, 4, 8, 8);
+  p.fill(14, 4, 8, 8);
+  p.fill(4, 14, 8, 8);
+  p.rect(14, 14, 8, 8);
 }
 
-// A won board: three solid marks straight down the diagonal, two rings that
-// did not get there. Solid-plus-grid so it carries the same weight as the
-// nonogram icon next to it.
+// A cross beside a ring. The kit's version put them in the corners of a
+// grid, but at drawer size the grid's lines ran into the cross; the two marks
+// alone read as XO at a glance.
 inline void xo(ToolsCanvas& c, int cx, int cy, int s) {
-  const int cell = s / 3;
-  const int x0 = cx - (3 * cell) / 2, y0 = cy - (3 * cell) / 2;
-  static const uint8_t kSolid[3] = {0, 4, 8};
-  static const uint8_t kRing[2] = {2, 6};
-  for (int i = 0; i < 3; i++) {
-    const int k = kSolid[i];
-    c.fillRect(x0 + (k % 3) * cell + 3, y0 + (k / 3) * cell + 3, cell - 6, cell - 6, true);
-  }
-  for (int i = 0; i < 2; i++) {
-    const int k = kRing[i];
-    c.drawCircle(x0 + (k % 3) * cell + cell / 2, y0 + (k / 3) * cell + cell / 2,
-                 cell / 2 - 3, 2, true);
-  }
-  for (int i = 1; i < 3; i++) {
-    c.fillRect(x0 + i * cell - 1, y0, 2, 3 * cell, true);
-    c.fillRect(x0, y0 + i * cell - 1, 3 * cell, 2, true);
-  }
+  Pen p(c, cx, cy, s, 26);
+  p.line(2.5f, 8, 11, 16.5f);
+  p.line(11, 8, 2.5f, 16.5f);
+  p.circle(18.5f, 12.25f, 4.5f);
 }
 
 inline void draw(ToolsCanvas& c, int idx, int cx, int cy, int s) {
   switch (idx) {
     case 0: wordle(c, cx, cy, s); break;
-    case 1: nonogram(c, cx, cy, s); break;
+    case 1: mines(c, cx, cy, s); break;
     case 2: g2048(c, cx, cy, s); break;
     default: xo(c, cx, cy, s); break;
   }

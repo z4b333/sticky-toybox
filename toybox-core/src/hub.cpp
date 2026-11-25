@@ -21,6 +21,12 @@ using applist::Group;
 using applist::Item;
 using applist::NGROUPS;
 
+// The calendar buffer for home's due popup: 2.5 KB, so static, not stack.
+static cal::Store& calStore() {
+  static cal::Store s;
+  return s;
+}
+
 static_assert(appvis::GAMES == gicons::COUNT, "game count out of step with appvis");
 static_assert(appvis::TOOLS == ticons::COUNT, "tool count out of step with appvis");
 static_assert(NGROUPS == 3, "the dock draws exactly three folders");
@@ -193,8 +199,9 @@ void drawRecentStrip(ToolsCanvas& c, int stripTop, const recents::Entry* rec, in
 // The page arrows in a drawer's header corner, drawn (and hit) only when the
 // drawer has more than one page of tiles. A guest's corner already carries
 // the gear, so its pager sits just left of it.
-TRect fpagePrevRect(bool guest) { return TRect{SCREEN_W - (guest ? 300 : 190), 4, 56, 56}; }
-TRect fpageNextRect(bool guest) { return TRect{SCREEN_W - (guest ? 176 : 66), 4, 56, 56}; }
+// Clear of the corner: the gear (guest) or More (standalone) lives there.
+TRect fpagePrevRect(bool guest) { return TRect{SCREEN_W - (guest ? 300 : 246), 4, 56, 56}; }
+TRect fpageNextRect(bool guest) { return TRect{SCREEN_W - (guest ? 176 : 122), 4, 56, 56}; }
 
 void drawFolderPager(ToolsCanvas& c, bool guest, int page, int pages) {
   const TRect pv = fpagePrevRect(guest), nx = fpageNextRect(guest);
@@ -216,7 +223,10 @@ void renderFolder(ToolsHost& host, ToolsCanvas& c, int folder, int page,
   const int pages = folderPagesOf(cellCount);
   page = clampFolderPage(page, cellCount);
   host.topBar(grp.name);
-  if (guest) decor::gear(c, SCREEN_W - 30, TOPBAR_H / 2, 12, 8, true);
+  if (guest)
+    decor::gear(c, SCREEN_W - 30, TOPBAR_H / 2, 12, 8, true);
+  else
+    chrome2::moreDots(c, SCREEN_W - HELP_W / 2, TOPBAR_H / 2);  // More: settings (kit)
   if (pages > 1) drawFolderPager(c, guest, page, pages);
 
   const bool strip = folder == 2 && !guest && recN > 0 && pages == 1 && stripFits(cellCount);
@@ -228,17 +238,22 @@ void renderFolder(ToolsHost& host, ToolsCanvas& c, int folder, int page,
     (void)cx;
     const int icx = tx + TILE_W / 2;
     if (it.idx == ADD_IDX && !it.game) {
-      c.textCentered(icx, rowTop + th / 2 - 12, "+ add", TS_SMALL, true);
+      c.textCentered(icx, rowTop + th / 2 - 12, "+ add", TS_MED, true);
       return;
     }
-    if (it.game)
-      gicons::draw(c, it.idx, icx, rowTop + 22 + TILE / 2, TILE);
-    else
-      ticons::draw(c, it.idx, icx, rowTop + 22 + TILE / 2, TILE);
+    // Kit tile, owner's cut (25 Nov): a big line icon and the name in bold,
+    // centred in the tile. No status line -- at one size the bold name and a
+    // regular line under it read alike on this panel.
     char label[24];
     sentence(label, sizeof(label), it.game ? gicons::NAMES[it.idx] : ticons::NAMES[it.idx]);
-    const TSize sz = c.textWidth(label, TS_SMALL, true) <= TILE_W - 12 ? TS_SMALL : TS_SMALL;
-    c.textCentered(icx, rowTop + 22 + TILE + 14, label, sz, true, true);
+    const int ih = TILE_ICON, lh = c.textHeight(TS_MED);
+    const int top = rowTop + (th - (ih + 14 + lh)) / 2;
+    if (it.game)
+      gicons::draw(c, it.idx, icx, top + ih / 2, ih);
+    else
+      ticons::draw(c, it.idx, icx, top + ih / 2, ih);
+    const TSize sz = c.textWidth(label, TS_MED, true) <= TILE_W - 10 ? TS_MED : TS_SMALL;
+    c.textCentered(icx, top + ih + 14 + (lh - c.textHeight(sz)) / 2, label, sz, true, true);
   });
   drawDock(c, folder);
   if (strip) drawRecentStrip(c, stripTopFor(cellCount), rec, recN);
@@ -335,7 +350,7 @@ void HubScreen::drawDue(ToolsHost& host, ToolsCanvas& c) {
   _dueBottom = 0;
   int y = 0, mo = 0, d = 0, hh = 0, mm = 0;
   if (!host.clockDate(y, mo, d) || !host.clockHHMM(hh, mm)) return;
-  static cal::Store store;  // static: 2.5 KB is not stack
+  cal::Store& store = calStore();
   cal::load(store);
   int first = -1, count = 0, inDays = -1;
   uint32_t occ = 0;
@@ -388,6 +403,10 @@ HubScreen::Tap HubScreen::hit(const ToolsHost& host, int x, int y) const {
     }
     if (guest && inRect(x, y, SCREEN_W - 100, 0, 100, BAR_TOUCH_H)) {
       t.kind = Tap::Settings;  // the gear in the header corner
+      return t;
+    }
+    if (!guest && inRect(x, y, SCREEN_W - HELP_W, 0, HELP_W, BAR_TOUCH_H)) {
+      t.kind = Tap::Settings;  // More, top-right: the settings page (kit)
       return t;
     }
     if (y >= DOCK_Y) {

@@ -122,7 +122,7 @@ void Touch::poll(TouchEvent& ev) {
       _lastY = y;
       // A finger that stays put long enough is a hold: reported once, while
       // still down, and its lift is then not a tap.
-      if (!_holdFired && millis() - _downMs >= HOLD_MS && abs(x - _downX) <= TAP_SLOP &&
+      if (!_holdFired && millis() - _downMs >= _holdMs && abs(x - _downX) <= TAP_SLOP &&
           abs(y - _downY) <= TAP_SLOP) {
         _holdFired = true;
         ev.held = true;

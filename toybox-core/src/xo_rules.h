@@ -104,27 +104,59 @@ inline int bestMove(const State& s, int side, bool three, uint32_t rnd) {
   return n == 0 ? -1 : picks[rnd % (uint32_t)n];
 }
 
-// Finishes a win it can see, but only spots yours about half the time.
+// The two weaker opponents (C3, owner: Easy was too easy; three levels like
+// Ships). Both take a win they can see.
+//
+//   Easy   -- blocks your winning line about four times in five, and likes the
+//             middle; otherwise it plays anywhere. Beatable by any plan.
+//   Normal -- always blocks, takes the middle, then the corners, and half the
+//             time plays the perfect move. A two-way trap (a fork) still gets
+//             past it, because it only ever looks one move ahead.
+//   Hard   -- bestMove: the full game tree, never loses.
+namespace detail {
+inline int winningMove(const State& s, int side, bool three, const int* empty, int n) {
+  for (int i = 0; i < n; i++) {
+    State t = s;
+    applyMove(t, side, empty[i], three);
+    if (winner(t) == side) return empty[i];
+  }
+  return -1;
+}
+}  // namespace detail
+
 inline int easyMove(const State& s, int side, bool three, uint32_t rnd) {
   const int foe = 3 - side;
   int empty[9], n = 0;
   for (int c = 0; c < 9; c++)
     if (!s.cell[c]) empty[n++] = c;
   if (n == 0) return -1;
+  int m = detail::winningMove(s, side, three, empty, n);
+  if (m >= 0) return m;
+  if (rnd % 5 != 0) {  // four times in five it sees your line
+    m = detail::winningMove(s, foe, three, empty, n);
+    if (m >= 0) return m;
+  }
+  if (!s.cell[4] && ((rnd >> 3) & 1)) return 4;
+  return empty[(rnd >> 4) % (uint32_t)n];
+}
 
-  for (int i = 0; i < n; i++) {
-    State t = s;
-    applyMove(t, side, empty[i], three);
-    if (winner(t) == side) return empty[i];
-  }
-  if (rnd & 1) {
-    for (int i = 0; i < n; i++) {
-      State t = s;
-      applyMove(t, foe, empty[i], three);
-      if (winner(t) == foe) return empty[i];
-    }
-  }
-  return empty[(rnd >> 1) % (uint32_t)n];
+inline int normalMove(const State& s, int side, bool three, uint32_t rnd) {
+  const int foe = 3 - side;
+  int empty[9], n = 0;
+  for (int c = 0; c < 9; c++)
+    if (!s.cell[c]) empty[n++] = c;
+  if (n == 0) return -1;
+  int m = detail::winningMove(s, side, three, empty, n);
+  if (m >= 0) return m;
+  m = detail::winningMove(s, foe, three, empty, n);
+  if (m >= 0) return m;
+  if ((rnd >> 2) & 1) return bestMove(s, side, three, rnd >> 3);
+  if (!s.cell[4]) return 4;
+  int corners[4], k = 0;
+  for (int c : {0, 2, 6, 8})
+    if (!s.cell[c]) corners[k++] = c;
+  if (k) return corners[(rnd >> 3) % (uint32_t)k];
+  return empty[(rnd >> 3) % (uint32_t)n];
 }
 
 }  // namespace xorules

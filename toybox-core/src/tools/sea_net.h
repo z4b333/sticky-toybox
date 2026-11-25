@@ -17,8 +17,8 @@ namespace seanet {
 enum : uint8_t {
   T_HELLO = 1,   // host -> everyone: "a game is open here"
   T_JOIN,        // guest -> host
-  T_ACCEPT,      // host -> guest
-  T_READY,       // either: "my fleet is placed"
+  T_ACCEPT,      // host -> guest: {rules}
+  T_READY,       // either: "my fleet is placed" {confirm, rules}
   T_FIRE,        // {seq, cell}
   T_RESULT,      // {seq, cell, hit, sunk, allSunk}
   T_BYE,         // leaving
@@ -126,6 +126,13 @@ class Duel {
 
   bool myTurn() const { return _phase == Phase::Play && _turn && !_pending; }
 
+  // "A hit fires again" (C3, a setting, on by default). Both devices must play
+  // by the same rule or each would think it is the other's turn, so the host's
+  // setting governs: it rides on ACCEPT and on every READY, and a guest takes
+  // it from there. Set before hosting or joining.
+  void setFireAgain(bool on) { _again = on; }
+  bool fireAgain() const { return _again; }
+
   bool fire(int cell, uint32_t now) {
     if (!myTurn() || cell < 0 || cell >= sea::CELLS) return false;
     if (_theirs.shot[cell] != sea::UNSHOT) return false;
@@ -208,8 +215,13 @@ class Duel {
 
  private:
   void sendReady(bool confirm) {
-    const uint8_t p = confirm ? 1 : 0;
-    _link.sendTo(_peer, T_READY, &p, 1);
+    const uint8_t p[2] = {(uint8_t)(confirm ? 1 : 0), rulesByte()};
+    _link.sendTo(_peer, T_READY, p, 2);
+  }
+  uint8_t rulesByte() const { return _again ? 1 : 0; }
+  // A guest plays by the host's rules; the host keeps its own.
+  void takeRules(const radio::Msg& m, int at) {
+    if (!_iAmHost && m.len > at) _again = (m.data[at] & 1) != 0;
   }
 
   void sendFire() {
@@ -281,11 +293,13 @@ class Duel {
             _peerSeen = now;
             _phase = Phase::Setup;
           }
-          _link.sendTo(_peer, T_ACCEPT, nullptr, 0);
+          const uint8_t rules = rulesByte();
+          _link.sendTo(_peer, T_ACCEPT, &rules, 1);
         }
         break;
 
       case T_ACCEPT:
+        if (fromPeer) takeRules(m, 0);
         if (_phase == Phase::Joining && fromPeer) _phase = Phase::Setup;
         break;
 
@@ -294,6 +308,7 @@ class Duel {
         // answer each other's answers for the rest of the session, and a stray
         // echo arriving after the last ship sinks reads as "they restarted".
         const bool confirm = m.len > 0 && m.data[0] != 0;
+        if (fromPeer) takeRules(m, 1);
         if (_phase == Phase::Over && !confirm) {
           // The peer is asking to start again and its REMATCH never arrived.
           beginRematch();
@@ -329,7 +344,9 @@ class Duel {
           _cached = r;
           _lastIncoming = r;
           _lastIncomingCell = cell;
-          _turn = true;  // their shot is spent; the board is ours now
+          // Their shot is spent and the board is ours -- unless it hit and a
+          // hit fires again, in which case they go on.
+          _turn = !(_again && r.hit && !r.allSunk);
           if (r.allSunk) {
             _won = false;
             _phase = Phase::Over;
@@ -348,7 +365,7 @@ class Duel {
         _theirs.shot[cell] = m.data[2] ? sea::HIT : sea::MISS;
         if (m.data[3] > 0) _theirAfloat--;
         _pending = false;
-        _turn = false;
+        _turn = _again && m.data[2] && !m.data[4];  // a hit keeps the turn
         if (m.data[4]) {
           _won = true;
           _theirAfloat = 0;
@@ -393,6 +410,7 @@ class Duel {
   int _lastIncomingCell = -1;
 
   bool _peerRestarted = false, _won = false;
+  bool _again = true;
 };
 
 }  // namespace seanet

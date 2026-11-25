@@ -68,7 +68,8 @@ class Preferences {
   // firmware checks, and settings deliberately removes keys it may never have
   // written.
   bool remove(const char* k) {
-    const size_t n = ints.erase(k) + uints.erase(k) + bools.erase(k) + strs.erase(k);
+    const size_t n =
+        ints.erase(k) + uints.erase(k) + bools.erase(k) + strs.erase(k) + blobs.erase(k);
     return n > 0;
   }
 };

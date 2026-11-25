@@ -811,6 +811,9 @@ void loop() {
   if (passes < 2 && ++passes == 2) otadev::confirm(prefs);
 
   TouchEvent ev;
+  // The open app may want a quicker hold than the default (Mines flags on
+  // one); asked every pass, since apps come and go between them.
+  touch.setHoldMs(toybox.holdMs());
   touch.poll(ev);
   if (ev.tapped || ev.swiped) noteActivity();
 

@@ -1,14 +1,18 @@
-// Battleship, alone against the device or across two of them.
+// Ships (Battleship), against the Sticky or across two of them.
 //
-// Firing is select-then-confirm rather than tap-to-fire. At this screen's
-// density an 8x8 grid gives cells about 5 mm across, which is under a
-// fingertip; picking a cell and then pressing a full-width FIRE button removes
-// the whole class of "I meant the square above" mistakes, and on a panel that
-// cannot show a hover state it also makes the target visible before it is spent.
+// v2 (C3, kit "Ships", "Ships, place the fleet", "Ships, game over"): a 10x10
+// board edge to edge, five ships placed by hand (or shuffled), three levels
+// for the Sticky, and a hit that fires again -- a setting, on by default.
+//
+// Firing is aim-then-confirm: the first tap on a square aims (an outlined
+// square), a second tap on the same square fires. At 44 px a cell is under a
+// fingertip, and on a panel that cannot show a hover state the target has to
+// be visible before it is spent. UP / DOWN move the aim and OK fires.
 #pragma once
 #include <esp_random.h>
 
 #include "decor.h"
+#include "game_kit.h"
 #include "help.h"
 #include "record.h"
 #include "sea_net.h"
@@ -16,50 +20,51 @@
 #include "tools_draw.h"
 
 namespace seaui {
-// menu
-// Two choices and nothing else, so they are sized like two cards rather than
-// two buttons: at 92 px tall and 140 apart they sat in the middle of the panel
-// with 200 px of nothing under them. The rhythm below is one gap -- about 90 px
-// -- repeated between the intro, each choice, and the record line.
-inline constexpr TRect SOLO_BTN{40, 168, 400, 132};
-inline constexpr TRect DUEL_BTN{40, 420, 400, 132};  // clears the caption above it
-// Under the won/lost line on the menu, the one screen here with room to spare.
-inline constexpr TRect CLEAR_BTN{(480 - record::BTN_W) / 2, 730, record::BTN_W, record::BTN_H};
+// menu (kit "Ships"): a picture, then the ways to play as rows.
+inline constexpr TRect PICTURE{16, 54, 448, 186};
+inline constexpr TRect SOLO_ROW{0, 254, 480, 76};
+inline constexpr TRect DUEL_ROW{16, 336, 448, 76};
 
-// pairing
+// pairing (unchanged in function)
 inline constexpr TRect HOST_BTN{40, 150, 400, 84};
 inline constexpr TRect BROWSE_BTN{40, 254, 400, 84};
 inline constexpr TRect CANCEL_BTN{40, 690, 400, 60};
 inline constexpr int FOUND_Y = 200, FOUND_H = 76, FOUND_GAP = 12;
 
-// setup
-inline constexpr int SET_CELL = 50, SET_X = 40, SET_Y = 116;
-inline constexpr TRect SHUFFLE_BTN{40, 552, 190, 68};
-inline constexpr TRect READY_BTN{250, 552, 190, 68};
+// placing the fleet
+inline constexpr int SET_CELL = 42, SET_X = 30, SET_Y = 54;  // 420 square
+inline constexpr int CHIP_Y = SET_Y + 10 * SET_CELL + 16;    // 490
+inline constexpr int CHIP_H = 44;
+inline constexpr TRect TURN_BTN{20, CHIP_Y + CHIP_H + 18, 140, 64};
+inline constexpr TRect SHUFFLE_BTN{170, CHIP_Y + CHIP_H + 18, 140, 64};
+inline constexpr TRect PLACE_BTN{320, CHIP_Y + CHIP_H + 18, 140, 64};
+inline constexpr int SET_MSG_Y = TURN_BTN.y + TURN_BTN.h + 20;
 
 // play
-inline constexpr int ENEMY_CELL = 50, ENEMY_X = 40, ENEMY_Y = 100;
-inline constexpr TRect FIRE_BTN{40, 512, 400, 60};
-inline constexpr int OWN_CELL = 24, OWN_X = 144, OWN_Y = 600;
-
-// over
-// Below the closing look at your fleet, not through it.
-inline constexpr int OVER_GRID_Y = 340;
-inline constexpr TRect AGAIN_BTN{40, 600, 190, 72};
-inline constexpr TRect DONE_BTN{250, 600, 190, 72};
+inline constexpr int ENEMY_CELL = 44, ENEMY_X = 20, ENEMY_Y = 92;  // 440 square
+inline constexpr int OWN_CELL = 18, OWN_X = 20, OWN_Y = ENEMY_Y + 10 * ENEMY_CELL + 14;
+inline constexpr int OWN_TEXT_X = OWN_X + 10 * OWN_CELL + 24;
 
 inline TRect foundRect(int i) {
   return TRect{40, FOUND_Y + i * (FOUND_H + FOUND_GAP), 400, FOUND_H};
+}
+inline TRect enemyCell(int k) {
+  return TRect{ENEMY_X + sea::xOf(k) * ENEMY_CELL, ENEMY_Y + sea::yOf(k) * ENEMY_CELL, ENEMY_CELL,
+               ENEMY_CELL};
+}
+inline TRect setCell(int k) {
+  return TRect{SET_X + sea::xOf(k) * SET_CELL, SET_Y + sea::yOf(k) * SET_CELL, SET_CELL, SET_CELL};
 }
 }  // namespace seaui
 
 class SeaTool : public ToolApp {
  public:
-  const char* title() const override { return "BATTLESHIP"; }
+  const char* title() const override { return "SHIPS"; }
 
   void enter(ToolsHost& h) override {
     ToolApp::enter(h);
-    _help = !help::suppressed(prefs(), "sea");
+    _view = help::suppressed(prefs(), "sea") ? View::Game : View::Rules;
+    _rulesFromMore = false;
     _armedClear = false;
     _flashCell = -1;
     _flashUntil = 0;
@@ -82,13 +87,14 @@ class SeaTool : public ToolApp {
     if (_flashUntil && (int32_t)(millis() - _flashUntil) >= 0) {
       _flashUntil = 0;
       _flashCell = -1;
-      host().refresh(false);
+      if (_view == View::Game) host().refresh(false);
       return;
     }
     if (!_duelMode) return;
     const seanet::Phase before = _duel.phase();
     const bool wasMyTurn = _duel.myTurn();
     const int seenBefore = shotCount(_duel.theirs()) + shotCount(_duel.mine());
+    const int mineBefore = shotCount(_duel.mine());
     _duel.poll(millis());
     const int foundNow = _duel.foundCount();
 
@@ -100,26 +106,43 @@ class SeaTool : public ToolApp {
     _foundShown = foundNow;
     if (!dirty) return;
 
-    syncDuelScreen();
-    // A hit that arrived over the air deserves the same shell as one fired at
-    // the device: find the square that changed, and light it up.
+    // Count our shots as their answers come back, and say what happened.
     for (int k = 0; k < sea::CELLS; k++) {
       const uint8_t now = _duel.theirs().shot[k];
-      if (now == sea::HIT && _lastTheirs[k] != sea::HIT) blast(k);
+      if (now != sea::UNSHOT && _lastTheirs[k] == sea::UNSHOT) {
+        _shots++;
+        if (now == sea::HIT) {
+          _hits++;
+          blast(k);
+          snprintf(_msg, sizeof(_msg), "%s", _duel.myTurn() ? "Hit! Fire again" : "Hit");
+        } else {
+          snprintf(_msg, sizeof(_msg), "Miss");
+        }
+      }
       _lastTheirs[k] = now;
     }
-    host().refresh(_duel.phase() == seanet::Phase::Over);
+    if (shotCount(_duel.mine()) != mineBefore) {
+      const sea::Shot& in = _duel.lastIncoming();
+      snprintf(_msg, sizeof(_msg), "%s", in.sunk >= 0 ? "They sank one" : in.hit ? "They hit you" : "They missed");
+    }
+    syncDuelScreen();
+    if (_view == View::Game) host().refresh(_duel.phase() == seanet::Phase::Over);
   }
 
   void render(ToolsCanvas& c) override {
-    host().topBar(title(), true);
-    if (_help) {
-      help::render(c, help::SHIPS);
+    if (_view == View::Rules) {
+      gk::bar(host(), c, title());
+      gk::rules(c, help::SHIPS);
+      return;
+    }
+    if (_view == View::Menu) {
+      gk::Row rows[gk::MENU_MAX];
+      gk::menu(host(), c, title(), rows, menuRows(rows));
       return;
     }
     switch (_screen) {
       case Screen::Menu: renderMenu(c); break;
-      case Screen::Pair: renderPair(c); break;
+      case Screen::Pair: gk::bar(host(), c, title()); renderPair(c); break;
       case Screen::Setup: renderSetup(c); break;
       case Screen::Play: renderPlay(c); break;
       default: renderOver(c); break;
@@ -128,13 +151,35 @@ class SeaTool : public ToolApp {
 
   void onTap(int x, int y) override {
     if (host().isBackTap(x, y)) {
-      if (_duelMode) _duel.end();
       host().beep(1);
+      if (_view == View::Menu || (_view == View::Rules && _rulesFromMore)) {
+        _view = View::Game;
+        _armedClear = false;
+        host().refreshUi();
+        return;
+      }
+      if (_duelMode) _duel.end();
       host().goHub();
       return;
     }
-    if (host().isHelpTap(x, y)) return toggleHelp();
-    if (_help) return tapHelp(x, y);
+    if (_view == View::Rules) {
+      const help::Tap t = help::hit(x, y);
+      if (t == help::Tap::None) return;
+      if (t == help::Tap::Never) help::suppress(prefs(), "sea");
+      _view = View::Game;
+      _rulesFromMore = false;
+      host().beep(1);
+      host().refreshUi();
+      return;
+    }
+    if (_view == View::Menu) return tapMenuRows(x, y);
+    if (gk::isMore(host(), x, y)) {
+      _view = View::Menu;
+      _armedClear = false;
+      host().beep(1);
+      host().refreshUi();
+      return;
+    }
     switch (_screen) {
       case Screen::Menu: tapMenu(x, y); break;
       case Screen::Pair: tapPair(x, y); break;
@@ -144,31 +189,90 @@ class SeaTool : public ToolApp {
     }
   }
 
- private:
-  // The rules card sits over whatever screen is underneath, so dismissing it
-  // never loses a game in progress.
-  void toggleHelp() {
-    _help = !_help;
-    host().beep(1);
-    host().refreshUi();
-  }
-  void tapHelp(int x, int y) {
-    const help::Tap t = help::hit(x, y);
-    if (t == help::Tap::None) return;
-    if (t == help::Tap::Never) help::suppress(prefs(), "sea");
-    _help = false;
-    host().beep(1);
-    host().refreshUi();
+  // Side buttons in play: UP / DOWN walk the aim across the squares not yet
+  // fired at (upper = next), OK fires.
+  bool onButton(SideBtn b) override {
+    if (_view != View::Game || _screen != Screen::Play || !canFire()) return false;
+    if (b == SideBtn::Ok) {
+      if (_sel < 0) return true;
+      fireAt(_sel);
+      return true;
+    }
+    const int step = b == SideBtn::Up ? 1 : -1;
+    int k = _sel < 0 ? (step > 0 ? -1 : sea::CELLS) : _sel;
+    for (int n = 0; n < sea::CELLS; n++) {
+      k += step;
+      if (k < 0) k = sea::CELLS - 1;
+      if (k >= sea::CELLS) k = 0;
+      if (enemyBoard().shot[k] == sea::UNSHOT) break;
+    }
+    _sel = k;
+    host().beep(0);
+    host().refresh(false);
+    return true;
   }
 
+ private:
+  enum class View : uint8_t { Game, Menu, Rules };
   enum class Screen : uint8_t { Menu, Pair, Setup, Play, Over };
+
+  // --- settings ------------------------------------------------------------
+  int levelPref() { return constrain(prefs().getInt("bs_lvl", sea::NORMAL), 0, sea::LEVELS - 1); }
+  bool fireAgainPref() { return prefs().getBool("bs_again", true); }
+
+  int menuRows(gk::Row* rows) {
+    int n = 0;
+    rows[n++] = {"How to play", nullptr, false};
+    rows[n++] = {"Sticky plays", sea::levelName(levelPref()), false};
+    rows[n++] = {"A hit fires again", fireAgainPref() ? "On" : "Off", false};
+    if (prefs().getInt("bs_w", 0) + prefs().getInt("bs_l", 0) > 0)
+      rows[n++] = {"Clear record", nullptr, _armedClear};
+    return n;
+  }
+
+  void tapMenuRows(int x, int y) {
+    gk::Row rows[gk::MENU_MAX];
+    const int n = menuRows(rows);
+    const int i = gk::menuHit(x, y, n);
+    const bool wasArmed = _armedClear;
+    _armedClear = false;
+    if (i < 0) {
+      if (wasArmed) host().refresh(false);
+      return;
+    }
+    const char* what = rows[i].label;
+    if (!strcmp(what, "How to play")) {
+      _view = View::Rules;
+      _rulesFromMore = true;
+    } else if (!strcmp(what, "Sticky plays")) {
+      // Takes effect from the next game: a level that changed under a game in
+      // play would be a different opponent halfway through.
+      prefs().putInt("bs_lvl", (levelPref() + 1) % sea::LEVELS);
+    } else if (!strcmp(what, "A hit fires again")) {
+      prefs().putBool("bs_again", !fireAgainPref());
+    } else if (!strcmp(what, "Clear record")) {
+      if (!wasArmed) {
+        _armedClear = true;
+        host().beep(2);
+        host().refresh(false);
+        return;
+      }
+      record::clear(prefs(), record::SHIPS);
+      _view = View::Game;
+    }
+    host().beep(1);
+    host().refreshUi();
+  }
 
   // --- boards ------------------------------------------------------------
   // One pair of accessors so every screen draws the same way in both modes.
   const sea::Board& myBoard() const { return _duelMode ? _duel.mine() : _mine; }
+  sea::Board& myBoardMutable() { return _duelMode ? _duel.mineMutable() : _mine; }
   const sea::Board& enemyBoard() const { return _duelMode ? _duel.theirs() : _enemy; }
   int myAfloat() const { return _duelMode ? _duel.myAfloat() : sea::afloat(_mine); }
   int enemyAfloat() const { return _duelMode ? _duel.theirAfloat() : sea::afloat(_enemy); }
+  bool canFire() const { return _duelMode ? _duel.myTurn() : _myTurnSolo; }
+  bool againRule() const { return _duelMode ? _duel.fireAgain() : _againSolo; }
 
   static int shotCount(const sea::Board& b) {
     int n = 0;
@@ -176,72 +280,72 @@ class SeaTool : public ToolApp {
       if (b.shot[c] != sea::UNSHOT) n++;
     return n;
   }
-
-  void shuffleFleet() {
-    if (_duelMode) {
-      _duel.placeFleet(esp_random());
-    } else {
-      sea::clear(_mine);
-      sea::placeRandom(_mine, [] { return esp_random(); });
-    }
+  static int hitsTaken(const sea::Board& b) {
+    int n = 0;
+    for (int c = 0; c < sea::CELLS; c++)
+      if (b.shot[c] == sea::HIT) n++;
+    return n;
   }
 
   // --- menu --------------------------------------------------------------
+  void drawPicture(ToolsCanvas& c) {
+    const TRect& p = seaui::PICTURE;
+    c.drawRect(p.x, p.y, p.w, p.h, 2, true);
+    // Sea: ruled lines, a boat riding them (kit).
+    for (int y = p.y + 10; y < p.y + p.h - 4; y += 10) c.fillRect(p.x + 4, y, p.w - 8, 1, true);
+    const int cx = p.x + p.w / 2, wl = p.y + 108;
+    c.fillRect(cx - 86, wl - 34, 172, 46, false);
+    c.fillRect(cx - 30, wl - 70, 60, 40, false);
+    c.drawRect(cx - 30, wl - 70, 60, 40, 3, true);
+    c.fillRect(cx - 84, wl - 34, 168, 3, true);
+    c.fillRect(cx - 84, wl - 34, 3, 26, true);
+    c.fillRect(cx + 81, wl - 34, 3, 26, true);
+    for (int i = 0; i < 26; i++) {
+      // the hull's rounded foot
+      const int inset = i * i / 18;
+      c.fillRect(cx - 84 + inset, wl - 8 + i, 3, 1, true);
+      c.fillRect(cx + 81 - inset, wl - 8 + i, 3, 1, true);
+    }
+    c.fillRect(cx - 84 + 37, wl + 17, 168 - 74, 3, true);
+  }
+
   void renderMenu(ToolsCanvas& c) {
     using namespace seaui;
-    c.textCentered(c.width() / 2, 60, "Sink the other fleet first", TS_MED, true);
-
-    c.button(SOLO_BTN.x, SOLO_BTN.y, SOLO_BTN.w, SOLO_BTN.h, "PLAY THE DEVICE", true, TS_LARGE);
-    c.textCentered(c.width() / 2, SOLO_BTN.y + SOLO_BTN.h + 12, "hunts like a person",
-                   TS_MED, true);
-
-    c.button(DUEL_BTN.x, DUEL_BTN.y, DUEL_BTN.w, DUEL_BTN.h, "TWO DEVICES", false, TS_LARGE);
-    c.textCentered(c.width() / 2, DUEL_BTN.y + DUEL_BTN.h + 12, "hidden fleets, over the air",
-                   TS_MED, true);
-    c.textCentered(c.width() / 2, DUEL_BTN.y + DUEL_BTN.h + 38,
-                   "needs a second Toybox nearby", TS_MED, true);
-
+    gk::bar(host(), c, title());
+    drawPicture(c);
+    // The first way to play is THE action: a black row (kit).
+    c.fillRect(SOLO_ROW.x, SOLO_ROW.y, SOLO_ROW.w, SOLO_ROW.h, true);
+    c.text(16, SOLO_ROW.y + 10, "Against the Sticky", TS_LARGE, false);
     char buf[48];
-    const int w = prefs().getInt("bs_w", 0), l = prefs().getInt("bs_l", 0);
-    if (w + l > 0) {
-      snprintf(buf, sizeof(buf), "won %d   lost %d", w, l);
-      c.textCentered(c.width() / 2, 700, buf, TS_MED, true);
-      c.button(seaui::CLEAR_BTN.x, seaui::CLEAR_BTN.y, seaui::CLEAR_BTN.w, seaui::CLEAR_BTN.h,
-               record::label(_armedClear), _armedClear, TS_MED);
-    }
+    snprintf(buf, sizeof(buf), "it shoots back - %s", sea::levelName(levelPref()));
+    c.text(16, SOLO_ROW.y + 46, buf, TS_SMALL, false);
+    c.text(SOLO_ROW.w - 36, SOLO_ROW.y + 20, ">", TS_LARGE, false, true);
+    c.text(DUEL_ROW.x, DUEL_ROW.y + 10, "Two Stickies", TS_LARGE, true);
+    c.text(DUEL_ROW.x, DUEL_ROW.y + 46, "near each other, over Wi-Fi", TS_SMALL, true);
+    c.text(DUEL_ROW.x + DUEL_ROW.w - 20, DUEL_ROW.y + 20, ">", TS_LARGE, true, true);
+    c.fillRect(DUEL_ROW.x, DUEL_ROW.y + DUEL_ROW.h, DUEL_ROW.w, 1, true);
+    if (_msg[0]) c.textCentered(c.width() / 2, 460, _msg, TS_MED, true, true);
+    snprintf(buf, sizeof(buf), "wins %d - losses %d - in a row %d", prefs().getInt("bs_w", 0),
+             prefs().getInt("bs_l", 0), prefs().getInt("bs_strk", 0));
+    gk::foot(c, buf);
   }
 
   void tapMenu(int x, int y) {
     using namespace seaui;
-
-    const bool wasArmed = _armedClear;
-    _armedClear = false;
-    const bool haveRecord = prefs().getInt("bs_w", 0) + prefs().getInt("bs_l", 0) > 0;
-    if (CLEAR_BTN.hit(x, y) && haveRecord) {
-      if (wasArmed) {
-        record::clear(prefs(), record::SHIPS);
-        host().beep(1);
-      } else {
-        _armedClear = true;
-        host().beep(2);
-      }
-      host().refresh(false);
-      return;
-    }
-    if (wasArmed) host().refresh(false);
-
-    if (SOLO_BTN.hit(x, y)) {
+    if (SOLO_ROW.hit(x, y)) {
       _duelMode = false;
-      shuffleFleet();
+      _msg[0] = 0;
+      _againSolo = fireAgainPref();
       sea::clear(_enemy);
       sea::placeRandom(_enemy, [] { return esp_random(); });
-      _gunner.reset();
+      _gunner.reset(levelPref());
+      startPlacing();
       _screen = Screen::Setup;
       host().beep(1);
       host().refreshUi();
       return;
     }
-    if (DUEL_BTN.hit(x, y)) {
+    if (DUEL_ROW.hit(x, y)) {
       _duelMode = true;
       _foundShown = -1;
       if (!_duel.begin()) {
@@ -251,6 +355,7 @@ class SeaTool : public ToolApp {
         host().refresh(false);
         return;
       }
+      _msg[0] = 0;
       _screen = Screen::Pair;
       host().beep(1);
       host().refreshUi();
@@ -276,13 +381,13 @@ class SeaTool : public ToolApp {
       c.textCentered(c.width() / 2, 396, "them tap JOIN A GAME", TS_MED, true);
       decor::ornament(c, c.width() / 2, 452, 300, true);
       c.textCentered(c.width() / 2, 476, "waiting for a player...", TS_MED, true, true);
-      c.textCentered(c.width() / 2, 516, "keep both devices in the same room", TS_SMALL, true);
+      c.textCentered(c.width() / 2, 516, "keep both Stickies in the same room", TS_SMALL, true);
     } else if (p == Phase::Browsing || p == Phase::Joining) {
       c.textCentered(c.width() / 2, 76, "GAMES NEARBY", TS_MED, true);
       const int n = _duel.foundCount();
       if (n == 0) {
         c.textCentered(c.width() / 2, 250, "looking...", TS_LARGE, true, true);
-        c.textCentered(c.width() / 2, 302, "the other device must be", TS_MED, true);
+        c.textCentered(c.width() / 2, 302, "the other Sticky must be", TS_MED, true);
         c.textCentered(c.width() / 2, 330, "on HOST A GAME", TS_MED, true);
       }
       for (int i = 0; i < n; i++) {
@@ -293,7 +398,7 @@ class SeaTool : public ToolApp {
       if (p == Phase::Joining)
         c.textCentered(c.width() / 2, 620, "joining...", TS_MED, true, true);
     } else {
-      c.textCentered(c.width() / 2, 76, "Two devices, one game", TS_MED, true);
+      c.textCentered(c.width() / 2, 76, "Two Stickies, one game", TS_MED, true);
       c.button(HOST_BTN.x, HOST_BTN.y, HOST_BTN.w, HOST_BTN.h, "HOST A GAME", true, TS_LARGE);
       c.textCentered(c.width() / 2, HOST_BTN.y + HOST_BTN.h + 10,
                      "shows a code for the other player", TS_SMALL, true);
@@ -301,7 +406,7 @@ class SeaTool : public ToolApp {
                TS_LARGE);
       c.textCentered(c.width() / 2, BROWSE_BTN.y + BROWSE_BTN.h + 10,
                      "lists the codes it can hear", TS_SMALL, true);
-      c.textCentered(c.width() / 2, 452, "Both devices stay on their", TS_MED, true);
+      c.textCentered(c.width() / 2, 452, "Both Stickies stay on their", TS_MED, true);
       c.textCentered(c.width() / 2, 480, "own screen - neither can", TS_MED, true);
       c.textCentered(c.width() / 2, 508, "see the other's fleet.", TS_MED, true);
     }
@@ -322,10 +427,12 @@ class SeaTool : public ToolApp {
     const Phase p = _duel.phase();
     if (p == Phase::Idle) {
       if (HOST_BTN.hit(x, y)) {
+        _duel.setFireAgain(fireAgainPref());
         _duel.startHosting(millis());
         host().beep(1);
         host().refreshUi();
       } else if (BROWSE_BTN.hit(x, y)) {
+        _duel.setFireAgain(fireAgainPref());
         _duel.startBrowsing();
         _foundShown = 0;
         host().beep(1);
@@ -351,8 +458,7 @@ class SeaTool : public ToolApp {
     switch (_duel.phase()) {
       case Phase::Setup:
         if (_screen != Screen::Setup) {
-          shuffleFleet();
-          _sel = -1;
+          startPlacing();
           _screen = Screen::Setup;
         }
         break;
@@ -374,123 +480,268 @@ class SeaTool : public ToolApp {
     }
   }
 
-  // --- setup -------------------------------------------------------------
+  // --- placing the fleet ----------------------------------------------------
+  // Kit "Ships, place the fleet": tap a square and the ship in hand is drawn
+  // there striped; Turn swings it; Place puts it down and hands you the next.
+  // The chips under the board say which are down (struck) and which is in
+  // hand (black); tapping a struck chip picks that ship up again. Shuffle
+  // throws the whole fleet down at random, the old way.
+  void startPlacing() {
+    sea::Board& b = myBoardMutable();
+    memset(b.ship, 0, sizeof(b.ship));
+    memset(b.shot, 0, sizeof(b.shot));
+    _hand = 0;
+    _horiz = true;
+    _aim = -1;
+    _sel = -1;
+    _shots = _hits = 0;
+    _msg[0] = 0;
+    memset(_lastTheirs, 0, sizeof(_lastTheirs));
+  }
+
+  void nextInHand() {
+    const sea::Board& b = myBoard();
+    _hand = -1;
+    for (int s = 0; s < sea::SHIPS; s++)
+      if (!sea::placed(b, s)) {
+        _hand = s;
+        break;
+      }
+  }
+
+  // Where the ship in hand would lie with its first square at _aim, pulled
+  // back inside the board if it ran off the edge.
+  bool handAt(int& x, int& y) const {
+    if (_aim < 0 || _hand < 0) return false;
+    const int len = sea::LEN[_hand];
+    x = sea::xOf(_aim);
+    y = sea::yOf(_aim);
+    if (_horiz && x + len > sea::N) x = sea::N - len;
+    if (!_horiz && y + len > sea::N) y = sea::N - len;
+    return true;
+  }
+
   void renderSetup(ToolsCanvas& c) {
     using namespace seaui;
-    c.textCentered(c.width() / 2, 58, "YOUR FLEET", TS_MED, true);
-    c.textCentered(c.width() / 2, 86, "4 . 3 . 3 . 2", TS_MED, true);
-    drawGrid(c, SET_X, SET_Y, SET_CELL, myBoard(), true, -1);
+    const sea::Board& b = myBoard();
+    char corner[8];
+    int down = 0;
+    for (int s = 0; s < sea::SHIPS; s++) down += sea::placed(b, s);
+    snprintf(corner, sizeof(corner), "%d/%d", down, sea::SHIPS);
+    gk::bar(host(), c, "PLACE SHIPS", corner);
+
+    // The grid, the ships already down solid, the one in hand striped.
+    for (int k = 0; k < sea::CELLS; k++) {
+      const TRect r = setCell(k);
+      if (b.ship[k]) c.fillRect(r.x + 1, r.y + 1, r.w - 1, r.h - 1, true);
+    }
+    int hx, hy;
+    bool fits = false;
+    if (handAt(hx, hy)) {
+      const int len = sea::LEN[_hand];
+      fits = sea::canPlace(b, hx, hy, len, _horiz);
+      for (int i = 0; i < len; i++) {
+        const int k = sea::cellAt(_horiz ? hx + i : hx, _horiz ? hy : hy + i);
+        const TRect r = setCell(k);
+        gk::stripes(c, r.x + 1, r.y + 1, r.w - 1, r.h - 1);
+      }
+    }
+    for (int i = 0; i <= sea::N; i++) {
+      c.fillRect(SET_X + i * SET_CELL, SET_Y, 1, sea::N * SET_CELL + 1, true);
+      c.fillRect(SET_X, SET_Y + i * SET_CELL, sea::N * SET_CELL + 1, 1, true);
+    }
+    c.drawRect(SET_X - 2, SET_Y - 2, sea::N * SET_CELL + 5, sea::N * SET_CELL + 5, 2, true);
+
+    // The chips: struck when down, black when in hand.
+    int x = 20;
+    for (int s = 0; s < sea::SHIPS; s++) {
+      char lbl[16];
+      snprintf(lbl, sizeof(lbl), "%s %d", sea::shipName(s), sea::LEN[s]);
+      const int w = c.textWidth(lbl, TS_SMALL) + 16;
+      _chipX[s] = (int16_t)x;
+      _chipW[s] = (int16_t)w;
+      if (s == _hand) {
+        c.fillRect(x, CHIP_Y, w, CHIP_H, true);
+        c.textInBox(x, CHIP_Y, w, CHIP_H, lbl, TS_SMALL, false, true);
+      } else {
+        c.drawRect(x, CHIP_Y, w, CHIP_H, 2, true);
+        c.textInBox(x, CHIP_Y, w, CHIP_H, lbl, TS_SMALL, true);
+        if (sea::placed(b, s)) c.fillRect(x + 6, CHIP_Y + CHIP_H / 2, w - 12, 2, true);
+      }
+      x += w + 6;
+    }
 
     const bool waiting = _duelMode && _duel.waitingForPeerReady();
-    c.button(SHUFFLE_BTN.x, SHUFFLE_BTN.y, SHUFFLE_BTN.w, SHUFFLE_BTN.h, "SHUFFLE", false,
-             TS_LARGE);
-    c.button(READY_BTN.x, READY_BTN.y, READY_BTN.w, READY_BTN.h, waiting ? "WAITING" : "READY",
-             !waiting, TS_LARGE);
+    const bool all = sea::fleetPlaced(b);
+    c.button(TURN_BTN.x, TURN_BTN.y, TURN_BTN.w, TURN_BTN.h, "Turn", false, TS_LARGE);
+    c.button(SHUFFLE_BTN.x, SHUFFLE_BTN.y, SHUFFLE_BTN.w, SHUFFLE_BTN.h, "Shuffle", false, TS_LARGE);
+    if (waiting)
+      c.button(PLACE_BTN.x, PLACE_BTN.y, PLACE_BTN.w, PLACE_BTN.h, "Waiting", false, TS_LARGE);
+    else
+      c.button(PLACE_BTN.x, PLACE_BTN.y, PLACE_BTN.w, PLACE_BTN.h, all ? "Start" : "Place",
+               all || (fits && _aim >= 0), TS_LARGE);
 
     if (waiting) {
-      c.textCentered(c.width() / 2, 646, "waiting for the other player", TS_MED, true, true);
+      c.textCentered(c.width() / 2, SET_MSG_Y, "waiting for the other player", TS_MED, true, true);
       if (_duel.peerRestarted())
-        c.textCentered(c.width() / 2, 680, "they want another game", TS_MED, true);
-    } else {
-      c.textCentered(c.width() / 2, 646, "SHUFFLE until you like it", TS_MED, true);
-      c.textCentered(c.width() / 2, 674, "ships may touch, and none", TS_MED, true);
-      c.textCentered(c.width() / 2, 702, "of this is hidden from you", TS_MED, true);
+        c.textCentered(c.width() / 2, SET_MSG_Y + 30, "they want another game", TS_MED, true);
+    } else if (_msg[0]) {
+      c.textCentered(c.width() / 2, SET_MSG_Y, _msg, TS_MED, true, true);
+    } else if (_aim >= 0 && !fits) {
+      c.textCentered(c.width() / 2, SET_MSG_Y, "it overlaps a ship there", TS_MED, true, true);
+    } else if (all) {
+      c.textCentered(c.width() / 2, SET_MSG_Y, "all five are down - Start", TS_MED, true);
     }
+    gk::foot(c, all ? "tap a ship's chip to move it" : "tap a square - striped = where it goes");
   }
 
   void tapSetup(int x, int y) {
     using namespace seaui;
     if (_duelMode && _duel.waitingForPeerReady()) return;
-    if (SHUFFLE_BTN.hit(x, y)) {
-      shuffleFleet();
+    sea::Board& b = myBoardMutable();
+    _msg[0] = 0;
+    if (x >= SET_X && x < SET_X + sea::N * SET_CELL && y >= SET_Y && y < SET_Y + sea::N * SET_CELL) {
+      if (_hand < 0) {  // nothing in hand: a tap on a ship picks it up
+        const int k = sea::cellAt((x - SET_X) / SET_CELL, (y - SET_Y) / SET_CELL);
+        if (!b.ship[k]) return;
+        _hand = b.ship[k] - 1;
+        sea::lift(b, _hand);
+        _aim = k;
+      } else {
+        _aim = sea::cellAt((x - SET_X) / SET_CELL, (y - SET_Y) / SET_CELL);
+      }
       host().beep(0);
       host().refresh(false);
       return;
     }
-    if (!READY_BTN.hit(x, y)) return;
-    host().beep(1);
-    if (_duelMode) {
-      _duel.setReady(millis());
-      syncDuelScreen();
-    } else {
-      _screen = Screen::Play;
-      _myTurnSolo = true;
+    if (y >= CHIP_Y && y < CHIP_Y + CHIP_H) {
+      for (int s = 0; s < sea::SHIPS; s++) {
+        if (x < _chipX[s] || x >= _chipX[s] + _chipW[s]) continue;
+        if (sea::placed(b, s)) sea::lift(b, s);  // pick it up again
+        _hand = s;
+        host().beep(0);
+        host().refresh(false);
+        return;
+      }
+      return;
     }
-    _sel = -1;
-    host().refreshUi();
+    if (TURN_BTN.hit(x, y)) {
+      _horiz = !_horiz;
+      host().beep(0);
+      host().refresh(false);
+      return;
+    }
+    if (SHUFFLE_BTN.hit(x, y)) {
+      if (_duelMode) {
+        _duel.placeFleet(esp_random());
+      } else {
+        memset(b.ship, 0, sizeof(b.ship));
+        sea::placeRandom(b, [] { return esp_random(); });
+      }
+      _hand = -1;
+      _aim = -1;
+      host().beep(0);
+      host().refresh(false);
+      return;
+    }
+    if (!PLACE_BTN.hit(x, y)) return;
+    if (sea::fleetPlaced(b)) {
+      host().beep(1);
+      if (_duelMode) {
+        _duel.setReady(millis());
+        syncDuelScreen();
+      } else {
+        _screen = Screen::Play;
+        _myTurnSolo = true;
+      }
+      _sel = -1;
+      host().refreshUi();
+      return;
+    }
+    int hx, hy;
+    if (!handAt(hx, hy) || !sea::canPlace(b, hx, hy, sea::LEN[_hand], _horiz)) {
+      snprintf(_msg, sizeof(_msg), _aim < 0 ? "tap a square first" : "it overlaps a ship there");
+      host().beep(2);
+      host().refresh(false);
+      return;
+    }
+    sea::put(b, hx, hy, sea::LEN[_hand], _horiz, _hand);
+    _aim = -1;
+    nextInHand();
+    host().beep(1);
+    host().refresh(false);
   }
 
   // --- play --------------------------------------------------------------
   void renderPlay(ToolsCanvas& c) {
     using namespace seaui;
     char buf[48];
-
-    const bool canFire = _duelMode ? _duel.myTurn() : _myTurnSolo;
-    if (_msg[0])
-      c.textCentered(c.width() / 2, 52, _msg, TS_MED, true, true);
-    else
-      c.textCentered(c.width() / 2, 52, canFire ? "YOUR SHOT" : "waiting for them...", TS_MED,
-                     true, canFire);
-
-    c.text(ENEMY_X, 78, "ENEMY WATERS", TS_MED, true);
-    snprintf(buf, sizeof(buf), "%d afloat", enemyAfloat());
-    c.text(ENEMY_X + 400 - c.textWidth(buf, TS_MED), 78, buf, TS_MED, true);
-    drawGrid(c, ENEMY_X, ENEMY_Y, ENEMY_CELL, enemyBoard(), false, _sel);
+    gk::bar(host(), c, title(), _duelMode ? "vs Sticky" : sea::levelName(_gunner.level));
+    const bool fire = canFire();
+    const char* head = _msg[0] ? _msg : fire ? "Your shot" : "Their turn";
+    c.textClipped(ENEMY_X, 50, 250, head, TS_LARGE, true, true);
+    snprintf(buf, sizeof(buf), "their fleet: %d of %d afloat", enemyAfloat(), sea::SHIPS);
+    c.text(ENEMY_X + 440 - c.textWidth(buf, TS_SMALL), 60, buf, TS_SMALL, true);
+    drawGrid(c, ENEMY_X, ENEMY_Y, ENEMY_CELL, enemyBoard(), false, fire ? _sel : -1);
 
     // The blast overrunning its own square is the whole point of it: for one
     // frame the shot is bigger than the grid it landed in.
     if (_flashCell >= 0) {
       const int fx = ENEMY_X + sea::xOf(_flashCell) * ENEMY_CELL + ENEMY_CELL / 2;
       const int fy = ENEMY_Y + sea::yOf(_flashCell) * ENEMY_CELL + ENEMY_CELL / 2;
-      // For one frame the shell is bigger than the square it landed in, with
-      // the radiating strokes a comic puts round a bang.
       decor::rays(c, fx, fy, ENEMY_CELL - 4, ENEMY_CELL + 26, 12, 0.13f, true);
       decor::blast(c, fx, fy, ENEMY_CELL, (uint32_t)_flashCell, true);
       decor::debris(c, fx, fy, ENEMY_CELL * 2, (uint32_t)_flashCell, true);
     }
 
-    const bool armed = canFire && _sel >= 0;
-    if (armed) {
-      snprintf(buf, sizeof(buf), "FIRE AT %c%d", 'A' + sea::xOf(_sel), sea::yOf(_sel) + 1);
-      c.button(FIRE_BTN.x, FIRE_BTN.y, FIRE_BTN.w, FIRE_BTN.h, buf, true, TS_LARGE);
-    } else {
-      c.button(FIRE_BTN.x, FIRE_BTN.y, FIRE_BTN.w, FIRE_BTN.h,
-               canFire ? "PICK A SQUARE" : "THEIR TURN", false, TS_MED);
-    }
-
-    // Headed across the full width, not across the little grid: at this text
-    // size the label and the count together are wider than the board below.
-    c.text(ENEMY_X, 576, "YOUR FLEET", TS_MED, true);
-    snprintf(buf, sizeof(buf), "%d afloat", myAfloat());
-    c.text(ENEMY_X + 400 - c.textWidth(buf, TS_MED), 576, buf, TS_MED, true);
+    // Your own fleet, small, with what has happened to it beside it (kit).
     drawGrid(c, OWN_X, OWN_Y, OWN_CELL, myBoard(), true, -1);
+    int ty = OWN_Y + 8;
+    c.text(OWN_TEXT_X, ty, "YOUR FLEET", TS_SMALL, true, true);
+    ty += 30;
+    snprintf(buf, sizeof(buf), "%d of %d afloat", myAfloat(), sea::SHIPS);
+    c.text(OWN_TEXT_X, ty, buf, TS_SMALL, true);
+    ty += 28;
+    const int taken = hitsTaken(myBoard());
+    snprintf(buf, sizeof(buf), "%d %s taken", taken, taken == 1 ? "hit" : "hits");
+    c.text(OWN_TEXT_X, ty, buf, TS_SMALL, true);
+    ty += 40;
+    c.text(OWN_TEXT_X, ty, againRule() ? "a hit fires again" : "one shot a turn", TS_SMALL, true);
+    ty += 28;
+    c.text(OWN_TEXT_X, ty, "UP / DOWN aim - OK fire", TS_SMALL, true);
+
+    if (fire && _sel >= 0)
+      snprintf(buf, sizeof(buf), "tap %c%d again to fire", 'A' + sea::xOf(_sel), sea::yOf(_sel) + 1);
+    else
+      snprintf(buf, sizeof(buf), "shots %d - hits %d", _shots, _hits);
+    gk::foot(c, buf);
   }
 
   void tapPlay(int x, int y) {
     using namespace seaui;
-    const bool canFire = _duelMode ? _duel.myTurn() : _myTurnSolo;
-    if (!canFire) return;
-
-    // Selecting is free and repeatable; only FIRE spends the turn.
-    if (x >= ENEMY_X && x < ENEMY_X + 8 * ENEMY_CELL && y >= ENEMY_Y &&
-        y < ENEMY_Y + 8 * ENEMY_CELL) {
-      const int cell = sea::cellAt((x - ENEMY_X) / ENEMY_CELL, (y - ENEMY_Y) / ENEMY_CELL);
-      if (enemyBoard().shot[cell] != sea::UNSHOT) {
-        host().beep(2);
-        return;
-      }
+    if (!canFire()) return;
+    if (x < ENEMY_X || x >= ENEMY_X + sea::N * ENEMY_CELL || y < ENEMY_Y ||
+        y >= ENEMY_Y + sea::N * ENEMY_CELL)
+      return;
+    const int cell = sea::cellAt((x - ENEMY_X) / ENEMY_CELL, (y - ENEMY_Y) / ENEMY_CELL);
+    if (enemyBoard().shot[cell] != sea::UNSHOT) {
+      host().beep(2);
+      return;
+    }
+    // The first tap aims; the second, on the same square, fires.
+    if (cell != _sel) {
       _sel = cell;
-      _msg[0] = 0;
       host().beep(0);
       host().refresh(false);
       return;
     }
+    fireAt(cell);
+  }
 
-    if (!FIRE_BTN.hit(x, y) || _sel < 0) return;
-    const int cell = _sel;
+  void fireAt(int cell) {
     _sel = -1;
     if (_duelMode) {
-      _duel.fire(cell, millis());
+      if (!_duel.fire(cell, millis())) return;
       host().beep(1);
       snprintf(_msg, sizeof(_msg), "shot away...");
       host().refresh(false);
@@ -499,25 +750,50 @@ class SeaTool : public ToolApp {
     soloTurn(cell);
   }
 
-  // Both shots resolve into a single frame: on e-ink, two refreshes to play one
-  // exchange is most of a second wasted.
+  // Your shot and the Sticky's reply resolve into a single frame: on e-ink,
+  // two refreshes to play one exchange is most of a second wasted. With "a hit
+  // fires again", a hit of yours keeps the turn, and the Sticky's hits let it
+  // fire on in the same frame.
   void soloTurn(int cell) {
     const sea::Shot mine = sea::fire(_enemy, cell);
+    _shots++;
+    if (mine.hit) _hits++;
     if (mine.allSunk) {
       finishSolo(true);
       return;
     }
-    const int reply = _gunner.choose([] { return esp_random(); });
-    sea::Shot theirs;
-    if (reply >= 0) {
-      theirs = sea::fire(_mine, reply);
-      _gunner.observe(reply, theirs);
-    }
-    if (theirs.allSunk) {
-      finishSolo(false);
+    if (mine.hit && _againSolo) {
+      snprintf(_msg, sizeof(_msg), "%s", mine.sunk >= 0 ? "Sunk! Fire again" : "Hit! Fire again");
+      host().beep(mine.sunk >= 0 ? 3 : 1);
+      blast(cell);
+      host().refresh(false);
       return;
     }
-    describe(mine, theirs, reply);
+    int theirHits = 0, theirSunk = 0, theirShots = 0;
+    for (;;) {
+      const int reply = _gunner.choose([] { return esp_random(); });
+      if (reply < 0) break;
+      const sea::Shot theirs = sea::fire(_mine, reply);
+      _gunner.observe(reply, theirs, [] { return esp_random(); });
+      theirShots++;
+      if (theirs.hit) theirHits++;
+      if (theirs.sunk >= 0) theirSunk++;
+      if (theirs.allSunk) {
+        finishSolo(false);
+        return;
+      }
+      if (!(theirs.hit && _againSolo)) break;
+    }
+    const char* you = mine.sunk >= 0 ? "Sunk one" : mine.hit ? "Hit" : "Miss";
+    if (theirSunk)
+      snprintf(_msg, sizeof(_msg), "%s - they sank one", you);
+    else if (theirHits > 1)
+      snprintf(_msg, sizeof(_msg), "%s - hit %d times", you, theirHits);
+    else if (theirHits)
+      snprintf(_msg, sizeof(_msg), "%s - they hit you", you);
+    else
+      snprintf(_msg, sizeof(_msg), "%s - they missed", you);
+    (void)theirShots;
     host().beep(mine.sunk >= 0 ? 3 : (mine.hit ? 1 : 0));
     if (mine.hit) blast(cell);
     host().refresh(false);
@@ -530,60 +806,43 @@ class SeaTool : public ToolApp {
     _flashUntil = millis() + 320;
   }
 
-  void describe(const sea::Shot& mine, const sea::Shot& theirs, int reply) {
-    const char* you = mine.sunk >= 0 ? "SUNK ONE" : (mine.hit ? "HIT" : "miss");
-    if (reply < 0) {
-      snprintf(_msg, sizeof(_msg), "%s", you);
-      return;
-    }
-    const char* them = theirs.sunk >= 0 ? "sank one of yours"
-                       : theirs.hit    ? "hit you"
-                                       : "missed";
-    snprintf(_msg, sizeof(_msg), "%s - they %s", you, them);
-  }
-
   void finishSolo(bool won) {
     recordResult(won);
     _screen = Screen::Over;
     host().beep(won ? 3 : 2);
-    host().refreshUi();
+    host().refresh(true);
   }
 
   void recordResult(bool won) {
     prefs().putInt(won ? "bs_w" : "bs_l", prefs().getInt(won ? "bs_w" : "bs_l", 0) + 1);
+    prefs().putInt("bs_strk", won ? prefs().getInt("bs_strk", 0) + 1 : 0);
   }
 
-  // --- over --------------------------------------------------------------
+  // --- over (kit "Ships, game over") ------------------------------------------
   void renderOver(ToolsCanvas& c) {
-    using namespace seaui;
+    gk::bar(host(), c, title());
     const bool lost = _duelMode && _duel.phase() == seanet::Phase::Lost;
     const bool won = _duelMode ? _duel.won() : (enemyAfloat() == 0);
-
+    char pct[8], wins[8], row[8], line[48];
+    snprintf(pct, sizeof(pct), "%d%%", _shots ? (100 * _hits + _shots / 2) / _shots : 0);
+    snprintf(wins, sizeof(wins), "%d", prefs().getInt("bs_w", 0));
+    snprintf(row, sizeof(row), "%d", prefs().getInt("bs_strk", 0));
+    const gk::Stat st[3] = {{pct, "hits"}, {wins, "wins"}, {row, "in a row"}};
     if (lost) {
-      c.textCentered(c.width() / 2, 180, "THE OTHER DEVICE", TS_LARGE, true, true);
-      c.textCentered(c.width() / 2, 220, "WENT AWAY", TS_LARGE, true, true);
-      c.textCentered(c.width() / 2, 292, "out of range, or it left the game", TS_MED, true);
-    } else {
-      if (won) decor::confetti(c, 30, 90, 420, 220, 11, 16, true);
-      decor::banner(c, 40, 156, 400, 70, won ? "FLEET SUNK" : "YOU ARE SUNK", TS_LARGE, won);
-      c.textCentered(c.width() / 2, 244, won ? "you win" : "they win", TS_LARGE, true);
-      char buf[48];
-      snprintf(buf, sizeof(buf), "%d of your ships still afloat", myAfloat());
-      c.textCentered(c.width() / 2, 320, buf, TS_MED, true);
+      gk::result(c, "GAME ENDED", "They left", "the other Sticky went away", nullptr, 0, "Menu",
+                 nullptr);
+      return;
     }
-
-    drawGrid(c, OWN_X, OVER_GRID_Y, OWN_CELL, myBoard(), true, -1);
-    c.textCentered(c.width() / 2, OVER_GRID_Y + 8 * OWN_CELL + 12, "your fleet at the end",
-                   TS_MED, true);
-
-    if (!lost)
-      c.button(AGAIN_BTN.x, AGAIN_BTN.y, AGAIN_BTN.w, AGAIN_BTN.h, "AGAIN", true, TS_LARGE);
-    c.button(DONE_BTN.x, DONE_BTN.y, DONE_BTN.w, DONE_BTN.h, "DONE", false, TS_LARGE);
+    if (won)
+      snprintf(line, sizeof(line), "every ship sunk in %d shots", _shots);
+    else
+      snprintf(line, sizeof(line), "%d of theirs still afloat", enemyAfloat());
+    gk::result(c, "GAME OVER", won ? "You won" : "You lost", line, st, 3, "Menu", "Again");
+    gk::foot(c, "your fleet's record against all comers");
   }
 
   void tapOver(int x, int y) {
-    using namespace seaui;
-    if (DONE_BTN.hit(x, y)) {
+    if (gk::RES_LEFT.hit(x, y)) {
       if (_duelMode) _duel.end();
       _duelMode = false;
       _screen = Screen::Menu;
@@ -592,18 +851,21 @@ class SeaTool : public ToolApp {
       host().refreshUi();
       return;
     }
-    if (!AGAIN_BTN.hit(x, y)) return;
+    if (!gk::RES_RIGHT.hit(x, y)) return;
+    if (_duelMode && _duel.phase() == seanet::Phase::Lost) return;
     host().beep(1);
     _msg[0] = 0;
     _sel = -1;
     if (_duelMode) {
       _duel.requestRematch(millis());
+      startPlacing();
       syncDuelScreen();
     } else {
-      shuffleFleet();
+      _againSolo = fireAgainPref();
       sea::clear(_enemy);
       sea::placeRandom(_enemy, [] { return esp_random(); });
-      _gunner.reset();
+      _gunner.reset(levelPref());
+      startPlacing();
       _screen = Screen::Setup;
     }
     host().refreshUi();
@@ -614,56 +876,43 @@ class SeaTool : public ToolApp {
   // enemy board only ever draws what you have learned by firing at it.
   void drawGrid(ToolsCanvas& c, int gx, int gy, int cell, const sea::Board& b, bool showShips,
                 int selected) {
-    const int span = 8 * cell;
-    for (int i = 0; i <= 8; i++) {
+    const int span = sea::N * cell;
+    for (int i = 0; i <= sea::N; i++) {
       c.fillRect(gx + i * cell, gy, 1, span + 1, true);
       c.fillRect(gx, gy + i * cell, span + 1, 1, true);
     }
-    // The big board can carry drawn marks; the thumbnail of your own fleet is
-    // 24 px a cell, where a burst would come out as a smudge, so it keeps the
-    // plain blocks and dots it always had.
+    c.drawRect(gx - 2, gy - 2, span + 5, span + 5, 2, true);
     const bool big = cell > 30;
     for (int k = 0; k < sea::CELLS; k++) {
       const int x = gx + sea::xOf(k) * cell, y = gy + sea::yOf(k) * cell;
       const int mx = x + cell / 2, my = y + cell / 2;
       const uint8_t shot = b.shot[k];
       // A sunk hull is no longer a secret: you watched it go down, so it is
-      // drawn on either board, wreckage and all.
+      // drawn on either board.
       const bool wreck = b.ship[k] && sea::sunk(b, b.ship[k] - 1);
       const bool ship = (showShips || wreck) && b.ship[k];
-
-      if (wreck && shot == sea::HIT) {
+      if (shot == sea::HIT && (ship || !showShips)) {
+        // Kit: a hit is a black square with a white cross; a wreck the same
+        // with the cross heavier.
         c.fillRect(x + 2, y + 2, cell - 3, cell - 3, true);
-        if (big) {
-          decor::blast(c, mx, my, cell / 3, (uint32_t)k + 7, false);
-          decor::debris(c, mx, my, cell / 2, (uint32_t)k, false);
-        } else {
-          c.fillRect(mx - 1, my - 5, 3, 11, false);
-          c.fillRect(mx - 5, my - 1, 11, 3, false);
-        }
-      } else if (ship && shot == sea::HIT) {
-        c.fillRect(x + 2, y + 2, cell - 3, cell - 3, true);
-        if (big) decor::blast(c, mx, my, cell / 3, (uint32_t)k, false);
+        const int in = big ? 11 : 4, t = big ? (wreck ? 5 : 4) : 2;
+        c.drawLine(x + in, y + in, x + cell - in, y + cell - in, t, false);
+        c.drawLine(x + cell - in, y + in, x + in, y + cell - in, t, false);
       } else if (ship) {
-        const int in = big ? 5 : 3;
-        c.drawRect(x + in, y + in, cell - 2 * in, cell - 2 * in, big ? 3 : 2, true);
-      } else if (shot == sea::HIT) {
-        // A hit on water we cannot see means a hull is there: fill it in.
-        if (big) {
-          decor::blast(c, mx, my, cell / 2 - 3, (uint32_t)k, true);
-        } else {
-          c.fillRect(x + 4, y + 4, cell - 8, cell - 8, true);
-        }
-      } else if (shot == sea::MISS) {
+        // Your own hulls: striped on the small map, as the kit draws them.
         if (big)
-          decor::peg(c, mx, my, cell / 2 - 16, true);
+          c.drawRect(x + 5, y + 5, cell - 10, cell - 10, 3, true);
         else
-          c.fillCircle(mx, my, 2, true);
+          gk::stripes(c, x + 1, y + 1, cell - 1, cell - 1);
+        if (shot == sea::HIT) c.fillRect(x + 2, y + 2, cell - 3, cell - 3, true);
+      } else if (shot == sea::MISS) {
+        c.fillCircle(mx, my, big ? 3 : 2, true);
       }
     }
     if (selected >= 0) {
       const int x = gx + sea::xOf(selected) * cell, y = gy + sea::yOf(selected) * cell;
-      c.drawRect(x - 2, y - 2, cell + 5, cell + 5, 4, true);
+      c.fillRect(x + 1, y + 1, cell - 1, cell - 1, false);
+      c.drawRect(x - 1, y - 1, cell + 3, cell + 3, 4, true);
     }
   }
 
@@ -675,24 +924,42 @@ class SeaTool : public ToolApp {
     for (int k = 0; k < sea::CELLS; k++)
       if (_enemy.ship[k] == (uint8_t)(id + 1)) sea::fire(_enemy, k);
   }
+  int hostScreen() const { return (int)_screen; }
+  const sea::Board& hostMine() const { return myBoard(); }
+  const sea::Board& hostEnemy() const { return enemyBoard(); }
+  int hostSel() const { return _sel; }
+  int hostShots() const { return _shots; }
+  const char* hostMsg() const { return _msg; }
+  int hostChipX(int s) const { return _chipX[s] + _chipW[s] / 2; }
 
  private:
 #endif
+  View _view = View::Game;
   Screen _screen = Screen::Menu;
   int8_t _flashCell = -1;
   uint32_t _flashUntil = 0;
   uint8_t _lastTheirs[sea::CELLS] = {};
-  bool _help = false;
   bool _armedClear = false;
   bool _duelMode = false;
+  bool _rulesFromMore = false;  // the card came from More: Back returns to the game
   int _sel = -1;
   int _foundShown = -1;
   char _msg[48] = {};
+
+  // placing
+  int _hand = 0;      // the ship in hand, -1 when none
+  bool _horiz = true;
+  int _aim = -1;      // the square tapped, where the ship in hand would start
+  int16_t _chipX[sea::SHIPS] = {}, _chipW[sea::SHIPS] = {};
+
+  // this game
+  int _shots = 0, _hits = 0;
 
   // solo
   sea::Board _mine{}, _enemy{};
   sea::Gunner _gunner{};
   bool _myTurnSolo = true;
+  bool _againSolo = true;
 
   seanet::Duel _duel;
 };

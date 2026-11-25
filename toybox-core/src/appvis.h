@@ -14,7 +14,7 @@
 
 namespace appvis {
 
-constexpr int GAMES = 4;   // wordle, nonogram, 2048, xo
+constexpr int GAMES = 4;   // wordle, mines (was nonogram), 2048, xo
 constexpr int TOOLS = 14;  // the tool shell's own apps, in ticons order
 constexpr int COUNT = GAMES + TOOLS;
 constexpr uint32_t ALL = (1u << COUNT) - 1;

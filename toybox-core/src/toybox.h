@@ -25,6 +25,8 @@ class Toybox {
   // it, and the caller can do whatever it would have done otherwise.
   bool onButton(SideBtn b);
   void onHold(int x, int y);
+  // The open app's hold time (ToolApp::holdMs), 0 for the default.
+  uint16_t holdMs() const { return (_where == Where::App && _active) ? _active->holdMs() : 0; }
   void onBothHeld();
   void tick();
   bool wantsTick() const;

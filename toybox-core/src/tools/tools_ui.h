@@ -753,6 +753,10 @@ class ToolApp {
   virtual void onSwipe(int dx, int dy) { (void)dx; (void)dy; }
   // A finger held still for about 1.5 s (v2): the focus timer's way out.
   virtual void onHold(int x, int y) { (void)x; (void)y; }
+  // How long that hold takes in this app, in ms; 0 is the device's default
+  // (1.5 s, long enough never to fire by accident). Mines flags on a hold, and
+  // a flag that takes a second and a half is a game nobody finishes.
+  virtual uint16_t holdMs() const { return 0; }
   // Both side buttons held together for two seconds.
   virtual void onBothHeld() {}
   virtual void tick() {}                       // ~50 Hz, for running timers

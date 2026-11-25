@@ -4,7 +4,22 @@
 // this class is only the screen around them.
 #pragma once
 #include "chrome.h"
+#include "tools/game_kit.h"
 #include "xo_rules.h"
+
+// v2 (kit "XO"): whose move and which mark you are, the open 3x3 grid edge to
+// edge, WON / LOST / DRAW, and two chips -- against the Sticky or a friend.
+// The Sticky's last move is striped. Level and the 3-marks rule live in More.
+namespace xoui {
+inline constexpr int CELL = 140;
+inline constexpr int BOARD = 3 * CELL;               // 420
+inline constexpr int BX = (SCREEN_W - BOARD) / 2;   // 30
+inline constexpr int BY = 112;
+inline constexpr int STAT_Y = BY + BOARD + 20;      // 552
+inline constexpr TRect CHIP_AI{30, STAT_Y + gk::STAT_H + 16, 236, 56};
+inline constexpr TRect CHIP_FRIEND{276, STAT_Y + gk::STAT_H + 16, 174, 56};
+inline TRect statRect(int i) { return TRect{30 + i * 144, STAT_Y, 132, gk::STAT_H}; }
+}  // namespace xoui
 
 class XoApp : public ToolApp {
  public:
@@ -12,14 +27,24 @@ class XoApp : public ToolApp {
   void enter(ToolsHost& h) override;
   void render(ToolsCanvas& c) override;
   void onTap(int x, int y) override;
+#ifdef TOYBOX_HOST
+  int hostCell(int i) const { return _s.cell[i]; }
+#endif
 
   // Rule set and opponent are persisted, so the device comes back how you left it.
   enum Rule : uint8_t { RULE_CLASSIC = 0, RULE_THREE = 1 };
-  enum Foe : uint8_t { FOE_EASY = 0, FOE_HARD = 1, FOE_HUMAN = 2 };
+  // Stored in NVS as x_foe; NORMAL came later (C3) and took the next number.
+  enum Foe : uint8_t { FOE_EASY = 0, FOE_HARD = 1, FOE_HUMAN = 2, FOE_NORMAL = 3 };
 
  private:
-  bool _help = false;        // rules card is up
-  bool _armedClear = false;  // CLEAR RECORD has been tapped once
+  enum class View : uint8_t { Board, Menu, Rules };
+  View _view = View::Board;
+  bool _armedClear = false;  // Clear record has been tapped once (More)
+  bool _rulesFromMore = false;  // the card came from More: Back returns to the game
+  int menuRows(gk::Row* rows);
+  void tapMenu(int x, int y);
+  void setFoe(Foe f);
+  static const char* levelName(Foe f);
 
   void newGame();
   void place(int cell);           // apply the side-to-move's mark, then judge

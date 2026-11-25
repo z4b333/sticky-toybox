@@ -80,9 +80,17 @@ phone held next to the device.
 Everything can be tested on a PC. There are two host-side programs in
 `test/host/`:
 
-`test_logic.cpp` covers game logic: the nonogram generator and solver, Wordle
-scoring, 2048 moves, Sudoku uniqueness, Battleship rules and its network
-protocol, and the XO game-tree proof.
+`test_logic.cpp` covers game logic: Wordle scoring, 2048 moves, Sudoku
+uniqueness, Mines (first tap safe, flood, flags, chords), Battleship rules, its
+three opponent levels and its network protocol (fire-again rule included), and
+the XO game-tree proof.
+
+```
+cd test/host
+g++ -std=gnu++17 -O2 -DTOYBOX_HOST -I ../../toybox-core/src -I . -I mock \
+  test_logic.cpp -o test_logic
+./test_logic
+```
 
 `host_preview.cpp` builds the firmware against a fake display, renders every
 screen to an image file, and checks the results. It verifies tap routing, the
@@ -102,7 +110,7 @@ g++ -std=gnu++17 -O2 -w -DTOYBOX_HOST -I . -I mock -I ../../src \
   ../../toybox-core/src/epubcover.cpp ../../toybox-core/src/epubart.cpp -x c ../../lib/tjpgd/src/tjpgd.c -x none \
   ../../lib/miniz/src/toybox_miniz_impl.c \
   ../../toybox-core/src/settings.cpp ../../toybox-core/src/wordle.cpp \
-  ../../toybox-core/src/nonogram.cpp ../../toybox-core/src/game2048.cpp \
+  ../../toybox-core/src/mines.cpp ../../toybox-core/src/game2048.cpp \
   ../../toybox-core/src/xo.cpp -o preview
 ./preview
 ```

@@ -13,27 +13,11 @@ using xorules::State;
 XoApp xoApp;
 
 namespace {
-// Portrait: a big board you can hit with a thumb, controls stacked beneath.
-constexpr int CELL = 132;
-constexpr int BOARD = 3 * CELL;          // 396
-constexpr int BX = (SCREEN_W - BOARD) / 2;  // 42
-constexpr int BY = 120;
-
-struct Btn {
-  int x, y, w, h;
-};
-constexpr int FOE_W = 140, FOE_H = 54, FOE_Y = 536;
-constexpr int FOE_X0 = (SCREEN_W - 3 * FOE_W - 2 * 15) / 2;  // 15
-constexpr Btn BTN_RULE{42, 602, 220, 54};
-constexpr Btn BTN_NEW{282, 602, 156, 54};
-// Beside the record it erases, on the strip under it.
-constexpr Btn BTN_CLEAR{SCREEN_W - 16 - record::BTN_W, 752, record::BTN_W, 44};
-
+using namespace xoui;
 // THREE never fills the board, so nothing ends it on its own. Long chases are
 // almost always repetitions; call them a draw rather than let one run forever.
 constexpr int MAX_PLIES = 60;
 
-Btn foeRect(int i) { return Btn{FOE_X0 + i * (FOE_W + 15), FOE_Y, FOE_W, FOE_H}; }
 int cellX(int c) { return BX + (c % 3) * CELL; }
 int cellY(int c) { return BY + (c / 3) * CELL; }
 }  // namespace
@@ -94,196 +78,235 @@ void XoApp::place(int cell) {
 // --- drawing -----------------------------------------------------------------
 
 namespace {
-// A mark that is about to lift is drawn hairline instead of solid — same shape,
-// visibly on its way out.
+// A mark that is about to lift is drawn hairline instead of solid -- same
+// shape, visibly on its way out.
 void drawX(ToolsCanvas& c, int cell, bool doomed) {
   const int x = cellX(cell), y = cellY(cell);
-  const int in = 30, t = doomed ? 3 : 11;
+  const int in = 34, t = doomed ? 3 : 10;
   c.drawLine(x + in, y + in, x + CELL - in, y + CELL - in, t, true);
   c.drawLine(x + CELL - in, y + in, x + in, y + CELL - in, t, true);
 }
 
 void drawO(ToolsCanvas& c, int cell, bool doomed) {
   const int x = cellX(cell), y = cellY(cell);
-  c.drawCircle(x + CELL / 2, y + CELL / 2, CELL / 2 - 30, doomed ? 3 : 11, true);
+  c.drawCircle(x + CELL / 2, y + CELL / 2, CELL / 2 - 36, doomed ? 3 : 10, true);
 }
 }  // namespace
 
+const char* XoApp::levelName(Foe f) {
+  return f == FOE_EASY ? "Easy" : f == FOE_NORMAL ? "Normal" : "Hard";
+}
+
+int XoApp::menuRows(gk::Row* rows) {
+  int n = 0;
+  rows[n++] = {"How to play", nullptr, false};
+  rows[n++] = {"New game", nullptr, false};
+  rows[n++] = {"Sticky plays", levelName(_foe == FOE_HUMAN ? (Foe)prefs().getInt("x_lvl", FOE_HARD) : _foe), false};
+  rows[n++] = {"Rule", _rule == RULE_THREE ? "3 marks" : "Classic", false};
+  if (prefs().getInt("x_w", 0) + prefs().getInt("x_l", 0) + prefs().getInt("x_d", 0) > 0)
+    rows[n++] = {"Clear record", nullptr, _armedClear};
+  return n;
+}
+
 void XoApp::render(ToolsCanvas& c) {
-  host().topBar("XO", true);
-  if (_help) {
-    help::render(c, help::XO);
+  if (_view == View::Rules) {
+    gk::bar(host(), c, "XO");
+    gk::rules(c, help::XO);
     return;
   }
+  if (_view == View::Menu) {
+    gk::Row rows[gk::MENU_MAX];
+    gk::menu(host(), c, "XO", rows, menuRows(rows));
+    return;
+  }
+  gk::bar(host(), c, "XO", _rule == RULE_THREE ? "3 marks" : nullptr);
+  const bool friendly = _foe == FOE_HUMAN;
 
-  char buf[48];
-
-  // --- status ----------------------------------------------------------
+  // --- whose move -------------------------------------------------------
   const char* status;
   if (_over == 3)
-    status = "DRAW";
+    status = "Draw";
   else if (_over == 1)
-    status = (_foe == FOE_HUMAN) ? "X WINS" : "YOU WIN";
+    status = friendly ? "X wins" : "You won";
   else if (_over == 2)
-    status = (_foe == FOE_HUMAN) ? "O WINS" : "MACHINE WINS";
-  else if (_foe == FOE_HUMAN)
-    status = (_turn == 1) ? "X TO PLAY" : "O TO PLAY";
+    status = friendly ? "O wins" : "Sticky won";
+  else if (friendly)
+    status = _turn == 1 ? "X to move" : "O to move";
   else
-    status = "YOUR TURN";
-  if (_over) {
-    // A result is worth a plaque; a turn is not.
-    const bool youWon = (_over == 1 && _foe != FOE_HUMAN);
-    decor::banner(c, 70, 54, 340, 52, status, TS_LARGE, youWon);
-  } else {
-    c.textTrackedCentered(SCREEN_W / 2, 66, status, TS_LARGE, true, false, 2);
-  }
+    status = "Your move";
+  c.text(BX, 60, status, TS_LARGE, true, true);
+  const char* tag = friendly ? "pass and play" : "you are X";
+  const int tw = c.textWidth(tag, TS_SMALL) + 20;
+  c.drawRect(BX + BOARD - tw, 62, tw, 32, 2, true);
+  c.textInBox(BX + BOARD - tw, 62, tw, 32, tag, TS_SMALL, true);
 
-  // --- board -----------------------------------------------------------
-  c.drawRect(BX - 3, BY - 3, BOARD + 6, BOARD + 6, 3, true);
+  // --- board: four lines, no frame (kit) -----------------------------------
+  // The Sticky's last move is striped under its mark, so a single refresh
+  // still reads as a reply.
+  if (_lastAi >= 0) gk::stripes(c, cellX(_lastAi) + 4, cellY(_lastAi) + 4, CELL - 8, CELL - 8);
   for (int i = 1; i < 3; i++) {
-    c.fillRect(BX + i * CELL - 2, BY + 8, 4, BOARD - 16, true);
-    c.fillRect(BX + 8, BY + i * CELL - 2, BOARD - 16, 4, true);
+    c.fillRect(BX + i * CELL - 2, BY, 4, BOARD, true);
+    c.fillRect(BX, BY + i * CELL - 2, BOARD, 4, true);
   }
-
   const int doomX = _over ? -1 : xorules::doomed(_s, 1, three());
   const int doomO = _over ? -1 : xorules::doomed(_s, 2, three());
   for (int cell = 0; cell < 9; cell++) {
+    if (_s.cell[cell] && cell == _lastAi) {
+      // A white patch behind the mark keeps it solid on the stripes.
+      c.fillCircle(cellX(cell) + CELL / 2, cellY(cell) + CELL / 2, CELL / 2 - 22, false);
+    }
     if (_s.cell[cell] == 1)
       drawX(c, cell, cell == doomX);
     else if (_s.cell[cell] == 2)
       drawO(c, cell, cell == doomO);
   }
-
-  // Where the machine just played, so a single refresh still reads as a reply.
-  if (_lastAi >= 0 && !_over)
-    c.fillCircle(cellX(_lastAi) + CELL - 16, cellY(_lastAi) + 16, 6, true);
-
   if (_over && _over != 3) {
     const int l = xorules::winLine(_s);
     if (l >= 0) {
       const int a = xorules::LINES[l][0], b = xorules::LINES[l][2];
       c.drawLine(cellX(a) + CELL / 2, cellY(a) + CELL / 2, cellX(b) + CELL / 2,
-                   cellY(b) + CELL / 2, 9, true);
+                 cellY(b) + CELL / 2, 9, true);
     }
   }
 
-  // --- controls --------------------------------------------------------
-  // One text size for the whole row. "2 PLAYER" is the longest label, so it
-  // sets the size for all three -- a row where one button's text is smaller
-  // than its neighbours' reads as a mistake, not as emphasis.
-  static const char* kFoeNames[3] = {"EASY", "HARD", "2 PLAYER"};
-  for (int i = 0; i < 3; i++) {
-    const Btn b = foeRect(i);
-    c.button(b.x, b.y, b.w, b.h, kFoeNames[i], i == (int)_foe, TS_MED);
-  }
-  c.button(BTN_RULE.x, BTN_RULE.y, BTN_RULE.w, BTN_RULE.h, _rule == RULE_THREE ? "3 MARKS" : "CLASSIC", _rule == RULE_THREE, TS_LARGE);
-  c.button(BTN_NEW.x, BTN_NEW.y, BTN_NEW.w, BTN_NEW.h, "NEW", false, TS_LARGE);
-
-  // Once it is over, the line under the controls stops explaining the rule and
-  // starts saying what to do next -- there is no room for both above the board.
-  c.textCentered(SCREEN_W / 2, 668, _over ? "tap the board for a new game"
-                        : _rule == RULE_THREE ? "the faint mark lifts next"
-                                              : "three in a row wins", TS_MED, true);
-
-  // --- record ----------------------------------------------------------
-  if (_foe == FOE_HUMAN) {
-    c.text(20, 706, "pass the device each turn", TS_MED, true);
-    if (_sitX + _sitO + _sitD > 0) {
-      snprintf(buf, sizeof(buf), "this sitting   X %d   O %d   drew %d", _sitX, _sitO, _sitD);
-      c.text(20, 732, buf, TS_MED, true);
-    }
+  // --- record -------------------------------------------------------------
+  if (friendly) {
+    gk::statInt(c, statRect(0), "X", _sitX);
+    gk::statInt(c, statRect(1), "O", _sitO);
+    gk::statInt(c, statRect(2), "DRAW", _sitD);
   } else {
-    const int w = prefs().getInt("x_w", 0), l = prefs().getInt("x_l", 0);
-    const int d = prefs().getInt("x_d", 0);
-    snprintf(buf, sizeof(buf), "won %d   lost %d   drew %d", w, l, d);
-    c.text(20, 706, buf, TS_MED, true);
-    snprintf(buf, sizeof(buf), "streak %d   best %d", prefs().getInt("x_strk", 0),
+    gk::statInt(c, statRect(0), "WON", prefs().getInt("x_w", 0));
+    gk::statInt(c, statRect(1), "LOST", prefs().getInt("x_l", 0));
+    gk::statInt(c, statRect(2), "DRAW", prefs().getInt("x_d", 0));
+  }
+
+  // --- who you play ----------------------------------------------------------
+  char chip[32];
+  snprintf(chip, sizeof(chip), "vs Sticky - %s",
+           _foe == FOE_EASY ? "easy" : _foe == FOE_NORMAL ? "normal"
+           : _foe == FOE_HARD ? "hard"
+           : prefs().getInt("x_lvl", FOE_HARD) == FOE_EASY ? "easy"
+           : prefs().getInt("x_lvl", FOE_HARD) == FOE_NORMAL ? "normal" : "hard");
+  gk::choice(c, CHIP_AI, chip, !friendly);
+  gk::choice(c, CHIP_FRIEND, "vs a friend", friendly);
+
+  char buf[48];
+  if (_over)
+    gk::foot(c, "tap the board to play again");
+  else if (friendly)
+    gk::foot(c, "pass the Sticky each turn");
+  else {
+    snprintf(buf, sizeof(buf), "streak %d - best %d", prefs().getInt("x_strk", 0),
              prefs().getInt("x_best", 0));
-    c.text(20, 732, buf, TS_MED, true);
-    if (w + l + d > 0)
-      c.button(BTN_CLEAR.x, BTN_CLEAR.y, BTN_CLEAR.w, BTN_CLEAR.h, record::label(_armedClear), _armedClear, TS_MED);
+    gk::foot(c, buf);
   }
 }
 
 void XoApp::enter(ToolsHost& h) {
   ToolApp::enter(h);
+  _rulesFromMore = false;
   _armedClear = false;
   _sitX = _sitO = _sitD = 0;
-  _help = !help::suppressed(prefs(), "xo");
+  _view = help::suppressed(prefs(), "xo") ? View::Board : View::Rules;
   _rule = (Rule)prefs().getInt("x_rule", RULE_CLASSIC);
   _foe = (Foe)prefs().getInt("x_foe", FOE_HARD);
   if (_rule > RULE_THREE) _rule = RULE_CLASSIC;
-  if (_foe > FOE_HUMAN) _foe = FOE_HARD;
+  if (_foe > FOE_NORMAL) _foe = FOE_HARD;
   newGame();
 }
 
+void XoApp::setFoe(Foe f) {
+  _foe = f;
+  prefs().putInt("x_foe", (int)f);
+  // The level the Sticky last played at, so "vs Sticky" goes back to it.
+  if (f != FOE_HUMAN) prefs().putInt("x_lvl", (int)f);
+  newGame();
+}
+
+void XoApp::tapMenu(int x, int y) {
+  gk::Row rows[gk::MENU_MAX];
+  const int n = menuRows(rows);
+  const int i = gk::menuHit(x, y, n);
+  const bool wasArmed = _armedClear;
+  _armedClear = false;
+  if (i < 0) {
+    if (wasArmed) host().refresh(false);
+    return;
+  }
+  const char* what = rows[i].label;
+  if (!strcmp(what, "How to play")) {
+    _view = View::Rules;
+    _rulesFromMore = true;
+  } else if (!strcmp(what, "New game")) {
+    newGame();
+    _view = View::Board;
+  } else if (!strcmp(what, "Sticky plays")) {
+    // Easy -> Normal -> Hard -> Easy. Choosing a level also means playing
+    // the Sticky.
+    const Foe now = _foe == FOE_HUMAN ? (Foe)prefs().getInt("x_lvl", FOE_HARD) : _foe;
+    setFoe(now == FOE_EASY ? FOE_NORMAL : now == FOE_NORMAL ? FOE_HARD : FOE_EASY);
+  } else if (!strcmp(what, "Rule")) {
+    _rule = (_rule == RULE_THREE) ? RULE_CLASSIC : RULE_THREE;
+    prefs().putInt("x_rule", (int)_rule);
+    newGame();
+  } else if (!strcmp(what, "Clear record")) {
+    if (!wasArmed) {
+      _armedClear = true;
+      host().beep(2);
+      host().refresh(false);
+      return;
+    }
+    record::clear(prefs(), record::XO);
+    _view = View::Board;
+  }
+  host().beep(1);
+  host().refreshUi();
+}
+
 void XoApp::onTap(int x, int y) {
-  // Back comes before the rules card, not after it. A card that swallows
-  // "< HUB" leaves the only way out of the app behind a button you have to
-  // find first, and the sudoku and battleship screens never did that.
+  // Back comes before everything else: out of a card or menu to the board,
+  // out of the board to the hub.
   if (host().isBackTap(x, y)) {
     host().beep(1);
+    if (_view == View::Menu || (_view == View::Rules && _rulesFromMore)) {
+      _view = View::Board;
+      _armedClear = false;
+      host().refreshUi();
+      return;
+    }
     host().goHub();
     return;
   }
-
-  if (host().isHelpTap(x, y)) {
-    _help = !_help;
-    host().beep(1);
-    host().refreshUi();
-    return;
-  }
-  if (_help) {
+  if (_view == View::Rules) {
     const help::Tap t = help::hit(x, y);
     if (t == help::Tap::None) return;
     if (t == help::Tap::Never) help::suppress(prefs(), "xo");
-    _help = false;
+    _view = View::Board;
+    _rulesFromMore = false;
+    host().beep(1);
+    host().refreshUi();
+    return;
+  }
+  if (_view == View::Menu) return tapMenu(x, y);
+  if (gk::isMore(host(), x, y)) {
+    _view = View::Menu;
+    _armedClear = false;
     host().beep(1);
     host().refreshUi();
     return;
   }
 
-  // The record's own clear: armed by the first tap, and disarmed by any tap
-  // that is not the second one, so it cannot lie in wait.
-  const bool wasArmed = _armedClear;
-  _armedClear = false;
-  if (inRect(x, y, BTN_CLEAR.x, BTN_CLEAR.y, BTN_CLEAR.w, BTN_CLEAR.h) && _foe != FOE_HUMAN) {
-    if (wasArmed) {
-      record::clear(prefs(), record::XO);
-      host().beep(1);
-    } else {
-      _armedClear = true;
-      host().beep(2);
-    }
-    host().refresh(false);
-    return;
-  }
-  if (wasArmed) {
-    host().refresh(false);
-  }
-
-  for (int i = 0; i < 3; i++) {
-    const Btn b = foeRect(i);
-    if (inRect(x, y, b.x, b.y, b.w, b.h)) {
-      _foe = (Foe)i;
-      prefs().putInt("x_foe", i);
-      host().beep(1);
-      newGame();
-      host().refresh(true);
-      return;
-    }
-  }
-  if (inRect(x, y, BTN_RULE.x, BTN_RULE.y, BTN_RULE.w, BTN_RULE.h)) {
-    _rule = (_rule == RULE_THREE) ? RULE_CLASSIC : RULE_THREE;
-    prefs().putInt("x_rule", (int)_rule);
+  if (CHIP_AI.hit(x, y)) {
+    if (_foe != FOE_HUMAN) return;
     host().beep(1);
-    newGame();
+    setFoe((Foe)prefs().getInt("x_lvl", FOE_HARD));
     host().refresh(true);
     return;
   }
-  if (inRect(x, y, BTN_NEW.x, BTN_NEW.y, BTN_NEW.w, BTN_NEW.h)) {
+  if (CHIP_FRIEND.hit(x, y)) {
+    if (_foe == FOE_HUMAN) return;
     host().beep(1);
-    newGame();
+    setFoe(FOE_HUMAN);
     host().refresh(true);
     return;
   }
@@ -310,14 +333,14 @@ void XoApp::onTap(int x, int y) {
   place(c);
   host().beep(0);
 
-  // The machine answers inside the same frame — one e-ink refresh per turn,
+  // The machine answers inside the same frame -- one e-ink refresh per turn,
   // not two.
   bool aiLifts = false;
   if (!_over && _foe != FOE_HUMAN && _turn == 2) {
     aiLifts = xorules::doomed(_s, 2, three()) >= 0;
-    const int m = (_foe == FOE_EASY)
-                      ? xorules::easyMove(_s, 2, three(), esp_random())
-                      : xorules::bestMove(_s, 2, three(), esp_random());
+    const int m = _foe == FOE_EASY     ? xorules::easyMove(_s, 2, three(), esp_random())
+                  : _foe == FOE_NORMAL ? xorules::normalMove(_s, 2, three(), esp_random())
+                                       : xorules::bestMove(_s, 2, three(), esp_random());
     if (m >= 0) {
       _lastAi = (int8_t)m;
       place(m);

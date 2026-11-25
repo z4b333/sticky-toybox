@@ -35,6 +35,8 @@ class Touch {
     _tfy = flipY;
   }
   void setPanelFlip(bool fx, bool fy) { _pfx = fx; _pfy = fy; }
+  // How long a still finger takes to become a hold; 0 puts the default back.
+  void setHoldMs(uint32_t ms) { _holdMs = ms ? ms : HOLD_MS; }
 
  private:
   bool readReg(uint16_t reg, uint8_t* buf, uint8_t len);
@@ -53,6 +55,7 @@ class Touch {
   int _lastX = 0, _lastY = 0;
   static constexpr int TAP_SLOP = 14;
   static constexpr uint32_t HOLD_MS = 1500;
+  uint32_t _holdMs = HOLD_MS;
   static constexpr int SWIPE_MIN = 40;
 };
 

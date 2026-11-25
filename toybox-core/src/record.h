@@ -18,11 +18,12 @@ inline constexpr const char* COIN[] = {"c_heads", "c_tails"};
 inline constexpr const char* WORDLE[] = {"w_games", "w_wins", "w_streak", "w_max",
                                          "w_d1",    "w_d2",   "w_d3",     "w_d4",
                                          "w_d5",    "w_d6"};
-inline constexpr const char* NONOGRAM[] = {"n5_best", "n10_best", "n5_solved", "n10_solved"};
+inline constexpr const char* MINES[] = {"ms_w0", "ms_w1", "ms_w2", "ms_l0", "ms_l1", "ms_l2",
+                                        "ms_strk", "ms_best"};
 inline constexpr const char* G2048[] = {"t_best", "t_tile"};
 inline constexpr const char* XO[] = {"x_w", "x_l", "x_d", "x_strk", "x_best"};
 inline constexpr const char* SUDOKU[] = {"sd_w0", "sd_w1", "sd_w2"};
-inline constexpr const char* SHIPS[] = {"bs_w", "bs_l"};
+inline constexpr const char* SHIPS[] = {"bs_w", "bs_l", "bs_strk", "bs_shots", "bs_hits"};
 
 // Removed, not zeroed, so a cleared record reads exactly like a new device's.
 template <size_t N>
@@ -33,7 +34,7 @@ inline void clear(Preferences& p, const char* const (&keys)[N]) {
 inline void clearAll(Preferences& p) {
   clear(p, COIN);
   clear(p, WORDLE);
-  clear(p, NONOGRAM);
+  clear(p, MINES);
   clear(p, G2048);
   clear(p, XO);
   clear(p, SUDOKU);

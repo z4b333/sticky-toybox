@@ -1,5 +1,5 @@
-// Host-side logic tests: nonogram solver/generator, wordle scoring, 2048 moves,
-// the XO rules + search, the picker list parser, and the Battleship rules.
+// Host-side logic tests: wordle scoring, 2048 moves, the XO rules + search, the
+// picker list parser, the Battleship rules and protocol, Sudoku, and Mines.
 // Build: g++ -std=c++17 -O2 -I../../src test_logic.cpp -o test && ./test
 #include <cassert>
 #include <cstdio>
@@ -7,83 +7,15 @@
 #include <functional>
 #include <random>
 
-#include "nonogram_solver.h"
 #include "xo_rules.h"
 #include "tools/picker_list.h"
 #include "tools/sea_rules.h"
 #include "tools/sea_net.h"
 #include "tools/sudoku_gen.h"
+#include "tools/mines_rules.h"
 
 static std::mt19937 rng(12345);
 static uint32_t rnd32() { return rng(); }
-
-// --- Nonogram ----------------------------------------------------------------
-static void testNonogram() {
-  using namespace nono;
-
-  // 1) Known simple line deductions: len 10, clue [10] -> all filled
-  {
-    uint8_t clue[1] = {10};
-    int8_t cells[MAXN];
-    memset(cells, -1, sizeof(cells));
-    assert(lineSolve(10, clue, 1, cells));
-    for (int i = 0; i < 10; i++) assert(cells[i] == 1);
-  }
-  // 2) clue [9] on len 10 -> middle 8 forced
-  {
-    uint8_t clue[1] = {9};
-    int8_t cells[MAXN];
-    memset(cells, -1, sizeof(cells));
-    assert(lineSolve(10, clue, 1, cells));
-    for (int i = 1; i < 9; i++) assert(cells[i] == 1);
-    assert(cells[0] == -1 && cells[9] == -1);
-  }
-  // 3) clue [4,4] on len 10: X X X X _ ? X X X X ... placements: pos pairs
-  {
-    uint8_t clue[2] = {4, 4};
-    int8_t cells[MAXN];
-    memset(cells, -1, sizeof(cells));
-    assert(lineSolve(10, clue, 2, cells));
-    // group1 in cols 0..4 (start 0 or 1), group2 start 5 or 6
-    assert(cells[1] == 1 && cells[2] == 1 && cells[3] == 1);
-    assert(cells[6] == 1 && cells[7] == 1 && cells[8] == 1);
-  }
-  // 4) empty clue with demanded fill -> contradiction
-  {
-    int8_t cells[MAXN];
-    memset(cells, -1, sizeof(cells));
-    cells[3] = 1;
-    assert(!lineSolve(10, nullptr, 0, cells));
-  }
-  // 5) contradiction: clue [3] but a known-empty split makes it impossible
-  {
-    uint8_t clue[1] = {5};
-    int8_t cells[MAXN];
-    for (int i = 0; i < 10; i++) cells[i] = (i == 4) ? 0 : -1;
-    // [5] must fit either 0..3 (len 4, impossible) or 5..9 (exactly)
-    assert(lineSolve(10, clue, 1, cells));
-    for (int i = 5; i < 10; i++) assert(cells[i] == 1);
-    for (int i = 0; i < 4; i++) assert(cells[i] == 0);
-  }
-
-  // 6) Generation: solver must fully reproduce the generated solution
-  for (int n : {5, 10}) {
-    long attemptsTotal = 0;
-    for (int trial = 0; trial < 50; trial++) {
-      uint8_t sol[MAXN][MAXN];
-      Clues cl;
-      const int attempts = generateSolvable(n, sol, cl, rnd32);
-      assert(attempts > 0);
-      attemptsTotal += attempts;
-      int8_t solved[MAXN][MAXN];
-      assert(logicSolvable(n, cl, solved));
-      for (int r = 0; r < n; r++)
-        for (int c = 0; c < n; c++) assert((solved[r][c] == 1) == (sol[r][c] == 1));
-    }
-    printf("nonogram %dx%d: 50 puzzles ok, avg attempts %.1f\n", n, n,
-           attemptsTotal / 50.0);
-  }
-}
 
 // --- Wordle scoring (mirror of wordle.cpp submitGuess scoring) ---------------
 static void scoreGuess(const char* answer, const char* guess, uint8_t out[5]) {
@@ -375,7 +307,7 @@ static void testPickerList() {
   {  // over-long names are cut, not rejected
     const int n = fromText("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n", items);  // 30 a's
     assert(n == 1);
-    assert((int)strlen(items[0]) == MAX_LEN);
+    assert((int)strlen(items[0]) == MAX_CHARS);
   }
 
   {  // the tail past MAX_ITEMS is dropped rather than wrapping round
@@ -391,18 +323,11 @@ static void testPickerList() {
     assert(strcmp(items[MAX_ITEMS - 1], one) == 0);
   }
 
-  {  // accented Latin folds to its base letter instead of drawing as noise
-    const int n = fromText("Jos\xc3\xa9\nZo\xc3\xab\n\xc3\x87""etin\n", items);
-    assert(n == 3);
-    assert(strcmp(items[0], "Jose") == 0);
-    assert(strcmp(items[1], "Zoe") == 0);
-    assert(strcmp(items[2], "Cetin") == 0);
-  }
-
-  {  // other multi-byte scripts collapse to one marker per character, not per byte
-    const int n = fromText("\xe0\xb8\x81\xe0\xb8\x82\n", items);  // two Thai letters
-    assert(n == 1);
-    assert(strcmp(items[0], "??") == 0);
+  {  // since C2 every script is kept whole, accents and Thai included
+    const int n = fromText("Jos\xc3\xa9\n\xe0\xb8\x81\xe0\xb8\x82\n", items);
+    assert(n == 2);
+    assert(strcmp(items[0], "Jos\xc3\xa9") == 0);
+    assert(strcmp(items[1], "\xe0\xb8\x81\xe0\xb8\x82") == 0);
   }
 
   {  // control characters are stripped; tabs become spaces
@@ -535,30 +460,52 @@ static void testSea() {
     assert(afloat(b) == 0);
   }
 
-  {  // the gunner finishes every board, and beats firing blindly on average
-    long total = 0;
-    for (int game = 0; game < 300; game++) {
-      Board b;
-      clear(b);
-      placeRandom(b, rnd);
-      Gunner g;
-      g.reset();
-      int shots = 0;
-      while (afloat(b) > 0) {
-        const int c = g.choose(rnd);
-        assert(c >= 0 && "gunner ran out of cells before sinking the fleet");
-        const Shot s = fire(b, c);
-        assert(!s.repeat && "gunner fired at the same cell twice");
-        g.observe(c, s);
-        if (++shots > CELLS) break;
+  {  // every level finishes every board; Hard beats Normal beats Easy on average
+    double avg[LEVELS];
+    for (int lvl = 0; lvl < LEVELS; lvl++) {
+      long total = 0;
+      for (int game = 0; game < 300; game++) {
+        Board b;
+        clear(b);
+        placeRandom(b, rnd);
+        Gunner g;
+        g.reset(lvl);
+        int shots = 0;
+        while (afloat(b) > 0) {
+          const int c = g.choose(rnd);
+          assert(c >= 0 && "gunner ran out of cells before sinking the fleet");
+          const Shot s = fire(b, c);
+          assert(!s.repeat && "gunner fired at the same cell twice");
+          g.observe(c, s, rnd);
+          if (++shots > CELLS) break;
+        }
+        assert(afloat(b) == 0);
+        total += shots;
       }
-      assert(afloat(b) == 0);
-      total += shots;
+      avg[lvl] = (double)total / 300.0;
+      printf("sea gunner %s: %.1f shots average over 300 games\n", levelName(lvl), avg[lvl]);
     }
-    const double avg = (double)total / 300.0;
-    // Blind fire needs ~58 of 64 shots; hunt-and-target should be far better.
-    assert(avg < 45.0);
-    printf("sea gunner: %.1f shots average over 300 games\n", avg);
+    // Blind fire needs ~95 of 100 shots to sink 16 cells.
+    assert(avg[EASY] < 92.0);
+    assert(avg[NORMAL] < avg[EASY] - 5.0);
+    assert(avg[HARD] < avg[NORMAL] - 3.0);
+  }
+
+  {  // placing by hand: lift takes a ship off, placed() and fleetPlaced() agree
+    Board b;
+    clear(b);
+    assert(!fleetPlaced(b));
+    for (int s = 0; s < SHIPS; s++) {
+      assert(canPlace(b, 0, s * 2, LEN[s], true));
+      put(b, 0, s * 2, LEN[s], true, s);
+      assert(placed(b, s));
+    }
+    assert(fleetPlaced(b));
+    assert(!canPlace(b, 0, 0, 2, false) && "a ship on top of another");
+    assert(!canPlace(b, N - 1, 9, 2, true) && "a ship off the edge");
+    lift(b, 2);
+    assert(!placed(b, 2) && !fleetPlaced(b) && placed(b, 1) && placed(b, 3));
+    assert(canPlace(b, 0, 4, LEN[2], true));
   }
 
   printf("sea rules ok\n");
@@ -591,6 +538,11 @@ static int playOut(Duel& a, Duel& b, uint32_t& now, std::mt19937& rng) {
   sea::Gunner ga, gb;
   ga.reset();
   gb.reset();
+  // Shots already fired (a test may fire a few by hand first) are known.
+  for (int c = 0; c < sea::CELLS; c++) {
+    if (a.theirs().shot[c] != sea::UNSHOT) ga.tried[c] = a.theirs().shot[c] == sea::HIT ? 2 : 1;
+    if (b.theirs().shot[c] != sea::UNSHOT) gb.tried[c] = b.theirs().shot[c] == sea::HIT ? 2 : 1;
+  }
   int shots = 0;
   while (a.phase() == Phase::Play || b.phase() == Phase::Play) {
     Duel* shooter = a.myTurn() ? &a : (b.myTurn() ? &b : nullptr);
@@ -720,6 +672,41 @@ static void testDuel() {
       b.end();
     }
     printf("duel survives a lossy radio (5 games)\n");
+  }
+
+  {  // "a hit fires again": the host's setting governs both sides
+    for (int rule = 0; rule < 2; rule++) {
+      uint32_t now = 1000;
+      Duel a, b;
+      a.setFireAgain(rule != 0);
+      b.setFireAgain(rule == 0);  // the guest starts the other way round
+      pair(a, b, now);
+      assert(b.fireAgain() == (rule != 0) && "the guest did not take the host's rule");
+      readyUp(a, b, now, 5, 6);
+      assert(b.fireAgain() == (rule != 0));
+      int hit = -1, miss = -1;
+      for (int c = 0; c < sea::CELLS; c++) {
+        if (b.mine().ship[c] && hit < 0) hit = c;
+        if (!b.mine().ship[c] && miss < 0) miss = c;
+      }
+      assert(a.fire(hit, now));
+      assert(pump(a, b, now, [&] { return a.theirs().shot[hit] != sea::UNSHOT; }));
+      assert(pump(a, b, now, [&] { return true; }));
+      if (rule) {
+        assert(a.myTurn() && !b.myTurn() && "a hit should have kept the turn");
+        assert(a.fire(miss, now));
+        assert(pump(a, b, now, [&] { return a.theirs().shot[miss] != sea::UNSHOT; }));
+      }
+      assert(!a.myTurn() && "the turn should have passed");
+      assert(pump(a, b, now, [&] { return b.myTurn(); }));
+      // Both play to the end under that rule and agree who won.
+      playOut(a, b, now, rng);
+      assert(pump(a, b, now, [&] { return a.phase() == Phase::Over && b.phase() == Phase::Over; }));
+      assert(a.won() != b.won());
+      a.end();
+      b.end();
+    }
+    printf("duel fire-again rule ok (host's setting, both ways)\n");
   }
 
   {  // rematch resets both boards and hands the opening shot back to the host
@@ -896,15 +883,142 @@ static void testSudoku() {
   printf("sudoku ok\n");
 }
 
+
+// --- Mines -------------------------------------------------------------------
+// What the board promises the player: the first tap is safe and opens a patch,
+// flags protect their squares, a chord only fires when its flags are all
+// placed, and the game is won exactly when every safe square is open.
+static void testMines() {
+  using namespace mns;
+  std::mt19937 r(7);
+  auto rnd = [&r] { return (uint32_t)r(); };
+  for (int lvl = 0; lvl < LEVELS; lvl++) {
+    for (int game = 0; game < 500; game++) {
+      Board b;
+      reset(b, lvl);
+      const int first = (int)(rnd() % CELLS);
+      assert(tap(b, first, rnd) && "the first tap went off");
+      int laid = 0;
+      for (int k = 0; k < CELLS; k++) laid += b.mine[k];
+      assert(laid == MINES[lvl]);
+      assert(!b.mine[first] && count(b, first) == 0 && "the first tap must open a patch");
+      around(first, [&](int j) { assert(b.st[j] == OPEN); });
+      // Every open zero has every neighbour open (the flood went all the way).
+      for (int k = 0; k < CELLS; k++)
+        if (b.st[k] == OPEN && count(b, k) == 0)
+          around(k, [&](int j) { assert(b.st[j] == OPEN); });
+      // Play it out knowing the answer: flag every mine, chord or dig the rest.
+      for (int k = 0; k < CELLS; k++)
+        if (b.mine[k]) assert(toggleFlag(b, k));
+      assert(flags(b) == MINES[lvl]);
+      for (int k = 0; k < CELLS; k++) {
+        if (b.mine[k]) {
+          assert(tap(b, k, rnd) && b.st[k] == FLAG && "a flag must protect its square");
+          continue;
+        }
+        tap(b, k, rnd);
+      }
+      assert(won(b) && !lost(b));
+      assert(!toggleFlag(b, 0) && "no flags once it is over");
+    }
+  }
+  {  // a chord fires only when the flags round a number are complete
+    Board b;
+    reset(b, 0);
+    memset(b.mine, 0, sizeof(b.mine));
+    b.mine[0] = 1;  // a single mine in the corner
+    b.laid = 1;
+    assert(tap(b, 10, rnd));  // (1,1): a "1", touching the mine
+    assert(b.st[10] == OPEN && count(b, 10) == 1);
+    assert(b.st[1] == HIDDEN);
+    assert(tap(b, 10, rnd) && b.st[1] == HIDDEN && "a chord with no flag must do nothing");
+    assert(toggleFlag(b, 0));
+    assert(tap(b, 10, rnd) && b.st[1] == OPEN && b.st[9] == OPEN && "the chord did not open");
+  }
+  {  // a wrong flag and a chord: the chord digs the mine and loses
+    Board b;
+    reset(b, 0);
+    memset(b.mine, 0, sizeof(b.mine));
+    b.mine[0] = 1;
+    b.laid = 1;
+    tap(b, 10, rnd);
+    assert(toggleFlag(b, 1));  // the wrong square
+    assert(!tap(b, 10, rnd) && lost(b) && b.boom == 1);
+  }
+  printf("mines ok (first tap safe, flood, flags, chords, wins, 1500 games)\n");
+}
+
+// The three XO levels must be in the right order: against the same opponent,
+// Normal loses less than Easy and Hard never loses; Normal never misses a line
+// it could block, and Easy now blocks most of them.
+static void testXoLevels() {
+  using namespace xorules;
+  std::mt19937 r(31);
+  // Plays `games` of classic XO: the level as O against a mover that makes a
+  // random move but always takes a win it sees. Returns how many O lost.
+  auto run = [&](int level, int games) {
+    int lost = 0;
+    for (int g = 0; g < games; g++) {
+      State s;
+      reset(s);
+      int turn = 1;
+      while (!winner(s) && !boardFull(s)) {
+        int m;
+        if (turn == 1) {
+          m = -1;
+          for (int c = 0; c < 9 && m < 0; c++) {
+            if (s.cell[c]) continue;
+            State t = s;
+            applyMove(t, 1, c, false);
+            if (winner(t) == 1) m = c;
+          }
+          if (m < 0) {
+            int e[9], n = 0;
+            for (int c = 0; c < 9; c++)
+              if (!s.cell[c]) e[n++] = c;
+            m = e[r() % n];
+          }
+        } else {
+          m = level == 0 ? easyMove(s, 2, false, r()) : level == 1 ? normalMove(s, 2, false, r())
+                                                               : bestMove(s, 2, false, r());
+        }
+        applyMove(s, turn, m, false);
+        turn = 3 - turn;
+      }
+      if (winner(s) == 1) lost++;
+    }
+    return lost;
+  };
+  const int easy = run(0, 2000), normal = run(1, 2000), hard = run(2, 2000);
+  printf("xo levels vs a greedy random X (2000 games): easy lost %d, normal %d, hard %d\n", easy,
+         normal, hard);
+  assert(hard == 0);
+  assert(normal < easy);
+  // Normal always blocks an open line; Easy blocks most of the time.
+  int easyBlocks = 0;
+  for (int i = 0; i < 1000; i++) {
+    State s;
+    reset(s);
+    applyMove(s, 1, 0, false);
+    applyMove(s, 2, 8, false);
+    applyMove(s, 1, 1, false);  // X threatens 2
+    assert(normalMove(s, 2, false, r()) == 2);
+    if (easyMove(s, 2, false, r()) == 2) easyBlocks++;
+  }
+  assert(easyBlocks > 700 && easyBlocks < 900);
+  printf("xo levels ok (normal always blocks; easy blocked %d of 1000)\n", easyBlocks);
+}
+
 int main() {
-  testNonogram();
   testWordle();
   test2048();
   testXo();
+  testXoLevels();
   testPickerList();
   testSea();
   testDuel();
   testSudoku();
+  testMines();
   printf("ALL TESTS PASSED\n");
   return 0;
 }

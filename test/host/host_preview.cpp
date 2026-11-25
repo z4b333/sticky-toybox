@@ -79,7 +79,7 @@ static FakeOta g_fakeOta;
 #include "tools/cpfont.h"
 #include "tools/lock_image.h"
 #include "tools/lockscreen.h"
-#include "nonogram.h"
+#include "mines.h"
 #include "tools/note_store.h"
 #include "tools/tool_dice.h"
 #include "tools/tool_coin.h"
@@ -2009,9 +2009,8 @@ int main() {
   prefs.putInt("w_d3", 4);
   prefs.putInt("w_d4", 5);
   prefs.putInt("w_d5", 1);
-  prefs.putInt("n5_solved", 3);
-  prefs.putInt("n10_solved", 2);
-  prefs.putUInt("n10_best", 412);
+  prefs.putInt("ms_w0", 3);
+  prefs.putInt("ms_l0", 2);
   prefs.putInt("t_best", 20116);
   prefs.putInt("t_tile", 1024);
   prefs.putUInt("c_heads", 63);
@@ -7745,47 +7744,153 @@ int main() {
   setScreen("help_wordle");
   toybox.open(true, 0);
   g_dumpEnabled = false;
-  toybox.onTap(240, 653);  // GOT IT
-  auto wordleKey = [&](char ch) {
-    const char* r1 = "QWERTYUIOP";
-    const char* r2 = "ASDFGHJKL";
-    const char* r3 = "ZXCVBNM";
-    for (int i = 0; r1[i]; i++)
-      if (r1[i] == ch) return toybox.onTap(2 + i * 48 + 22, 628 + 26);
-    for (int i = 0; r2[i]; i++)
-      if (r2[i] == ch) return toybox.onTap(26 + i * 48 + 22, 686 + 26);
-    for (int i = 0; r3[i]; i++)
-      if (r3[i] == ch) return toybox.onTap(6 + 64 + 4 + i * 48 + 22, 744 + 26);
-  };
+  tapRect(help::OK_BTN);  // GOT IT
+  auto wordleKey = [&](char ch) { tapRect(wordui::keyRect(ch)); };
+  // Today's word is the date's: the same on every open, and a game left
+  // half-played is the one that comes back.
+  const std::string daily = static_cast<WordleApp*>(toybox.hostActive())->hostAnswer();
+  if (!static_cast<WordleApp*>(toybox.hostActive())->hostDaily()) {
+    printf("WORDLE FAIL: with a clock it did not open on today's word\n");
+    abort();
+  }
   for (const char* p = "CRANE"; *p; p++) wordleKey(*p);
   g_dumpEnabled = true;
   setScreen("wordle");
-  toybox.onTap(6 + 32, 744 + 26);  // ENTER
-
-  // Play it out so the end-of-game plaque is rendered rather than assumed. The
-  // last ENTER is the frame we want, so everything before it is silent.
+  tapRect(wordui::ENTER);
   g_dumpEnabled = false;
+  toybox.goHub();
+  toybox.open(true, 0);
+  if (daily != static_cast<WordleApp*>(toybox.hostActive())->hostAnswer()) {
+    printf("WORDLE FAIL: leaving and coming back changed today's word\n");
+    abort();
+  }
+  for (const char* p = "SLO"; *p; p++) wordleKey(*p);
+  g_dumpEnabled = true;
+  setScreen("wordle_typing");
+  wordleKey('T');
+  setScreen("wordle_short");
+  tapRect(wordui::ENTER);  // four letters: "too short"
+  g_dumpEnabled = false;
+  tapRect(wordui::DEL);
+  for (int i = 0; i < 4; i++) tapRect(wordui::DEL);
+
+  // Play it out so the end screen is rendered rather than assumed. The last
+  // ENTER is the frame we want, so everything before it is silent.
   for (int g = 0; g < 4; g++) {
     for (const char* p = "CRANE"; *p; p++) wordleKey(*p);
-    toybox.onTap(6 + 32, 744 + 26);
+    tapRect(wordui::ENTER);
   }
   for (const char* p = "CRANE"; *p; p++) wordleKey(*p);
   g_dumpEnabled = true;
   setScreen("wordle_over");
-  toybox.onTap(6 + 32, 744 + 26);  // ENTER: the sixth guess ends it
+  tapRect(wordui::ENTER);  // the sixth guess ends it: the result screen
+  setScreen("wordle_board_over");
+  tapRect(gk::RES_LEFT);   // Close: the finished board
+  setScreen("wordle_more");
+  toybox.onTap(EPD_W - 28, 20);  // More
+  g_dumpEnabled = false;
+  tapRect(gk::menuRect(1));  // New word
+  if (static_cast<WordleApp*>(toybox.hostActive())->hostDaily() ||
+      daily == static_cast<WordleApp*>(toybox.hostActive())->hostAnswer()) {
+    printf("WORDLE FAIL: New word did not give an extra word\n");
+    abort();
+  }
+  // Solve one for the "solved in" screen: type the answer itself.
+  {
+    const std::string ans = static_cast<WordleApp*>(toybox.hostActive())->hostAnswer();
+    for (const char* p = "CRANE"; *p; p++) wordleKey(*p);
+    tapRect(wordui::ENTER);
+    for (char ch : ans) wordleKey(ch);
+    g_dumpEnabled = true;
+    setScreen("wordle_solved");
+    tapRect(wordui::ENTER);
+  }
+  printf("wordle ok (today's word by date, kept on reopen; New word is another; result screen)\n");
 
-  setScreen("help_nonogram");
+  // --- mines ----------------------------------------------------------------
+  setScreen("help_mines");
+  prefs.remove("ms_state");
   toybox.open(true, 1);
-  setScreen("nonogram");
-  toybox.onTap(240, 653);  // GOT IT, which repaints the board
-
-  setScreen("nonogram_solved");
-  static_cast<NonogramApp*>(toybox.hostActive())->hostSetWon(412);
+  g_dumpEnabled = false;
+  tapRect(help::OK_BTN);
+  g_dumpEnabled = true;
+  setScreen("mines_new");
+  stickyHost.refresh(true);
+  {
+    auto* m = static_cast<MinesApp*>(toybox.hostActive());
+    auto cellTap = [&](int k) { tapRect(minesui::cellRect(k)); };
+    g_dumpEnabled = false;
+    cellTap(4 * mns::N + 4);  // the middle: always safe, always a patch
+    mns::Board& b = m->hostBoard();
+    if (b.mine[40] || mns::count(b, 40) != 0 || b.st[40] != mns::OPEN) {
+      printf("MINES FAIL: the first tap was not a safe, open patch\n");
+      abort();
+    }
+    // Flag a mine next to the open patch with a hold, the way a finger does.
+    int flagged = -1;
+    for (int k = 0; k < mns::CELLS && flagged < 0; k++) {
+      if (!b.mine[k] || b.st[k] != mns::HIDDEN) continue;
+      bool edge = false;
+      mns::around(k, [&](int j) { edge |= b.st[j] == mns::OPEN; });
+      if (edge) flagged = k;
+    }
+    if (flagged >= 0) {
+      const TRect r = minesui::cellRect(flagged);
+      toybox.onHold(r.x + r.w / 2, r.y + r.h / 2);
+      if (b.st[flagged] != mns::FLAG) {
+        printf("MINES FAIL: a hold did not plant a flag\n");
+        abort();
+      }
+      cellTap(flagged);  // a tap on a flag must not dig it
+      if (b.st[flagged] != mns::FLAG || mns::lost(b)) {
+        printf("MINES FAIL: a tap dug through a flag\n");
+        abort();
+      }
+    }
+    if (toybox.holdMs() == 0 || toybox.holdMs() > 600) {
+      printf("MINES FAIL: Mines did not ask for a quick hold (%d ms)\n", toybox.holdMs());
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("mines_play");
+    stickyHost.refresh(false);
+    // Lose on purpose: dig a mine that has no flag.
+    g_dumpEnabled = false;
+    int boom = -1;
+    for (int k = 0; k < mns::CELLS && boom < 0; k++)
+      if (b.mine[k] && b.st[k] == mns::HIDDEN) boom = k;
+    g_dumpEnabled = true;
+    setScreen("mines_lost");
+    cellTap(boom);
+    if (!mns::lost(b)) {
+      printf("MINES FAIL: digging a mine did not end the game\n");
+      abort();
+    }
+    // A new game, then win it by digging every safe square.
+    g_dumpEnabled = false;
+    tapRect(minesui::NEW);
+    cellTap(0);
+    for (int k = 0; k < mns::CELLS; k++)
+      if (!b.mine[k] && b.st[k] == mns::HIDDEN) cellTap(k);
+    g_dumpEnabled = true;
+    if (!mns::won(b)) {
+      printf("MINES FAIL: every safe square dug, and not won\n");
+      abort();
+    }
+    setScreen("mines_won");
+    stickyHost.refresh(true);
+    setScreen("mines_board_won");
+    tapRect(gk::RES_LEFT);
+    setScreen("mines_more");
+    toybox.onTap(EPD_W - 28, 20);
+    printf("mines ok (first tap safe, hold flags at %d ms, flags guard, lose, win)\n",
+           toybox.holdMs());
+  }
 
   setScreen("help_2048");
   toybox.open(true, 2);
   g_dumpEnabled = false;
-  toybox.onTap(240, 653);  // GOT IT
+  tapRect(help::OK_BTN);  // GOT IT
   toybox.onSwipe(-120, 10);
   g_dumpEnabled = true;
   setScreen("g2048_merge");
@@ -7795,43 +7900,92 @@ int main() {
   // made it rather than to a timer.
   setScreen("g2048");
   toybox.onSwipe(10, 120);
+  setScreen("g2048_button");
+  toybox.onButton(SideBtn::Up);  // the upper side button slides the board up
+
+  // A late board, every tile style on it: plain, striped and solid.
+  {
+    struct Saved {
+      uint8_t b[4][4], prev[4][4];
+      int32_t score, prevScore;
+      uint8_t canUndo, over, reached, pad[2];
+    } sv{};
+    const uint8_t late[16] = {1, 2, 3, 1, 4, 5, 2, 0, 7, 8, 4, 2, 10, 9, 6, 3};
+    memcpy(sv.b, late, 16);
+    sv.score = 20116;
+    prefs.putBytes("t_state", &sv, sizeof(sv));
+    g_dumpEnabled = false;
+    toybox.goHub();
+    g_dumpEnabled = true;
+    help::suppress(prefs, "g20");  // straight to the board
+    setScreen("g2048_tiles");
+    toybox.open(true, 2);
+  }
 
   setScreen("g2048_win");
   static_cast<G2048App*>(toybox.hostActive())->hostSetOver(true);
   setScreen("g2048_over");
   static_cast<G2048App*>(toybox.hostActive())->hostSetOver(false);
+  setScreen("g2048_more");
+  g_dumpEnabled = false;
+  tapRect(gk::RES_LEFT);
+  g_dumpEnabled = true;
+  toybox.onTap(EPD_W - 28, 20);
+  g_dumpEnabled = false;
+  toybox.onTap(BACK_W / 2, TOPBAR_H / 2);  // back from More to the board
+  g_dumpEnabled = true;
 
-  // --- XO: classic vs HARD, then the 3-mark variant -----------------------
+  // --- XO: vs the Sticky, then the 3-mark rule ------------------------------
   setScreen("help_xo");
+  prefs.putInt("x_foe", 1);
   toybox.open(true, 3);
   g_dumpEnabled = false;
-  toybox.onTap(240, 653);  // GOT IT
-  auto xoTap = [&](int cell) { toybox.onTap(42 + (cell % 3) * 132 + 66, 120 + (cell / 3) * 132 + 66); };
+  tapRect(help::OK_BTN);  // GOT IT
+  auto xoTap = [&](int cell) {
+    toybox.onTap(xoui::BX + (cell % 3) * xoui::CELL + xoui::CELL / 2,
+                 xoui::BY + (cell / 3) * xoui::CELL + xoui::CELL / 2);
+  };
+  // The Sticky's replies depend on the dice, so each move goes to the first
+  // free square of a list rather than to a fixed one.
+  auto xoFree = [&](std::initializer_list<int> order) {
+    auto* xo = static_cast<XoApp*>(toybox.hostActive());
+    for (int k : order)
+      if (!xo->hostCell(k)) return xoTap(k);
+  };
   xoTap(4);  // centre; the machine answers in the same frame
   g_dumpEnabled = true;
   setScreen("xo");
-  xoTap(0);
+  xoFree({0, 2, 6, 8, 1, 3, 5, 7});
 
   setScreen("xo_three");
   g_dumpEnabled = false;
-  toybox.onTap(42 + 110, 602 + 27);  // rule toggle -> 3 MARKS
-  xoTap(4);
-  xoTap(0);
-  xoTap(8);
+  toybox.onTap(EPD_W - 28, 20);  // More
+  tapRect(gk::menuRect(3));      // Rule -> 3 marks
+  toybox.onTap(BACK_W / 2, TOPBAR_H / 2);
+  xoFree({4, 0, 8, 2});
+  xoFree({0, 8, 2, 6});
+  xoFree({8, 2, 6, 1});
   g_dumpEnabled = true;
-  xoTap(2);
+  xoFree({2, 6, 1, 3, 5, 7});
 
-  // Pass-and-play, taken to a win, so the result plaque gets rendered.
+  setScreen("xo_more");
+  toybox.onTap(EPD_W - 28, 20);
+
+  // Pass-and-play, taken to a win, so the result line gets rendered.
   setScreen("xo_won");
   g_dumpEnabled = false;
-  toybox.onTap(42 + 110, 602 + 27);   // back to CLASSIC
-  toybox.onTap(15 + 2 * 155 + 70, 536 + 27);  // 2 PLAYER
+  tapRect(gk::menuRect(3));  // back to Classic
+  toybox.onTap(BACK_W / 2, TOPBAR_H / 2);
+  tapRect(xoui::CHIP_FRIEND);  // vs a friend
   xoTap(0);
   xoTap(3);
   xoTap(1);
   xoTap(4);
   g_dumpEnabled = true;
   xoTap(2);  // X takes the top row
+  g_dumpEnabled = false;
+  tapRect(xoui::CHIP_AI);  // leave it as the record guard below expects
+  g_dumpEnabled = true;
 
   // --- tools -------------------------------------------------------------
   setScreen("tool_coin");
@@ -8559,80 +8713,145 @@ int main() {
     printf("flash long ok (300 cards, 128/256-character faces whole at TS_MED or larger)\n");
   }
 
-  // --- battleship (solo) --------------------------------------------------
+  // --- ships (solo) --------------------------------------------------------
   setScreen("help_ships");
   toybox.open(false, 7);
   setScreen("tool_sea_menu");
-  toybox.onTap(240, 653);  // GOT IT
+  tapRect(help::OK_BTN);  // GOT IT
+  {
+    auto* sea = static_cast<SeaTool*>(toybox.hostActive());
+    setScreen("tool_sea_setup");
+    tapRect(seaui::SOLO_ROW);  // Against the Sticky: the empty board, Carrier in hand
 
-  setScreen("tool_sea_setup");
-  toybox.onTap(240, 200 + 46);  // PLAY THE DEVICE
+    // Place the Carrier by hand: tap a square (striped preview), turn it, put it down.
+    setScreen("tool_sea_setup_aim");
+    tapRect(seaui::setCell(sea::cellAt(1, 2)));
+    setScreen("tool_sea_setup_turn");
+    tapRect(seaui::TURN_BTN);
+    g_dumpEnabled = false;
+    tapRect(seaui::PLACE_BTN);
+    if (!sea::placed(sea->hostMine(), 0)) {
+      printf("SHIPS FAIL: Place did not put the Carrier down\n");
+      abort();
+    }
+    // Two more by hand, leaving two in hand for the picture.
+    tapRect(seaui::setCell(sea::cellAt(4, 0)));
+    tapRect(seaui::PLACE_BTN);
+    tapRect(seaui::setCell(sea::cellAt(4, 6)));
+    tapRect(seaui::PLACE_BTN);
+    // A square where the ship would overlap is refused, not placed.
+    tapRect(seaui::setCell(sea::cellAt(1, 4)));
+    g_dumpEnabled = true;
+    setScreen("tool_sea_setup_overlap");
+    tapRect(seaui::PLACE_BTN);
+    g_dumpEnabled = false;
+    tapRect(seaui::SHUFFLE_BTN);  // the rest at random: all five down
+    if (!sea::fleetPlaced(sea->hostMine())) {
+      printf("SHIPS FAIL: Shuffle did not put the whole fleet down\n");
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_sea_setup_done");
+    stickyHost.refresh(false);
 
-  setScreen("tool_sea_play");
-  g_dumpEnabled = false;
-  toybox.onTap(250 + 95, 552 + 34);  // READY
-  // Fire a diagonal so the board shows a mix of hits and misses.
-  for (int k = 0; k < 6; k++) {
-    const int cx = 40 + k * 50 + 25, cy = 100 + k * 50 + 25;
-    toybox.onTap(cx, cy);          // select
-    toybox.onTap(240, 512 + 30);   // FIRE
+    setScreen("tool_sea_play");
+    g_dumpEnabled = false;
+    tapRect(seaui::PLACE_BTN);  // Start
+    // Fire a diagonal (aim, then fire) so the board shows hits and misses.
+    for (int k = 0; k < 6; k++) {
+      const TRect r = seaui::enemyCell(sea::cellAt(k, k));
+      tapRect(r);
+      tapRect(r);
+    }
+    const int shots = sea->hostShots();
+    if (shots < 1) {
+      printf("SHIPS FAIL: aim-then-tap-again did not fire\n");
+      abort();
+    }
+    g_dumpEnabled = true;
+    tapRect(seaui::enemyCell(sea::cellAt(2, 7)));  // leave one square aimed at
+
+    // Wreckage: sink one enemy ship outright and show what that looks like.
+    setScreen("tool_sea_sunk");
+    sea->hostSinkShip(0);
+    stickyHost.refresh(false);
+
+    // Fire at every square in turn; the game ends one way or the other.
+    setScreen("tool_sea_over");
+    g_dumpEnabled = false;
+    for (int k = 0; k < sea::CELLS && sea->hostScreen() == 3; k++) {
+      if (sea->hostEnemy().shot[k] != sea::UNSHOT) continue;
+      tapRect(seaui::enemyCell(k));
+      tapRect(seaui::enemyCell(k));
+    }
+    g_dumpEnabled = true;
+    stickyHost.refresh(true);
+    if (sea->hostScreen() != 4) {
+      printf("SHIPS FAIL: firing at every square did not end the game\n");
+      abort();
+    }
+    setScreen("tool_sea_more");
+    toybox.onTap(EPD_W - 28, 20);
+    g_dumpEnabled = false;
+    toybox.onTap(BACK_W / 2, TOPBAR_H / 2);
+    g_dumpEnabled = true;
+    printf("ships ok (placed by hand, overlap refused, shuffle, aim then fire, game over)\n");
   }
-  toybox.onTap(40 + 25, 100 + 3 * 50 + 25);  // leave one square selected
-  g_dumpEnabled = true;
-  toybox.onTap(40 + 2 * 50 + 25, 100 + 5 * 50 + 25);
-
-  // Wreckage: sink one enemy ship outright and show what that looks like.
-  setScreen("tool_sea_sunk");
-  static_cast<SeaTool*>(toybox.hostActive())->hostSinkShip(0);
-  stickyHost.refresh(false);
-
-  // Fire at every square in turn; the game ends one way or the other, and the
-  // end screen is what we came for.
-  setScreen("tool_sea_over");
-  g_dumpEnabled = false;
-  for (int k = 0; k < sea::CELLS; k++) {
-    toybox.onTap(40 + sea::xOf(k) * 50 + 25, 100 + sea::yOf(k) * 50 + 25);
-    toybox.onTap(240, 512 + 30);
-    // Halfway down the board something has always gone under by now: catch the
-    // wreckage marks before the game finishes.
-  }
-  g_dumpEnabled = true;
-  stickyHost.refresh(true);
 
   setScreen("tool_sea_pair");
   g_dumpEnabled = false;
   toybox.open(false, 7);
   tapRect(help::OK_BTN);     // reopening brings the rules card back
-  tapRect(seaui::DUEL_BTN);  // TWO DEVICES
+  tapRect(seaui::DUEL_ROW);  // Two Stickies
   g_dumpEnabled = true;
   tapRect(seaui::HOST_BTN);  // HOST A GAME
 
   // --- sudoku -------------------------------------------------------------
-  // Which cells are givens depends on the generated puzzle, so rather than
-  // guess coordinates, sweep a row and a column: taps on givens are refused and
-  // whichever empty cell was touched last stays selected.
   setScreen("help_sudoku");
+  prefs.remove("sd_state");
   toybox.open(false, 8);
   g_dumpEnabled = false;
-  toybox.onTap(240, 653);  // GOT IT
-  auto sudCell = [](int r, int c) { toybox.onTap(24 + c * 48 + 24, 80 + r * 48 + 24); };
-  auto sudKey = [](int i) { toybox.onTap(10 + (i % 5) * 94 + 42, (i < 5 ? 524 : 602) + 34); };
-  for (int c = 0; c < 9; c++) {  // some of these land, some are refused
-    sudCell(0, c);
-    sudKey(c % 9);
+  tapRect(help::OK_BTN);  // GOT IT
+  {
+    auto* sd = static_cast<SudokuTool*>(toybox.hostActive());
+    int empty[4], ne = 0;
+    for (int k = 0; k < sud::CELLS && ne < 4; k++)
+      if (!sd->hostGiven(k)) empty[ne++] = k;
+    // A right digit, a wrong one, and pencil notes in a third.
+    tapRect(sdui::cellRect(empty[0]));
+    tapRect(sdui::keyRect(sd->hostSolution(empty[0]) - 1));
+    tapRect(sdui::cellRect(empty[1]));
+    tapRect(sdui::keyRect(sd->hostSolution(empty[1]) % 9));  // wrong on purpose
+    tapRect(sdui::cellRect(empty[2]));
+    tapRect(sdui::btnRect(sdui::B_NOTES));
+    tapRect(sdui::keyRect(1));
+    tapRect(sdui::keyRect(4));
+    tapRect(sdui::keyRect(6));
+    tapRect(sdui::btnRect(sdui::B_NOTES));
+    tapRect(sdui::cellRect(empty[3]));
+    tapRect(sdui::cellRect(empty[3]));  // re-tapping keeps it selected
+    if (sd->hostSel() != empty[3]) {
+      printf("SUDOKU FAIL: a second tap on the selected cell cleared it\n");
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_sudoku");
+    stickyHost.refresh(false);
+    setScreen("tool_sudoku_check");
+    tapRect(sdui::btnRect(sdui::B_CHECK));
   }
-  for (int r = 1; r < 5; r++) {
-    sudCell(r, 4);
-    sudKey((r + 2) % 9);
-  }
-  for (int r = 0; r < 9; r++) sudCell(r, 2);  // leave one empty cell selected
-  g_dumpEnabled = true;
-  setScreen("tool_sudoku");
-  sudKey(4);  // enter a digit into it
 
   setScreen("tool_sudoku_solved");
   static_cast<SudokuTool*>(toybox.hostActive())->hostSolve();
   stickyHost.refresh(true);
+  setScreen("tool_sudoku_more");
+  g_dumpEnabled = false;
+  tapRect(gk::RES_LEFT);
+  g_dumpEnabled = true;
+  toybox.onTap(EPD_W - 28, 20);
+  g_dumpEnabled = false;
+  toybox.onTap(BACK_W / 2, TOPBAR_H / 2);
+  g_dumpEnabled = true;
 
   // --- notes -------------------------------------------------------------
   {
@@ -9193,7 +9412,7 @@ int main() {
   // front of "< HUB", so the only way out of a game you had just opened was to
   // find and press a button on the card first.
   for (int g = 0; g < 4; g++) {
-    static const char* kKeys[4] = {"h_wrd", "h_non", "h_g20", "h_xo"};
+    static const char* kKeys[4] = {"h_wrd", "h_mns", "h_g20", "h_xo"};
     prefs.remove(kKeys[g]);  // put the card back up
     toybox.open(true, g);
     toybox.onTap(BACK_W / 2, TOPBAR_H / 2);
@@ -9211,11 +9430,14 @@ int main() {
   // once refused, and the "?" raises it again.
   {
     g_dumpEnabled = false;
-    const int KEY_X = 2 + 22, KEY_Y = 628 + 26;   // a letter on Wordle's keyboard
+    const TRect q = wordui::keyRect('Q');
+    const int KEY_X = q.x + q.w / 2, KEY_Y = q.y + q.h / 2;  // a letter on Wordle's keyboard
     const int OK_X = 240, OK_Y = 653;             // GOT IT
     const int NEVER_X = 240, NEVER_Y = 730;       // DON'T SHOW AGAIN
-    const int HELP_X = EPD_W - 28, HELP_Y = 20;   // the ? in the top bar
+    const int HELP_X = EPD_W - 28, HELP_Y = 20;   // More, in the top bar
+    const TRect howTo = gk::menuRect(0);          // More > How to play
 
+    prefs.remove("w_state");  // a game in play, so a key tap paints
     prefs.putBool("h_wrd", false);
     toybox.open(true, 0);
     int before = g_paintCount;
@@ -9251,12 +9473,13 @@ int main() {
       printf("HELP FAIL: the card came back after being refused\n");
       abort();
     }
-    // ...and the ? is the way back in.
+    // ...and More > How to play is the way back in.
     toybox.onTap(HELP_X, HELP_Y);
+    toybox.onTap(howTo.x + howTo.w / 2, howTo.y + howTo.h / 2);
     before = g_paintCount;
     toybox.onTap(KEY_X, KEY_Y);
     if (g_paintCount != before) {
-      printf("HELP FAIL: ? did not raise the card\n");
+      printf("HELP FAIL: More > How to play did not raise the card\n");
       abort();
     }
     g_dumpEnabled = true;
@@ -9268,7 +9491,9 @@ int main() {
   // nothing, and walking away from an armed button must disarm it.
   {
     g_dumpEnabled = false;
-    const int CX = EPD_W - 16 - 214 + 107, CY = 752 + 22;  // XO's CLEAR RECORD
+    // XO's Clear record, the last row of its More page.
+    const TRect clr = gk::menuRect(4);
+    const int CX = clr.x + clr.w / 2, CY = clr.y + clr.h / 2;
     prefs.putBool("h_xo", true);
     prefs.putInt("x_foe", 1);  // a preference, not a score: must survive
     prefs.putInt("x_w", 3);
@@ -9276,12 +9501,13 @@ int main() {
     prefs.putInt("x_d", 2);
 
     toybox.open(true, 3);
+    toybox.onTap(EPD_W - 28, 20);  // More
     toybox.onTap(CX, CY);  // arms
     if (prefs.getInt("x_w", -1) != 3) {
       printf("RECORD FAIL: one tap cleared XO\n");
       abort();
     }
-    toybox.onTap(240, 66);  // somewhere else: disarms
+    toybox.onTap(240, 700);  // somewhere else on the page: disarms
     toybox.onTap(CX, CY);   // arms again, does not confirm the stale one
     if (prefs.getInt("x_w", -1) != 3) {
       printf("RECORD FAIL: an armed clear survived a tap elsewhere\n");
@@ -9299,6 +9525,23 @@ int main() {
     }
     g_dumpEnabled = true;
     printf("record clears ok (two taps, disarms, app-local)\n");
+  }
+
+  // Every drawer carries More in its top-right corner, and it opens Settings.
+  {
+    g_dumpEnabled = false;
+    for (int f = 0; f < 3; f++) {
+      toybox.goHub();
+      toybox.onTap(f * (EPD_W / 3) + EPD_W / 6, EPD_H - 30);  // the dock: drawer f
+      toybox.onTap(EPD_W - 28, 20);                            // More
+      if (!toybox.hostInSettings()) {
+        printf("DRAWER FAIL: More in drawer %d did not open Settings\n", f);
+        abort();
+      }
+    }
+    toybox.goHub();
+    g_dumpEnabled = true;
+    printf("drawer More ok (all three open Settings)\n");
   }
 
   // --- importing from the card ---------------------------------------------
@@ -9690,7 +9933,7 @@ int main() {
       abort();
     }
     // ...and NEW GAME still means new.
-    toybox.onTap(40 + 90, 660 + 30);
+    tapRect(g2048ui::NEW);
     const uint8_t* fresh = static_cast<G2048App*>(toybox.hostActive())->hostBoard();
     int tiles = 0;
     for (int i = 0; i < 16; i++)
