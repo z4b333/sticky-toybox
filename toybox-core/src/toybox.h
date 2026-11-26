@@ -34,6 +34,7 @@ class Toybox {
   bool canNap() const;
   // Before power-off: the open app writes what it is holding (ToolApp::flush).
   void flush();
+  void beforeSleep();  // D: the open app's last word before the power goes
 
   // Where the back button goes. Apps reach this through ToolsHost::goHub(),
   // which every host forwards here.

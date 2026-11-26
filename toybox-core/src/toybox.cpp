@@ -95,6 +95,10 @@ void Toybox::flush() {
   if (_where == Where::App && _active) _active->flush();
 }
 
+void Toybox::beforeSleep() {
+  if (_where == Where::App && _active) _active->beforeSleep();
+}
+
 void Toybox::begin(ToolsHost& h) {
   _host = &h;
   appvis::load(h.prefs());

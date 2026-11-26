@@ -2404,6 +2404,51 @@ int main() {
     toybox.onTap(16, 16);  // the corner: back to the DEVICE tab
   }
 
+  // D: Reading sync page. Every switch flips its pref; with Auto sync off the
+  // two "when" rows are dimmed and a tap on them does nothing.
+  {
+    const bool wasDump = g_dumpEnabled;
+    auto& pr = stickyHost.prefs();
+    g_dumpEnabled = true;
+    setScreen("settings_sync");
+    tapAct(setui::ACT_SYNC);
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    tapRect(setui::syncRow(1));
+    if (pr.getBool(rhl::K_HL, true)) {
+      printf("SETTINGS FAIL: highlights switch did not turn off\n");
+      abort();
+    }
+    tapRect(setui::syncRow(1));
+    tapRect(setui::syncRow(2));
+    if (pr.getBool(rhl::K_AUTO, true) || rhl::onOpen(pr) || rhl::onClose(pr)) {
+      printf("SETTINGS FAIL: auto sync off should switch off both 'when' rows\n");
+      abort();
+    }
+    tapRect(setui::syncRow(3));
+    if (!pr.getBool(rhl::K_OPEN, true)) {
+      printf("SETTINGS FAIL: a dimmed row still flipped\n");
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("settings_sync_auto_off");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    tapRect(setui::syncRow(2));
+    tapRect(setui::syncRow(4));
+    if (!rhl::onOpen(pr) || rhl::onClose(pr)) {
+      printf("SETTINGS FAIL: 'when it closes' did not turn off on its own\n");
+      abort();
+    }
+    tapRect(setui::syncRow(4));
+    if (!rhl::hl(pr) || !rhl::autoOn(pr) || !rhl::onOpen(pr) || !rhl::onClose(pr)) {
+      printf("SETTINGS FAIL: sync switches not back to on\n");
+      abort();
+    }
+    g_dumpEnabled = wasDump;
+    toybox.onTap(16, 16);
+  }
+
   // --- v2 setup steps ---------------------------------------------------------
   // From Settings > DEVICE > Setup: four steps, each drawn; sleep and beep
   // rows write what they say; back on step 1 returns to the settings root.
@@ -4543,9 +4588,9 @@ int main() {
     {
       char mp[bstore::PATH_CAP];
       marks::path("/books/wind.epub", mp, sizeof(mp));
-      uint8_t raw[marks::FILE_BYTES];
+      static uint8_t raw[marks::FILE_BYTES];
       if (stickyHost.sdReadFile(mp, raw, sizeof(raw)) != marks::FILE_BYTES ||
-          memcmp(raw, "TBM3", 4) != 0 || raw[4] != 1 || raw[14] == 0) {
+          memcmp(raw, "TBM4", 4) != 0 || raw[4] != 1 || raw[marks::HEAD + 14 + marks::ID] == 0) {
         printf("EPUB APP FAIL: no bookmark with a phrase on the card at %s\n", mp);
         abort();
       }
@@ -4608,8 +4653,8 @@ int main() {
         abort();
       }
       uint8_t raw[8];
-      if (sdcard::hostReadSide(mp, raw, 8) < 8 || memcmp(raw, "TBM3", 4) != 0) {
-        printf("MARKS FAIL: the save did not migrate the file to TBM3\n");
+      if (sdcard::hostReadSide(mp, raw, 8) < 8 || memcmp(raw, "TBM4", 4) != 0) {
+        printf("MARKS FAIL: the save did not migrate the file to TBM4\n");
         abort();
       }
       snprintf(mm[0].label, sizeof(mm[0].label),
@@ -4621,7 +4666,7 @@ int main() {
         printf("MARKS FAIL: a long label did not survive the round trip\n");
         abort();
       }
-      printf("marks migration ok (TBM2 read, TBM3 written, long labels whole)\n");
+      printf("marks migration ok (TBM2 read, TBM4 written, long labels whole)\n");
     }
 
     // Type: bigger text re-derives the page from the offset, so the reader
@@ -5228,6 +5273,208 @@ int main() {
           abort();
         }
         toybox.onTap(240, btnY);
+      }
+
+      // D. Highlights from Readest come with the place (part A, pull). Two on
+      // this very page (made from its own words, so they underline here), one
+      // elsewhere, one deleted that was never here; then Readest deletes one,
+      // and one removed HERE stays removed however often the pull runs.
+      {
+        char hdoc[33];
+        et->hostDocHash(hdoc);
+        const int sp = et->hostSpine();
+        const uint32_t po = et->hostPageOffset();
+        char w0[64] = "", w1[64] = "";
+        {  // the first three words of lines 0 and 2: real words, on this page
+          auto firstWords = [](const char* line, char* out, int cap) {
+            int n = 0, words = 0;
+            for (const char* q = line; *q && n < cap - 1; q++) {
+              if (*q == ' ' && ++words == 3) break;
+              out[n++] = *q;
+            }
+            out[n] = 0;
+          };
+          firstWords(et->hostLineText(0), w0, sizeof(w0));
+          firstWords(et->hostLineText(2), w1, sizeof(w1));
+        }
+        char page1[2048];
+        snprintf(page1, sizeof(page1),
+                 "{\"document\":\"%s\",\"sync_version\":2,\"cursor\":3,\"more\":true,\"items\":["
+                 "{\"id\":\"rd-aaa1111\",\"deleted\":0,\"revision\":1,\"spine\":%d,\"start_offset\":%u,"
+                 "\"end_offset\":%u,\"chapter\":\"One\",\"text\":\"%s\",\"created_at\":1787000000},"
+                 "{\"id\":\"rd-gone000\",\"deleted\":1,\"revision\":2},"
+                 "{\"id\":\"rd-bbb2222\",\"deleted\":0,\"spine\":%d,\"start_offset\":%u,\"end_offset\":%u,"
+                 "\"chapter\":\"One\",\"text\":\"%s\\n\",\"created_at\":1787000001}]}",
+                 hdoc, sp, po + 1, po + 1 + (unsigned)strlen(w0), w0, sp, po + 40,
+                 po + 40 + (unsigned)strlen(w1), w1);
+        const char* page2 =
+            "{\"cursor\":4,\"more\":false,\"items\":[{\"id\":\"rd-ccc3333\",\"deleted\":0,\"spine\":0,"
+            "\"start_offset\":0,\"end_offset\":30,\"chapter\":\"\",\"text\":\"a phrase from elsewhere "
+            "in the book, \\u201cquoted\\u201d\"}]}";
+        rhl::g_hostClips = rhl::HostClips();
+        rhl::g_hostClips.pages[hdoc] = {page1, page2};
+        const int had = et->hostMarkCount();
+        toybox.onButton(SideBtn::Ok);
+        tapSync(nullptr);
+        if (et->hostHlAdded() != 3 || et->hostHlRemoved() != 0 || et->hostMarkCount() != had + 3 ||
+            rhl::g_hostClips.gets != 2) {
+          printf("HL FAIL: pull added %d removed %d, %d marks (had %d), %d gets\n", et->hostHlAdded(),
+                 et->hostHlRemoved(), et->hostMarkCount(), had, rhl::g_hostClips.gets);
+          abort();
+        }
+        g_dumpEnabled = true;
+        setScreen("tool_epub_sync_highlights");
+        stickyHost.refresh(true);
+        g_dumpEnabled = false;
+        toybox.onTap(240, btnY);  // back to the book: two underlines on the page
+        g_dumpEnabled = true;
+        setScreen("tool_epub_readest_underlined");
+        stickyHost.refresh(true);
+        g_dumpEnabled = false;
+        // Their own: from Readest, with an id, on this page by offset.
+        int onPage = 0, fromReadest = 0;
+        for (int i = 0; i < et->hostMarkCount(); i++) {
+          fromReadest += et->hostMarkSrc(i) == marks::SRC_READEST;
+          onPage += et->hostMarkSrc(i) == marks::SRC_READEST && et->hostMarkHere(i);
+        }
+        if (fromReadest != 3 || onPage != 2) {
+          printf("HL FAIL: %d from Readest, %d found on this page (want 3, 2)\n", fromReadest, onPage);
+          abort();
+        }
+        // The same pull again: nothing new.
+        toybox.onButton(SideBtn::Ok);
+        tapSync(nullptr);
+        if (et->hostHlAdded() != 0 || et->hostMarkCount() != had + 3) {
+          printf("HL FAIL: a second pull added %d (%d marks)\n", et->hostHlAdded(), et->hostMarkCount());
+          abort();
+        }
+        toybox.onTap(240, btnY);
+        // Readest deletes rd-bbb2222: gone here too.
+        page1[0] = 0;
+        rhl::g_hostClips.pages[hdoc] = {
+            "{\"cursor\":2,\"more\":false,\"items\":[{\"id\":\"rd-bbb2222\",\"deleted\":1}]}"};
+        toybox.onButton(SideBtn::Ok);
+        tapSync(nullptr);
+        if (et->hostHlRemoved() != 1 || et->hostMarkCount() != had + 2) {
+          printf("HL FAIL: Readest's deletion removed %d (%d marks)\n", et->hostHlRemoved(),
+                 et->hostMarkCount());
+          abort();
+        }
+        toybox.onTap(240, btnY);
+        // Removed HERE: buried, so a pull that still lists it does not bring it back.
+        {
+          int at = -1;
+          for (int i = 0; i < et->hostMarkCount(); i++)
+            if (!strcmp(et->hostMarkId(i), "rd-aaa1111")) at = i;
+          if (at < 0 || !et->hostMarkHere(at)) {
+            printf("HL FAIL: rd-aaa1111 not on this page to remove\n");
+            abort();
+          }
+          et->hostRemoveMark(at);
+          char again[1024];
+          snprintf(again, sizeof(again),
+                   "{\"cursor\":1,\"more\":false,\"items\":[{\"id\":\"rd-aaa1111\",\"deleted\":0,"
+                   "\"spine\":%d,\"start_offset\":%u,\"end_offset\":%u,\"text\":\"%s\"}]}",
+                   sp, po + 1, po + 9, w0);
+          rhl::g_hostClips.pages[hdoc] = {again};
+          toybox.onButton(SideBtn::Ok);
+          tapSync(nullptr);
+          if (et->hostHlAdded() != 0 || et->hostMarkCount() != had + 1 || !marks::buried("rd-aaa1111")) {
+            printf("HL FAIL: a removed highlight came back (%d added, %d marks)\n", et->hostHlAdded(),
+                   et->hostMarkCount());
+            abort();
+          }
+          et->hostReloadMarks();  // and the burial is on the card, not just in RAM
+          if (!marks::buried("rd-aaa1111")) {
+            printf("HL FAIL: the burial did not survive a reload\n");
+            abort();
+          }
+          toybox.onTap(240, btnY);
+        }
+        // Highlights off: the pull does not run.
+        stickyHost.prefs().putBool(rhl::K_HL, false);
+        const int getsOff = rhl::g_hostClips.gets;
+        toybox.onButton(SideBtn::Ok);
+        tapSync(nullptr);
+        if (rhl::g_hostClips.gets != getsOff) {
+          printf("HL FAIL: highlights off still pulled\n");
+          abort();
+        }
+        toybox.onTap(240, btnY);
+        stickyHost.prefs().remove(rhl::K_HL);
+        rhl::g_hostClips = rhl::HostClips();
+        printf("readest highlights ok (pull, again, deleted there, removed here, off)\n");
+      }
+
+      // D. Auto sync: closing the book sends the place (the strip over the
+      // page first), opening it checks Readest by itself, sleep sends it too;
+      // with Auto sync off none of them touch the radio.
+      {
+        const int cur = et->hostCurIndex();
+        int putsWas = kosync::g_server.puts;
+        g_dumpEnabled = true;
+        setScreen("tool_epub_sync_closing");
+        toybox.onTap(40, 20);  // the corner closes the book
+        g_dumpEnabled = false;
+        if (kosync::g_server.puts != putsWas + 1 || et->hostCurIndex() != -1) {
+          printf("AUTO FAIL: closing sent %d places (book %d)\n", kosync::g_server.puts - putsWas,
+                 et->hostCurIndex());
+          abort();
+        }
+        const int getsWas = kosync::g_server.gets;
+        et->hostOpen(cur);
+        if (et->hostAuto() != 1 || et->hostSyncStage() != 1) {
+          printf("AUTO FAIL: opening did not start a sync (auto %d stage %d)\n", et->hostAuto(),
+                 et->hostSyncStage());
+          abort();
+        }
+        g_dumpEnabled = true;
+        setScreen("tool_epub_sync_opening");
+        stickyHost.refresh(false);
+        g_dumpEnabled = false;
+        toybox.tick();
+        if (et->hostAuto() != 0 || et->hostSyncStage() != 0 || kosync::g_server.gets != getsWas + 1 ||
+            et->hostMenu() != 0) {
+          printf("AUTO FAIL: after the open's sync: auto %d stage %d gets %d menu %d\n", et->hostAuto(),
+                 et->hostSyncStage(), kosync::g_server.gets - getsWas, et->hostMenu());
+          abort();
+        }
+        putsWas = kosync::g_server.puts;
+        g_dumpEnabled = true;
+        setScreen("tool_epub_sync_sleeping");
+        toybox.beforeSleep();
+        g_dumpEnabled = false;
+        if (kosync::g_server.puts != putsWas + 1) {
+          printf("AUTO FAIL: sleep sent %d places\n", kosync::g_server.puts - putsWas);
+          abort();
+        }
+        // Off: the corner closes with no radio, the open does not sync.
+        stickyHost.prefs().putBool(rhl::K_AUTO, false);
+        homenet::g_hostJoins = 0;
+        toybox.onTap(40, 20);
+        et->hostOpen(cur);
+        toybox.beforeSleep();
+        if (homenet::g_hostJoins != 0 || et->hostAuto() != 0 || et->hostSyncStage() != 0) {
+          printf("AUTO FAIL: auto sync off still joined %d times\n", homenet::g_hostJoins);
+          abort();
+        }
+        // Only the open: closing is quiet.
+        stickyHost.prefs().putBool(rhl::K_AUTO, true);
+        stickyHost.prefs().putBool(rhl::K_CLOSE, false);
+        putsWas = kosync::g_server.puts;
+        toybox.onTap(40, 20);
+        if (kosync::g_server.puts != putsWas) {
+          printf("AUTO FAIL: 'when it closes' off still sent the place\n");
+          abort();
+        }
+        et->hostOpen(cur);
+        if (et->hostAuto() != 1) {
+          printf("AUTO FAIL: 'when a book opens' on did not sync\n");
+          abort();
+        }
+        toybox.tick();
+        stickyHost.prefs().remove(rhl::K_CLOSE);
+        printf("auto sync ok (close, open, sleep, off, open only)\n");
       }
 
       // 5. Failures say what failed, and the place on the card stays.

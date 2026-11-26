@@ -800,6 +800,9 @@ class ToolApp {
   // app is deleted and before the device powers off, so a held-back place
   // is never lost to either.
   virtual void flush() {}
+  // The device is about to power off (D: the reader sends its place to
+  // Readest first). Called before flush(); may block for a network round.
+  virtual void beforeSleep() {}
   // The two side buttons, for an app that has something for them to do. Only
   // flashcards does: a hand holding the device can grade a card without the
   // other hand coming up to the panel. Everything else leaves these alone, and

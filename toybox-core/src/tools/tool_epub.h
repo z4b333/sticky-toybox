@@ -27,6 +27,7 @@
 #include "series.h"
 #include "home_net.h"
 #include "kosync.h"
+#include "readest_hl.h"
 #include "lib_web.h"
 #include "lock_image.h"
 #include "reader_menu.h"
@@ -228,6 +229,11 @@ class EpubTool : public ToolApp {
         return;
       }
       renderPage(c);
+      if (_auto == AUTO_OPEN)
+        drawAutoStrip(c, "SYNCING", "Checking Readest", "your place and highlights");
+      else if (_auto != AUTO_NONE)
+        drawAutoStrip(c, _auto == AUTO_SLEEP ? "SYNCING \xc2\xb7 THEN SLEEP" : "SYNCING \xc2\xb7 CLOSING",
+                      "Sending your place to Readest", "no Wi-Fi: it goes on anyway");
       return;
     }
     // Inside a series the bar carries the series name, because that is the
@@ -565,6 +571,20 @@ class EpubTool : public ToolApp {
   int hostLineY(int i) const { return i < _lineN ? _lines[i].y : -1; }
   const char* hostMarkLabel(int i) const { return i < _nmarks ? _marks[i].label : ""; }
   int hostMarkCount() const { return _nmarks; }
+  const char* hostLineText(int i) const { return i < _lineN ? _lines[i].t : ""; }
+  int hostMarkSrc(int i) const { return i < _nmarks ? _marks[i].src : -1; }
+  const char* hostMarkId(int i) const { return i < _nmarks ? _marks[i].id : ""; }
+  bool hostMarkHere(int i) const { return i < _nmarks && markHere(i); }
+  int hostHlAdded() const { return _hlRes.added; }
+  int hostHlRemoved() const { return _hlRes.removed; }
+  int hostAuto() const { return _auto; }
+  void hostReloadMarks() { _nmarks = marks::load(host(), _books[_cur].file, _marks); }
+  // The list's second tap on the row you are on, without the list.
+  void hostRemoveMark(int at) {
+    if (_marks[at].src == marks::SRC_READEST) marks::bury(_marks[at].id);
+    marks::remove(_marks, _nmarks, at);
+    marks::save(host(), _books[_cur].file, _marks, _nmarks);
+  }
   int hostTextSize() const { return _size; }
   int hostTocCount() { return _ntoc; }
   // The contents fallback -- chapters named by their own first words -- only
@@ -578,6 +598,7 @@ class EpubTool : public ToolApp {
   bool hostLineItalAt(int i, int at) const { return i < _lineN && _lines[i].italAt(at); }
   int hostLineCount() const { return _lineN; }
   void hostOpen(int i) { openBook(i); }
+  int hostCurIndex() const { return _cur; }
   const char* hostDir() const { return _dir; }
   int hostFolders() const { return _nf; }
   int hostGroups() const { return _ng; }
@@ -606,6 +627,49 @@ class EpubTool : public ToolApp {
   // Where the reader is, in the only terms that survive a change of type or a
   // change of firmware: the visible-codepoint offset of the page's first word.
   uint32_t curOffset() const { return _page < _lutN ? epubui::pageOff(_lut[_page]) : 0; }
+
+  // D: is an automatic sync possible at all? Readest signed in, a home Wi-Fi.
+  bool autoReady() {
+    return _host && kosync::isReadest(prefs()) && homenet::haveWifi(prefs());
+  }
+  // The kit's banner strip across the page while an automatic sync runs.
+  void drawAutoStrip(ToolsCanvas& c, const char* label, const char* title, const char* sub) {
+    const int W = c.width(), H = c.height();
+    const int h = 150, y = (H - h) / 2;
+    c.fillRect(0, y, W, h, false);
+    c.fillRect(0, y, W, 3, true);
+    c.fillRect(0, y + h - 3, W, 3, true);
+    c.textTracked(28, y + 24, label, TS_SMALL, true, true, 3);
+    c.text(28, y + 24 + c.textHeight(TS_SMALL) + 6, title, TS_LARGE, true, true);
+    c.text(28, y + 24 + c.textHeight(TS_SMALL) + 12 + c.textHeight(TS_LARGE), sub, TS_SMALL, true);
+  }
+  // Is mark i on the page being read? A highlight from Readest has no page in
+  // this layout, so its offset decides.
+  bool markHere(int i) const {
+    const marks::Mark& m = _marks[i];
+    if (m.spine != (uint16_t)_spine) return false;
+    if (m.page != marks::NO_PAGE) return m.page == (uint16_t)_page;
+    if (_page >= _lutN) return false;
+    const uint32_t a = epubui::pageOff(_lut[_page]);
+    const uint32_t z = _page + 1 < _lutN ? epubui::pageOff(_lut[_page + 1]) : 0xFFFFFFFFu;
+    return m.off >= a && m.off < z;
+  }
+  // D: the sync on the way out -- the book closing, or the Sticky going to
+  // sleep. The strip over the page, then the place sent; nothing asked.
+  void syncOnTheWayOut(bool sleeping) {
+    if (!_open || _cur < 0 || !autoReady() || !rhl::onClose(prefs())) return;
+    _menu = rmenu::Page::None;
+    _picking = false;
+    _auto = sleeping ? AUTO_SLEEP : AUTO_CLOSE;
+    host().setCanvasRotation(_rot);
+    host().refresh(false);  // the page, with the strip across it
+    runSync(true);
+    _auto = AUTO_NONE;
+    char line[64];
+    snprintf(line, sizeof(line), "sync: on the way out (%s) done", sleeping ? "sleep" : "close");
+    host().perfLog(line);
+  }
+  void beforeSleep() override { syncOnTheWayOut(true); }
 
   bool inFolder() const { return !shelf::isTop(_dir); }
   const char* seriesName() const {
@@ -850,6 +914,20 @@ class EpubTool : public ToolApp {
       // promised, blocking, with every step on a deadline.
       runSync();
       _syncStage = 2;
+      if (_auto == AUTO_OPEN) {
+        _auto = AUTO_NONE;
+        // Only a question needs the Sync page; otherwise straight back to the
+        // page, now with Readest's highlights underlined on it.
+        if (_syncOut == SO_ASK) {
+          _menu = rmenu::Page::Sync;
+          host().setCanvasRotation(0);
+          host().refresh(true);
+          return;
+        }
+        _syncStage = 0;
+        host().refresh(false);
+        return;
+      }
       paint();
       return;
     }
@@ -1052,6 +1130,13 @@ class EpubTool : public ToolApp {
     // picture page with nothing over it.
     syncPageRot();
     if (!showDeviceArtGrey()) host().refresh(true);
+    // D: the automatic sync on opening -- the strip goes up over the first
+    // page, and the next tick does the blocking work.
+    if (autoReady() && rhl::onOpen(prefs())) {
+      _auto = AUTO_OPEN;
+      _syncStage = 1;
+      paint();
+    }
   }
 
   // The second line of a shelf row: where the reader stopped, or nothing at
@@ -1139,6 +1224,7 @@ class EpubTool : public ToolApp {
   }
 
   void closeBook(bool beep) {
+    if (beep) syncOnTheWayOut(false);  // the owner closed it: not a failed open
     _menu = rmenu::Page::None;
     host().setCanvasRotation(0);  // the shelf, like everything else, is portrait
     if (_open) {
@@ -2449,7 +2535,7 @@ class EpubTool : public ToolApp {
   // both saved (the phone's clock page takes both). The rules for what to do
   // with the answer live in kosync::decide().
   static constexpr int SYNC_BTN_Y = 560, SYNC_BTN_H = 96;
-  enum : uint8_t { SO_SENT, SO_SAME, SO_ASK, SO_FAIL };
+  enum : uint8_t { SO_SENT, SO_SAME, SO_ASK, SO_FAIL, SO_HLONLY };
 
   // A home Wi-Fi is the one thing needed; with no account yet, the row
   // signs in with Readest first.
@@ -2525,7 +2611,33 @@ class EpubTool : public ToolApp {
     _books[_cur].synced = true;
   }
 
-  void runSync() {
+  // D (26 Nov): highlights from Readest, pulled while the radio is up for the
+  // place. `closing` is the sync on the way out (the book closing, or the
+  // Sticky going to sleep): it sends the place and asks nothing.
+  void pullHighlights(const char* doc) {
+    _hlTried = true;
+    _hlRes = rhl::Merged{};
+    _hlErr = kosync::Result::Ok;
+    rhl::Clip* clips = (rhl::Clip*)calloc(rhl::PULL_MAX, sizeof(rhl::Clip));
+    if (!clips) {
+      _hlErr = kosync::Result::LowMemory;
+      return;
+    }
+    int k = 0;
+    _hlErr = rhl::pull(prefs(), doc, clips, rhl::PULL_MAX, k);
+    if (_hlErr == kosync::Result::Ok) {
+      _hlRes = rhl::merge(_marks, _nmarks, clips, k);
+      if (_hlRes.added || _hlRes.removed) marks::save(host(), _books[_cur].file, _marks, _nmarks);
+    }
+    free(clips);
+    char line[96];
+    snprintf(line, sizeof(line), "sync: highlights %s, %d from Readest, %d new, %d removed%s",
+             kosync::describe(_hlErr), k, _hlRes.added, _hlRes.removed, _hlRes.full ? ", list full" : "");
+    host().perfLog(line);
+  }
+
+  void runSync(bool closing = false) {
+    _hlTried = false;
     if (_saveDue) saveProgress();  // the card first: it is the record that matters
     _syncPct = bookFraction();
     char doc[33];
@@ -2547,6 +2659,13 @@ class EpubTool : public ToolApp {
     const homenet::Result j = homenet::connect(prefs());
     if (j != homenet::Result::Ok) {  // the radio is already off on this path
       syncFail(homenet::describe(j));
+      return;
+    }
+    if (!closing && rhl::hl(prefs()) && kosync::isReadest(prefs())) pullHighlights(doc);
+    if (!rhl::pos(prefs())) {  // the place is not synced: highlights were the errand
+      homenet::off();
+      markSynced();
+      _syncOut = SO_HLONLY;
       return;
     }
     char me[33];
@@ -2593,6 +2712,11 @@ class EpubTool : public ToolApp {
       case kosync::Decision::AskJump:
         homenet::off();
         markSynced();
+        if (closing) {  // on the way out nobody is there to ask; the further place stands
+          host().perfLog("sync: result further on elsewhere - left as it is");
+          _syncOut = SO_SAME;
+          return;
+        }
         host().perfLog("sync: result further on elsewhere - asking");
         _syncOut = SO_ASK;
         snprintf(_syncMsg, sizeof(_syncMsg), "%s", r.device[0] ? r.device : "another reader");
@@ -2635,6 +2759,24 @@ class EpubTool : public ToolApp {
     jumpTo(spine, off);
   }
 
+  // The highlights half of a sync, in one line; false when it did not run.
+  bool hlLine(char* buf, size_t n) {
+    if (!_hlTried) return false;
+    if (_hlErr != kosync::Result::Ok)
+      snprintf(buf, n, "highlights: %s", kosync::describe(_hlErr));
+    else if (_hlRes.added && _hlRes.removed)
+      snprintf(buf, n, "%d new from Readest \xc2\xb7 %d removed", _hlRes.added, _hlRes.removed);
+    else if (_hlRes.added)
+      snprintf(buf, n, "%d new highlight%s from Readest", _hlRes.added, _hlRes.added == 1 ? "" : "s");
+    else if (_hlRes.removed)
+      snprintf(buf, n, "%d highlight%s removed, deleted in Readest", _hlRes.removed,
+               _hlRes.removed == 1 ? "" : "s");
+    else
+      snprintf(buf, n, "highlights in step with Readest");
+    if (_hlRes.full) snprintf(buf + strlen(buf), n - strlen(buf), " (list full)");
+    return true;
+  }
+
   void renderSync(ToolsCanvas& c) {
     host().topBar("SYNC", false, "OPTIONS");
     const int W = c.width();
@@ -2665,7 +2807,14 @@ class EpubTool : public ToolApp {
       c.textCentered(W / 2, 380, "this takes up to half a minute", TS_SMALL, true);
       return;
     }
+    if (hlLine(buf, sizeof(buf))) c.textCentered(W / 2, _syncOut == SO_ASK ? 410 : 420, buf, TS_MED, true, true);
     switch (_syncOut) {
+      case SO_HLONLY:
+        c.textCentered(W / 2, 200, "HIGHLIGHTS", TS_MED, true, true);
+        c.textCentered(W / 2, 260, _hlErr == kosync::Result::Ok ? "synced with Readest" : "not synced",
+                       TS_LARGE, true);
+        c.textCentered(W / 2, 330, "the place is not synced: Settings > Reading sync", TS_SMALL, true);
+        break;
       case SO_SENT:
         c.textCentered(W / 2, 200, "SENT", TS_MED, true, true);
         snprintf(buf, sizeof(buf), "%d%% through the book", (int)(_syncPct * 100 + 0.5));
@@ -3591,15 +3740,17 @@ class EpubTool : public ToolApp {
           snprintf(buf, sizeof(buf), "%s", len);
         rmenu::drawRow(c, k, label, buf, shelf::rowSep(k, idx, total), spine == _spine);
       } else {
-        char label[marks::LABEL + 8], where[40];
+        char label[marks::LABEL + 8], where[48];
         markLabel(_marks[idx], label, sizeof(label));
-        snprintf(where, sizeof(where), "chapter %u, page %u", (unsigned)(_marks[idx].spine + 1),
-                 (unsigned)(_marks[idx].page + 1));
+        const char* from = _marks[idx].src == marks::SRC_READEST ? "Readest" : "this Sticky";
+        if (_marks[idx].page == marks::NO_PAGE)
+          snprintf(where, sizeof(where), "chapter %u  \xc2\xb7  %s", (unsigned)(_marks[idx].spine + 1), from);
+        else
+          snprintf(where, sizeof(where), "chapter %u, page %u  \xc2\xb7  %s",
+                   (unsigned)(_marks[idx].spine + 1), (unsigned)(_marks[idx].page + 1), from);
         // Two lines for the phrase: it is a sentence somebody chose, and the
         // half past the clip was usually the half they chose it for.
-        rmenu::drawRowWrap(c, k, label, where, shelf::rowSep(k, idx, total),
-                           _marks[idx].spine == (uint16_t)_spine &&
-                               _marks[idx].page == (uint16_t)_page);
+        rmenu::drawRowWrap(c, k, label, where, shelf::rowSep(k, idx, total), markHere(idx));
       }
     }
     shelf::drawPager(c, _mpage, total);
@@ -3866,7 +4017,10 @@ class EpubTool : public ToolApp {
     }
     // A bookmark you are already standing on is one you are asking to remove:
     // there is nowhere else for that tap to mean anything.
-    if (_marks[idx].spine == _spine && _marks[idx].page == _page) {
+    if (markHere(idx)) {
+      // One from Readest is buried: a pull must not bring it back, and part B
+      // tells Readest (deleted on one side, gone on both -- owner).
+      if (_marks[idx].src == marks::SRC_READEST) marks::bury(_marks[idx].id);
       marks::remove(_marks, _nmarks, idx);
       marks::save(host(), _books[_cur].file, _marks, _nmarks);
       host().beep(1);
@@ -4194,6 +4348,12 @@ class EpubTool : public ToolApp {
   int _ntoc = -1;                  // -1 until the book's contents are read
   marks::Mark _marks[marks::MAX];
   int _nmarks = 0;
+  // D: the highlights half of the last sync, and an automatic sync running.
+  bool _hlTried = false;
+  rhl::Merged _hlRes;
+  kosync::Result _hlErr = kosync::Result::Ok;
+  enum : uint8_t { AUTO_NONE, AUTO_OPEN, AUTO_CLOSE, AUTO_SLEEP };
+  uint8_t _auto = AUTO_NONE;
   char _rootSub[5][48] = {};
   uint8_t _size = 0, _lead = 1;
   uint8_t _margin = 1, _para = 1;  // v2: side margins, paragraph gap

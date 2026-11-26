@@ -253,6 +253,9 @@ bool g_dashUp = false;
 bool usbIn() { return digitalRead(PIN_USB_IN) == HIGH; }
 
 void powerOff(bool lowBattery = false, bool announce = false) {
+  // D: an open book sends its place to Readest first, when the owner has
+  // asked for that on sleep. Not on a low battery: that power-off is urgent.
+  if (!lowBattery) toybox.beforeSleep();
   // First, while the card and the app are both still there: a reader that
   // has turned a page in the last few seconds has not saved its place yet.
   toybox.flush();

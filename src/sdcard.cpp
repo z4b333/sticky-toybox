@@ -438,9 +438,9 @@ void buildFakeEpub() {
 struct FakeSide {
   char path[160];
   // Big enough for the largest thing kept about a book: the position is ten
-  // bytes, the chapter note under a hundred, and the bookmarks file 1,670 -- sixteen marks carrying the sentences they
-  // were made from, at the 96-byte labels of TBM3.
-  uint8_t data[2048];
+  // bytes, the chapter note under a hundred, and the highlights file 10,888
+  // (TBM4: sixty-four highlights with their Readest ids, and the burials).
+  uint8_t data[11264];
   int n = 0;
 };
 // Each book leaves a position, a chapter note and a bookmarks file, the

@@ -15,6 +15,8 @@
 // not.
 #pragma once
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "book_store.h"
@@ -22,23 +24,34 @@
 
 namespace marks {
 
-inline constexpr int MAX = 16;
+// Sixty-four per book (D, 26 Nov: Readest keeps up to 256 a book; this was
+// sixteen when marks were a shelf of places rather than highlights).
+inline constexpr int MAX = 64;
 inline constexpr uint16_t TBK_SPINE = 0xFFFF;  // a .tbk has no chapters
+// A highlight that came from Readest has no page in THIS layout until it is
+// found; the list then says the chapter alone.
+inline constexpr uint16_t NO_PAGE = 0xFFFF;
 
-// spine + offset is an EPUB position (a visible-codepoint offset, so it
-// survives any change of layout); `page` is what
-// the .tbk reader uses and what an EPUB shows in its list, remembering that a
-// page number is only true for the layout that made it.
+// spine + offset is an EPUB position (a visible-codepoint offset, CrossPoint's
+// counting -- the same Readest's clippings carry, so a pulled highlight lands
+// exactly); `page` is what the .tbk reader uses and what an EPUB shows in its
+// list, remembering that a page number is only true for the layout that made
+// it. `end` is the highlight's end offset when known (pulled ones), else 0.
 //
-// 96 bytes of label, up from 40: the label is a picked phrase, and at 40 a
-// sentence lost its second half to "..." at the moment of keeping -- the
-// half that was usually the reason it was kept.
+// 96 bytes of label: the phrase as it is matched on the page (lines joined by
+// single spaces), cut with "..." when longer.
 inline constexpr int LABEL = 96;
+inline constexpr int ID = 40;  // Readest's note id; empty for one kept here
+enum Src : uint8_t { SRC_HERE = 0, SRC_READEST = 1 };
 
 struct Mark {
   uint16_t spine;
   uint16_t page;
   uint32_t off;
+  uint32_t end;
+  uint8_t src;
+  uint8_t flags;
+  char id[ID];
   char label[LABEL];  // the phrase, or empty for a .tbk page
 };
 
@@ -57,99 +70,184 @@ inline void oldPath(const char* file, char* out, int cap) {
   snprintf(out, (size_t)cap, "/.toybox/marks/%08lx.tbm", (unsigned long)key(file));
 }
 
-// "TBM3", u16 count, then MAX entries of 104 bytes. Fixed length, so a save is
-// one write and a load is one read, and a truncated file is refused rather
-// than guessed at -- there is nothing here worth recovering half of.
+// "TBM4", u16 count, u16 tombstones, then MAX entries of 150 bytes, then
+// TOMBS ids of 40. Fixed length, so a save is one write and a load is one
+// read, and a truncated file is refused rather than guessed at.
 //
-// TBM2 -- the same layout with 40-byte labels -- is still READ, so a card
-// full of marks kept before the labels grew loses none of them; the next
-// save writes TBM3 and the file has migrated. Never written, like the
-// Murmur progress directory: one format going out, two coming in.
-inline constexpr int ENTRY = 8 + LABEL;
-inline constexpr int FILE_BYTES = 6 + MAX * ENTRY;
+// Tombstones: Readest highlights removed on this Sticky. They keep a pull
+// from bringing the highlight straight back, and are what part B sends to
+// Readest as deletions. One book is open at a time, so they live in this
+// module between load() and save() (tombs()).
+//
+// TBM3 (16 x 104) and TBM2 (16 x 48) are still READ; the next save writes TBM4.
+inline constexpr int TOMBS = 32;
+inline constexpr int ENTRY = 14 + ID + LABEL;  // 150
+inline constexpr int HEAD = 8;
+inline constexpr int FILE_BYTES = HEAD + MAX * ENTRY + TOMBS * ID;
+inline constexpr int OLD_MAX = 16;
+inline constexpr int LABEL_V3 = 96, ENTRY_V3 = 8 + LABEL_V3, FILE_BYTES_V3 = 6 + OLD_MAX * ENTRY_V3;
 inline constexpr int LABEL_V2 = 40;
 inline constexpr int ENTRY_V2 = 8 + LABEL_V2;
-inline constexpr int FILE_BYTES_V2 = 6 + MAX * ENTRY_V2;
+inline constexpr int FILE_BYTES_V2 = 6 + OLD_MAX * ENTRY_V2;
+
+struct Tombs {
+  int n = 0;
+  char id[TOMBS][ID] = {};
+};
+inline Tombs& tombs() {
+  static Tombs t;
+  return t;
+}
+inline bool buried(const char* id) {
+  if (!id || !id[0]) return false;
+  const Tombs& t = tombs();
+  for (int i = 0; i < t.n; i++)
+    if (strcmp(t.id[i], id) == 0) return true;
+  return false;
+}
+inline void bury(const char* id) {
+  if (!id || !id[0] || buried(id)) return;
+  Tombs& t = tombs();
+  if (t.n == TOMBS) {  // the oldest goes: it has had the longest to reach Readest
+    memmove(t.id[0], t.id[1], (size_t)(TOMBS - 1) * ID);
+    t.n--;
+  }
+  snprintf(t.id[t.n++], ID, "%s", id);
+}
 
 inline bool save(ToolsHost& h, const char* file, const Mark* m, int n);
+
+inline uint32_t rd32(const uint8_t* e) {
+  return (uint32_t)e[0] | ((uint32_t)e[1] << 8) | ((uint32_t)e[2] << 16) | ((uint32_t)e[3] << 24);
+}
+inline void wr32(uint8_t* e, uint32_t v) {
+  e[0] = (uint8_t)(v & 255);
+  e[1] = (uint8_t)((v >> 8) & 255);
+  e[2] = (uint8_t)((v >> 16) & 255);
+  e[3] = (uint8_t)((v >> 24) & 255);
+}
 
 // Moves an old-place file across as it is read, so the old folder empties
 // without waiting for the owner to keep another mark.
 inline int load(ToolsHost& h, const char* file, Mark* out) {
+  tombs() = Tombs{};
   char p[bstore::PATH_CAP];
   path(file, p, sizeof(p));
-  // Static: 1.7 KB is no stack frame's business, and neither reader loads
-  // two books at once.
-  static uint8_t buf[FILE_BYTES];
-  int got = h.sdReadFile(p, buf, sizeof(buf));
+  // From the heap (PSRAM): 10.9 KB is no stack frame's, nor .bss's, business.
+  uint8_t* buf = (uint8_t*)malloc(FILE_BYTES);
+  if (!buf) return 0;
+  int got = h.sdReadFile(p, buf, FILE_BYTES);
   bool fromOld = false;
   if (got <= 0) {
     oldPath(file, p, sizeof(p));
-    got = h.sdReadFile(p, buf, sizeof(buf));
+    got = h.sdReadFile(p, buf, FILE_BYTES);
     fromOld = got > 0;
   }
-  int entry = ENTRY, labelBytes = LABEL;
-  if (got == FILE_BYTES && memcmp(buf, "TBM3", 4) == 0) {
-    // current
-  } else if (got == FILE_BYTES_V2 && memcmp(buf, "TBM2", 4) == 0) {
-    entry = ENTRY_V2;
-    labelBytes = LABEL_V2;
+  int n = 0;
+  if (got == FILE_BYTES && memcmp(buf, "TBM4", 4) == 0) {
+    n = buf[4] | (buf[5] << 8);
+    int t = buf[6] | (buf[7] << 8);
+    if (n > MAX) n = MAX;
+    if (t > TOMBS) t = TOMBS;
+    for (int i = 0; i < n; i++) {
+      const uint8_t* e = buf + HEAD + i * ENTRY;
+      Mark& o = out[i];
+      o.spine = (uint16_t)(e[0] | (e[1] << 8));
+      o.page = (uint16_t)(e[2] | (e[3] << 8));
+      o.off = rd32(e + 4);
+      o.end = rd32(e + 8);
+      o.src = e[12];
+      o.flags = e[13];
+      memcpy(o.id, e + 14, ID);
+      o.id[ID - 1] = 0;
+      memcpy(o.label, e + 14 + ID, LABEL);
+      o.label[LABEL - 1] = 0;
+    }
+    Tombs& tb = tombs();
+    tb.n = t;
+    for (int i = 0; i < t; i++) {
+      memcpy(tb.id[i], buf + HEAD + MAX * ENTRY + i * ID, ID);
+      tb.id[i][ID - 1] = 0;
+    }
   } else {
-    return 0;
+    int entry = 0, labelBytes = 0;
+    if (got == FILE_BYTES_V3 && memcmp(buf, "TBM3", 4) == 0) {
+      entry = ENTRY_V3;
+      labelBytes = LABEL_V3;
+    } else if (got == FILE_BYTES_V2 && memcmp(buf, "TBM2", 4) == 0) {
+      entry = ENTRY_V2;
+      labelBytes = LABEL_V2;
+    }
+    if (entry) {
+      n = buf[4] | (buf[5] << 8);
+      if (n > OLD_MAX) n = OLD_MAX;
+      for (int i = 0; i < n; i++) {
+        const uint8_t* e = buf + 6 + i * entry;
+        Mark& o = out[i];
+        o = Mark{};
+        o.spine = (uint16_t)(e[0] | (e[1] << 8));
+        o.page = (uint16_t)(e[2] | (e[3] << 8));
+        o.off = rd32(e + 4);
+        memcpy(o.label, e + 8, (size_t)labelBytes);
+        o.label[labelBytes - 1] = 0;
+      }
+    }
   }
-  int n = buf[4] | (buf[5] << 8);
-  if (n > MAX) n = MAX;
-  for (int i = 0; i < n; i++) {
-    const uint8_t* e = buf + 6 + i * entry;
-    out[i].spine = (uint16_t)(e[0] | (e[1] << 8));
-    out[i].page = (uint16_t)(e[2] | (e[3] << 8));
-    out[i].off = (uint32_t)e[4] | ((uint32_t)e[5] << 8) | ((uint32_t)e[6] << 16) |
-                 ((uint32_t)e[7] << 24);
-    memset(out[i].label, 0, LABEL);
-    memcpy(out[i].label, e + 8, labelBytes);
-    out[i].label[labelBytes - 1] = 0;
-  }
+  free(buf);
   if (fromOld) save(h, file, out, n);  // writes the new place, removes the old
   return n;
 }
 
 inline bool save(ToolsHost& h, const char* file, const Mark* m, int n) {
   if (n > MAX) n = MAX;
-  static uint8_t buf[FILE_BYTES];  // static for the same reason as load's
-  memset(buf, 0, sizeof(buf));
-  memcpy(buf, "TBM3", 4);
+  uint8_t* buf = (uint8_t*)calloc(1, FILE_BYTES);
+  if (!buf) return false;
+  memcpy(buf, "TBM4", 4);
+  const Tombs& tb = tombs();
   buf[4] = (uint8_t)(n & 255);
   buf[5] = (uint8_t)(n >> 8);
+  buf[6] = (uint8_t)(tb.n & 255);
+  buf[7] = (uint8_t)(tb.n >> 8);
   for (int i = 0; i < n; i++) {
-    uint8_t* e = buf + 6 + i * ENTRY;
+    uint8_t* e = buf + HEAD + i * ENTRY;
     e[0] = (uint8_t)(m[i].spine & 255);
     e[1] = (uint8_t)(m[i].spine >> 8);
     e[2] = (uint8_t)(m[i].page & 255);
     e[3] = (uint8_t)(m[i].page >> 8);
-    e[4] = (uint8_t)(m[i].off & 255);
-    e[5] = (uint8_t)((m[i].off >> 8) & 255);
-    e[6] = (uint8_t)((m[i].off >> 16) & 255);
-    e[7] = (uint8_t)((m[i].off >> 24) & 255);
-    memcpy(e + 8, m[i].label, LABEL);
+    wr32(e + 4, m[i].off);
+    wr32(e + 8, m[i].end);
+    e[12] = m[i].src;
+    e[13] = m[i].flags;
+    memcpy(e + 14, m[i].id, ID);
+    memcpy(e + 14 + ID, m[i].label, LABEL);
   }
+  for (int i = 0; i < tb.n; i++) memcpy(buf + HEAD + MAX * ENTRY + i * ID, tb.id[i], ID);
   char p[bstore::PATH_CAP];
   path(file, p, sizeof(p));
-  if (!h.sdWriteFileAtomic(p, buf, sizeof(buf))) return false;
+  const bool ok = h.sdWriteFileAtomic(p, buf, FILE_BYTES);
+  free(buf);
+  if (!ok) return false;
   oldPath(file, p, sizeof(p));
   if (h.sdRemove(p)) h.sdRmdir("/.toybox/marks");  // moved; the folder goes when empty
   return true;
 }
 
-// Marks are kept in reading order, so the list reads like the book. Returns
-// the index it landed at, or -1 when this place is already kept (asking twice
-// for the same page should not fill the shelf with duplicates).
+// Kept in reading order (chapter, then offset), so the list reads like the
+// book. Returns the index it landed at, or -1 when it is already there: the
+// same Readest id, or -- for one kept here -- the same page (asking twice for
+// the same page should not fill the list with duplicates).
 inline int add(Mark* m, int& n, const Mark& add) {
-  for (int i = 0; i < n; i++)
-    if (m[i].spine == add.spine && m[i].page == add.page) return -1;
+  for (int i = 0; i < n; i++) {
+    if (add.id[0]) {
+      if (strcmp(m[i].id, add.id) == 0) return -1;
+    } else if (!m[i].id[0] && m[i].spine == add.spine && m[i].page == add.page &&
+               add.page != NO_PAGE) {
+      return -1;
+    }
+  }
   if (n >= MAX) return -1;
   int at = 0;
-  while (at < n && (m[at].spine < add.spine ||
-                    (m[at].spine == add.spine && m[at].page < add.page)))
+  while (at < n && (m[at].spine < add.spine || (m[at].spine == add.spine && m[at].off <= add.off)))
     at++;
   for (int i = n; i > at; i--) m[i] = m[i - 1];
   m[at] = add;

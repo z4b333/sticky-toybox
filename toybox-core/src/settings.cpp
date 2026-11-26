@@ -7,6 +7,8 @@
 #include "tools/charge_dash.h"
 #include "tools/flash_qr.h"
 #include "tools/home_net.h"
+#include "tools/kosync.h"
+#include "tools/readest_hl.h"
 #include "tools/lock_image.h"
 #include "tools/recents.h"
 #include "tools/tool_icons.h"
@@ -150,6 +152,15 @@ inline void draw(ToolsCanvas& c, int act, int cx, int cy, bool dark) {
       c.drawLine(cx - 1, cy + 11, cx - 7, cy + 5, 2, dark);
       c.fillRect(cx + 5, cy - 4, 2, 8, dark);
       c.fillRect(cx + 10, cy - 8, 2, 16, dark);
+      break;
+    case ACT_SYNC:  // two arrows chasing round
+      c.drawCircle(cx, cy, 11, 2, dark);
+      c.fillRect(cx - 14, cy - 2, 6, 4, !dark);
+      c.fillRect(cx + 8, cy - 2, 6, 4, !dark);
+      c.drawLine(cx + 11, cy - 1, cx + 7, cy - 6, 2, dark);
+      c.drawLine(cx + 11, cy - 1, cx + 15, cy - 6, 2, dark);
+      c.drawLine(cx - 11, cy + 1, cx - 7, cy + 6, 2, dark);
+      c.drawLine(cx - 11, cy + 1, cx - 15, cy + 6, 2, dark);
       break;
     case ACT_CLOCK:  // a clock face, hands at ten past ten
       c.drawCircle(cx, cy, 14, 2, dark);
@@ -1056,6 +1067,10 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
     renderDash(host, c);
     return;
   }
+  if (_page == 21) {
+    renderSync(host, c);
+    return;
+  }
   drawTopBar(c, "SETTINGS");
 
   using namespace setui;
@@ -1111,6 +1126,9 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
       {ACT_APPS, "Apps on the hub", apps, true},
       {ACT_FILES, "Add over Wi-Fi", "", true},
       {ACT_CLOCK, "Clock", clockV, true},
+      {ACT_SYNC, "Reading sync",
+       !kosync::haveAccount(host.prefs()) ? "off" : kosync::isReadest(host.prefs()) ? "Readest" : "KOReader",
+       true},
       {ACT_SOUND, "Sound", "", false},
       {ACT_VOLUME, "Volume", "", false},
       {ACT_SETUP, "Setup", "run again", true},
@@ -1197,6 +1215,101 @@ void SettingsScreen::renderApps(ToolsHost& host, ToolsCanvas& c) {
   c.button(r.x, r.y, r.w, r.h, _note ? "THE CARDS WILL SHOW AGAIN" : "SHOW THE HOW-TO CARDS AGAIN",
            false, TS_MED);
   c.textCentered(SCREEN_W / 2, 776, "hiding an app keeps everything saved in it", TS_SMALL, true);
+}
+
+// --- Reading sync (D) ----------------------------------------------------------------
+namespace {
+struct SyncRow {
+  const char* key;
+  const char* name;
+  const char* sub;
+};
+constexpr SyncRow kSyncRows[setui::SYNC_ROWS] = {
+    {rhl::K_POS, "Reading position", nullptr},
+    {rhl::K_HL, "Highlights", "deleted on one side, gone on both"},
+    {rhl::K_AUTO, "Auto sync", "off: only the Sync button"},
+    {rhl::K_OPEN, "When a book opens", "gets your place and new highlights"},
+    {rhl::K_CLOSE, "When a book closes or it sleeps", "sends your place"},
+};
+void syncHead(ToolsCanvas& c, int y, const char* label, const char* right) {
+  using namespace setui;
+  c.textTracked(BTN_X, y, label, TS_SMALL, true, false, 2);
+  if (right) c.text(BTN_X + BTN_W - c.textWidth(right, TS_SMALL), y, right, TS_SMALL, true);
+  chrome2::dottedRule(c, BTN_X, y + c.textHeight(TS_SMALL) + 6, BTN_W);
+}
+}  // namespace
+
+void SettingsScreen::renderSync(ToolsHost& host, ToolsCanvas& c) {
+  using namespace setui;
+  drawTopBar(c, "READING SYNC");
+  Preferences& p = host.prefs();
+  const bool acct = kosync::haveAccount(p);
+  syncHead(c, SYNC_ACC_Y - 30, "ACCOUNT", nullptr);
+  char name[kosync::USER_MAX] = "", line[96];
+  if (acct) kosync::user(p, name, sizeof(name));
+  c.text(BTN_X, SYNC_ACC_Y + 8, acct ? (kosync::isReadest(p) ? "Readest" : "KOReader sync") : "Not signed in",
+         TS_MED, true, true);
+  if (acct)
+    snprintf(line, sizeof(line), "%s", name);
+  else
+    snprintf(line, sizeof(line), "sign in from a book: More > Sync");
+  c.textClipped(BTN_X, SYNC_ACC_Y + 8 + c.textHeight(TS_MED) + 2, BTN_W - 140, line, TS_SMALL, true);
+  if (acct) {
+    const TRect so = syncSignOutRect();
+    if (_armed) c.fillRect(so.x, so.y, so.w, so.h, true);
+    else c.drawRect(so.x, so.y, so.w, so.h, 2, true);
+    c.textInBox(so.x, so.y, so.w, so.h, _armed ? "Sure?" : "Sign out", TS_SMALL, !_armed, true);
+  }
+  syncHead(c, syncRowY(0) - 30, "WHAT TO SYNC", nullptr);
+  syncHead(c, syncRowY(2) - 30, "AUTO SYNC", "over the home Wi-Fi");
+  const bool autoOn = p.getBool(rhl::K_AUTO, true);
+  for (int i = 0; i < SYNC_ROWS; i++) {
+    const TRect r = syncRow(i);
+    const bool dim = i >= 3 && !autoOn;
+    const bool on = p.getBool(kSyncRows[i].key, true);
+    const int nameY = r.y + (kSyncRows[i].sub ? 8 : (r.h - c.textHeight(TS_MED)) / 2);
+    c.text(r.x, nameY, kSyncRows[i].name, TS_MED, true);
+    if (kSyncRows[i].sub) c.text(r.x, nameY + c.textHeight(TS_MED) + 2, kSyncRows[i].sub, TS_SMALL, true);
+    const int sx = r.x + r.w - SWITCH_W - 4, sy = r.y + (r.h - SWITCH_H) / 2;
+    lightSwitch(c, sx, sy, on && !dim);
+    if (dim) {  // the timing switches stand down while auto sync is off: a light screen over them
+      for (int yy = r.y; yy < r.y + r.h; yy += 2)
+        for (int xx = r.x + (yy & 2 ? 1 : 0); xx < r.x + r.w; xx += 2) c.fillRect(xx, yy, 1, 1, false);
+    }
+    c.fillRect(r.x, r.y + r.h + 1, r.w, 1, true);
+  }
+  c.textCentered(SCREEN_W / 2, 776, _note ? _note : "Sync now from any book: More > Sync", TS_SMALL, true);
+}
+
+bool SettingsScreen::tapSync(ToolsHost& host, int x, int y) {
+  using namespace setui;
+  Preferences& p = host.prefs();
+  const bool wasArmed = _armed;
+  _armed = false;
+  _note = nullptr;
+  if (kosync::haveAccount(p) && syncSignOutRect().hit(x, y)) {
+    if (!wasArmed) {
+      _armed = true;  // two taps: signing out is not undone by a third
+      host.beep(2);
+    } else {
+      kosync::forgetAccount(p);
+      _note = "signed out: sign in again from a book";
+      host.beep(1);
+    }
+    return true;
+  }
+  for (int i = 0; i < SYNC_ROWS; i++) {
+    if (!syncRow(i).hit(x, y)) continue;
+    if (i >= 3 && !p.getBool(rhl::K_AUTO, true)) {
+      host.beep(2);
+      _note = "turn Auto sync on first";
+      return true;
+    }
+    rhl::flip(p, kSyncRows[i].key);
+    host.beep(1);
+    return true;
+  }
+  return wasArmed;
 }
 
 // --- the charging dashboard page (C6) ---------------------------------------------
@@ -1604,6 +1717,7 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
   if (_page == 5) return tapLockPic(host, x, y);
   if (_page == 3) return tapApps(host, x, y);
   if (_page == 20) return tapDash(host, x, y);
+  if (_page == 21) return tapSync(host, x, y);
   if (_page == 4) return tapFiles(host, x, y);
   if (_page == 6) return tapClock(host, x, y);
   if (_page == 7) return tapFontWho(host, x, y);
@@ -1714,6 +1828,12 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
     // the note says so, because a Sticky left off on the cable fills up.
     host.setBatteryCare(!host.batteryCare());
     _note = host.batteryCare() ? "holds 80% while the screen is on" : "charges to 100%";
+    host.beep(1);
+    return true;
+  }
+  if (rowHit(ACT_SYNC)) {
+    _page = 21;
+    _armed = false;
     host.beep(1);
     return true;
   }
