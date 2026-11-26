@@ -32,7 +32,8 @@ inline constexpr const char* K_TVER = "ota_tver";    // the version on trial, re
 inline constexpr const char* K_ROLLED = "ota_rolled"; // version that was rolled back, for the notice
 inline constexpr const char* K_BASE = "ota_base";    // sha256 of the base pack last written over the air
 inline constexpr int MAX_TRIES = 3;
-inline constexpr int DEFAULT_MIN_BATTERY = 30;
+// Owner, 26 Nov: 20 % (was 30) for every way of updating, USB or not aside.
+inline constexpr int DEFAULT_MIN_BATTERY = 20;
 
 // --- versions -------------------------------------------------------------------
 // The strings are `git describe` output: "v1.4.4", "v2.0.0-beta.3", or a build
@@ -313,6 +314,86 @@ inline void sizeText(uint32_t bytes, char* out, size_t n) {
     snprintf(out, n, "%u KB", (unsigned)((bytes + 1023u) / 1024u));
 }
 
+// --- from the SD card ---------------------------------------------------------------
+// Settings > Update & about > FROM SD CARD (owner, 25-26 Nov). Only these
+// names, only in /toybox/update/ -- the files from the release page, as they
+// are. Nothing else on the card is read for this.
+
+inline constexpr const char* CARD_DIR = "/toybox/update/";
+inline constexpr int CARD_FILES = 5;
+
+struct CardFile {
+  const char* file;   // name in CARD_DIR
+  const char* label;  // the partition it goes to; nullptr = the app slot
+  const char* title;  // as the screen names it
+  uint32_t bytes = 0;
+  bool found = false;
+};
+
+struct Card {
+  enum State : uint8_t { NoCard, Nothing, NotToybox, TooBig, Found };
+  State state = NoCard;
+  char version[VER_MAX] = {};  // read out of toybox-app.bin, if it is there
+  char bad[24] = {};           // the file a refusal is about
+  CardFile files[CARD_FILES] = {
+      {"toybox-app.bin", nullptr, "Firmware"},
+      {"base_font.tfp", "base_font", "Base font pack"},
+      {"zh_full.tfp", "zh_font", "Chinese pack"},
+      {"ko_full.tfp", "ko_font", "Korean pack"},
+      {"ja_full.tfp", "ja_font", "Japanese pack"},
+  };
+  int count() const {
+    int n = 0;
+    for (const CardFile& f : files) n += f.found;
+    return n;
+  }
+  uint32_t total() const {
+    uint32_t t = 0;
+    for (const CardFile& f : files)
+      if (f.found) t += f.bytes;
+    return t;
+  }
+  bool hasApp() const { return files[0].found; }
+};
+
+// A font pack starts with its format's four letters; anything else is not one.
+inline bool isPackHead(const uint8_t* b, size_t n) {
+  return n >= 4 && b[0] == 'T' && b[1] == 'F' && b[2] == 'P' && (b[3] == '1' || b[3] == '2');
+}
+
+// The Toybox marker, looked for across chunk borders, and the version that
+// follows it up to its NUL -- what SlotWriter does on the way into flash,
+// here for reading a file before anything is written.
+struct MarkerScan {
+  const char* marker;  // "\x7fTOYBOX-STICKY-APP\x7f"
+  size_t len;
+  size_t matched = 0;
+  bool seen = false;
+  int verLen = 0;
+  char ver[VER_MAX] = {};
+  MarkerScan(const char* m, size_t n) : marker(m), len(n) {}
+  void feed(const uint8_t* b, size_t n) {
+    for (size_t i = 0; i < n; i++) {
+      const char c = (char)b[i];
+      if (seen) {
+        if (verLen >= 0 && verLen < (int)sizeof(ver) - 1 && c) {
+          ver[verLen++] = c;
+          ver[verLen] = 0;
+        } else {
+          verLen = -1;
+        }
+        continue;
+      }
+      if (c == marker[matched]) {
+        if (++matched == len) seen = true;
+      } else {
+        matched = (c == marker[0]) ? 1 : 0;
+      }
+    }
+  }
+  bool done() const { return seen && verLen < 0; }
+};
+
 // --- the device, as the settings page sees it --------------------------------------
 // Implemented by the firmware (src/ota.cpp) and by the host harness's fake.
 // A port without OTA returns nullptr from ToolsHost::otaDevice() and the page
@@ -395,6 +476,16 @@ class Device {
   virtual const Lan& lan() const = 0;
   // Once after a rollback: the version that would not start. Clears it.
   virtual bool takeRollbackNotice(char* ver, size_t n) = 0;
+  // FROM SD CARD: what is in /toybox/update/, read but not written. Blocks
+  // about a second (the firmware is read through for its marker).
+  virtual void cardScan(Card& out) { out = Card{}; }
+  // Writes what cardScan found -- packs first, the firmware last -- then
+  // renames each file to .done. Progress stages are indexes into files[].
+  // On Ok with the firmware among them, the caller says so and restart()s.
+  virtual Err cardInstall(const Card& c, Progress p, void* ctx) {
+    (void)c, (void)p, (void)ctx;
+    return Err::Flash;
+  }
 };
 
 #ifdef TOYBOX_HOST

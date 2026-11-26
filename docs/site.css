@@ -226,6 +226,12 @@ code {
   padding: 2px 6px;
 }
 pre code { display: block; padding: 12px 14px; overflow-x: auto; }
+.cardtree { background: #f0f0f2; border-radius: var(--radius); padding: 14px 16px; display: grid;
+  grid-template-columns: max-content 1fr; column-gap: 18px; row-gap: 4px; font-size: 15px; }
+.cardtree > div { display: contents; }
+.cardtree code { background: none; padding: 0; font-size: 14px; white-space: pre; line-height: 1.5; }
+.cardtree span { color: var(--muted); line-height: 1.45; }
+.cardtree + .hint { margin-top: 12px; }
 
 details {
   border: 1px solid var(--line);

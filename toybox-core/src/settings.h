@@ -148,8 +148,14 @@ inline TRect clockNetRect() { return TRect{16, 620, SCREEN_W - 32, 60}; }
 // where every other page in settings does: DONE at the bottom, the one thing to
 // do above it.
 inline TRect updCheckRect() { return TRect{16, 288, SCREEN_W - 32, 60}; }
-inline TRect updLanRect() { return TRect{16, 408, SCREEN_W - 32, 60}; }
-inline TRect updResetRect() { return TRect{16, 588, SCREEN_W - 32, 60}; }
+inline TRect updLanRect() { return TRect{16, 380, SCREEN_W - 32, 60}; }
+inline TRect updCardRect() { return TRect{16, 472, SCREEN_W - 32, 60}; }
+inline TRect updResetRect() { return TRect{16, 628, SCREEN_W - 32, 60}; }
+// The SD screen's pair at the foot: NOT NOW, and INSTALL beside it.
+inline TRect updCardNoRect() { return TRect{16, 700, (SCREEN_W - 32 - 12) / 2, 60}; }
+inline TRect updCardGoRect() {
+  return TRect{16 + (SCREEN_W - 32 - 12) / 2 + 12, 700, (SCREEN_W - 32 - 12) / 2, 60};
+}
 inline TRect updInstallRect() { return TRect{16, 620, SCREEN_W - 32, 60}; }
 inline TRect updDoneRect() { return filesDoneRect(); }
 inline constexpr int UPD_QR = 200, UPD_QR_X = (SCREEN_W - UPD_QR) / 2, UPD_QR_Y = 214;
@@ -386,8 +392,11 @@ class SettingsScreen {
   // The update page: 0 = the page, 1 = checking (the next tick does the
   // blocking work), 2 = what the check found, 3 = installing (the tick blocks,
   // repainting the bar as bytes land), 4 = installed or not, 5 = the computer
-  // page, 6 = joining the home Wi-Fi for it (the next tick).
+  // page, 6 = joining the home Wi-Fi for it (the next tick), 7 = reading the
+  // card (the next tick), 8 = what the card holds, 9 = installing from it
+  // (the tick blocks), 10 = installed from the card or not.
   uint8_t _upStage = 0;
+  ota::Card _card;
   ota::Err _upErr = ota::Err::Ok;
   ota::Check _upCheck;
   uint8_t _upPart = 0;  // which file the bar is filling: 0 app, 1 fonts

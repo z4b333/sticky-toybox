@@ -179,6 +179,11 @@ bool streamClose(bool keep);
 // held. moveFile makes the destination's folders and replaces what is there;
 // removeDir takes an empty folder only.
 bool moveFile(const char* from, const char* to);
+// Part of a big file, for the SD update: n bytes at offset into dst, the
+// count read back (0 at the end, -1 on error). Keeps the file open between
+// calls; readAtClose() lets it go. Only while the bus is held.
+int readAt(const char* path, uint32_t offset, void* dst, int n);
+void readAtClose();
 bool removeFile(const char* path);
 bool removeDir(const char* path);
 

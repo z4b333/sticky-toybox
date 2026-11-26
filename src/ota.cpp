@@ -16,6 +16,7 @@
 #include <esp_random.h>
 #include <mbedtls/sha256.h>
 
+#include "sdcard.h"
 #include "sensors.h"
 #include "tools/home_net.h"
 
@@ -532,6 +533,145 @@ class StickyOta : public ota::Device {
     _p.getString(ota::K_ROLLED, ver, n);
     _p.remove(ota::K_ROLLED);
     return true;
+  }
+
+  // --- from the SD card ---
+
+  void cardScan(ota::Card& out) override {
+    out = ota::Card{};
+    if (!sdcard::browseOpen()) return;  // NoCard: nothing answered
+    uint8_t* buf = (uint8_t*)heap_caps_malloc(CHUNK, MALLOC_CAP_SPIRAM);
+    char path[64];
+    out.state = ota::Card::Nothing;
+    for (ota::CardFile& f : out.files) {
+      snprintf(path, sizeof(path), "%s%s", ota::CARD_DIR, f.file);
+      const int n = sdcard::fileSize(path);
+      if (n <= 0) continue;
+      f.bytes = (uint32_t)n;
+      f.found = true;
+      // How big its home is.
+      const esp_partition_t* home =
+          f.label ? esp_partition_find_first(ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_ANY,
+                                             f.label)
+                  : esp_ota_get_next_update_partition(nullptr);
+      if (!home || f.bytes > home->size) {
+        out.state = ota::Card::TooBig;
+        snprintf(out.bad, sizeof(out.bad), "%s", f.file);
+        break;
+      }
+      if (!buf) continue;
+      if (f.label) {
+        // A pack: its four letters.
+        const int k = sdcard::readAt(path, 0, buf, 4);
+        if (!ota::isPackHead(buf, k > 0 ? (size_t)k : 0)) {
+          out.state = ota::Card::NotToybox;
+          snprintf(out.bad, sizeof(out.bad), "%s", f.file);
+          break;
+        }
+      } else {
+        // The firmware: read through for the marker and the version after it.
+        ota::MarkerScan ms(toybox_app_marker, MARKER_LEN);
+        for (uint32_t at = 0; at < f.bytes && !ms.done();) {
+          const int k = sdcard::readAt(path, at, buf, CHUNK);
+          if (k <= 0) break;
+          ms.feed(buf, (size_t)k);
+          at += (uint32_t)k;
+        }
+        if (!ms.seen) {
+          out.state = ota::Card::NotToybox;
+          snprintf(out.bad, sizeof(out.bad), "%s", f.file);
+          break;
+        }
+        snprintf(out.version, sizeof(out.version), "%s", ms.ver);
+      }
+    }
+    sdcard::readAtClose();
+    free(buf);
+    sdcard::browseClose();
+    if (out.state == ota::Card::Nothing && out.count() > 0) out.state = ota::Card::Found;
+  }
+
+  Err cardInstall(const ota::Card& c, ota::Progress prog, void* ctx) override {
+    if (c.state != ota::Card::Found) return Err::Download;
+    const ota::Gate g = ota::mayStart(sensors::batteryPercent(), sensors::charging(),
+                                      ota::DEFAULT_MIN_BATTERY,
+                                      c.hasApp() ? c.files[0].bytes : 0, slotBytes());
+    if (g == ota::Gate::LowBattery) return Err::LowBattery;
+    if (g == ota::Gate::TooBig) return Err::TooBig;
+    if (!sdcard::browseOpen()) return Err::Download;
+    uint8_t* buf = (uint8_t*)heap_caps_malloc(CHUNK, MALLOC_CAP_SPIRAM);
+    if (!buf) {
+      sdcard::browseClose();
+      return Err::LowMemory;
+    }
+    char path[64];
+    Err err = Err::Ok;
+    // Packs first (every v2 build reads the same pack format, so the running
+    // app is content with a new one), the firmware last, as the site does.
+    for (int i = 1; i <= ota::CARD_FILES && err == Err::Ok; i++) {
+      const int idx = i % ota::CARD_FILES;  // 1,2,3,4 then 0
+      const ota::CardFile& f = c.files[idx];
+      if (!f.found) continue;
+      snprintf(path, sizeof(path), "%s%s", ota::CARD_DIR, f.file);
+      if (f.label) {
+        if (strcmp(f.label, "base_font") == 0) _p.remove(ota::K_BASE);
+        PartWriter pw;
+        err = pw.begin(f.label, f.bytes);
+        mbedtls_sha256_context sha;
+        mbedtls_sha256_init(&sha);
+        mbedtls_sha256_starts(&sha, 0);
+        for (uint32_t at = 0; err == Err::Ok && at < f.bytes;) {
+          const int k = sdcard::readAt(path, at, buf, CHUNK);
+          if (k <= 0) {
+            err = Err::Download;
+            break;
+          }
+          mbedtls_sha256_update(&sha, buf, (size_t)k);
+          err = pw.write(buf, (size_t)k);
+          at += (uint32_t)k;
+          if (prog) prog(ctx, (uint8_t)idx, at, f.bytes);
+        }
+        uint8_t d[32];
+        char want[65], got[65];
+        mbedtls_sha256_finish(&sha, d);
+        mbedtls_sha256_free(&sha);
+        hex(d, 32, want);
+        // Read back from flash: what landed is what the card held.
+        if (err == Err::Ok && !(partSha(pw.part(), f.bytes, got) && strcmp(got, want) == 0))
+          err = Err::Mismatch;
+        if (err == Err::Ok && strcmp(f.label, "base_font") == 0) _p.putString(ota::K_BASE, got);
+      } else {
+        SlotWriter w;
+        err = w.begin(f.bytes);
+        for (uint32_t at = 0; err == Err::Ok && at < f.bytes;) {
+          const int k = sdcard::readAt(path, at, buf, CHUNK);
+          if (k <= 0) {
+            err = Err::Download;
+            break;
+          }
+          err = w.write(buf, (size_t)k);
+          at += (uint32_t)k;
+          if (prog) prog(ctx, 0, at, f.bytes);
+        }
+        if (err == Err::Ok) err = w.finish(nullptr);  // the marker and the image checksum
+        if (err == Err::Ok) err = w.activate(_p);
+        if (err != Err::Ok) w.abort();
+      }
+    }
+    sdcard::readAtClose();
+    // Installed once: the files become .done, so the next look finds nothing.
+    if (err == Err::Ok) {
+      for (const ota::CardFile& f : c.files) {
+        if (!f.found) continue;
+        char done[72];
+        snprintf(path, sizeof(path), "%s%s", ota::CARD_DIR, f.file);
+        snprintf(done, sizeof(done), "%s.done", path);
+        sdcard::moveFile(path, done);
+      }
+    }
+    free(buf);
+    sdcard::browseClose();
+    return err;
   }
 
  private:

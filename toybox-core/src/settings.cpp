@@ -1779,6 +1779,30 @@ void upBytes(ToolsCanvas& c, int y, uint32_t done, uint32_t total) {
 }
 }  // namespace
 
+namespace {
+// An SD card, 48x60 at (x, y): a cut corner and four contacts.
+void sdIcon(ToolsCanvas& c, int x, int y) {
+  c.drawLine(x, y, x + 34, y, 3, true);
+  c.drawLine(x + 34, y, x + 48, y + 14, 3, true);
+  c.drawLine(x + 48, y + 14, x + 48, y + 60, 3, true);
+  c.drawLine(x + 48, y + 60, x, y + 60, 3, true);
+  c.drawLine(x, y + 60, x, y, 3, true);
+  for (int k = 0; k < 4; k++) c.fillRect(x + 8 + k * 8, y + 6, 4, 12, true);
+}
+// The order the card's files go in (packs, then the firmware) and where one
+// stands in it, 1-based, for "STEP 2 OF 3".
+int cardStep(const ota::Card& k, int idx) {
+  int n = 0;
+  for (int i = 1; i <= ota::CARD_FILES; i++) {
+    const int j = i % ota::CARD_FILES;
+    if (!k.files[j].found) continue;
+    n++;
+    if (j == idx) return n;
+  }
+  return n;
+}
+}  // namespace
+
 void SettingsScreen::renderUpdate(ToolsHost& host, ToolsCanvas& c) {
   using namespace setui;
   _upHost = &host;
@@ -1884,6 +1908,119 @@ void SettingsScreen::renderUpdate(ToolsHost& host, ToolsCanvas& c) {
     return;
   }
 
+  // --- FROM SD CARD --------------------------------------------------------------
+  if (_upStage == 7) {
+    overPage(chrome2::BI_WORKING, "FROM SD CARD", "Reading the card", "A second or two.");
+    return;
+  }
+  if (_upStage == 8) {
+    const ota::Card& k = _card;
+    if (k.state != ota::Card::Found) {
+      const char* t = "Nothing to install";
+      const char* l1 = "Copy toybox-app.bin, and any packs,";
+      const char* l2 = "to toybox/update on the card.";
+      const char* note = "Files from the release page, as they are.";
+      const char* lab = "FROM SD CARD";
+      if (k.state == ota::Card::NoCard) {
+        t = "No card in the slot";
+        l1 = "Put the card in, then try again.";
+        l2 = nullptr;
+        note = "The card is read only when you ask.";
+      } else if (k.state == ota::Card::NotToybox || k.state == ota::Card::TooBig) {
+        lab = "NOT INSTALLED";
+        t = k.state == ota::Card::NotToybox ? "Not a Toybox file" : "Too big for its place";
+        snprintf(buf, sizeof(buf), "%s on the card is not", k.bad);
+        l1 = buf;
+        l2 = k.state == ota::Card::NotToybox ? "made for the Sticky." : "from a release for the Sticky.";
+        note = "Nothing was changed.";
+      }
+      sdIcon(c, SCREEN_W / 2 - 24, 196);
+      c.textTrackedCentered(SCREEN_W / 2, 282, lab, TS_SMALL, true, true, 4);
+      c.textCentered(SCREEN_W / 2, 312, t, TS_LARGE, true, true);
+      c.textCentered(SCREEN_W / 2, 372, l1, TS_MED, true);
+      if (l2) c.textCentered(SCREEN_W / 2, 404, l2, TS_MED, true);
+      chrome2::dottedRule(c, 16, 668, SCREEN_W - 32);
+      c.textCentered(SCREEN_W / 2, 676, note, TS_SMALL, true);
+      const TRect dn = TRect{16, 712, SCREEN_W - 32, 56};
+      c.button(dn.x, dn.y, dn.w, dn.h, "DONE", false, TS_LARGE);
+      return;
+    }
+    sdIcon(c, SCREEN_W / 2 - 24, 72);
+    c.textTrackedCentered(SCREEN_W / 2, 150, "ON THE CARD", TS_SMALL, true, true, 4);
+    if (k.hasApp()) c.textCentered(SCREEN_W / 2, 178, k.version, TS_HUGE, true, true);
+    else c.textCentered(SCREEN_W / 2, 188, "Language packs", TS_LARGE, true, true);
+    snprintf(buf, sizeof(buf), "now: %s", d ? d->version() : "");
+    c.textCentered(SCREEN_W / 2, 246, buf, TS_SMALL, true);
+    c.textTracked(16, 286, "WILL INSTALL", TS_SMALL, true, false, 1);
+    chrome2::dottedRule(c, 16, 308, SCREEN_W - 32);
+    int y = 316;
+    for (int i = 1; i <= ota::CARD_FILES; i++) {
+      const ota::CardFile& f = k.files[i % ota::CARD_FILES];
+      if (!f.found) continue;
+      c.text(16, y + 4, f.title, TS_MED, true, true);
+      c.text(16, y + 4 + c.textHeight(TS_MED), f.file, TS_SMALL, true);
+      char sz[16];
+      ota::sizeText(f.bytes, sz, sizeof(sz));
+      c.text(SCREEN_W - 16 - c.textWidth(sz, TS_MED), y + 4, sz, TS_MED, true);
+      y += 56;
+      c.fillRect(16, y - 2, SCREEN_W - 32, 1, true);
+    }
+    chrome2::dottedRule(c, 16, 618, SCREEN_W - 32);
+    c.textCentered(SCREEN_W / 2, 628, "About a minute. Notes, books and settings stay.", TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, 654, "If it won't start, it goes back.", TS_SMALL, true);
+    const TRect no = updCardNoRect(), go = updCardGoRect();
+    c.button(no.x, no.y, no.w, no.h, "NOT NOW", false, TS_MED);
+    const int bat = host.batteryPercent();
+    if (!host.charging() && bat >= 0 && bat < ota::DEFAULT_MIN_BATTERY) {
+      for (int k2 = 0; k2 < go.w; k2 += 10) {
+        c.fillRect(go.x + k2, go.y, 6, 2, true);
+        c.fillRect(go.x + k2, go.y + go.h - 2, 6, 2, true);
+      }
+      for (int k2 = 0; k2 < go.h; k2 += 10) {
+        c.fillRect(go.x, go.y + k2, 2, 6, true);
+        c.fillRect(go.x + go.w - 2, go.y + k2, 2, 6, true);
+      }
+      snprintf(buf, sizeof(buf), "Battery %d%%: charge to", bat);
+      c.textCentered(go.x + go.w / 2, go.y + 8, buf, TS_SMALL, true, true);
+      snprintf(buf, sizeof(buf), "%d%% or plug in", ota::DEFAULT_MIN_BATTERY);
+      c.textCentered(go.x + go.w / 2, go.y + 8 + c.textHeight(TS_SMALL) + 2, buf, TS_SMALL, true, true);
+    } else {
+      c.button(go.x, go.y, go.w, go.h, "INSTALL", true, TS_MED);
+    }
+    return;
+  }
+  if (_upStage == 9) {
+    const int n = _card.count(), at = cardStep(_card, _upPart);
+    snprintf(buf, sizeof(buf), "FROM THE CARD \xc2\xb7 STEP %d OF %d", at, n);
+    c.textTrackedCentered(SCREEN_W / 2, 120, buf, TS_SMALL, true, true, 3);
+    c.textCentered(SCREEN_W / 2, 176, _card.hasApp() ? _card.version : "Language packs", TS_LARGE,
+                   true, true);
+    c.textCentered(SCREEN_W / 2, 296, _card.files[_upPart % ota::CARD_FILES].title, TS_MED, true);
+    upBar(c, _upDone, _upTotal);
+    upBytes(c, UPD_BAR_Y + UPD_BAR_H + 16, _upDone, _upTotal);
+    c.textCentered(SCREEN_W / 2, 470, "Leave the card in.", TS_MED, true);
+    c.textCentered(SCREEN_W / 2, 506, "notes and settings are not touched", TS_SMALL, true);
+    return;
+  }
+  if (_upStage == 10) {
+    if (_upErr == ota::Err::Ok) {
+      if (_card.hasApp()) snprintf(buf, sizeof(buf), "into %s", _card.version);
+      else snprintf(buf, sizeof(buf), "with the new packs");
+      overPage(chrome2::BI_DOWNLOAD, "INSTALLED \xc2\xb7 RESTARTING", buf,
+               "The files on the card are now .done.");
+      return;
+    }
+    c.textCentered(SCREEN_W / 2, 120, "NOT UPDATED", TS_MED, true, true);
+    c.textCentered(SCREEN_W / 2, 220, ota::describe(_upErr), TS_LARGE, true);
+    c.textCentered(SCREEN_W / 2, 300,
+                   _upErr == ota::Err::Download ? "is the card still in? try again" : upHint(_upErr),
+                   TS_MED, true);
+    c.textCentered(SCREEN_W / 2, 380, "this version keeps running", TS_SMALL, true);
+    const TRect dn = updDoneRect();
+    c.button(dn.x, dn.y, dn.w, dn.h, "DONE", false, TS_LARGE);
+    return;
+  }
+
   if (_upStage == 5 || _upStage == 6) {
     const ota::Lan* l = d ? &d->lan() : nullptr;
     const TRect dn = updDoneRect();
@@ -1973,17 +2110,19 @@ void SettingsScreen::renderUpdate(ToolsHost& host, ToolsCanvas& c) {
     if (wifi) {
       char name[homenet::SSID_MAX];
       homenet::wifiName(host.prefs(), name, sizeof(name));
-      snprintf(buf, sizeof(buf), "from the website, through %s", name);
+      snprintf(buf, sizeof(buf), "downloads it online, over %s", name);
     } else {
       snprintf(buf, sizeof(buf), "save a home wifi first: Settings > Clock");
     }
-    c.textCentered(SCREEN_W / 2, ck.y + ck.h + 10, buf, TS_SMALL, true);
+    c.textCentered(SCREEN_W / 2, ck.y + ck.h + 8, buf, TS_SMALL, true);
     c.button(ln.x, ln.y, ln.w, ln.h, "FROM A COMPUTER", false, TS_MED);
-    c.textCentered(SCREEN_W / 2, ln.y + ln.h + 10, "a page at toybox.local takes a .bin file", TS_SMALL,
-                   true);
+    c.textCentered(SCREEN_W / 2, ln.y + ln.h + 8, "sends a .bin file from toybox.local", TS_SMALL, true);
+    const TRect cd = updCardRect();
+    c.button(cd.x, cd.y, cd.w, cd.h, "FROM SD CARD", false, TS_MED);
+    c.textCentered(SCREEN_W / 2, cd.y + cd.h + 8, "installs the files in toybox/update", TS_SMALL, true);
   }
-  c.textTracked(16, 532, "EXTRAS", TS_SMALL, true, false, 1);
-  c.fillRect(16, 554, SCREEN_W - 32, 1, true);
+  c.textTracked(16, 574, "EXTRAS", TS_SMALL, true, false, 1);
+  c.fillRect(16, 596, SCREEN_W - 32, 1, true);
   {
     const TRect a = updResetRect();
     if (_armed) c.fillRect(a.x, a.y, a.w, a.h, true);
@@ -2029,6 +2168,47 @@ bool SettingsScreen::tapUpdate(ToolsHost& host, int x, int y) {
     }
     return false;
   }
+  if (_upStage == 7 || _upStage == 9) return false;  // busy with the card
+  if (_upStage == 8) {
+    if (_card.state != ota::Card::Found) {
+      if (TRect{16, 712, SCREEN_W - 32, 56}.hit(x, y)) {
+        host.beep(1);
+        _upStage = 0;
+        host.refresh(true);
+      }
+      return false;
+    }
+    if (updCardNoRect().hit(x, y)) {
+      host.beep(1);
+      _upStage = 0;
+      host.refresh(true);
+      return false;
+    }
+    const int bat = host.batteryPercent();
+    const bool low = !host.charging() && bat >= 0 && bat < ota::DEFAULT_MIN_BATTERY;
+    if (!low && d && updCardGoRect().hit(x, y)) {
+      host.beep(1);
+      _upStage = 9;
+      for (int i = 1; i <= ota::CARD_FILES; i++)  // the first file it will write
+        if (_card.files[i % ota::CARD_FILES].found) {
+          _upPart = (uint8_t)(i % ota::CARD_FILES);
+          break;
+        }
+      _upDone = 0;
+      _upTotal = _card.files[_upPart].bytes;
+      _upPainted = 0;
+      host.refresh(true);
+    }
+    return false;
+  }
+  if (_upStage == 10) {
+    if (_upErr != ota::Err::Ok && updDoneRect().hit(x, y)) {
+      host.beep(1);
+      _upStage = 0;
+      host.refresh(true);
+    }
+    return false;
+  }
   if (_upStage == 5) {
     const ota::Lan::Phase ph = d ? d->lan().phase : ota::Lan::Off;
     if (ph == ota::Lan::Receiving || ph == ota::Lan::Verifying || ph == ota::Lan::Done) return false;
@@ -2067,6 +2247,14 @@ bool SettingsScreen::tapUpdate(ToolsHost& host, int x, int y) {
     homenet::wifiName(host.prefs(), _netName, sizeof(_netName));
     _upRolled[0] = 0;
     _upStage = 1;
+    host.refresh(true);
+    return false;
+  }
+  if (updCardRect().hit(x, y)) {
+    host.beep(1);
+    _upRolled[0] = 0;
+    _card = ota::Card{};
+    _upStage = 7;
     host.refresh(true);
     return false;
   }
@@ -2122,6 +2310,22 @@ bool SettingsScreen::tickUpdate(ToolsHost& host) {
   }
   if (_upStage == 4) {
     if (_upErr == ota::Err::Ok) d->restart();  // "RESTARTING" is on the panel by now
+    return false;
+  }
+  if (_upStage == 7) {
+    d->cardScan(_card);
+    _upStage = 8;
+    host.beep(_card.state == ota::Card::Found ? 1 : 2);
+    return true;  // the card let go of the bus: the repaint is a full one
+  }
+  if (_upStage == 9) {
+    _upErr = d->cardInstall(_card, &SettingsScreen::onProgress, this);
+    _upStage = 10;
+    host.beep(_upErr == ota::Err::Ok ? 1 : 2);
+    return true;
+  }
+  if (_upStage == 10) {
+    if (_upErr == ota::Err::Ok) d->restart();
     return false;
   }
   if (_upStage == 6) {

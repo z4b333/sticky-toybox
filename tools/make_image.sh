@@ -86,7 +86,7 @@ cat > docs/firmware/version.json <<JSON
   "ota": {
     "app": { "path": "firmware/toybox-app.bin", "bytes": $APP_BYTES, "sha256": "$APP_SHA" },
     "base": { "path": "firmware/base_font.tfp", "bytes": $BASE_BYTES, "sha256": "$BASE_SHA" },
-    "minBattery": 30
+    "minBattery": 20
   }
 }
 JSON

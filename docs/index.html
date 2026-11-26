@@ -329,6 +329,40 @@
     </div>
   </section>
 
+  <!-- The card, for a first fill. Every folder is one the firmware already
+       reads (src/sdcard.cpp, card_text.h, ota_core.h CARD_DIR); keep this
+       list in step with them. -->
+  <section id="card">
+    <div class="wrap grid cols-2">
+      <div>
+        <p class="eyebrow">The SD card</p>
+        <h2>What goes where.</h2>
+        <p class="lede prose">A FAT32 card with these folders. Every one of
+        them is optional &mdash; make only the ones you use.</p>
+      </div>
+      <div class="prose">
+<div class="cardtree" role="list">
+          <div role="listitem"><code>SD card</code><span></span></div>
+          <div role="listitem"><code>├── books/</code><span>EPUBs, and .tbk from Toybox Slicer</span></div>
+          <div role="listitem"><code>│   └── Manga/</code><span>a folder inside is a shelf of its own</span></div>
+          <div role="listitem"><code>├── wallpapers/</code><span>.tbi or .bmp, for Home and the lock screen</span></div>
+          <div role="listitem"><code>├── sleep.bmp</code><span>the sleeping panel’s picture</span></div>
+          <div role="listitem"><code>├── sleep/</code><span>…or a folder of them, one at random</span></div>
+          <div role="listitem"><code>├── notes/</code><span>.md or .txt notes</span></div>
+          <div role="listitem"><code>├── decks/</code><span>flashcards: .tsv, .csv or .txt</span></div>
+          <div role="listitem"><code>├── recipes/</code><span>.json recipes</span></div>
+          <div role="listitem"><code>├── fonts/</code><span>one folder per family, .cpfont files</span></div>
+          <div role="listitem"><code>└── toybox/</code><span></span></div>
+          <div role="listitem"><code>    └── update/</code><span>toybox-app.bin and .tfp packs, for FROM SD CARD</span></div>
+        </div>
+        <p class="hint">Make wallpapers and sleep art with the
+        <a href="wallpaper.html">wallpaper maker</a>, notes and decks with the
+        <a href="editor.html">editor</a>. The card is only read when you open
+        something on it, so it can come out between uses.</p>
+      </div>
+    </div>
+  </section>
+
   <section id="install">
     <div class="wrap">
       <p class="eyebrow">Install</p>
@@ -405,10 +439,10 @@
            Sticky fetches from this site; the computer route is a page the
            Sticky serves. Plain navigation to http:// is allowed. -->
       <div class="ota" id="ota">
-        <h3>After that: updates over Wi-Fi</h3>
+        <h3>After that: updates without the cable</h3>
         <p>Once Toybox 2 is on your Sticky, you don't need the cable again.
-        It needs a home Wi-Fi saved once (<b>Settings &rsaquo; Clock</b>,
-        from your phone).</p>
+        The first two ways need a home Wi-Fi saved once (<b>Settings &rsaquo;
+        Clock</b>, from your phone); the card needs nothing.</p>
         <ol class="steps">
           <li><b>From this site.</b> On the Sticky: <b>Settings &rsaquo;
           Update &amp; about &rsaquo; CHECK FOR UPDATE</b>. It downloads the
@@ -418,10 +452,15 @@
           address the screen shows) on the same Wi-Fi, type the six-digit code
           from the screen, and send it
           <a href="firmware/toybox-app.bin" download>toybox-app.bin</a>.</li>
+          <li><b>From the SD card.</b> No Wi-Fi needed. Copy
+          <a href="firmware/toybox-app.bin" download>toybox-app.bin</a>, and
+          any font packs you want, into <code>toybox/update/</code> on the
+          card, then press <b>FROM SD CARD</b>. After installing, the files are
+          renamed to <code>.done</code> so they install only once.</li>
         </ol>
-        <p class="hint">Either way your notes, books and settings stay. A new
+        <p class="hint">Any way your notes, books and settings stay. A new
         version that can't start goes back to the old one by itself, and says
-        so under <b>Update &amp; about</b>. Keep the battery above 30&nbsp;% or
+        so under <b>Update &amp; about</b>. Keep the battery above 20&nbsp;% or
         the Sticky plugged in.</p>
       </div>
 

@@ -849,6 +849,17 @@ bool moveFile(const char* from, const char* to) {
   return true;
 }
 bool removeFile(const char* path) { return busHeld() && removeAny(path); }
+int readAt(const char* path, uint32_t offset, void* dst, int n) {
+  if (!busHeld() || !path || n < 0) return -1;
+  auto it = fakeCard().find(path);
+  if (it == fakeCard().end()) return -1;
+  const std::string& d = it->second;
+  if (offset >= d.size()) return 0;
+  const size_t k = d.size() - offset < (size_t)n ? d.size() - offset : (size_t)n;
+  memcpy(dst, d.data() + offset, k);
+  return (int)k;
+}
+void readAtClose() {}
 // The guards' back doors: the card as another build left it, with no session.
 bool hostCardMove(const char* from, const char* to) { return moveAny(from, to); }
 bool hostCardRemove(const char* path) { return removeAny(path); }
@@ -1986,6 +1997,29 @@ bool moveFile(const char* from, const char* to) {
 bool removeFile(const char* path) {
   if (!busHeld() || !path || path[0] != '/') return false;
   return SD.exists(path) && SD.remove(path);
+}
+
+namespace {
+File g_rd;
+char g_rdPath[96] = "";
+}  // namespace
+
+int readAt(const char* path, uint32_t offset, void* dst, int n) {
+  if (!busHeld() || !path || path[0] != '/' || n < 0) return -1;
+  if (!g_rd || strcmp(g_rdPath, path) != 0) {
+    if (g_rd) g_rd.close();
+    g_rdPath[0] = 0;
+    g_rd = sdOpenR(path);
+    if (!g_rd || g_rd.isDirectory()) return -1;
+    snprintf(g_rdPath, sizeof(g_rdPath), "%s", path);
+  }
+  if (g_rd.position() != offset && !g_rd.seek(offset)) return -1;
+  return (int)g_rd.read((uint8_t*)dst, (size_t)n);
+}
+
+void readAtClose() {
+  if (g_rd) g_rd.close();
+  g_rdPath[0] = 0;
 }
 
 bool removeDir(const char* path) {

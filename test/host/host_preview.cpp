@@ -70,6 +70,22 @@ struct FakeOta : ota::Device {
     rolled[0] = 0;
     return true;
   }
+  // FROM SD CARD: a scripted card.
+  ota::Card cardScript;
+  ota::Err cardErr = ota::Err::Ok;
+  int cardScans = 0, cardInstalls = 0;
+  void cardScan(ota::Card& out) override {
+    cardScans++;
+    out = cardScript;
+  }
+  ota::Err cardInstall(const ota::Card& c, ota::Progress p, void* ctx) override {
+    cardInstalls++;
+    for (int i = 1; i <= ota::CARD_FILES; i++) {
+      const ota::CardFile& f = c.files[i % ota::CARD_FILES];
+      if (f.found && p) p(ctx, (uint8_t)(i % ota::CARD_FILES), f.bytes / 2, f.bytes);
+    }
+    return cardErr;
+  }
 };
 static FakeOta g_fakeOta;
 #include "bmp_gray.h"
@@ -2886,6 +2902,75 @@ int main() {
     toybox.tick();
     shot("update_lan_no_wifi");
     tapRect(setui::updDoneRect());
+    toybox.onTap(BACK_W / 2, TOPBAR_H / 2);
+
+    // From the SD card: no card, nothing there, a file that is not ours, then
+    // a release with a pack -- low battery, a failed install, a good one.
+    tapAct(setui::ACT_UPDATE);
+    g_fakeOta.cardScript = ota::Card{};  // NoCard
+    tapRect(setui::updCardRect());
+    if (st.hostUpStage() != 7) fail("FROM SD CARD did not start");
+    shot("update_card_reading");
+    toybox.tick();
+    if (st.hostUpStage() != 8 || g_fakeOta.cardScans != 1) fail("the card was not read");
+    shot("update_card_none");
+    tapRect(TRect{16, 712, SCREEN_W - 32, 56});
+    if (st.hostUpStage() != 0) fail("DONE did not leave the card screen");
+    g_fakeOta.cardScript.state = ota::Card::Nothing;
+    tapRect(setui::updCardRect());
+    toybox.tick();
+    shot("update_card_empty");
+    tapRect(TRect{16, 712, SCREEN_W - 32, 56});
+    g_fakeOta.cardScript.state = ota::Card::NotToybox;
+    snprintf(g_fakeOta.cardScript.bad, sizeof(g_fakeOta.cardScript.bad), "toybox-app.bin");
+    tapRect(setui::updCardRect());
+    toybox.tick();
+    shot("update_card_not_ours");
+    tapRect(setui::updCardGoRect());
+    if (g_fakeOta.cardInstalls) fail("installed a refused card");
+    tapRect(TRect{16, 712, SCREEN_W - 32, 56});
+    {
+      ota::Card& k = g_fakeOta.cardScript;
+      k = ota::Card{};
+      k.state = ota::Card::Found;
+      snprintf(k.version, sizeof(k.version), "v2.1.0");
+      k.files[0].found = true;
+      k.files[0].bytes = 1468006;
+      k.files[2].found = true;
+      k.files[2].bytes = 1153433;
+      k.files[3].found = true;
+      k.files[3].bytes = 943718;
+    }
+    tapRect(setui::updCardRect());
+    toybox.tick();
+    shot("update_card_found");
+    sensors::hostSetBattery(15, false);
+    shot("update_card_low_battery");
+    tapRect(setui::updCardGoRect());
+    if (g_fakeOta.cardInstalls) fail("installed from the card on 15% battery");
+    sensors::hostSetBattery(80, false);
+    g_fakeOta.cardErr = ota::Err::Download;
+    tapRect(setui::updCardGoRect());
+    if (st.hostUpStage() != 9) fail("INSTALL from the card did not start");
+    g_dumpEnabled = true;
+    setScreen("update_card_installing");
+    toybox.tick();
+    g_dumpEnabled = false;
+    if (g_fakeOta.cardInstalls != 1 || st.hostUpStage() != 10) fail("the card install did not run");
+    shot("update_card_failed");
+    const int restartsWas = g_fakeOta.restarts;
+    toybox.tick();
+    if (g_fakeOta.restarts != restartsWas) fail("restarted after a failed card install");
+    tapRect(setui::updDoneRect());
+    if (st.hostUpStage() != 0) fail("DONE did not leave a failed card install");
+    g_fakeOta.cardErr = ota::Err::Ok;
+    tapRect(setui::updCardRect());
+    toybox.tick();
+    tapRect(setui::updCardGoRect());
+    toybox.tick();
+    shot("update_card_done");
+    toybox.tick();
+    if (g_fakeOta.restarts != restartsWas + 1) fail("no restart after the card install");
     toybox.onTap(BACK_W / 2, TOPBAR_H / 2);
 
     homenet::forgetWifi(stickyHost.prefs());
