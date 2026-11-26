@@ -5305,8 +5305,8 @@ int main() {
                  "{\"id\":\"rd-gone000\",\"deleted\":1,\"revision\":2},"
                  "{\"id\":\"rd-bbb2222\",\"deleted\":0,\"spine\":%d,\"start_offset\":%u,\"end_offset\":%u,"
                  "\"chapter\":\"One\",\"text\":\"%s\\n\",\"created_at\":1787000001}]}",
-                 hdoc, sp, po + 1, po + 1 + (unsigned)strlen(w0), w0, sp, po + 40,
-                 po + 40 + (unsigned)strlen(w1), w1);
+                 hdoc, sp, po, po + (unsigned)strlen(w0), w0, sp, po + 72,
+                 po + 72 + (unsigned)strlen(w1), w1);
         const char* page2 =
             "{\"cursor\":4,\"more\":false,\"items\":[{\"id\":\"rd-ccc3333\",\"deleted\":0,\"spine\":0,"
             "\"start_offset\":0,\"end_offset\":30,\"chapter\":\"\",\"text\":\"a phrase from elsewhere "
@@ -5377,6 +5377,10 @@ int main() {
                    "\"spine\":%d,\"start_offset\":%u,\"end_offset\":%u,\"text\":\"%s\"}]}",
                    sp, po + 1, po + 9, w0);
           rhl::g_hostClips.pages[hdoc] = {again};
+          // First with Readest out of reach for the deletion: the burial holds,
+          // on the card too, and the pull still leaves it out.
+          rhl::g_hostPuts = rhl::HostPuts();
+          rhl::g_hostPuts.fail = kosync::Result::NetworkError;
           toybox.onButton(SideBtn::Ok);
           tapSync(nullptr);
           if (et->hostHlAdded() != 0 || et->hostMarkCount() != had + 1 || !marks::buried("rd-aaa1111")) {
@@ -5389,6 +5393,22 @@ int main() {
             printf("HL FAIL: the burial did not survive a reload\n");
             abort();
           }
+          toybox.onTap(240, btnY);
+          // Then Readest is told: one deletion sent, and the tombstone goes.
+          rhl::g_hostPuts.fail = kosync::Result::Ok;
+          toybox.onButton(SideBtn::Ok);
+          tapSync(nullptr);
+          if (et->hostHlDead() != 1 || rhl::g_hostPuts.bodies.size() != 1 ||
+              rhl::g_hostPuts.bodies[0].find("{\"id\":\"rd-aaa1111\",\"deleted\":1}") == std::string::npos ||
+              marks::buried("rd-aaa1111") || et->hostMarkCount() != had + 1) {
+            printf("HL FAIL: the deletion did not go to Readest (%d dead, %d puts: %s)\n", et->hostHlDead(),
+                   (int)rhl::g_hostPuts.bodies.size(),
+                   rhl::g_hostPuts.bodies.empty() ? "" : rhl::g_hostPuts.bodies[0].c_str());
+            abort();
+          }
+          // Readest now lists it deleted.
+          rhl::g_hostClips.pages[hdoc] = {
+              "{\"cursor\":1,\"more\":false,\"items\":[{\"id\":\"rd-aaa1111\",\"deleted\":1}]}"};
           toybox.onTap(240, btnY);
         }
         // Highlights off: the pull does not run.
@@ -5404,6 +5424,163 @@ int main() {
         stickyHost.prefs().remove(rhl::K_HL);
         rhl::g_hostClips = rhl::HostClips();
         printf("readest highlights ok (pull, again, deleted there, removed here, off)\n");
+      }
+
+      // D (owner's photos, 26 Nov): a short Readest highlight is underlined on
+      // its own page only, never wherever the same words come again. "1 w"
+      // is on most pages of this book.
+      {
+        const uint32_t po = et->hostPageOffset();
+        et->hostAddReadestMark("rd-short", po + 4, po + 7, "1 w");
+        stickyHost.refresh(true);
+        const int here = et->hostUnderlines();
+        toybox.onButton(SideBtn::Up);  // next page
+        stickyHost.refresh(true);
+        const int there = et->hostUnderlines();
+        toybox.onButton(SideBtn::Down);
+        et->hostRemoveById("rd-short");
+        if (here != 1 || there != 0) {
+          printf("HL FAIL: a short highlight underlined %d times here, %d on the next page\n", here, there);
+          abort();
+        }
+        printf("short highlight on its own page only ok\n");
+      }
+
+      // D part B. Highlights kept here go to Readest: exact offsets, the whole
+      // phrase (not the 96-byte label), once. Removing a sent one tells Readest;
+      // removing an unsent one tells nobody. One kept before part B goes too.
+      {
+        char hdoc[33];
+        et->hostDocHash(hdoc);
+        rhl::g_hostClips = rhl::HostClips();
+        rhl::g_hostPuts = rhl::HostPuts();
+        const uint32_t po = et->hostPageOffset();
+        int thai = -1;
+        for (int i = 0; i < et->hostLineN(); i++)
+          if (strstr(et->hostLineText(i), "\xe0\xb8\xaa\xe0\xb8\xa7")) thai = i;  // "สว"
+        if (thai < 0) {
+          printf("PUSH FAIL: no Thai line on the page\n");
+          abort();
+        }
+        const int had = et->hostMarkCount();
+        et->hostKeepWords(0, 0, 0, 2);  // "w0721 w0722 w0723", the page's first words
+        et->hostKeepWords(1, 0, 3, 5);  // three whole lines: longer than a label
+        et->hostKeepWords(thai, 0, thai, 1);  // Thai, then CJK
+        et->hostAddOldMark("an old one kept before...");
+        if (et->hostMarkCount() != had + 4 || et->hostHlWaiting() != 4) {
+          printf("PUSH FAIL: kept %d (want 4), %d waiting\n", et->hostMarkCount() - had, et->hostHlWaiting());
+          abort();
+        }
+        int first = -1, lines = -1, th = -1, old = -1;
+        for (int i = 0; i < et->hostMarkCount(); i++) {
+          const char* l = et->hostMarkLabel(i);
+          if (!strcmp(l, "w0721 w0722 w0723")) first = i;
+          if (!strncmp(l, "w0727", 5)) lines = i;
+          if (strstr(l, "\xe4\xb8\x96")) th = i;  // 世
+          if (!strncmp(l, "an old", 6)) old = i;
+        }
+        if (first < 0 || lines < 0 || th < 0 || old < 0) {
+          printf("PUSH FAIL: kept labels not found (%d %d %d %d)\n", first, lines, th, old);
+          abort();
+        }
+        if (et->hostMarkOff(first) != po || et->hostMarkEnd(first) != po + 17 ||
+            strncmp(et->hostMarkId(first), "sticky-", 7) != 0) {
+          printf("PUSH FAIL: first words at %u..%u (page %u) id %s\n", et->hostMarkOff(first),
+                 et->hostMarkEnd(first), po, et->hostMarkId(first));
+          abort();
+        }
+        char longId[marks::ID], thaiId[marks::ID];
+        snprintf(longId, sizeof(longId), "%s", et->hostMarkId(lines));
+        snprintf(thaiId, sizeof(thaiId), "%s", et->hostMarkId(th));
+        {
+          const char* lab = et->hostMarkLabel(lines);
+          const size_t L = strlen(lab);
+          if (L < 3 || strcmp(lab + L - 3, "...") != 0 || !et->hostTextWaiting(longId)) {
+            printf("PUSH FAIL: the long one should be cut in its label, whole beside it\n");
+            abort();
+          }
+        }
+        // Thai + CJK: the range is the codepoints of the words (one space between).
+        if (et->hostMarkEnd(th) - et->hostMarkOff(th) != (uint32_t)rhl::codepoints(et->hostMarkLabel(th))) {
+          printf("PUSH FAIL: Thai range %u..%u for %d codepoints\n", et->hostMarkOff(th), et->hostMarkEnd(th),
+                 rhl::codepoints(et->hostMarkLabel(th)));
+          abort();
+        }
+        toybox.onButton(SideBtn::Ok);
+        g_dumpEnabled = true;
+        setScreen("tool_epub_sync_sent");
+        tapSync(nullptr);
+        g_dumpEnabled = false;
+        std::string all;
+        for (auto& b : rhl::g_hostPuts.bodies) all += b;
+        char want[160];
+        snprintf(want, sizeof(want), "\"start_offset\":%u,\"end_offset\":%u,\"text\":\"w0721 w0722 w0723\"", po,
+                 po + 17);
+        if (et->hostHlSent() != 4 || rhl::g_hostPuts.bodies.size() != 1 || all.find(want) == std::string::npos ||
+            all.find("w0727 w0728") == std::string::npos || all.find("w0743 w0744\"") == std::string::npos ||
+            all.find("\"text\":\"an old one kept before\"") == std::string::npos ||
+            all.find("\xe0\xb8\xaa\xe0\xb8\xa7") == std::string::npos || et->hostHlWaiting() != 0 ||
+            et->hostTextWaiting(longId)) {
+          printf("PUSH FAIL: sent %d in %d puts, %d still waiting:\n%s\n", et->hostHlSent(),
+                 (int)rhl::g_hostPuts.bodies.size(), et->hostHlWaiting(), all.c_str());
+          abort();
+        }
+        toybox.onTap(240, btnY);
+        // Again: nothing to send.
+        toybox.onButton(SideBtn::Ok);
+        tapSync(nullptr);
+        if (rhl::g_hostPuts.bodies.size() != 1) {
+          printf("PUSH FAIL: a second sync sent again\n");
+          abort();
+        }
+        toybox.onTap(240, btnY);
+        // Readest lists them back (its copies): nothing doubles.
+        {
+          std::string page = "{\"cursor\":9,\"more\":false,\"items\":[";
+          page += "{\"id\":\"" + std::string(thaiId) + "\",\"deleted\":0,\"spine\":0,\"text\":\"x\"}]}";
+          rhl::g_hostClips.pages[hdoc] = {page};
+          const int before = et->hostMarkCount();
+          toybox.onButton(SideBtn::Ok);
+          tapSync(nullptr);
+          if (et->hostMarkCount() != before || et->hostHlAdded() != 0) {
+            printf("PUSH FAIL: its own highlight came back as a second one\n");
+            abort();
+          }
+          toybox.onTap(240, btnY);
+        }
+        // Removing a sent one: Readest hears of it.
+        for (int i = 0; i < et->hostMarkCount(); i++)
+          if (!strcmp(et->hostMarkId(i), thaiId)) et->hostRemoveMark(i);
+        // An unsent one, kept and removed before any sync: nobody hears.
+        et->hostKeepWords(4, 0, 4, 1);
+        int fresh = -1;
+        for (int i = 0; i < et->hostMarkCount(); i++)
+          if (!strncmp(et->hostMarkLabel(i), et->hostLineText(4), 5) && !(et->hostMarkFlags(i) & 1)) fresh = i;
+        char freshId[marks::ID];
+        snprintf(freshId, sizeof(freshId), "%s", fresh >= 0 ? et->hostMarkId(fresh) : "");
+        if (fresh >= 0) et->hostRemoveMark(fresh);
+        if (fresh < 0 || marks::buried(freshId) || !marks::buried(thaiId) || et->hostHlWaiting() != 1) {
+          printf("PUSH FAIL: removal bookkeeping (fresh %d, %d waiting)\n", fresh, et->hostHlWaiting());
+          abort();
+        }
+        rhl::g_hostClips.pages.clear();
+        g_dumpEnabled = true;
+        setScreen("tool_epub_sync_closing_waiting");
+        const int bookIdx = et->hostCurIndex();
+        toybox.onTap(40, 20);  // close: the strip counts the one deletion
+        g_dumpEnabled = false;
+        all.clear();
+        for (auto& b : rhl::g_hostPuts.bodies) all += b;
+        if (rhl::g_hostPuts.bodies.size() != 2 ||
+            rhl::g_hostPuts.bodies[1] != "{\"items\":[{\"id\":\"" + std::string(thaiId) + "\",\"deleted\":1}]}" ||
+            all.find(freshId) != std::string::npos) {
+          printf("PUSH FAIL: on the way out: %s\n", all.c_str());
+          abort();
+        }
+        et->hostOpen(bookIdx);
+        toybox.tick();
+        rhl::g_hostPuts = rhl::HostPuts();
+        printf("readest push ok (kept, whole text, offsets, Thai, old one, once, deletions, unsent)\n");
       }
 
       // D. Auto sync: closing the book sends the place (the strip over the

@@ -20,6 +20,7 @@
 // harness can put every case through them. The radio is in kosync.h.
 #pragma once
 #include <Preferences.h>
+#include <esp_random.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -201,6 +202,83 @@ inline Merged merge(marks::Mark* m, int& n, const Clip* c, int k) {
   return r;
 }
 
+// --- part B: what goes to Readest -------------------------------------------------
+// An id for one kept here: Readest takes any printable ASCII up to 64, and
+// the same id twice is a retry it ignores -- so it is made once, when the
+// highlight is kept, and never again.
+inline void newId(char* out, size_t cap) {
+  char dev[33];
+  kosync::deviceId(dev);
+  snprintf(out, cap, "sticky-%.8s-%08lx", dev, (unsigned long)esp_random());
+}
+
+// The text as JSON wants it.
+inline void jsonStr(String& o, const char* s) {
+  o += '"';
+  for (const unsigned char* q = (const unsigned char*)s; *q; q++) {
+    const unsigned char ch = *q;
+    if (ch == '"' || ch == '\\') {
+      o += '\\';
+      o += (char)ch;
+    } else if (ch == '\n') {
+      o += "\\n";
+    } else if (ch < 0x20) {
+      o += ' ';
+    } else {
+      o += (char)ch;
+    }
+  }
+  o += '"';
+}
+
+// One kept highlight, ready to go.
+struct Out {
+  char id[marks::ID];
+  uint16_t spine;
+  uint32_t start, end;
+  const char* text;  // borrowed
+};
+
+inline int codepoints(const char* s) {
+  int n = 0;
+  for (const unsigned char* q = (const unsigned char*)s; *q; q++) n += (*q & 0xC0) != 0x80;
+  return n;
+}
+
+// { "items": [ deleted ones, then new ones ] }. Offsets go only when they
+// are a real range; Readest finds the words near the start either way.
+inline void body(String& o, const char (*dead)[marks::ID], int nd, const Out* add, int na) {
+  o = "{\"items\":[";
+  bool first = true;
+  for (int i = 0; i < nd; i++) {
+    if (!first) o += ',';
+    first = false;
+    o += "{\"id\":";
+    jsonStr(o, dead[i]);
+    o += ",\"deleted\":1}";
+  }
+  for (int i = 0; i < na; i++) {
+    if (!first) o += ',';
+    first = false;
+    o += "{\"id\":";
+    jsonStr(o, add[i].id);
+    char num[64];
+    snprintf(num, sizeof(num), ",\"deleted\":0,\"spine\":%u", (unsigned)add[i].spine);
+    o += num;
+    if (add[i].end > add[i].start) {
+      snprintf(num, sizeof(num), ",\"start_offset\":%lu,\"end_offset\":%lu", (unsigned long)add[i].start,
+               (unsigned long)add[i].end);
+      o += num;
+    }
+    o += ",\"text\":";
+    jsonStr(o, add[i].text);
+    o += '}';
+  }
+  o += "]}";
+}
+
+inline constexpr int PUSH_BATCH = 10;  // a page of text each: a modest request
+
 // --- the radio ------------------------------------------------------------------
 // Every page of the book's clippings into `out` (up to max). Joined to the
 // home Wi-Fi already: the caller owns the radio. A book Readest has never seen
@@ -215,6 +293,18 @@ struct HostClips {
   int gets = 0;
 };
 inline HostClips g_hostClips;
+struct HostPuts {
+  std::vector<std::string> bodies;
+  kosync::Result fail = kosync::Result::Ok;
+};
+inline HostPuts g_hostPuts;
+inline kosync::Result put(Preferences& p, const char* doc, const String& b) {
+  (void)doc;
+  if (!kosync::haveAccount(p)) return kosync::Result::NoAccount;
+  if (g_hostPuts.fail != kosync::Result::Ok) return g_hostPuts.fail;
+  g_hostPuts.bodies.push_back(b.c_str());
+  return kosync::Result::Ok;
+}
 
 inline kosync::Result pull(Preferences& p, const char* doc, Clip* out, int max, int& n) {
   n = 0;
@@ -232,6 +322,11 @@ inline kosync::Result pull(Preferences& p, const char* doc, Clip* out, int max, 
   return kosync::Result::Ok;
 }
 #else
+inline kosync::Result put(Preferences& p, const char* doc, const String& b) {
+  char path[64];
+  snprintf(path, sizeof(path), "/api/v1/clippings/%s", doc);
+  return kosync::request(p, "PUT", path, b.c_str(), nullptr);
+}
 inline kosync::Result pull(Preferences& p, const char* doc, Clip* out, int max, int& n) {
   n = 0;
   uint32_t cursor = 0;

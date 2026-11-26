@@ -1229,7 +1229,7 @@ constexpr SyncRow kSyncRows[setui::SYNC_ROWS] = {
     {rhl::K_HL, "Highlights", "deleted on one side, gone on both"},
     {rhl::K_AUTO, "Auto sync", "off: only the Sync button"},
     {rhl::K_OPEN, "When a book opens", "gets your place and new highlights"},
-    {rhl::K_CLOSE, "When a book closes or it sleeps", "sends your place"},
+    {rhl::K_CLOSE, "When a book closes or it sleeps", "sends your place and highlights"},
 };
 void syncHead(ToolsCanvas& c, int y, const char* label, const char* right) {
   using namespace setui;

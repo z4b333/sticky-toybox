@@ -231,9 +231,13 @@ class EpubTool : public ToolApp {
       renderPage(c);
       if (_auto == AUTO_OPEN)
         drawAutoStrip(c, "SYNCING", "Checking Readest", "your place and highlights");
-      else if (_auto != AUTO_NONE)
+      else if (_auto != AUTO_NONE) {
+        char sub[80] = "no Wi-Fi: it goes on anyway";
+        const int w = rhl::hl(prefs()) ? hlWaiting() : 0;
+        if (w) snprintf(sub, sizeof(sub), "and %d highlight%s \xc2\xb7 no Wi-Fi: it goes on anyway", w, w == 1 ? "" : "s");
         drawAutoStrip(c, _auto == AUTO_SLEEP ? "SYNCING \xc2\xb7 THEN SLEEP" : "SYNCING \xc2\xb7 CLOSING",
-                      "Sending your place to Readest", "no Wi-Fi: it goes on anyway");
+                      "Sending your place to Readest", sub);
+      }
       return;
     }
     // Inside a series the bar carries the series name, because that is the
@@ -577,13 +581,60 @@ class EpubTool : public ToolApp {
   bool hostMarkHere(int i) const { return i < _nmarks && markHere(i); }
   int hostHlAdded() const { return _hlRes.added; }
   int hostHlRemoved() const { return _hlRes.removed; }
+  int hostHlSent() const { return _hlSent; }
+  int hostUnderlines() const { return _ulCount; }
+  void hostAddReadestMark(const char* id, uint32_t off, uint32_t end, const char* label) {
+    marks::Mark m{};
+    m.spine = (uint16_t)_spine;
+    m.page = marks::NO_PAGE;
+    m.off = off;
+    m.end = end;
+    m.src = marks::SRC_READEST;
+    snprintf(m.id, sizeof(m.id), "%s", id);
+    snprintf(m.label, sizeof(m.label), "%s", label);
+    marks::add(_marks, _nmarks, m);
+  }
+  void hostRemoveById(const char* id) {
+    for (int i = 0; i < _nmarks; i++)
+      if (!strcmp(_marks[i].id, id)) {
+        marks::remove(_marks, _nmarks, i);
+        return;
+      }
+  }
+  int hostHlDead() const { return _hlDead; }
+  int hostHlWaiting() const { return hlWaiting(); }
+  uint32_t hostMarkOff(int i) const { return i < _nmarks ? _marks[i].off : 0; }
+  uint32_t hostMarkEnd(int i) const { return i < _nmarks ? _marks[i].end : 0; }
+  int hostMarkFlags(int i) const { return i < _nmarks ? _marks[i].flags : -1; }
+  // A highlight as part A and before kept it: no id, no range.
+  void hostAddOldMark(const char* label) {
+    marks::Mark m{};
+    m.spine = (uint16_t)_spine;
+    m.page = (uint16_t)_page;
+    m.off = curOffset();
+    snprintf(m.label, sizeof(m.label), "%s", label);
+    marks::add(_marks, _nmarks, m);
+    marks::save(host(), _books[_cur].file, _marks, _nmarks);
+  }
+  bool hostTextWaiting(const char* id) {
+    char t[64];
+    return marks::loadText(host(), _books[_cur].file, id, t, sizeof(t));
+  }
+  int hostLineN() const { return _lineN; }
+  // Picks words (line, word)..(line, word) as two taps would, then keeps them.
+  void hostKeepWords(int l0, int w0, int l1, int w1) {
+    _pickL0 = l0;
+    _pickW0 = w0;
+    _pickL1 = l1;
+    _pickW1 = w1;
+    buildPhrase();
+    keepMark(_phrase);
+  }
   int hostAuto() const { return _auto; }
   void hostReloadMarks() { _nmarks = marks::load(host(), _books[_cur].file, _marks); }
   // The list's second tap on the row you are on, without the list.
   void hostRemoveMark(int at) {
-    if (_marks[at].src == marks::SRC_READEST) marks::bury(_marks[at].id);
-    marks::remove(_marks, _nmarks, at);
-    marks::save(host(), _books[_cur].file, _marks, _nmarks);
+    dropMark(at);
   }
   int hostTextSize() const { return _size; }
   int hostTocCount() { return _ntoc; }
@@ -1409,6 +1460,8 @@ class EpubTool : public ToolApp {
     // chapter, where the second layout always comes back empty, into a page
     // that erased itself the moment it was reached.
     const int keepLines = _lineN;
+    const int keepAnc = _ancN;
+    _ancN = 0;
     char keepImage[sizeof(_pageImage)];
     memcpy(keepImage, _pageImage, sizeof(keepImage));
     const uint8_t keepPart = _pageImagePart;
@@ -1572,6 +1625,16 @@ class EpubTool : public ToolApp {
           if (wItal) curItal[i >> 3] |= (uint8_t)(1 << (i & 7));
         }
       };
+      // Codepoints between the word's start and `p`: a word carried to the
+      // next page part-way through resumes at its own offset, not the word's.
+      auto offAt = [&](const char* p) {
+        uint32_t n = 0;
+        for (const char* q = w; q < p;) {
+          uni::next(q);
+          n++;
+        }
+        return off + n;
+      };
       // Puts `n` bytes of `s` on the line, `sep` px of space in front of them.
       auto append = [&](const char* s, int n, int sep, int width) {
         if (!curLen) curHead = wHead;
@@ -1581,6 +1644,10 @@ class EpubTool : public ToolApp {
           curW += sep;
         }
         if (curLen + n < (int)sizeof(cur)) {
+          // D part B: where these bytes are in the book, so a highlight
+          // picked off this line knows its exact offsets.
+          if (_ancN < MAX_ANC && curLen < 256)
+            _anc[_ancN++] = Anchor{(uint8_t)_lineN, (uint8_t)curLen, offAt(s)};
           markBold(curLen, n);
           memcpy(cur + curLen, s, (size_t)n);
           curLen += n;
@@ -1607,16 +1674,6 @@ class EpubTool : public ToolApp {
           best = n;
         }
         return best;
-      };
-      // Codepoints between the word's start and `p`: a word carried to the
-      // next page part-way through resumes at its own offset, not the word's.
-      auto offAt = [&](const char* p) {
-        uint32_t n = 0;
-        for (const char* q = w; q < p;) {
-          uni::next(q);
-          n++;
-        }
-        return off + n;
       };
       auto pend = [&](const char* rest) {
         strcpy(_pend, rest);
@@ -1703,6 +1760,7 @@ class EpubTool : public ToolApp {
     } else {
       if (_atEnd) _chapterPages = _lutN;
       _lineN = keepLines;  // nothing new: the page that was showing still is
+      _ancN = keepAnc;  // (nothing was appended, so the anchors are still its)
       memcpy(_pageImage, keepImage, sizeof(_pageImage));
       _pageImagePart = keepPart;
     }
@@ -2636,6 +2694,79 @@ class EpubTool : public ToolApp {
     host().perfLog(line);
   }
 
+  // D part B: deletions, then highlights kept here, to Readest. One kept
+  // before part B has no id and no range: it gets an id now, and its label for
+  // text (Readest finds the words near where the page began).
+  void pushHighlights(const char* doc) {
+    _hlSent = _hlDead = 0;
+    _hlPushErr = kosync::Result::Ok;
+    const char* file = _books[_cur].file;
+    bool changed = false;
+    for (int i = 0; i < _nmarks; i++)
+      if (_marks[i].src == marks::SRC_HERE && _marks[i].label[0] && !_marks[i].id[0]) {
+        rhl::newId(_marks[i].id, sizeof(_marks[i].id));
+        changed = true;
+      }
+    if (changed) marks::save(host(), file, _marks, _nmarks);
+    rhl::Out* outs = (rhl::Out*)calloc(rhl::PUSH_BATCH, sizeof(rhl::Out));
+    char* texts = (char*)malloc((size_t)rhl::PUSH_BATCH * (marks::TEXT_MAX + 1));
+    if (!outs || !texts) {
+      free(outs);
+      free(texts);
+      _hlPushErr = kosync::Result::LowMemory;
+      return;
+    }
+    int next = 0;
+    bool deadSent = false;
+    while (true) {
+      int idx[rhl::PUSH_BATCH];
+      int na = 0;
+      for (; next < _nmarks && na < rhl::PUSH_BATCH; next++) {
+        const marks::Mark& m = _marks[next];
+        if (m.src != marks::SRC_HERE || !m.label[0] || (m.flags & marks::FLAG_SENT)) continue;
+        char* t = texts + (size_t)na * (marks::TEXT_MAX + 1);
+        if (!marks::loadText(host(), file, m.id, t, marks::TEXT_MAX + 1)) {
+          snprintf(t, marks::TEXT_MAX + 1, "%s", m.label);
+          const size_t L = strlen(t);
+          if (L > 3 && strcmp(t + L - 3, "...") == 0) t[L - 3] = 0;  // the label's cut, not the book's
+        }
+        rhl::Out& o = outs[na];
+        snprintf(o.id, sizeof(o.id), "%s", m.id);
+        o.spine = m.spine;
+        o.start = m.off;
+        o.end = m.end > m.off ? m.end : m.off + (uint32_t)rhl::codepoints(t);
+        o.text = t;
+        idx[na++] = next;
+      }
+      const int nd = deadSent ? 0 : marks::tombs().n;
+      if (!na && !nd) break;
+      String b;
+      rhl::body(b, marks::tombs().id, nd, outs, na);
+      const kosync::Result r = rhl::put(prefs(), doc, b);
+      if (r != kosync::Result::Ok) {
+        _hlPushErr = r;
+        break;
+      }
+      if (nd) {
+        _hlDead = nd;
+        marks::clearTombs();
+        deadSent = true;
+      }
+      for (int k = 0; k < na; k++) _marks[idx[k]].flags |= marks::FLAG_SENT;
+      _hlSent += na;
+    }
+    free(outs);
+    free(texts);
+    if (_hlSent || _hlDead) {
+      marks::save(host(), file, _marks, _nmarks);
+      if (_hlSent) marks::keepTexts(host(), file, _marks, _nmarks);
+    }
+    char line[96];
+    snprintf(line, sizeof(line), "sync: highlights out %s, %d sent, %d deletions",
+             kosync::describe(_hlPushErr), _hlSent, _hlDead);
+    host().perfLog(line);
+  }
+
   void runSync(bool closing = false) {
     _hlTried = false;
     if (_saveDue) saveProgress();  // the card first: it is the record that matters
@@ -2661,7 +2792,16 @@ class EpubTool : public ToolApp {
       syncFail(homenet::describe(j));
       return;
     }
-    if (!closing && rhl::hl(prefs()) && kosync::isReadest(prefs())) pullHighlights(doc);
+    if (rhl::hl(prefs()) && kosync::isReadest(prefs())) {
+      if (!closing) {
+        pullHighlights(doc);
+      } else {
+        _hlTried = true;
+        _hlRes = rhl::Merged{};
+        _hlErr = kosync::Result::Ok;
+      }
+      pushHighlights(doc);
+    }
     if (!rhl::pos(prefs())) {  // the place is not synced: highlights were the errand
       homenet::off();
       markSynced();
@@ -2762,17 +2902,35 @@ class EpubTool : public ToolApp {
   // The highlights half of a sync, in one line; false when it did not run.
   bool hlLine(char* buf, size_t n) {
     if (!_hlTried) return false;
-    if (_hlErr != kosync::Result::Ok)
+    if (_hlErr != kosync::Result::Ok) {
       snprintf(buf, n, "highlights: %s", kosync::describe(_hlErr));
-    else if (_hlRes.added && _hlRes.removed)
-      snprintf(buf, n, "%d new from Readest \xc2\xb7 %d removed", _hlRes.added, _hlRes.removed);
-    else if (_hlRes.added)
-      snprintf(buf, n, "%d new highlight%s from Readest", _hlRes.added, _hlRes.added == 1 ? "" : "s");
-    else if (_hlRes.removed)
-      snprintf(buf, n, "%d highlight%s removed, deleted in Readest", _hlRes.removed,
-               _hlRes.removed == 1 ? "" : "s");
-    else
+      return true;
+    }
+    if (_hlPushErr != kosync::Result::Ok) {
+      snprintf(buf, n, "highlights not sent: %s", kosync::describe(_hlPushErr));
+      return true;
+    }
+    const int got = _hlRes.added, gone = _hlRes.removed + _hlDead, sent = _hlSent;
+    const int kinds = (got > 0) + (gone > 0) + (sent > 0);
+    if (kinds == 0) {
       snprintf(buf, n, "highlights in step with Readest");
+    } else if (kinds == 1 && got) {
+      snprintf(buf, n, "%d new highlight%s from Readest", got, got == 1 ? "" : "s");
+    } else if (kinds == 1 && sent) {
+      snprintf(buf, n, "%d highlight%s sent to Readest", sent, sent == 1 ? "" : "s");
+    } else if (kinds == 1) {
+      snprintf(buf, n, "%d highlight%s removed on both", gone, gone == 1 ? "" : "s");
+    } else {
+      buf[0] = 0;
+      auto part = [&](int v, const char* what) {
+        if (!v) return;
+        const size_t L = strlen(buf);
+        snprintf(buf + L, n - L, "%s%d %s", L ? " \xc2\xb7 " : "", v, what);
+      };
+      part(got, "new");
+      part(gone, "removed");
+      part(sent, "sent");
+    }
     if (_hlRes.full) snprintf(buf + strlen(buf), n - strlen(buf), " (list full)");
     return true;
   }
@@ -2807,7 +2965,10 @@ class EpubTool : public ToolApp {
       c.textCentered(W / 2, 380, "this takes up to half a minute", TS_SMALL, true);
       return;
     }
-    if (hlLine(buf, sizeof(buf))) c.textCentered(W / 2, _syncOut == SO_ASK ? 410 : 420, buf, TS_MED, true, true);
+    if (hlLine(buf, sizeof(buf))) {
+      const TSize ts = c.textWidth(buf, TS_MED, true) <= W - 32 ? TS_MED : TS_SMALL;  // errors run long
+      c.textCentered(W / 2, _syncOut == SO_ASK ? 410 : 420, buf, ts, true, true);
+    }
     switch (_syncOut) {
       case SO_HLONLY:
         c.textCentered(W / 2, 200, "HIGHLIGHTS", TS_MED, true, true);
@@ -3288,8 +3449,9 @@ class EpubTool : public ToolApp {
 
   // Everything from (l0,w0) to (l1,w1), joined by single spaces and cut to the
   // label's length -- a bookmark is a reminder, not a quotation.
-  void buildPhrase() {
-    _phrase[0] = 0;
+  void buildPhrase() { phraseInto(_phrase, sizeof(_phrase)); }
+  void phraseInto(char* out, size_t cap) {
+    out[0] = 0;
     int used = 0;
     for (int l = _pickL0; l <= _pickL1 && l < _lineN; l++) {
       const char* line = _lines[l].t;
@@ -3300,18 +3462,18 @@ class EpubTool : public ToolApp {
         const bool after = l > _pickL0 || word >= _pickW0;
         const bool before = l < _pickL1 || word <= _pickW1;
         if (after && before) {
-          const int room = (int)sizeof(_phrase) - 1 - used;
+          const int room = (int)cap - 1 - used;
           if (room <= 1) {
             // Out of label: say so with an ellipsis rather than stopping mid-word.
-            if (used > (int)sizeof(_phrase) - 5) used = (int)sizeof(_phrase) - 5;
-            snprintf(_phrase + used, 5, "...");
+            if (used > (int)cap - 5) used = (int)cap - 5;
+            snprintf(out + used, 5, "...");
             return;
           }
-          if (used) _phrase[used++] = ' ';
+          if (used) out[used++] = ' ';
           const int n = j - i < room - 1 ? j - i : room - 1;
-          memcpy(_phrase + used, line + i, (size_t)n);
+          memcpy(out + used, line + i, (size_t)n);
           used += n;
-          _phrase[used] = 0;
+          out[used] = 0;
         }
         while (line[j] == ' ') j++;
         i = j;
@@ -3345,14 +3507,81 @@ class EpubTool : public ToolApp {
     host().refresh(false);
   }
 
+  // One Readest knows of is buried: a pull must not bring it back, and the
+  // next sync tells Readest (deleted on one side, gone on both -- owner). One
+  // it never saw just goes, with its waiting text.
+  void dropMark(int at) {
+    const bool known = marks::known(_marks[at]);
+    const bool hadText = _marks[at].id[0] && !known;
+    if (known) marks::bury(_marks[at].id);
+    marks::remove(_marks, _nmarks, at);
+    marks::save(host(), _books[_cur].file, _marks, _nmarks);
+    if (hadText) marks::keepTexts(host(), _books[_cur].file, _marks, _nmarks);
+  }
+
+  // Highlights kept here that Readest does not have yet, and deletions it has
+  // not heard of: what a sync on the way out would carry.
+  int hlWaiting() const {
+    int n = marks::tombs().n;
+    for (int i = 0; i < _nmarks; i++)
+      n += _marks[i].src == marks::SRC_HERE && _marks[i].label[0] && !(_marks[i].flags & marks::FLAG_SENT);
+    return n;
+  }
+
+  // The book's offset of byte `pos` of line `l`; false off the anchors.
+  bool offsetAt(int l, int pos, uint32_t& out) const {
+    int best = -1;
+    for (int i = 0; i < _ancN; i++)
+      if (_anc[i].line == l && _anc[i].pos <= pos) best = i;
+    if (best < 0) return false;
+    uint32_t n = 0;
+    for (const char* q = _lines[l].t + _anc[best].pos; q < _lines[l].t + pos && *q;) {
+      uni::next(q);
+      n++;
+    }
+    out = _anc[best].off + n;
+    return true;
+  }
+
+  // The picked words' [start, end) in the book.
+  bool pickRange(uint32_t& a, uint32_t& z) const {
+    if (_pickL0 < 0 || _pickL1 < 0 || _pickL1 >= _lineN) return false;
+    int a0, a1, z0, z1;
+    if (!wordBytes(_lines[_pickL0].t, _pickW0, a0, a1) || !wordBytes(_lines[_pickL1].t, _pickW1, z0, z1))
+      return false;
+    // The last codepoint's first byte (Thai and CJK are three bytes each).
+    int last = z1 - 1;
+    while (last > z0 && (((uint8_t)_lines[_pickL1].t[last]) & 0xC0) == 0x80) last--;
+    if (!offsetAt(_pickL0, a0, a) || !offsetAt(_pickL1, last, z)) return false;
+    // z is where the last codepoint starts; one past it ends the range.
+    z += 1;
+    return z > a;
+  }
+
   void keepMark(const char* label) {
     marks::Mark m{};
     m.spine = (uint16_t)_spine;
     m.page = (uint16_t)_page;
     m.off = curOffset();
     snprintf(m.label, sizeof(m.label), "%s", label && label[0] ? label : "");
+    static char whole[marks::TEXT_MAX + 1];  // static: the loop task's stack is small
+    whole[0] = 0;
+    if (m.label[0]) {
+      // D part B: a highlight gets the id Readest will know it by, its exact
+      // place, and the whole phrase -- the label is only what fits.
+      rhl::newId(m.id, sizeof(m.id));
+      uint32_t a = 0, z = 0;
+      if (pickRange(a, z)) {
+        m.off = a;
+        m.end = z;
+      }
+      phraseInto(whole, sizeof(whole));
+    }
     const bool added = marks::add(_marks, _nmarks, m) >= 0;
-    if (added) marks::save(host(), _books[_cur].file, _marks, _nmarks);
+    if (added) {
+      if (whole[0]) marks::keepTexts(host(), _books[_cur].file, _marks, _nmarks, m.id, whole);
+      marks::save(host(), _books[_cur].file, _marks, _nmarks);
+    }
     _picking = false;
     _pickL0 = _pickL1 = -1;
     _menu = rmenu::Page::None;
@@ -4018,11 +4247,7 @@ class EpubTool : public ToolApp {
     // A bookmark you are already standing on is one you are asking to remove:
     // there is nowhere else for that tap to mean anything.
     if (markHere(idx)) {
-      // One from Readest is buried: a pull must not bring it back, and part B
-      // tells Readest (deleted on one side, gone on both -- owner).
-      if (_marks[idx].src == marks::SRC_READEST) marks::bury(_marks[idx].id);
-      marks::remove(_marks, _nmarks, idx);
-      marks::save(host(), _books[_cur].file, _marks, _nmarks);
+      dropMark(idx);
       host().beep(1);
       paint();
       return;
@@ -4140,6 +4365,7 @@ class EpubTool : public ToolApp {
   // Found by their text, the way the label was made: the page's lines joined
   // by single spaces, so a phrase that ran across a line break still matches.
   void drawHighlights(ToolsCanvas& c) {
+    _ulCount = 0;
     if (_nmarks <= 0 || _lineN <= 0 || _picking) return;
     bool any = false;
     for (int k = 0; k < _nmarks; k++) any |= _marks[k].label[0] && _marks[k].spine == (uint16_t)_spine;
@@ -4164,9 +4390,88 @@ class EpubTool : public ToolApp {
     ContentFace cf(host());
     const TSize ts = bodyTS();
     const int mx = epubui::marginPx(_margin);
+    auto under = [&](int l, int ca, int cz) {
+      _ulCount++;
+      char pre[201];
+      memcpy(pre, _lines[l].t, (size_t)ca);
+      pre[ca] = 0;
+      const int x0 = mx + c.textWidth(pre, ts);
+      memcpy(pre, _lines[l].t, (size_t)cz);
+      pre[cz] = 0;
+      const int x1 = mx + c.textWidth(pre, ts);
+      c.fillRect(x0, _lines[l].y + c.textHeight(ts) - 1, x1 - x0, 2, true);
+    };
     for (int k = 0; k < _nmarks; k++) {
       const marks::Mark& m = _marks[k];
       if (!m.label[0] || m.spine != (uint16_t)_spine) continue;
+      // D: one with a range is underlined by it -- all of it, where a label is
+      // only its first 96 bytes. The text match is for those kept before.
+      if (m.end > m.off && _ancN > 0) {
+        int segL[epubui::MAX_LINES], segA[epubui::MAX_LINES], segZ[epubui::MAX_LINES], ns = 0;
+        uint32_t firstAt = 0;  // the offset the underline starts at on this page
+        for (int l = 0; l < _lineN; l++) {
+          int ca = -1, cz = -1;
+          const char* t = _lines[l].t;
+          int ai = -1;
+          uint32_t at = 0;
+          for (const char* q = t; *q;) {
+            const int i = (int)(q - t);
+            // The anchor this byte runs on: the latest at or before it.
+            for (int j = ai + 1; j < _ancN; j++) {
+              if (_anc[j].line != l || _anc[j].pos > i) continue;
+              if (_anc[j].pos == i) {
+                ai = j;
+                at = _anc[j].off;
+              }
+            }
+            const char* was = q;
+            uni::next(q);
+            if (ai >= 0 && *was != ' ' && at >= m.off && at < m.end) {
+              if (ca < 0 && ns == 0) firstAt = at;
+              if (ca < 0) ca = i;
+              cz = (int)(q - t);
+            }
+            if (ai >= 0) at++;
+          }
+          if (ca >= 0 && ns < epubui::MAX_LINES) {
+            segL[ns] = l;
+            segA[ns] = ca;
+            segZ[ns++] = cz;
+          }
+        }
+        // Trusted only when the words there are the label's: offsets counted
+        // differently somewhere would otherwise underline the wrong words.
+        // Compared without spaces, as Readest compares them.
+        // None of its range on this page: it is elsewhere -- never matched
+        // by its words here (a one-word "The" would underline every "The").
+        if (ns == 0) continue;
+        // Begun on an earlier page: the label's words are over there.
+        bool same = true;
+        if (firstAt == m.off) {
+          const char* lab = m.label;
+          int s0 = 0, i = segA[0];
+          while (same && *lab) {
+            if (*lab == ' ' || (lab[0] == '.' && !strcmp(lab, "..."))) {
+              if (*lab != ' ') break;
+              lab++;
+              continue;
+            }
+            while (s0 < ns && i >= segZ[s0]) {
+              if (++s0 < ns) i = segA[s0];
+            }
+            if (s0 >= ns) break;  // the page ends first: the rest is overleaf
+            const char ch = _lines[segL[s0]].t[i++];
+            if (ch == ' ') continue;
+            if (ch != *lab++) same = false;
+          }
+        }
+        if (same) {
+          for (int j = 0; j < ns; j++) under(segL[j], segA[j], segZ[j]);
+          continue;
+        }
+      }
+      // By its words: only on the page it belongs to.
+      if (!markHere(k)) continue;
       char want[marks::LABEL];
       snprintf(want, sizeof(want), "%s", m.label);
       size_t wl = strlen(want);
@@ -4178,15 +4483,7 @@ class EpubTool : public ToolApp {
       for (int l = 0; l < _lineN; l++) {
         const int ls = starts[l], le = ls + (int)strlen(_lines[l].t);
         if (z <= ls || a >= le) continue;
-        const int ca = (a > ls ? a : ls) - ls, cz = (z < le ? z : le) - ls;
-        char pre[201];
-        memcpy(pre, _lines[l].t, (size_t)ca);
-        pre[ca] = 0;
-        const int x0 = mx + c.textWidth(pre, ts);
-        memcpy(pre, _lines[l].t, (size_t)cz);
-        pre[cz] = 0;
-        const int x1 = mx + c.textWidth(pre, ts);
-        c.fillRect(x0, _lines[l].y + c.textHeight(ts) - 1, x1 - x0, 2, true);
+        under(l, (a > ls ? a : ls) - ls, (z < le ? z : le) - ls);
       }
     }
     free(joined);
@@ -4344,6 +4641,19 @@ class EpubTool : public ToolApp {
   int _pickL0 = -1, _pickW0 = 0, _pickL1 = -1, _pickW1 = 0;
   bool _picking = false;
   char _phrase[marks::LABEL] = {};
+  // Where each run of bytes on the page's lines starts in the book: line,
+  // byte in the line, codepoint offset. A run never holds a space of the
+  // book's own, so the codepoints from an anchor on are the book's too.
+  struct Anchor {
+    uint8_t line, pos;
+    uint32_t off;
+  };
+  static constexpr int MAX_ANC = 400;
+  Anchor _anc[MAX_ANC] = {};
+  int _ancN = 0;
+  int _ulCount = 0;  // underline strokes in the last paint (for the harness)
+  int _hlSent = 0, _hlDead = 0;  // part B: what the last sync sent
+  kosync::Result _hlPushErr = kosync::Result::Ok;
   int _mpage = 0;                  // which page of the contents or the marks
   int _ntoc = -1;                  // -1 until the book's contents are read
   marks::Mark _marks[marks::MAX];

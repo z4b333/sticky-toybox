@@ -43,6 +43,9 @@ inline constexpr uint16_t NO_PAGE = 0xFFFF;
 inline constexpr int LABEL = 96;
 inline constexpr int ID = 40;  // Readest's note id; empty for one kept here
 enum Src : uint8_t { SRC_HERE = 0, SRC_READEST = 1 };
+// flags: one kept here that Readest already has (part B sent it). From then
+// on it is Readest's as much as this Sticky's: removing it here buries it.
+inline constexpr uint8_t FLAG_SENT = 1;
 
 struct Mark {
   uint16_t spine;
@@ -114,6 +117,10 @@ inline void bury(const char* id) {
   }
   snprintf(t.id[t.n++], ID, "%s", id);
 }
+
+inline void clearTombs() { tombs() = Tombs{}; }
+// Has Readest heard of it? Pulled ones came from there; kept ones once sent.
+inline bool known(const Mark& m) { return m.id[0] && (m.src == SRC_READEST || (m.flags & FLAG_SENT)); }
 
 inline bool save(ToolsHost& h, const char* file, const Mark* m, int n);
 
@@ -259,6 +266,97 @@ inline void remove(Mark* m, int& n, int at) {
   if (at < 0 || at >= n) return;
   for (int i = at; i + 1 < n; i++) m[i] = m[i + 1];
   n--;
+}
+
+// --- the whole phrase, until Readest has it (part B) --------------------------------
+// A label is 96 bytes -- enough to find the words on the page, not enough to
+// be the highlight: a sentence of Thai is three times that. So the phrase as
+// kept goes beside the marks, in "marks.tbt", until it is sent, and is
+// dropped once it has been. "TBT1", then records: id (ID bytes), u16 length,
+// the text.
+inline constexpr int TEXT_MAX = 1024;
+inline void textPath(const char* file, char* out, int cap) { bstore::file(file, "marks.tbt", out, cap); }
+inline constexpr int TEXT_REC = ID + 2;
+inline constexpr int TEXT_FILE_MAX = 4 + MAX * (TEXT_REC + TEXT_MAX);
+
+// The kept text for `id` into out; false when there is none.
+inline bool loadText(ToolsHost& h, const char* file, const char* id, char* out, int cap) {
+  out[0] = 0;
+  char p[bstore::PATH_CAP];
+  textPath(file, p, sizeof(p));
+  uint8_t* buf = (uint8_t*)malloc(TEXT_FILE_MAX);
+  if (!buf) return false;
+  const int got = h.sdReadFile(p, buf, TEXT_FILE_MAX);
+  bool found = false;
+  if (got >= 4 && memcmp(buf, "TBT1", 4) == 0) {
+    for (int at = 4; at + TEXT_REC <= got;) {
+      const int len = buf[at + ID] | (buf[at + ID + 1] << 8);
+      if (at + TEXT_REC + len > got) break;
+      if (strncmp((const char*)buf + at, id, ID) == 0) {
+        const int n = len < cap - 1 ? len : cap - 1;
+        memcpy(out, buf + at + TEXT_REC, (size_t)n);
+        out[n] = 0;
+        found = true;
+        break;
+      }
+      at += TEXT_REC + len;
+    }
+  }
+  free(buf);
+  return found;
+}
+
+// Rewrites the file with only the texts still waiting -- kept here, not yet
+// sent, still in the list -- plus `addId`/`addText` when given.
+inline bool keepTexts(ToolsHost& h, const char* file, const Mark* m, int n, const char* addId = nullptr,
+                      const char* addText = nullptr) {
+  char p[bstore::PATH_CAP];
+  textPath(file, p, sizeof(p));
+  uint8_t* old = (uint8_t*)malloc(TEXT_FILE_MAX);
+  uint8_t* out = (uint8_t*)malloc(TEXT_FILE_MAX);
+  if (!old || !out) {
+    free(old);
+    free(out);
+    return false;
+  }
+  int got = h.sdReadFile(p, old, TEXT_FILE_MAX);
+  if (got < 4 || memcmp(old, "TBT1", 4) != 0) got = 0;
+  auto waiting = [&](const char* id) {
+    for (int i = 0; i < n; i++)
+      if (m[i].src == SRC_HERE && !(m[i].flags & FLAG_SENT) && strncmp(m[i].id, id, ID) == 0)
+        return true;
+    return false;
+  };
+  memcpy(out, "TBT1", 4);
+  int w = 4;
+  auto put = [&](const char* id, const char* text, int len) {
+    if (len > TEXT_MAX) len = TEXT_MAX;
+    if (w + TEXT_REC + len > TEXT_FILE_MAX) return;
+    memset(out + w, 0, ID);
+    strncpy((char*)out + w, id, ID - 1);
+    out[w + ID] = (uint8_t)(len & 255);
+    out[w + ID + 1] = (uint8_t)(len >> 8);
+    memcpy(out + w + TEXT_REC, text, (size_t)len);
+    w += TEXT_REC + len;
+  };
+  for (int at = 4; got && at + TEXT_REC <= got;) {
+    const int len = old[at + ID] | (old[at + ID + 1] << 8);
+    if (at + TEXT_REC + len > got) break;
+    char id[ID];
+    memcpy(id, old + at, ID);
+    id[ID - 1] = 0;
+    if (waiting(id) && !(addId && strcmp(id, addId) == 0)) put(id, (const char*)old + at + TEXT_REC, len);
+    at += TEXT_REC + len;
+  }
+  if (addId && addText) put(addId, addText, (int)strlen(addText));
+  free(old);
+  bool ok = true;
+  if (w == 4)
+    h.sdRemove(p);  // nothing waits: no file (and none there is fine too)
+  else
+    ok = h.sdWriteFileAtomic(p, out, w);
+  free(out);
+  return ok;
 }
 
 }  // namespace marks
