@@ -65,6 +65,43 @@ void StickyHost::setBatteryCare(bool on) {
   g_care = on ? 1 : 0;
   ::prefs.putBool("bat_care", on);
 }
+namespace {
+int8_t g_dashPref = -1;
+}
+bool StickyHost::chargeDash() const {
+  if (g_dashPref < 0) g_dashPref = ::prefs.getBool("chg_dash", true) ? 1 : 0;
+  return g_dashPref == 1;
+}
+void StickyHost::setChargeDash(bool on) {
+  g_dashPref = on ? 1 : 0;
+  ::prefs.putBool("chg_dash", on);
+}
+namespace {
+int8_t g_picPref = -1;
+}
+int StickyHost::chargePic() const {
+  if (g_picPref < 0) {
+    const int p = ::prefs.getInt("chg_pic", 1);
+    g_picPref = (int8_t)(p < 0 || p > 3 ? 1 : p);
+  }
+  return g_picPref;
+}
+namespace {
+int8_t g_borderPref = -1;
+}
+bool StickyHost::chargePicBorder() const {
+  if (g_borderPref < 0) g_borderPref = ::prefs.getBool("chg_pbrd", true) ? 1 : 0;
+  return g_borderPref == 1;
+}
+void StickyHost::setChargePicBorder(bool on) {
+  g_borderPref = on ? 1 : 0;
+  ::prefs.putBool("chg_pbrd", on);
+}
+void StickyHost::setChargePic(int p) {
+  if (p < 0 || p > 3) return;
+  g_picPref = (int8_t)p;
+  ::prefs.putInt("chg_pic", p);
+}
 
 int StickyHost::sdWallpapers(char names[][SD_NAME_LEN], int max) {
   static_assert(SD_NAME_LEN == 40, "sdcard::listTbi fills 40-byte names");

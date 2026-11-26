@@ -71,6 +71,7 @@ class Toybox {
   // True only on the home page itself, not the folder pages: the holds belong
   // to the screen with the hint marks on it.
   bool atHubHome() const { return _where == Where::Hub && _hub.atHome(); }
+  bool inSettings() const { return _where == Where::Settings; }
 
   const char* activeTitle() const { return _active ? _active->title() : "TOYBOX"; }
 

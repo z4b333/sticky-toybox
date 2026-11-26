@@ -24,6 +24,8 @@
 #include "chrome.h"
 #include "sticky_host.h"
 #include "tools/book_thumbs.h"
+#include "tools/charge_dash.h"
+#include "tools/climate_calc.h"
 #include "tools/lock_image.h"
 #include "tools/lockscreen.h"
 #include "tools/tool_note.h"
@@ -245,6 +247,11 @@ void announceShutdown() {
   memcpy(epd.fb(), saved, EPD_BUF_SIZE);
 }
 
+// C6: true while the charging dashboard (or its popup) is on the glass. Its
+// frame is never a "page" to keep under the lock screen.
+bool g_dashUp = false;
+bool usbIn() { return digitalRead(PIN_USB_IN) == HIGH; }
+
 void powerOff(bool lowBattery = false, bool announce = false) {
   // First, while the card and the app are both still there: a reader that
   // has turned a page in the last few seconds has not saved its place yet.
@@ -262,7 +269,7 @@ void powerOff(bool lowBattery = false, bool announce = false) {
   bool pinned = false;
   char pin[note::NAME_LEN + 1];
   pinned = !lowBattery && note::getPinned(pin);
-  const bool keepPage = lock::keepsPage(lock::config(), pinned, lowBattery,
+  const bool keepPage = !g_dashUp && lock::keepsPage(lock::config(), pinned, lowBattery,
                                         toybox.showingOwnPage(), epd.rotation());
   if (keepPage) {
     // The page, knocked back to a grey texture so the picture over it reads as
@@ -591,6 +598,7 @@ void setup() {
   pinMode(PIN_SD_PWR, OUTPUT);
   digitalWrite(PIN_SD_PWR, LOW);
 
+  pinMode(PIN_USB_IN, INPUT);
   pinMode(PIN_BTN_UP, INPUT_PULLUP);
   pinMode(PIN_BTN_DOWN, INPUT_PULLUP);
   pinMode(PIN_BTN_OK, INPUT_PULLUP);
@@ -607,6 +615,7 @@ void setup() {
   buzzer::setLevel((buzzer::Level)prefs.getInt(
       "sound_lv", prefs.getBool("sound", true) ? (int)buzzer::Level::High : 0));
   TB_LOG("settings loaded, sound level %d\n", (int)buzzer::level());
+  TB_LOG("usb sense (GPIO9): %s\n", usbIn() ? "HIGH, cable in" : "LOW, no cable");
 
   if (!epd.begin()) {
     TB_LOG("EPD alloc failed\n");
@@ -830,6 +839,216 @@ void setup() {
   TB_LOG("ready -- %u B heap free\n", (unsigned)ESP.getFreeHeap());
 }
 
+// --- C6: the charging dashboard ----------------------------------------------------
+// Plugging in while awake (GPIO9 rising) puts up a landscape popup with Cancel;
+// three seconds later the dashboard takes the panel: clock, outside weather,
+// room, battery. Partial refresh on the minute, orientation checked every
+// 10 s, weather every 30 min. Touch does nothing; any button, or pulling the
+// cable, powers off with the normal lock screen. Owner, 24-25 Nov.
+enum class Dash : uint8_t { Off, Popup, On };
+Dash g_dash = Dash::Off;
+uint32_t g_dashT0 = 0, g_dashOrientAt = 0, g_dashWxAt = 0, g_dashUnplugAt = 0;
+int g_dashPrevRot = 0, g_dashRot = 0, g_dashSecs = -1, g_dashMinute = -1;
+bool g_dashWxTried = false;
+TRect g_dashCancel{0, 0, 0, 0};
+constexpr uint32_t DASH_POPUP_MS = 3000, DASH_ORIENT_MS = 10000, DASH_WX_MS = 30UL * 60 * 1000;
+
+void dashSetRotation(int r) {
+  epd.setRotation(r);
+  touch.setRotation(r);
+}
+
+int dashOrientation() {
+  const int o = sensors::imuPresent() ? sensors::orientation() : -1;
+  return o < 0 ? 0 : o;
+}
+
+void dashGather(chgdash::Info& in) {
+  sensors::Clock ck;
+  if (sensors::readClock(ck)) {
+    in.haveClock = true;
+    in.hh = ck.hour;
+    in.mm = ck.minute;
+    in.year = ck.year;
+    in.month = ck.month;
+    in.day = ck.day;
+  }
+  in.pct = sensors::batteryPercent();
+  if (!charger::allowed()) in.batt = chgdash::B_HELD;
+  else if (sensors::charging()) in.batt = chgdash::B_CHARGING;
+  else in.batt = in.pct >= 99 ? chgdash::B_FULL : chgdash::B_USB;
+  in.fahrenheit = prefs.getInt("cl_unit", 0) == 1;
+  in.noPlace = !wx::haveCity(prefs) || !homenet::haveWifi(prefs);
+  in.haveWx = !in.noPlace && wx::lastNow(prefs, in.now);
+  wx::Geo g{};
+  if (wx::geo(prefs, g) && g.found[0]) snprintf(in.place, sizeof(in.place), "%s", g.found);
+  else wx::city(prefs, in.place, sizeof(in.place));
+  // Only the town before the first comma: "Bangkok, Thailand" is too long.
+  if (char* comma = strchr(in.place, ',')) *comma = 0;
+  in.picBorder = stickyHost.chargePicBorder();
+  // The picture beside the weather, if the chosen one is in flash.
+  if (stickyHost.chargeDash()) {
+    switch (stickyHost.chargePic()) {
+      case 1:
+        if (wallimg::have()) in.pic = wallimg::PATH;
+        break;
+      case 2:
+        if (tbimg::have(lockimg::PATH)) in.pic = lockimg::PATH;
+        else if (lockimg::haveG2()) {
+          in.pic = lockimg::G2_PATH;
+          in.picGrey = true;
+        }
+        break;
+      case 3:
+        if (bthumb::haveLock()) in.pic = bthumb::LOCK_PATH;
+        break;
+      default:
+        break;
+    }
+  }
+  int t, rh;
+  if (sensors::readClimate(t, rh)) {
+    int oi = prefs.getInt("cl_off", clim::OFFSET_DEFAULT);
+    if (oi < 0 || oi >= clim::OFFSETS) oi = clim::OFFSET_DEFAULT;
+    const int off = clim::OFFSET_DECI[oi];
+    in.haveIndoor = true;
+    in.inRh = clim::correctedRh(t, rh, off);
+    in.inDeci = t + off;
+  }
+}
+
+void dashDraw(bool full) {
+  chgdash::Info in;
+  dashGather(in);
+  g_dashMinute = in.haveClock ? in.mm : -1;
+  chgdash::draw(stickyHost.sharedCanvas(), in);
+  if (full) epd.displayFull();
+  else epd.displayPartial();
+}
+
+void dashStart() {
+  g_dash = Dash::Popup;
+  g_dashUp = true;
+  g_dashT0 = millis();
+  g_dashPrevRot = epd.rotation();
+  g_dashSecs = 3;
+  // Portrait only (owner, 25 Nov). Over the screen that was showing, faded,
+  // like every other system banner; an app lying on its side is cleared
+  // instead, because its frame would sit sideways under the banner.
+  if (g_dashPrevRot == 0) {
+    stickyHost.fadeBehind();
+  } else {
+    dashSetRotation(0);
+    epd.clear();
+  }
+  g_dashCancel = chgdash::drawPopup(stickyHost.sharedCanvas(), g_dashSecs, sensors::batteryPercent());
+  epd.displayPartial();
+  buzzer::tap();
+  TB_LOG("dashboard: plugged in, popup\n");
+}
+
+void dashCancel() {
+  g_dash = Dash::Off;
+  g_dashUp = false;
+  dashSetRotation(g_dashPrevRot);
+  noteActivity();
+  buzzer::tap();
+  stickyHost.refresh(true);
+  TB_LOG("dashboard: cancelled\n");
+}
+
+void dashOpen() {
+  g_dash = Dash::On;
+  g_dashRot = dashOrientation();
+  dashSetRotation(g_dashRot);
+  g_dashOrientAt = millis();
+  g_dashWxTried = false;
+  dashDraw(true);
+  TB_LOG("dashboard: open, rotation %d\n", g_dashRot);
+}
+
+// Leaving is a power-off, as every button means sleep here. Waits for the
+// button to come up first, so a power button still held does not wake the
+// chip straight back out of the USB deep sleep.
+void dashSleep(const char* why) {
+  TB_LOG("dashboard: %s, powering off\n", why);
+  const uint32_t t = millis();
+  while ((digitalRead(PIN_BTN_OK) == LOW || digitalRead(PIN_BTN_UP) == LOW ||
+          digitalRead(PIN_BTN_DOWN) == LOW) &&
+         millis() - t < 5000)
+    delay(10);
+  dashSetRotation(0);
+  powerOff();
+}
+
+void dashLoop(const TouchEvent& ev) {
+  handleBatteryCare();
+  const bool anyBtn = digitalRead(PIN_BTN_OK) == LOW || digitalRead(PIN_BTN_UP) == LOW ||
+                      digitalRead(PIN_BTN_DOWN) == LOW;
+  // Pulled out: half a second of no USB, so a wiggle in the socket is not a
+  // power-off.
+  if (!usbIn()) {
+    if (!g_dashUnplugAt) g_dashUnplugAt = millis() | 1;
+    if (millis() - g_dashUnplugAt > 500) {
+      if (g_dash == Dash::Popup) dashCancel();  // the popup alone just goes away
+      else dashSleep("unplugged");
+      g_dashUnplugAt = 0;
+      return;
+    }
+  } else {
+    g_dashUnplugAt = 0;
+  }
+  if (g_dash == Dash::Popup) {
+    if (ev.tapped && g_dashCancel.hit(ev.x, ev.y)) {
+      dashCancel();
+      return;
+    }
+    const uint32_t el = millis() - g_dashT0;
+    if (el >= DASH_POPUP_MS) {
+      dashOpen();
+      return;
+    }
+    const int secs = (int)((DASH_POPUP_MS - el + 999) / 1000);
+    if (secs != g_dashSecs) {
+      g_dashSecs = secs;
+      g_dashCancel = chgdash::drawPopup(stickyHost.sharedCanvas(), secs, sensors::batteryPercent());
+      epd.displayPartial();
+    }
+    delay(20);
+    return;
+  }
+  // On.
+  if (anyBtn) {
+    dashSleep("button");
+    return;
+  }
+  bool redraw = false, full = false;
+  if (millis() - g_dashOrientAt >= DASH_ORIENT_MS) {
+    g_dashOrientAt = millis();
+    const int o = dashOrientation();
+    if (o != g_dashRot) {
+      g_dashRot = o;
+      dashSetRotation(o);
+      redraw = full = true;
+    }
+  }
+  sensors::Clock ck;
+  if (sensors::readClock(ck) && ck.minute != g_dashMinute) redraw = true;
+  // Weather: once soon after opening (the page is up first, from the last
+  // reading), then every 30 minutes. One request, Wi-Fi off again after.
+  if (wx::haveCity(prefs) && homenet::haveWifi(prefs) &&
+      (!g_dashWxTried || millis() - g_dashWxAt >= DASH_WX_MS)) {
+    g_dashWxTried = true;
+    g_dashWxAt = millis();
+    wx::Now n{};
+    const wx::Result r = wx::fetch(prefs, n);
+    TB_LOG("dashboard: weather %s\n", wx::describe(r));
+    if (r == wx::Result::Ok) redraw = true;
+  }
+  if (redraw) dashDraw(full);
+  delay(50);
+}
+
 void loop() {
   // setup() finished and one full pass ran: the build works. Not a timer --
   // a device woken for ten seconds and put back to sleep is a working build,
@@ -843,6 +1062,22 @@ void loop() {
   touch.setHoldMs(toybox.holdMs());
   touch.poll(ev);
   if (ev.tapped || ev.swiped) noteActivity();
+
+  // C6: plugged in while awake -> the dashboard's popup. Edge only: a device
+  // that boots on the cable, or is woken on it, does not get one.
+  {
+    static bool usbWas = usbIn();
+    const bool usb = usbIn();
+    if (usb != usbWas) TB_LOG("usb: %s\n", usb ? "in" : "out");
+    if (g_dash == Dash::Off && usb && !usbWas && stickyHost.chargeDash() && !g_pinnedMode &&
+        !g_bannerUp && !toybox.inSettings())
+      dashStart();
+    usbWas = usb;
+  }
+  if (g_dash != Dash::Off) {
+    dashLoop(ev);
+    return;
+  }
 
   if (g_pinnedMode) {
     if (ev.tapped) {

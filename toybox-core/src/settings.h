@@ -32,6 +32,7 @@ enum Action : int {
   ACT_VOLUME,  // v2: Low / Mid / High beside the Sound switch
   ACT_SETUP,   // v2: run the setup steps again
   ACT_CARE,    // C6: battery care, stop charging at 80 %
+  ACT_DASH,    // C6: the charging dashboard on plug-in
   ACT_COUNT
 };
 // Visual order groups the rows by what they are about (LOOK first -- the
@@ -49,9 +50,9 @@ enum Action : int {
 // and the rows of the open tab under them. The enum order stays put so a
 // caller aiming at a row by name never has to care which tab it sits in.
 inline constexpr int TAB_LOOK = 0, TAB_CONNECT = 1, TAB_DEVICE = 2, TAB_COUNT = 3;
-//                                      APPS WALL LOCK FILES SOUND UPDATE CLOCK FONT VOLUME SETUP CARE
-inline constexpr int TAB_OF[ACT_COUNT] = {2,   0,   0,   1,    2,    2,     1,    0,   2,     2,    2};
-inline constexpr int TAB_POS[ACT_COUNT] = {4,  0,   1,   0,    0,    5,     1,    2,   1,     3,    2};
+//                                      APPS WALL LOCK FILES SOUND UPDATE CLOCK FONT VOLUME SETUP CARE DASH
+inline constexpr int TAB_OF[ACT_COUNT] = {2,   0,   0,   1,    2,    2,     1,    0,   2,     2,    2,   2};
+inline constexpr int TAB_POS[ACT_COUNT] = {5,  0,   1,   0,    0,    6,     1,    2,   1,     4,    2,   3};
 inline constexpr int TAB_Y = TOPBAR_H + 12, TAB_H = 48, TAB_GAP = 8;
 inline constexpr int TAB_W = (SCREEN_W - 32 - 2 * TAB_GAP) / TAB_COUNT;
 inline constexpr int TAB_ROWS_Y = TAB_Y + TAB_H + 14;
@@ -71,6 +72,17 @@ inline TRect volSeg(int k) {
   return TRect{r.x + r.w - 3 * VOL_SEG_W + k * VOL_SEG_W, r.y + (r.h - VOL_SEG_H) / 2, VOL_SEG_W,
                VOL_SEG_H};
 }
+
+// C6 Dashboard page (kit "Settings > Charging dashboard"): the switch row,
+// then four picture rows with a 48x80 thumbnail each.
+inline constexpr int DASH_SW_Y = TOPBAR_H + 16, DASH_BRD_Y = DASH_SW_Y + 64;
+inline constexpr int DASH_LABEL_Y = DASH_BRD_Y + 60 + 26;
+inline constexpr int DASH_PIC_Y = DASH_LABEL_Y + 30, DASH_PIC_H = 96, DASH_PICS = 4;
+inline TRect dashSwitchRow() { return TRect{BTN_X, DASH_SW_Y, BTN_W, 60}; }
+inline TRect dashBorderRow() { return TRect{BTN_X, DASH_BRD_Y, BTN_W, 60}; }
+inline TRect dashPicRow(int i) { return TRect{BTN_X, DASH_PIC_Y + i * DASH_PIC_H, BTN_W, DASH_PIC_H}; }
+// The kit's light switch: a 68x34 rectangle with a rectangular slider.
+inline constexpr int SWITCH_W = 68, SWITCH_H = 34;
 
 // The setup steps (v2, kit "Setup"): font, sleep, beep, Wi-Fi. Big outlined
 // rows, the chosen one filled, and Next at the foot. Language, "how to set
@@ -300,6 +312,8 @@ class SettingsScreen {
   bool tapLockPic(ToolsHost& host, int x, int y);
   void renderApps(ToolsHost& host, ToolsCanvas& c);
   bool tapApps(ToolsHost& host, int x, int y);
+  void renderDash(ToolsHost& host, ToolsCanvas& c);
+  bool tapDash(ToolsHost& host, int x, int y);
   void renderFiles(ToolsHost& host, ToolsCanvas& c);
   bool tapFiles(ToolsHost& host, int x, int y);
   void leaveFiles();

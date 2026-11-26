@@ -4,6 +4,7 @@
 #include "appvis.h"
 #include "record.h"
 #include "tools/book_thumbs.h"
+#include "tools/charge_dash.h"
 #include "tools/flash_qr.h"
 #include "tools/home_net.h"
 #include "tools/lock_image.h"
@@ -170,6 +171,13 @@ inline void draw(ToolsCanvas& c, int act, int cx, int cy, bool dark) {
       c.fillRect(cx + 12, cy - 4, 3, 8, dark);
       c.fillRect(cx - 10, cy - 4, 15, 8, dark);
       break;
+    case ACT_DASH:  // a small clock face over a plug's two pins
+      c.drawRect(cx - 14, cy - 12, 28, 20, 2, dark);
+      c.drawLine(cx, cy - 6, cx, cy - 1, 2, dark);
+      c.drawLine(cx, cy - 1, cx + 5, cy + 2, 2, dark);
+      c.fillRect(cx - 6, cy + 8, 3, 6, dark);
+      c.fillRect(cx + 4, cy + 8, 3, 6, dark);
+      break;
     case ACT_UPDATE:  // an arrow coming down into a tray
       c.drawLine(cx, cy - 14, cx, cy + 4, 2, dark);
       c.drawLine(cx - 7, cy - 3, cx, cy + 4, 2, dark);
@@ -195,6 +203,30 @@ inline void draw(ToolsCanvas& c, int act, int cx, int cy, bool dark) {
 constexpr const char* HELP_KEYS[] = {"h_wrd", "h_mns", "h_g20", "h_xo", "h_sea", "h_sud",
                                      "h_fc",  "h_bk",  "h_ep",  "h_rcp", "h_c4", "h_bj",
                                      "h_hl",  "h_cb",  "h_hn",  "h_mp",  "h_lv", "h_cl"};
+
+// The kit's light switch (owner, 25 Nov): a rectangle with a rectangular
+// slider. Off: white track, black slider left. On: black track, white
+// slider right.
+void lightSwitch(ToolsCanvas& c, int x, int y, bool on) {
+  using namespace setui;
+  if (on) c.fillRect(x, y, SWITCH_W, SWITCH_H, true);
+  else c.drawRect(x, y, SWITCH_W, SWITCH_H, 2, true);
+  const int kw = 28, ky = y + 4, kh = SWITCH_H - 8;
+  c.fillRect(on ? x + SWITCH_W - 4 - kw : x + 4, ky, kw, kh, !on);
+}
+
+const char* dashPicName(int p) {
+  static const char* N[4] = {"No picture", "Home wallpaper", "Lock-screen picture",
+                             "Recent book cover"};
+  return N[p < 0 || p > 3 ? 0 : p];
+}
+const char* dashPicShort(int p) {
+  static const char* N[4] = {"No picture", "Wallpaper", "Lock picture", "Book cover"};
+  return N[p < 0 || p > 3 ? 0 : p];
+}
+const char* dashPicPath(int p) {
+  return p == 1 ? wallimg::PATH : p == 2 ? lockimg::PATH : p == 3 ? bthumb::LOCK_PATH : nullptr;
+}
 
 }  // namespace
 
@@ -1020,6 +1052,10 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
     renderApps(host, c);
     return;
   }
+  if (_page == 20) {
+    renderDash(host, c);
+    return;
+  }
   drawTopBar(c, "SETTINGS");
 
   using namespace setui;
@@ -1080,6 +1116,8 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
       {ACT_SETUP, "Setup", "run again", true},
       {ACT_UPDATE, "Update & about", upV, true},
       {ACT_CARE, "Battery care 80%", "", false},
+      {ACT_DASH, "Charging dashboard", host.chargeDash() ? dashPicShort(host.chargePic()) : "Off",
+       true},
   };
   (void)soundV;
   for (const Row& r : rows) {
@@ -1087,12 +1125,8 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
     const TRect a = actionRect(r.act);
     c.fillRect(a.x, a.y + a.h + (BTN_STEP - a.h) / 2, a.w, 1, true);  // the row's hairline
     if (r.act == ACT_SOUND || r.act == ACT_CARE) {
-      // A switch: filled track with the knob right when on.
       const bool on = r.act == ACT_SOUND ? host.soundLevel() > 0 : host.batteryCare();
-      const int tw = 64, th = 32, tx = a.x + a.w - tw - 4, ty = a.y + (a.h - th) / 2;
-      if (on) c.fillRect(tx, ty, tw, th, true);
-      else c.drawRect(tx, ty, tw, th, 2, true);
-      c.fillCircle(on ? tx + tw - th / 2 : tx + th / 2, ty + th / 2, th / 2 - 6, !on);
+      lightSwitch(c, a.x + a.w - SWITCH_W - 4, a.y + (a.h - SWITCH_H) / 2, on);
     } else if (r.act == ACT_VOLUME) {
       static const char* kVol[3] = {"Low", "Mid", "High"};
       const int lv = host.soundLevel();  // 0 = off, 1..3
@@ -1163,6 +1197,78 @@ void SettingsScreen::renderApps(ToolsHost& host, ToolsCanvas& c) {
   c.button(r.x, r.y, r.w, r.h, _note ? "THE CARDS WILL SHOW AGAIN" : "SHOW THE HOW-TO CARDS AGAIN",
            false, TS_MED);
   c.textCentered(SCREEN_W / 2, 776, "hiding an app keeps everything saved in it", TS_SMALL, true);
+}
+
+// --- the charging dashboard page (C6) ---------------------------------------------
+void SettingsScreen::renderDash(ToolsHost& host, ToolsCanvas& c) {
+  using namespace setui;
+  drawTopBar(c, "DASHBOARD");
+  const TRect sw = dashSwitchRow();
+  c.text(sw.x + 14, sw.y + (sw.h - c.textHeight(TS_MED)) / 2, "Show when plugged in", TS_MED, true);
+  lightSwitch(c, sw.x + sw.w - SWITCH_W - 4, sw.y + (sw.h - SWITCH_H) / 2, host.chargeDash());
+  c.fillRect(sw.x, sw.y + sw.h + 2, sw.w, 1, true);
+  const TRect br = dashBorderRow();
+  c.text(br.x + 14, br.y + (br.h - c.textHeight(TS_MED)) / 2, "Picture border", TS_MED, true);
+  lightSwitch(c, br.x + br.w - SWITCH_W - 4, br.y + (br.h - SWITCH_H) / 2, host.chargePicBorder());
+  c.fillRect(br.x, br.y + br.h + 2, br.w, 1, true);
+  c.textTracked(BTN_X, DASH_LABEL_Y, "PICTURE BESIDE THE WEATHER", TS_SMALL, true, false, 3);
+  c.fillRect(BTN_X, DASH_PIC_Y - 4, BTN_W, 2, true);
+  const int chosen = host.chargePic();
+  for (int i = 0; i < DASH_PICS; i++) {
+    const TRect r = dashPicRow(i);
+    const bool sel = i == chosen;
+    if (sel) c.fillRect(r.x, r.y, r.w, r.h, true);
+    // The thumbnail: the picture itself at a tenth (48x80), or a dashed
+    // frame where there is none.
+    const int tx = r.x + 14, ty = r.y + (r.h - 80) / 2;
+    const char* path = dashPicPath(i);
+    const bool grey = i == 2 && !tbimg::have(lockimg::PATH) && lockimg::haveG2();
+    if (grey) path = lockimg::G2_PATH;
+    if (!path || !chgdash::drawSmooth(c, path, grey, tx, ty, 1, 10)) {
+      if (sel) c.fillRect(tx, ty, 48, 80, false);
+      for (int k = 0; k < 80; k += 8) {
+        c.fillRect(tx, ty + k, 2, 4, true);
+        c.fillRect(tx + 46, ty + k, 2, 4, true);
+      }
+      for (int k = 0; k < 48; k += 8) {
+        c.fillRect(tx + k, ty, 4, 2, true);
+        c.fillRect(tx + k, ty + 78, 4, 2, true);
+      }
+    } else {
+      c.drawRect(tx - 1, ty - 1, 50, 82, 1, !sel);
+    }
+    c.text(tx + 48 + 18, r.y + (r.h - c.textHeight(TS_MED)) / 2, dashPicName(i), TS_MED, !sel);
+    if (sel) {
+      const int w = c.textTrackedWidth("CHOSEN", TS_SMALL, false, 3);
+      c.textTracked(r.x + r.w - 14 - w, r.y + (r.h - c.textHeight(TS_SMALL)) / 2, "CHOSEN", TS_SMALL,
+                    false, false, 3);
+    }
+    c.fillRect(r.x, r.y + r.h - 1, r.w, 1, true);
+  }
+  c.text(BTN_X, DASH_PIC_Y + DASH_PICS * DASH_PIC_H + 16, "No picture yet: weather only.", TS_SMALL,
+         true);
+}
+
+bool SettingsScreen::tapDash(ToolsHost& host, int x, int y) {
+  using namespace setui;
+  if (dashSwitchRow().hit(x, y)) {
+    host.setChargeDash(!host.chargeDash());
+    host.beep(1);
+    return true;
+  }
+  if (dashBorderRow().hit(x, y)) {
+    host.setChargePicBorder(!host.chargePicBorder());
+    host.beep(1);
+    return true;
+  }
+  for (int i = 0; i < DASH_PICS; i++) {
+    if (!dashPicRow(i).hit(x, y)) continue;
+    if (host.chargePic() == i) return false;
+    host.setChargePic(i);
+    host.beep(0);
+    return true;
+  }
+  return false;
 }
 
 bool SettingsScreen::tapApps(ToolsHost& host, int x, int y) {
@@ -1497,6 +1603,7 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
   if (_page == 2) return tapWall(host, x, y);
   if (_page == 5) return tapLockPic(host, x, y);
   if (_page == 3) return tapApps(host, x, y);
+  if (_page == 20) return tapDash(host, x, y);
   if (_page == 4) return tapFiles(host, x, y);
   if (_page == 6) return tapClock(host, x, y);
   if (_page == 7) return tapFontWho(host, x, y);
@@ -1607,6 +1714,11 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
     // the note says so, because a Sticky left off on the cable fills up.
     host.setBatteryCare(!host.batteryCare());
     _note = host.batteryCare() ? "holds 80% while the screen is on" : "charges to 100%";
+    host.beep(1);
+    return true;
+  }
+  if (rowHit(ACT_DASH)) {
+    _page = 20;
     host.beep(1);
     return true;
   }

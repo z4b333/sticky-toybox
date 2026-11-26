@@ -367,6 +367,16 @@ class ToolsHost {
   // C6 battery care: stop charging at 80 % while awake. On by default.
   virtual bool batteryCare() const { return false; }
   virtual void setBatteryCare(bool on) { (void)on; }
+  // C6 charging dashboard on plug-in. On by default.
+  virtual bool chargeDash() const { return false; }
+  virtual void setChargeDash(bool on) { (void)on; }
+  // Its picture beside the weather: 0 none, 1 home wallpaper, 2 lock-screen
+  // picture, 3 recent book cover.
+  virtual int chargePic() const { return 0; }
+  virtual void setChargePic(int p) { (void)p; }
+  // A rule around that picture. On by default.
+  virtual bool chargePicBorder() const { return true; }
+  virtual void setChargePicBorder(bool on) { (void)on; }
 
   // Whether the device beeps at all. It belongs to the host: the reader has its
   // own idea about sound, and the standalone firmware keeps it in its own NVS.

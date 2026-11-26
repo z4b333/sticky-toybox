@@ -111,6 +111,7 @@ static FakeOta g_fakeOta;
 #include "tools/tool_hilo.h"
 #include "tools/tool_memory.h"
 #include "tools/tool_climate.h"
+#include "tools/charge_dash.h"
 #include "tools/tool_level.h"
 #include "touch.h"
 #include "tools/help.h"
@@ -1582,6 +1583,101 @@ static void checkInkBits() {
   epd.clear();
 }
 
+// C6: every state of the charging dashboard, both ways up, and the popup.
+static void renderChargeDash() {
+  const bool wasDump = g_dumpEnabled;
+  g_dumpEnabled = true;
+  const int rot0 = epd.rotation();
+  ToolsCanvas& c = stickyHost.canvas();
+  chgdash::Info in;
+  in.haveClock = true;
+  in.hh = 21; in.mm = 24; in.year = 2026; in.month = 11; in.day = 25;
+  in.pct = 64;
+  in.haveWx = true;
+  in.now = wx::Now{312, 355, 70, 2, 2110};
+  snprintf(in.place, sizeof(in.place), "Bangkok");
+  in.haveIndoor = true; in.inDeci = 286; in.inRh = 61;
+  struct Case { const char* name; int rot; chgdash::Batt b; int pct; bool noPlace; int code; };
+  const Case cases[] = {
+      {"chg_dash", 0, chgdash::B_CHARGING, 64, false, 2},
+      {"chg_dash_held", 0, chgdash::B_HELD, 80, false, 61},
+      {"chg_dash_noplace", 0, chgdash::B_CHARGING, 92, true, 2},
+      {"chg_dash_land", 1, chgdash::B_CHARGING, 64, false, 2},
+      {"chg_dash_land_held", 1, chgdash::B_HELD, 80, false, 0},
+      {"chg_dash_land_noplace", 1, chgdash::B_FULL, 100, true, 2},
+      {"chg_dash_land_storm", 3, chgdash::B_USB, 97, false, 95},
+  };
+  for (const Case& k : cases) {
+    setScreen(k.name);
+    epd.setRotation(k.rot);
+    in.batt = k.b; in.pct = k.pct; in.noPlace = k.noPlace; in.now.code = (uint8_t)k.code;
+    chgdash::draw(c, in);
+    if (c.width() > c.height() != (k.rot & 1)) {
+      printf("CHGDASH FAIL: %s drew %dx%d\n", k.name, c.width(), c.height());
+      abort();
+    }
+    epd.displayFull();
+  }
+  // With a picture beside the weather: a striped 480x800 stand-in.
+  {
+    static uint8_t img[tbimg::FILE_SIZE];
+    const uint32_t magic = tbimg::MAGIC;
+    memcpy(img, &magic, 4);
+    img[4] = 480 & 0xFF; img[5] = 480 >> 8; img[6] = 800 & 0xFF; img[7] = 800 >> 8;
+    for (int y = 0; y < 800; y++)
+      for (int xb = 0; xb < 60; xb++) {
+        // A dithered photo stand-in: a top-to-bottom gradient with a dark
+        // disc, ordered-dithered at full size the way a sent picture is.
+        uint8_t v = 0;
+        for (int k = 0; k < 8; k++) {
+          const int x = xb * 8 + k, dx = x - 240, dy = y - 420;
+          int g = 255 - y * 255 / 800;
+          if (dx * dx + dy * dy < 150 * 150) g = g / 4;
+          static const uint8_t B4[4][4] = {{0, 8, 2, 10}, {12, 4, 14, 6}, {3, 11, 1, 9}, {15, 7, 13, 5}};
+          if (g > B4[y & 3][x & 3] * 16 + 8) v |= (uint8_t)(0x80 >> k);
+        }
+        img[tbimg::HEADER + y * 60 + xb] = v;
+      }
+    tfs::write("/chgtest.tbi", (const char*)img, sizeof(img));
+    in.pic = "/chgtest.tbi";
+    const Case pc[] = {{"chg_photo", 0, chgdash::B_CHARGING, 64, false, 2},
+                       {"chg_photo_land", 1, chgdash::B_HELD, 80, false, 61},
+                       {"chg_photo_noplace", 0, chgdash::B_CHARGING, 64, true, 2},
+                       {"chg_photo_noborder", 0, chgdash::B_FULL, 100, false, 3}};
+    for (const Case& k : pc) {
+      setScreen(k.name);
+      epd.setRotation(k.rot);
+      in.batt = k.b; in.pct = k.pct; in.noPlace = k.noPlace; in.now.code = (uint8_t)k.code;
+      in.picBorder = strcmp(k.name, "chg_photo_noborder") != 0;
+      chgdash::draw(c, in);
+      epd.displayFull();
+    }
+    in.pic = nullptr;
+    in.picBorder = true;
+    tfs::remove("/chgtest.tbi");
+  }
+  // The weather pass in Fahrenheit and below zero must still fit its column.
+  setScreen("chg_dash_land_cold");
+  epd.setRotation(1);
+  in.batt = chgdash::B_CHARGING; in.noPlace = false; in.fahrenheit = true; in.now.t = -183;
+  in.now.code = 73;
+  chgdash::draw(c, in);
+  epd.displayFull();
+  setScreen("chg_popup");
+  epd.setRotation(0);
+  epd.clear();
+  for (int k = 0; k < c.height(); k += 7) c.fillRect(0, k, c.width(), 1, true);  // a page behind
+  const TRect cr = chgdash::drawPopup(c, 3, 64);
+  if (cr.y + cr.h > c.height() || cr.w < 200) {
+    printf("CHGDASH FAIL: Cancel off the popup\n");
+    abort();
+  }
+  epd.displayFull();
+  epd.setRotation(rot0);
+  epd.clear();
+  g_dumpEnabled = wasDump;
+}
+
 static void checkLockOverPage() {
   lock::Config page;
   page.empty = lock::EMPTY_PAGE;
@@ -2082,6 +2178,7 @@ int main() {
   checkCardBaseline();
   checkThaiCardMarks();
   checkLockOverPage();
+  renderChargeDash();
   checkInkBits();
   checkHubRouting("all shown");
 
@@ -2256,6 +2353,39 @@ int main() {
   if (!stickyHost.batteryCare()) {
     printf("SETTINGS FAIL: battery care switch did not turn back on\n");
     abort();
+  }
+  // C6: the dashboard row opens its page; the switch there flips both ways,
+  // and a picture row is a choice.
+  if (!stickyHost.chargeDash() || stickyHost.chargePic() != 1) {
+    printf("SETTINGS FAIL: dashboard should default on, with the wallpaper\n");
+    abort();
+  }
+  {
+    const bool wasDump = g_dumpEnabled;
+    g_dumpEnabled = true;
+    setScreen("settings_dashboard");
+    tapAct(setui::ACT_DASH);
+    tapRect(setui::dashSwitchRow());
+    if (stickyHost.chargeDash()) {
+      printf("SETTINGS FAIL: dashboard switch did not turn off\n");
+      abort();
+    }
+    tapRect(setui::dashSwitchRow());
+    tapRect(setui::dashBorderRow());
+    if (stickyHost.chargePicBorder()) {
+      printf("SETTINGS FAIL: picture border switch did not turn off\n");
+      abort();
+    }
+    tapRect(setui::dashBorderRow());
+    tapRect(setui::dashPicRow(3));
+    if (!stickyHost.chargeDash() || stickyHost.chargePic() != 3) {
+      printf("SETTINGS FAIL: dashboard page taps did not land\n");
+      abort();
+    }
+    tapRect(setui::dashPicRow(1));
+    stickyHost.refresh(true);
+    g_dumpEnabled = wasDump;
+    toybox.onTap(16, 16);  // the corner: back to the DEVICE tab
   }
 
   // --- v2 setup steps ---------------------------------------------------------
