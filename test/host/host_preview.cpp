@@ -4460,6 +4460,34 @@ int main() {
       printf("page turns ok (three cadences count out, and the readers keep their own)\n");
     }
 
+    // The More card's tiles (v2): Contents, Highlight, Sync, Rotation,
+    // Settings, Exit. From the page, or from the panel (OK closes it first).
+    auto epubMore = [&](int tile) {
+      if (et->hostMenu() != 0) toybox.onButton(SideBtn::Ok);
+      const TRect mc = rmenu::moreCorner(stickyHost.canvas().width());
+      toybox.onTap(mc.x + mc.w / 2, mc.y + mc.h / 2);
+      const TRect t = rmenu::moreTile(tile, stickyHost.canvas().width(), stickyHost.canvas().height());
+      toybox.onTap(t.x + t.w / 2, t.y + t.h / 2);
+    };
+    // More > Settings (owner, 26 Nov): Text, Highlights, Reading sync, Start
+    // again; Text opens the bar at the foot of the page, at a tab.
+    auto epubSettings = [&](int tile) {
+      if (et->hostMenu() != 0) toybox.onButton(SideBtn::Ok);
+      const int W = stickyHost.canvas().width(), H = stickyHost.canvas().height();
+      const TRect mc = rmenu::moreCorner(W);
+      toybox.onTap(mc.x + mc.w / 2, mc.y + mc.h / 2);
+      tapRect(rmenu::moreTile(4, W, H));
+      tapRect(rmenu::moreSetTile(tile, W, H));
+    };
+    auto epubTextTab = [&](int tab) {
+      epubSettings(0);
+      tapRect(rmenu::textTab(tab, stickyHost.canvas().width(), stickyHost.canvas().height()));
+    };
+    auto tbSeg = [&](int tab, int k) {
+      const int W = stickyHost.canvas().width(), H = stickyHost.canvas().height();
+      tapRect(rmenu::textTab(tab, W, H));
+      tapRect(rmenu::textSeg(k, W, H));
+    };
     // --- the panel behind the power button ----------------------------------
     // OK used to close the book. It now opens the options panel, and closing
     // the book is a row in it.
@@ -4468,15 +4496,13 @@ int main() {
       printf("EPUB APP FAIL: OK did not open the panel\n");
       abort();
     }
-    setScreen("tool_epub_options");
+    setScreen("tool_epub_options");  // now the More card (owner, 26 Nov): no panel, no clock on it
     stickyHost.refresh(true);
-
-    checkCornerClock("epub");
 
     // Contents: the book's own nav document, and a jump that lands where the
     // row says -- including the chapter that is nothing but a picture.
     g_dumpEnabled = false;
-    toybox.onTap(240, rmenu::rootRect(0, 480).y + 40);
+    epubMore(0);
     if (et->hostMenu() != (int)rmenu::Page::Contents || et->hostTocCount() != 3) {
       printf("EPUB APP FAIL: contents shows menu %d with %d entries\n", et->hostMenu(),
              et->hostTocCount());
@@ -4496,16 +4522,14 @@ int main() {
 
     // A phrase kept, on the card, where a reflash cannot reach it. The pick
     // needs words on the screen, so go to the chapter of them first.
-    toybox.onButton(SideBtn::Ok);
-    toybox.onTap(240, rmenu::rootRect(0, 480).y + 40);  // CONTENTS
+    epubMore(0);  // CONTENTS
     toybox.onTap(240, shelf::Y0 + shelf::ROW_H + 20);   // the long chapter
     if (et->hostSpine() != 1 || et->hostLineCount() < 3) {
       printf("EPUB APP FAIL: no page of words to pick from (s%d, %d lines)\n", et->hostSpine(),
              et->hostLineCount());
       abort();
     }
-    toybox.onButton(SideBtn::Ok);
-    toybox.onTap(rmenu::plusRect(1, 480).x + 40, rmenu::plusRect(1, 480).y + 40);
+    epubMore(1);  // Highlight
     if (!et->hostPicking()) {
       printf("EPUB APP FAIL: + did not start a phrase pick\n");
       abort();
@@ -4561,8 +4585,7 @@ int main() {
     // v2: Cancel on the Highlight bar leaves highlight mode altogether --
     // no bar left behind on the page.
     {
-      toybox.onButton(SideBtn::Ok);
-      toybox.onTap(rmenu::plusRect(1, 480).x + 40, rmenu::plusRect(1, 480).y + 40);
+      epubMore(1);  // Highlight
       toybox.onTap(40, et->hostLineY(0) + 10);
       toybox.onTap(200, et->hostLineY(1) + 10);
       if (et->hostMenu() != (int)rmenu::Page::Keep) {
@@ -4596,8 +4619,7 @@ int main() {
       }
     }
     // CANCEL on the confirmation keeps nothing.
-    toybox.onButton(SideBtn::Ok);
-    toybox.onTap(rmenu::plusRect(1, 480).x + 40, rmenu::plusRect(1, 480).y + 40);
+    epubMore(1);  // Highlight
     toybox.onTap(40, et->hostLineY(0) + 10);
     toybox.onTap(200, et->hostLineY(1) + 10);
     toybox.onTap(360, 600);  // CANCEL
@@ -4605,8 +4627,7 @@ int main() {
       printf("EPUB APP FAIL: CANCEL kept one anyway (%d marks)\n", et->hostMarkCount());
       abort();
     }
-    toybox.onButton(SideBtn::Ok);
-    toybox.onTap(240, rmenu::rootRect(1, 480).y + 40);  // BOOKMARKS
+    epubSettings(1);  // HIGHLIGHTS
     if (et->hostMenu() != (int)rmenu::Page::Marks) {
       printf("EPUB APP FAIL: the bookmark list did not open\n");
       abort();
@@ -4615,8 +4636,8 @@ int main() {
     setScreen("tool_epub_marks");
     stickyHost.refresh(true);
     g_dumpEnabled = false;
-    // Standing on it already, so this tap removes it.
-    toybox.onTap(240, shelf::Y0 + 20);
+    // Its x removes it: kept here and never sent, so one tap does.
+    tapRect(TRect{480 - 16 - 48, shelf::Y0 + (shelf::ROW_H - 6 - 48) / 2, 48, 48});
     if (et->hostMarkCount() != 0) {
       printf("EPUB APP FAIL: the second tap did not remove the bookmark\n");
       abort();
@@ -4673,10 +4694,9 @@ int main() {
     // stays where it was reading rather than where the page number was. Done
     // on a page of WORDS -- the jump above left us on a picture, which has no
     // lines to count.
-    toybox.onButton(SideBtn::Ok);  // the panel again
-    toybox.onTap(240, rmenu::rootRect(2, 480).y + 40);
-    if (et->hostMenu() != (int)rmenu::Page::Text) {
-      printf("EPUB APP FAIL: the text page did not open\n");
+    epubTextTab(1);  // More > Settings > Text, at Size
+    if (et->hostMenu() != (int)rmenu::Page::TextBar) {
+      printf("EPUB APP FAIL: the text bar did not open\n");
       abort();
     }
     g_dumpEnabled = true;
@@ -4686,7 +4706,7 @@ int main() {
     {
       const uint32_t before = et->hostPageOffset();
       const int lines = et->hostLineCount();
-      tapRect(epubui::textPlus(0));  // SIZE +
+      tapRect(rmenu::textPlus(480, 800));  // SIZE +
       if (et->hostTextSize() != 1) {
         printf("EPUB APP FAIL: the size did not change (%d)\n", et->hostTextSize());
         abort();
@@ -4700,12 +4720,12 @@ int main() {
         printf("EPUB APP FAIL: bigger type gave %d lines, was %d\n", et->hostLineCount(), lines);
         abort();
       }
-      tapRect(epubui::textMinus(0));  // SIZE -, back to normal
+      tapRect(rmenu::textMinus(480, 800));  // SIZE -, back to normal
       // v2: margins and paragraph gap step, and a wider margin fits fewer
       // words on a line, so the page holds no more text than before.
       const uint32_t offBefore = et->hostPageOffset();
-      tapRect(epubui::textPlus(2));  // margins: wide
-      tapRect(epubui::textPlus(3));  // paragraphs: large
+      tbSeg(3, 2);  // margins: wide
+      tbSeg(4, 2);  // paragraphs: large
       g_dumpEnabled = true;
       setScreen("tool_epub_text_fine");
       stickyHost.refresh(true);
@@ -4714,20 +4734,20 @@ int main() {
         printf("EPUB APP FAIL: wider margins moved the reader forward\n");
         abort();
       }
-      tapRect(epubui::textMinus(2));  // back to normal
-      tapRect(epubui::textMinus(3));
+      tbSeg(3, 1);  // back to normal
+      tbSeg(4, 1);
     }
 
     // The contents fallback: a book with no navigation document names its
     // chapters by their own first words.
     et->hostDropToc();
-    toybox.onButton(SideBtn::Ok);
-    toybox.onTap(240, rmenu::rootRect(0, 480).y + 40);
+    epubMore(0);
     g_dumpEnabled = true;
     setScreen("tool_epub_contents_plain");
     stickyHost.refresh(true);
     g_dumpEnabled = false;
-    toybox.onButton(SideBtn::Ok);  // back to the root
+    toybox.onButton(SideBtn::Ok);  // back to the page (it came from More)
+    epubTextTab(0);                // the Text bar, at Font
 
     // The Font row opens a list of every face this device can set a book in --
     // the built-ins and whatever the card offered -- rather than cycling the
@@ -4741,7 +4761,7 @@ int main() {
     // reader's eyes and the offset is what has to stay put.
     {
       const uint32_t offBefore = et->hostPageOffset();
-      toybox.onTap(240, rmenu::rootRect(3, 480).y + 40);
+      tapRect(rmenu::textFontMore(480, 800));  // > : the whole list
       if (et->hostMenu() != (int)rmenu::Page::Font) {
         printf("EPUB APP FAIL: the Font row did not open the list (menu %d)\n", et->hostMenu());
         abort();
@@ -4771,7 +4791,7 @@ int main() {
       }
       // Back to the first, which stores nothing: "" is the face this firmware
       // has always drawn in.
-      toybox.onTap(240, rmenu::rootRect(3, 480).y + 40);
+      tapRect(rmenu::textFontMore(480, 800));
       toybox.onTap(240, shelf::Y0 + 20);
       if (stickyHost.fontFor(ToolsHost::FONT_READER)[0] ||
           et->hostPageOffset() != offBefore) {
@@ -4822,17 +4842,17 @@ int main() {
       et->hostSetStyle(0);
       const int linesSmall = et->hostLineCount();
 
-      toybox.onTap(240, rmenu::rootRect(2, 480).y + 40);
-      if (et->hostMenu() != (int)rmenu::Page::Text) {
-        printf("READER SIZE FAIL: the text page did not open\n");
+      if (et->hostMenu() != (int)rmenu::Page::TextBar) {
+        printf("READER SIZE FAIL: the text bar is not up (menu %d)\n", et->hostMenu());
         abort();
       }
+      tapRect(rmenu::textTab(1, 480, 800));  // Size
       g_dumpEnabled = true;
       setScreen("tool_epub_text_card");
       stickyHost.refresh(true);
       g_dumpEnabled = false;
 
-      tapRect(epubui::textPlus(0));  // SIZE +, to the family's 18 pt
+      tapRect(rmenu::textPlus(480, 800));  // SIZE +, to the family's 18 pt
       if (stickyHost.faceSize() != 1 || gfx::cardFaceLine(24, true) != 44) {
         printf("READER SIZE FAIL: stepping up left the size at %d and the body box at %d px\n",
                stickyHost.faceSize(), gfx::cardFaceLine(24, true));
@@ -4860,7 +4880,7 @@ int main() {
         }
       }
       // The top of the family is the top: there is no next size to step to.
-      tapRect(epubui::textPlus(0));
+      tapRect(rmenu::textPlus(480, 800));
       if (stickyHost.faceSize() != 1) {
         printf("READER SIZE FAIL: stepping past the family's largest gave %d\n",
                stickyHost.faceSize());
@@ -4871,7 +4891,7 @@ int main() {
       // the very box a chosen size sits in -- so leaving the book's face on
       // would set the chapter name in 44 px inside a 56 px band and run it off
       // the bottom of the panel.
-      toybox.onButton(SideBtn::Ok);  // back to the panel root
+      // (already on the panel: Book settings)
       // What the lock screen asks before it decides to keep the panel as it
       // is. A panel over the page does not count -- leaving a half-open
       // options panel on the fridge for eight hours is not the feature.
@@ -4911,10 +4931,8 @@ int main() {
       toybox.onTap(240, 400);  // the footer back down
 
       // Put the book back the way the next check expects to find it.
-      toybox.onButton(SideBtn::Ok);
-      toybox.onTap(240, rmenu::rootRect(2, 480).y + 40);
-      tapRect(epubui::textMinus(0));  // SIZE -, back to the family's 12 pt
-      toybox.onButton(SideBtn::Ok);
+      epubTextTab(1);
+      tapRect(rmenu::textMinus(480, 800));  // SIZE -, back to the family's 12 pt
       toybox.onButton(SideBtn::Ok);
       stickyHost.fontSet(ToolsHost::FONT_READER, "");
       stickyHost.fontEnter(ToolsHost::FONT_READER);
@@ -4979,10 +4997,9 @@ int main() {
     // (3), one tap each -- and the turn still lands when the panel closes.
     // The senses were confirmed on glass and swapped once.
     {
-      const int rotY = rmenu::rootRect(4, 480).y + 79;  // through the buttons
       const uint32_t offR = et->hostPageOffset();
       const int linesPortrait = et->hostLineCount();
-      toybox.onTap(380, rotY);  // RIGHT: landscape
+      et->hostSetRot(3);  // RIGHT: landscape (now via More > Rotation and its lock)
       if (stickyHost.canvasRotation() != 0) {
         printf("EPUB APP FAIL: the panel turned before it closed\n");
         abort();
@@ -5008,21 +5025,22 @@ int main() {
       toybox.render(stickyHost.sharedCanvas());
       epd.displayFull();
       g_dumpEnabled = false;
-      toybox.onButton(SideBtn::Ok);  // the panel stands the canvas up again
-      if (stickyHost.canvasRotation() != 0) {
-        printf("EPUB APP FAIL: the panel opened sideways\n");
+      toybox.onButton(SideBtn::Ok);  // More: the card sits at the page's own angle
+      if (stickyHost.canvasRotation() != 3 || et->hostMenu() != (int)rmenu::Page::More) {
+        printf("EPUB APP FAIL: More did not open over the landscape page (rot %d, menu %d)\n",
+               stickyHost.canvasRotation(), et->hostMenu());
         abort();
       }
       // The other landscape, one tap, no cycling through portrait to get
       // there; then straight home the same way.
-      toybox.onTap(98, rotY);  // LEFT: the other landscape
+      et->hostSetRot(1);  // LEFT: the other landscape
       toybox.onButton(SideBtn::Ok);
       if (stickyHost.canvasRotation() != 1) {
         printf("EPUB APP FAIL: LEFT did not land the flipped landscape\n");
         abort();
       }
       toybox.onButton(SideBtn::Ok);
-      toybox.onTap(239, rotY);  // PORTRAIT
+      et->hostSetRot(0);  // PORTRAIT
       toybox.onButton(SideBtn::Ok);
       if (stickyHost.canvasRotation() != 0 ||
           stickyHost.prefs().getUInt("rd_rot", 99) != 0) {
@@ -5061,7 +5079,7 @@ int main() {
       // straight on to the sync.
       {
         homenet::g_hostJoins = homenet::g_hostOffs = 0;
-        toybox.onTap(240, rmenu::rootRect(rowSync, 480).y + 30);
+        et->hostSyncFromPanel();
         if (et->hostSyncStage() != 3) {
           printf("SYNC FAIL: with no account the row did not start sign-in (stage %d)\n",
                  et->hostSyncStage());
@@ -5080,7 +5098,7 @@ int main() {
         // CANCEL while pending: radio off, nothing saved, back to the options.
         toybox.onTap(240, signY);
         if (et->hostSyncStage() != 0 || homenet::g_hostOffs != 1 ||
-            kosync::haveAccount(stickyHost.prefs()) || et->hostMenu() != (int)rmenu::Page::Root) {
+            kosync::haveAccount(stickyHost.prefs()) || et->hostMenu() != 0) {
           printf("SYNC FAIL: CANCEL left stage %d, offs %d, menu %d\n", et->hostSyncStage(),
                  homenet::g_hostOffs, et->hostMenu());
           abort();
@@ -5088,7 +5106,7 @@ int main() {
         // An expired code.
         kosync::g_server.polls = 0;
         kosync::g_server.expire = true;
-        toybox.onTap(240, rmenu::rootRect(rowSync, 480).y + 30);
+        et->hostSyncFromPanel();
         for (int i = 0; i < 6 && et->hostSyncStage() != 2; i++) toybox.tick();
         if (et->hostSyncOut() != 3 || kosync::haveAccount(stickyHost.prefs())) {
           printf("SYNC FAIL: an expired code gave out %d\n", et->hostSyncOut());
@@ -5100,7 +5118,7 @@ int main() {
         kosync::g_server.polls = 0;
         kosync::g_server.expire = false;
         homenet::g_hostOffs = 0;
-        toybox.onTap(240, rmenu::rootRect(rowSync, 480).y + 30);
+        et->hostSyncFromPanel();
         for (int i = 0; i < 8 && et->hostSyncStage() != 2; i++) toybox.tick();
         char key[40], want[33];
         stickyHost.prefs().getString(kosync::K_KEY, key, sizeof(key));
@@ -5126,7 +5144,7 @@ int main() {
           g_dumpEnabled = true;
           setScreen(busyShot);
         }
-        toybox.onTap(240, rmenu::rootRect(rowSync, 480).y + 30);
+        et->hostSyncFromPanel();
         g_dumpEnabled = false;
         if (et->hostMenu() != (int)rmenu::Page::Sync || et->hostSyncStage() != 1) {
           printf("SYNC FAIL: the Sync row did not start (menu %d stage %d)\n", et->hostMenu(),
@@ -5446,6 +5464,161 @@ int main() {
         printf("short highlight on its own page only ok\n");
       }
 
+      // Owner, 26 Nov: a highlight's words open its card. One from Readest
+      // asks twice to go (it goes on both sides) and is buried; one kept here
+      // and never sent goes at one tap. The Highlights list's x does the same.
+      {
+        const uint32_t po = et->hostPageOffset();
+        et->hostAddReadestMark("rd-card", po, po + 17, "w0721 w0722 w0723");
+        stickyHost.refresh(true);
+        int at = -1;
+        for (int i = 0; i < et->hostUlCount(); i++) at = i;  // its stroke(s): the only marks here
+        if (at < 0) {
+          printf("CARD FAIL: no underline to tap\n");
+          abort();
+        }
+        const TRect u = et->hostUlRect(0);
+        toybox.onTap(u.x + u.w / 2, u.y + u.h / 2);
+        if (et->hostMenu() != (int)rmenu::Page::HlCard) {
+          printf("CARD FAIL: tapping the underline gave menu %d\n", et->hostMenu());
+          abort();
+        }
+        g_dumpEnabled = true;
+        setScreen("tool_epub_hl_card");
+        stickyHost.refresh(false);
+        g_dumpEnabled = false;
+        const TRect rm = et->hostHlRemoveRect();
+        tapRect(rm);
+        if (!et->hostHlArmed() || et->hostMarkCount() == 0) {
+          printf("CARD FAIL: a Readest highlight went at one tap\n");
+          abort();
+        }
+        g_dumpEnabled = true;
+        setScreen("tool_epub_hl_card_armed");
+        stickyHost.refresh(false);
+        g_dumpEnabled = false;
+        const int before = et->hostMarkCount();
+        tapRect(et->hostHlRemoveRect());
+        if (et->hostMenu() != 0 || et->hostMarkCount() != before - 1 || !marks::buried("rd-card")) {
+          printf("CARD FAIL: Tap again left menu %d, %d marks, buried %d\n", et->hostMenu(),
+                 et->hostMarkCount(), (int)marks::buried("rd-card"));
+          abort();
+        }
+        // One kept here: one tap.
+        et->hostKeepWords(0, 3, 0, 4);
+        stickyHost.refresh(true);
+        const int kept = et->hostMarkCount();
+        const TRect u2 = et->hostUlRect(0);
+        toybox.onTap(u2.x + u2.w / 2, u2.y + u2.h / 2);
+        tapRect(et->hostHlRemoveRect());
+        if (et->hostMarkCount() != kept - 1 || et->hostMenu() != 0) {
+          printf("CARD FAIL: one kept here did not go at one tap\n");
+          abort();
+        }
+        // Close leaves it be.
+        et->hostKeepWords(0, 3, 0, 4);
+        stickyHost.refresh(true);
+        const TRect u3 = et->hostUlRect(0);
+        toybox.onTap(u3.x + u3.w / 2, u3.y + u3.h / 2);
+        const TRect r3 = et->hostHlRemoveRect();
+        tapRect(TRect{r3.x + r3.w + 10, r3.y, r3.w, r3.h});  // Close
+        if (et->hostMarkCount() != kept || et->hostMenu() != 0) {
+          printf("CARD FAIL: Close removed it or stayed up\n");
+          abort();
+        }
+        // The list: x on a Readest one asks, the second x removes it.
+        et->hostAddReadestMark("rd-list", po + 30, po + 41, "w0726 w0727");
+        epubSettings(1);  // Highlights
+        int idx = -1;
+        for (int i = 0; i < et->hostMarkCount(); i++)
+          if (!strcmp(et->hostMarkId(i), "rd-list")) idx = i;
+        const TRect xr{480 - 16 - 48, shelf::Y0 + (idx % shelf::PER_PAGE) * shelf::ROW_H + (shelf::ROW_H - 6 - 48) / 2, 48, 48};
+        if (idx >= shelf::PER_PAGE) toybox.onButton(SideBtn::Down);
+        tapRect(xr);
+        if (et->hostListArmed() != idx) {
+          printf("CARD FAIL: the list's x did not ask first (armed %d, idx %d)\n", et->hostListArmed(), idx);
+          abort();
+        }
+        g_dumpEnabled = true;
+        setScreen("tool_epub_marks_armed");
+        stickyHost.refresh(true);
+        g_dumpEnabled = false;
+        const int n0 = et->hostMarkCount();
+        tapRect(xr);
+        if (et->hostMarkCount() != n0 - 1 || !marks::buried("rd-list")) {
+          printf("CARD FAIL: the second x did not remove and bury it\n");
+          abort();
+        }
+        // Reading sync from the book's own settings: the same page as Settings'.
+        toybox.onTap(20, 20);  // back to the page
+        epubSettings(2);       // Reading sync
+        if (et->hostMenu() != (int)rmenu::Page::SyncSet) {
+          printf("CARD FAIL: Reading sync row gave menu %d\n", et->hostMenu());
+          abort();
+        }
+        g_dumpEnabled = true;
+        setScreen("tool_epub_reading_sync");
+        stickyHost.refresh(true);
+        g_dumpEnabled = false;
+        tapRect(syncpg::row(1));
+        if (stickyHost.prefs().getBool(rhl::K_HL, true)) {
+          printf("CARD FAIL: the Highlights switch did not flip from the book\n");
+          abort();
+        }
+        tapRect(syncpg::row(1));
+        toybox.onTap(20, 20);  // back: to the page
+        if (et->hostMenu() != 0) {
+          printf("CARD FAIL: back from Reading sync gave menu %d\n", et->hostMenu());
+          abort();
+        }
+        // Leave the book as the checks after this expect it: nothing of ours.
+        for (int i = et->hostMarkCount() - 1; i >= 0; i--)
+          if (et->hostMarkSrc(i) == marks::SRC_HERE) et->hostRemoveMark(i);
+        marks::clearTombs();
+        et->hostSaveMarks();
+        // The More card, its Settings side, and the Text bar's tabs (owner, 26 Nov).
+        {
+          const TRect mc = rmenu::moreCorner(480);
+          toybox.onTap(mc.x + mc.w / 2, mc.y + mc.h / 2);
+          g_dumpEnabled = true;
+          setScreen("tool_epub_more");
+          stickyHost.refresh(true);
+          tapRect(rmenu::moreTile(4, 480, 800));
+          setScreen("tool_epub_more_settings");
+          stickyHost.refresh(true);
+          g_dumpEnabled = false;
+          tapRect(rmenu::moreSetBack(480, 800));  // back to the six
+          tapRect(rmenu::moreTile(4, 480, 800));
+          tapRect(rmenu::moreSetTile(0, 480, 800));
+          if (et->hostMenu() != (int)rmenu::Page::TextBar) {
+            printf("CARD FAIL: Text gave menu %d\n", et->hostMenu());
+            abort();
+          }
+          for (int tab : {0, 2, 5}) {
+            tapRect(rmenu::textTab(tab, 480, 800));
+            g_dumpEnabled = true;
+            char nm[40];
+            snprintf(nm, sizeof(nm), "tool_epub_textbar_%d", tab);
+            setScreen(nm);
+            stickyHost.refresh(true);
+            g_dumpEnabled = false;
+          }
+          // Docked: a tap on the page, even just above the bar, changes nothing.
+          toybox.onTap(240, 300);
+          toybox.onTap(240, rmenu::textBar(480, 800).y - 8);
+          if (et->hostMenu() != (int)rmenu::Page::TextBar) {
+            printf("CARD FAIL: a tap off the bar closed it (menu %d)\n", et->hostMenu());
+            abort();
+          }
+          tapRect(rmenu::textClose(480, 800));  // its x does
+          if (et->hostMenu() != 0) {
+            printf("CARD FAIL: the bar's x left menu %d\n", et->hostMenu());
+            abort();
+          }
+        }
+        printf("highlight card ok (tap the words, Readest asks twice and is buried, list x, Reading sync)\n");
+      }
+
       // D part B. Highlights kept here go to Readest: exact offsets, the whole
       // phrase (not the 96-byte label), once. Removing a sent one tells Readest;
       // removing an unsent one tells nobody. One kept before part B goes too.
@@ -5690,7 +5863,8 @@ int main() {
     }
     // Row 6 now: "Start again" sits between the rotation buttons and the way
     // out, so a thumb reaching for one cannot land on the other.
-    toybox.onTap(240, rmenu::rootRect(6, 480).y + 40);
+    toybox.onButton(SideBtn::Ok);
+      toybox.onTap(40, 20);  // the Back corner closes the book
     if (et->hostScreen() != 0) {
       printf("EPUB APP FAIL: CLOSE THE BOOK did not close it\n");
       abort();
@@ -5735,7 +5909,8 @@ int main() {
         abort();
       }
       toybox.onButton(SideBtn::Ok);                       // the panel
-      toybox.onTap(240, rmenu::rootRect(6, 480).y + 40);  // CLOSE THE BOOK
+      toybox.onButton(SideBtn::Ok);
+      toybox.onTap(40, 20);  // the Back corner closes the book  // CLOSE THE BOOK
     }
 
 
@@ -5807,7 +5982,8 @@ int main() {
         if (part < 3) toybox.onButton(SideBtn::Down);
       }
       toybox.onButton(SideBtn::Ok);                       // the panel
-      toybox.onTap(240, rmenu::rootRect(6, 480).y + 40);  // CLOSE THE BOOK
+      toybox.onButton(SideBtn::Ok);
+      toybox.onTap(40, 20);  // the Back corner closes the book  // CLOSE THE BOOK
       printf("epub picture chapters ok (reachable both ways, never blank)\n");
     }
     toybox.goHub();
@@ -5950,7 +6126,8 @@ int main() {
       }
       sdcard::hostPlantSide(pth, back, 0);
       toybox.onButton(SideBtn::Ok);
-      toybox.onTap(240, rmenu::rootRect(6, 480).y + 40);  // CLOSE THE BOOK
+      toybox.onButton(SideBtn::Ok);
+      toybox.onTap(40, 20);  // the Back corner closes the book  // CLOSE THE BOOK
       printf("position move ok (old folders read once, note moved, old files gone)\n");
     }
 
@@ -6032,7 +6209,8 @@ int main() {
         abort();
       }
       toybox.onButton(SideBtn::Ok);
-      toybox.onTap(240, rmenu::rootRect(7, 480).y + 30);  // CLOSE (8 rows: Sync is there)
+      toybox.onButton(SideBtn::Ok);
+      toybox.onTap(40, 20);  // the Back corner closes the book  // CLOSE (8 rows: Sync is there)
       toybox.onTap(20, 20);  // out of /books/Readest to the top shelf
       // Again: Book 01 is now on the card -- a tick, and a tap opens it.
       toybox.onTap(240, shelf::Y0 + 10);
@@ -6051,7 +6229,8 @@ int main() {
         abort();
       }
       toybox.onButton(SideBtn::Ok);
-      toybox.onTap(240, rmenu::rootRect(7, 480).y + 30);
+      toybox.onButton(SideBtn::Ok);
+      toybox.onTap(40, 20);  // the Back corner closes the book
       toybox.onTap(20, 20);
 
       // The phone: SEARCH puts up the QR; a search from the page filters the
@@ -6093,7 +6272,8 @@ int main() {
         abort();
       }
       toybox.onButton(SideBtn::Ok);
-      toybox.onTap(240, rmenu::rootRect(7, 480).y + 30);
+      toybox.onButton(SideBtn::Ok);
+      toybox.onTap(40, 20);  // the Back corner closes the book
       toybox.onTap(20, 20);
 
       // Cancel part-way: no book, no .part.
@@ -6192,7 +6372,8 @@ int main() {
         abort();
       }
       toybox.onButton(SideBtn::Ok);
-      toybox.onTap(240, rmenu::rootRect(6, 480).y + 40);  // CLOSE THE BOOK
+      toybox.onButton(SideBtn::Ok);
+      toybox.onTap(40, 20);  // the Back corner closes the book  // CLOSE THE BOOK
       if (es->hostScreen() != 0 || es->hostInGroup() != 0) {
         printf("SERIES FAIL: closing a volume left the row (group %d)\n", es->hostInGroup());
         abort();
@@ -6266,7 +6447,8 @@ int main() {
       }
       toybox.onButton(SideBtn::Down);              // a turn
       toybox.onButton(SideBtn::Ok);                // the panel
-      toybox.onTap(240, rmenu::rootRect(6, 480).y + 40);  // CLOSE: the save lands
+      toybox.onButton(SideBtn::Ok);
+      toybox.onTap(40, 20);  // the Back corner closes the book  // CLOSE: the save lands
       uint8_t pb[16];
       if (sdcard::hostReadSide(posOf("/Read/novel.epub"), pb, 16) != 10) {
         sdcard::hostDumpSides();
@@ -7352,13 +7534,20 @@ int main() {
     }
     static marks::Mark mbuf[marks::MAX];
     const int marksWere = marks::load(stickyHost, "/books/wind.epub", mbuf);
-    toybox.onButton(SideBtn::Ok);  // the panel
-    const int W = 480, rowReset = stickyHost.typefaceCount() > 1 ? 5 : 4;
+    // More > Settings > Start again: the bar at the foot asks; its button is
+    // the second tap.
+    auto openStart = [&]() {
+      const TRect mc = rmenu::moreCorner(480);
+      toybox.onTap(mc.x + mc.w / 2, mc.y + mc.h / 2);
+      tapRect(rmenu::moreTile(4, 480, 800));
+      tapRect(rmenu::moreSetTile(3, 480, 800));
+    };
+    openStart();
     g_dumpEnabled = true;
     setScreen("epub_start_again_armed");
-    toybox.onTap(240, rmenu::rootRect(rowReset, W).y + 40);  // asks
+    stickyHost.refresh(true);
     g_dumpEnabled = false;
-    if (er->hostMenu() == 0 || er->hostSpine() != spineWas) {
+    if (er->hostMenu() != (int)rmenu::Page::StartBar || er->hostSpine() != spineWas) {
       printf("RESET FAIL: the first tap did something (menu %d, s%d)\n", er->hostMenu(),
              er->hostSpine());
       abort();
@@ -7366,14 +7555,13 @@ int main() {
     // A tap somewhere else takes the question away rather than leaving it
     // armed under a thumb: into Text, back out, and the next tap on the row
     // must only ASK again.
-    toybox.onTap(240, rmenu::rootRect(2, W).y + 40);  // Text
-    toybox.onTap(20, 20);                             // back to the root
-    toybox.onTap(240, rmenu::rootRect(rowReset, W).y + 40);  // asks (not confirms)
-    if (er->hostSpine() != spineWas) {
+    toybox.onTap(240, 300);  // the page: the bar goes, nothing else
+    if (er->hostMenu() != 0 || er->hostSpine() != spineWas) {
       printf("RESET FAIL: the question survived a trip to another screen\n");
       abort();
     }
-    toybox.onTap(240, rmenu::rootRect(rowReset, W).y + 40);  // and confirms
+    openStart();
+    tapRect(rmenu::startGo(480, 800));  // and confirms
     if (er->hostMenu() != 0) {
       printf("RESET FAIL: the panel stayed up after starting again\n");
       abort();

@@ -2,6 +2,7 @@
 // back the way they were.
 #pragma once
 #include "chrome.h"
+#include "tools/sync_page.h"
 #include "tools/clock_web.h"
 #include "tools/files_web.h"
 #include "tools/lockscreen.h"
@@ -83,16 +84,12 @@ inline TRect dashSwitchRow() { return TRect{BTN_X, DASH_SW_Y, BTN_W, 60}; }
 inline TRect dashBorderRow() { return TRect{BTN_X, DASH_BRD_Y, BTN_W, 60}; }
 // D: Settings > CONNECT > Reading sync. The account row, then five switches
 // in two groups (WHAT TO SYNC, AUTO SYNC), 66 px apart.
-inline constexpr int SYNC_ACC_Y = TOPBAR_H + 40, SYNC_ROW_H = 62;
-inline constexpr int SYNC_ROWS = 5;
-inline int syncRowY(int i) {
-  return TOPBAR_H + 40 + 70 + 34 + i * (SYNC_ROW_H + 4) + (i >= 2 ? 34 : 0);
-}
-inline TRect syncRow(int i) { return TRect{BTN_X, syncRowY(i), BTN_W, SYNC_ROW_H}; }
-inline TRect syncSignOutRect() { return TRect{SCREEN_W - 16 - 120, SYNC_ACC_Y + 10, 120, 48}; }
+// (Geometry and drawing live in tools/sync_page.h, shared with the reader.)
+inline TRect syncRow(int i) { return syncpg::row(i); }
+inline TRect syncSignOutRect() { return syncpg::signOutRect(); }
 inline TRect dashPicRow(int i) { return TRect{BTN_X, DASH_PIC_Y + i * DASH_PIC_H, BTN_W, DASH_PIC_H}; }
 // The kit's light switch: a 68x34 rectangle with a rectangular slider.
-inline constexpr int SWITCH_W = 68, SWITCH_H = 34;
+inline constexpr int SWITCH_W = syncpg::SWITCH_W, SWITCH_H = syncpg::SWITCH_H;
 
 // The setup steps (v2, kit "Setup"): font, sleep, beep, Wi-Fi. Big outlined
 // rows, the chosen one filled, and Next at the foot. Language, "how to set

@@ -77,7 +77,7 @@ inline void setRefreshMode(Preferences& p, bool epub, Refresh r) {
 }
 
 // Which page of the panel is showing. `None` means the book itself.
-enum class Page : uint8_t { None, Root, Contents, Marks, Text, Keep, Font, Sync, More };
+enum class Page : uint8_t { None, Root, Contents, Marks, Text, Keep, Font, Sync, More, SyncSet, HlCard, TextBar, StartBar };
 
 // Rows, generously spaced, divided by hairlines. A thumb needs the height
 // whether or not there is a box drawn around it.
@@ -264,11 +264,11 @@ inline void drawRow(ToolsCanvas& c, int slot, const char* label, const char* sub
 // a length that no longer exists); the second line clips if even two lines
 // are not enough, and the sub drops to the row's foot.
 inline void drawRowWrap(ToolsCanvas& c, int slot, const char* label, const char* sub, bool rule,
-                        bool marked = false) {
+                        bool marked = false, int rightPad = 0) {
   const int y = shelf::Y0 + slot * shelf::ROW_H;
   if (marked) c.fillRect(16, y + 10, 3, shelf::ROW_H - 28, true);
   const int x = marked ? 34 : 24;
-  const int w = c.width() - x - 24;
+  const int w = c.width() - x - 24 - rightPad;
   char line1[128] = "";
   const char* rest = nullptr;
   for (const char* p = label; *p;) {
@@ -286,7 +286,7 @@ inline void drawRowWrap(ToolsCanvas& c, int slot, const char* label, const char*
   }
   c.textClipped(x, y + 6, w, line1, TS_MED, true);
   if (rest) c.textClipped(x, y + 34, w, rest, TS_MED, true);
-  if (sub && sub[0]) c.text(x, y + 62, sub, TS_SMALL, true);
+  if (sub && sub[0]) c.textClipped(x, y + 62, w, sub, TS_SMALL, true);
   if (rule) c.fillRect(16, y + shelf::ROW_H - 6, c.width() - 32, 1, true);
 }
 
@@ -313,6 +313,48 @@ inline int hitMoreTile(int x, int y, int w, int h) {
     if (moreTile(i, w, h).hit(x, y)) return i;
   return -1;
 }
+// More > Settings (owner, 26 Nov): the same card, four tiles two by two --
+// Text, Highlights, Reading sync, Start again -- and a back arrow in the title.
+inline TRect moreSetTile(int i, int w, int h) {
+  const TRect k = moreCard(w, h);
+  const int tw = (MORE_W - 32 - MORE_TILE_GAP) / 2;
+  return {k.x + 16 + (i % 2) * (tw + MORE_TILE_GAP), k.y + 94 + (i / 2) * (MORE_TILE_H + MORE_TILE_GAP), tw,
+          MORE_TILE_H};
+}
+inline TRect moreSetBack(int w, int h) {
+  const TRect k = moreCard(w, h);
+  return {k.x, k.y, 160, 84};
+}
+
+// The Text bar at the foot of the page (owner, 26 Nov): a control row over
+// six icon tabs. The page around it is the preview.
+inline TRect textBar(int w, int h) { return {10, h - 10 - 124, w - 20, 124}; }
+inline int textRowY(int w, int h) { return textBar(w, h).y + 6; }
+// Six tabs and, last, the bar's own close (owner, 26 Nov: the bar is docked --
+// a tap on the page no longer closes it, so a thumb that misses a control
+// does not throw the settings away).
+inline TRect textTab(int i, int w, int h) {
+  const TRect b = textBar(w, h);
+  const int tw = (b.w - 20 - 6 * 4 - 12) / 7;
+  return {b.x + 10 + i * (tw + 4) + (i == 6 ? 12 : 0), b.y + 70, tw, 48};
+}
+inline TRect textClose(int w, int h) { return textTab(6, w, h); }
+inline int textCtlX0(int w, int h) { return textBar(w, h).x + 10 + 80; }
+inline int textCtlX1(int w, int h) { return textBar(w, h).x + textBar(w, h).w - 10; }
+inline TRect textSeg(int k, int w, int h) {
+  const int x0 = textCtlX0(w, h), x1 = textCtlX1(w, h), sw = (x1 - x0) / 3;
+  return {x0 + k * sw, textRowY(w, h) + 4, sw, 46};
+}
+inline TRect textMinus(int w, int h) { return {textCtlX1(w, h) - 54 - 96 - 54, textRowY(w, h) + 4, 54, 46}; }
+inline TRect textPlus(int w, int h) { return {textCtlX1(w, h) - 54, textRowY(w, h) + 4, 54, 46}; }
+inline TRect textFontMore(int w, int h) { return {textCtlX1(w, h) - 40, textRowY(w, h) + 4, 40, 46}; }
+// Start again, the same bar with one question.
+inline TRect startBar(int w, int h) { return {10, h - 10 - 66, w - 20, 66}; }
+inline TRect startGo(int w, int h) {
+  const TRect b = startBar(w, h);
+  return {b.x + b.w - 10 - 140, b.y + 10, 140, 46};
+}
+
 // Where the page answers "More": its top-right corner (the top-left closes).
 inline TRect moreCorner(int w) { return {w - 110, 0, 110, 60}; }
 // The "TAP TO LOCK" plate a page wears while it follows the device's angle.

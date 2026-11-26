@@ -1,4 +1,5 @@
 #include "settings.h"
+#include "tools/sync_page.h"
 
 #include "applist.h"
 #include "appvis.h"
@@ -215,16 +216,7 @@ constexpr const char* HELP_KEYS[] = {"h_wrd", "h_mns", "h_g20", "h_xo", "h_sea",
                                      "h_fc",  "h_bk",  "h_ep",  "h_rcp", "h_c4", "h_bj",
                                      "h_hl",  "h_cb",  "h_hn",  "h_mp",  "h_lv", "h_cl"};
 
-// The kit's light switch (owner, 25 Nov): a rectangle with a rectangular
-// slider. Off: white track, black slider left. On: black track, white
-// slider right.
-void lightSwitch(ToolsCanvas& c, int x, int y, bool on) {
-  using namespace setui;
-  if (on) c.fillRect(x, y, SWITCH_W, SWITCH_H, true);
-  else c.drawRect(x, y, SWITCH_W, SWITCH_H, 2, true);
-  const int kw = 28, ky = y + 4, kh = SWITCH_H - 8;
-  c.fillRect(on ? x + SWITCH_W - 4 - kw : x + 4, ky, kw, kh, !on);
-}
+void lightSwitch(ToolsCanvas& c, int x, int y, bool on) { syncpg::lightSwitch(c, x, y, on); }
 
 const char* dashPicName(int p) {
   static const char* N[4] = {"No picture", "Home wallpaper", "Lock-screen picture",
@@ -1218,98 +1210,14 @@ void SettingsScreen::renderApps(ToolsHost& host, ToolsCanvas& c) {
 }
 
 // --- Reading sync (D) ----------------------------------------------------------------
-namespace {
-struct SyncRow {
-  const char* key;
-  const char* name;
-  const char* sub;
-};
-constexpr SyncRow kSyncRows[setui::SYNC_ROWS] = {
-    {rhl::K_POS, "Reading position", nullptr},
-    {rhl::K_HL, "Highlights", "deleted on one side, gone on both"},
-    {rhl::K_AUTO, "Auto sync", "off: only the Sync button"},
-    {rhl::K_OPEN, "When a book opens", "gets your place and new highlights"},
-    {rhl::K_CLOSE, "When a book closes or it sleeps", "sends your place and highlights"},
-};
-void syncHead(ToolsCanvas& c, int y, const char* label, const char* right) {
-  using namespace setui;
-  c.textTracked(BTN_X, y, label, TS_SMALL, true, false, 2);
-  if (right) c.text(BTN_X + BTN_W - c.textWidth(right, TS_SMALL), y, right, TS_SMALL, true);
-  chrome2::dottedRule(c, BTN_X, y + c.textHeight(TS_SMALL) + 6, BTN_W);
-}
-}  // namespace
-
+// The page itself is shared with the reader's Book settings (sync_page.h).
 void SettingsScreen::renderSync(ToolsHost& host, ToolsCanvas& c) {
-  using namespace setui;
   drawTopBar(c, "READING SYNC");
-  Preferences& p = host.prefs();
-  const bool acct = kosync::haveAccount(p);
-  syncHead(c, SYNC_ACC_Y - 30, "ACCOUNT", nullptr);
-  char name[kosync::USER_MAX] = "", line[96];
-  if (acct) kosync::user(p, name, sizeof(name));
-  c.text(BTN_X, SYNC_ACC_Y + 8, acct ? (kosync::isReadest(p) ? "Readest" : "KOReader sync") : "Not signed in",
-         TS_MED, true, true);
-  if (acct)
-    snprintf(line, sizeof(line), "%s", name);
-  else
-    snprintf(line, sizeof(line), "sign in from a book: More > Sync");
-  c.textClipped(BTN_X, SYNC_ACC_Y + 8 + c.textHeight(TS_MED) + 2, BTN_W - 140, line, TS_SMALL, true);
-  if (acct) {
-    const TRect so = syncSignOutRect();
-    if (_armed) c.fillRect(so.x, so.y, so.w, so.h, true);
-    else c.drawRect(so.x, so.y, so.w, so.h, 2, true);
-    c.textInBox(so.x, so.y, so.w, so.h, _armed ? "Sure?" : "Sign out", TS_SMALL, !_armed, true);
-  }
-  syncHead(c, syncRowY(0) - 30, "WHAT TO SYNC", nullptr);
-  syncHead(c, syncRowY(2) - 30, "AUTO SYNC", "over the home Wi-Fi");
-  const bool autoOn = p.getBool(rhl::K_AUTO, true);
-  for (int i = 0; i < SYNC_ROWS; i++) {
-    const TRect r = syncRow(i);
-    const bool dim = i >= 3 && !autoOn;
-    const bool on = p.getBool(kSyncRows[i].key, true);
-    const int nameY = r.y + (kSyncRows[i].sub ? 8 : (r.h - c.textHeight(TS_MED)) / 2);
-    c.text(r.x, nameY, kSyncRows[i].name, TS_MED, true);
-    if (kSyncRows[i].sub) c.text(r.x, nameY + c.textHeight(TS_MED) + 2, kSyncRows[i].sub, TS_SMALL, true);
-    const int sx = r.x + r.w - SWITCH_W - 4, sy = r.y + (r.h - SWITCH_H) / 2;
-    lightSwitch(c, sx, sy, on && !dim);
-    if (dim) {  // the timing switches stand down while auto sync is off: a light screen over them
-      for (int yy = r.y; yy < r.y + r.h; yy += 2)
-        for (int xx = r.x + (yy & 2 ? 1 : 0); xx < r.x + r.w; xx += 2) c.fillRect(xx, yy, 1, 1, false);
-    }
-    c.fillRect(r.x, r.y + r.h + 1, r.w, 1, true);
-  }
-  c.textCentered(SCREEN_W / 2, 776, _note ? _note : "Sync now from any book: More > Sync", TS_SMALL, true);
+  syncpg::render(c, host.prefs(), _armed, _note);
 }
 
 bool SettingsScreen::tapSync(ToolsHost& host, int x, int y) {
-  using namespace setui;
-  Preferences& p = host.prefs();
-  const bool wasArmed = _armed;
-  _armed = false;
-  _note = nullptr;
-  if (kosync::haveAccount(p) && syncSignOutRect().hit(x, y)) {
-    if (!wasArmed) {
-      _armed = true;  // two taps: signing out is not undone by a third
-      host.beep(2);
-    } else {
-      kosync::forgetAccount(p);
-      _note = "signed out: sign in again from a book";
-      host.beep(1);
-    }
-    return true;
-  }
-  for (int i = 0; i < SYNC_ROWS; i++) {
-    if (!syncRow(i).hit(x, y)) continue;
-    if (i >= 3 && !p.getBool(rhl::K_AUTO, true)) {
-      host.beep(2);
-      _note = "turn Auto sync on first";
-      return true;
-    }
-    rhl::flip(p, kSyncRows[i].key);
-    host.beep(1);
-    return true;
-  }
-  return wasArmed;
+  return syncpg::tap(host, x, y, _armed, _note);
 }
 
 // --- the charging dashboard page (C6) ---------------------------------------------
