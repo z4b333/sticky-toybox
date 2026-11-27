@@ -76,10 +76,13 @@ inline constexpr int REC_GAP = 4;      // tiles to heading
 
 // --- home styles (kit "Home") -------------------------------------------------
 // Book collection: the book being read, the other one, the week's streak.
-inline TRect booksNow() { return TRect{16, 64, SCREEN_W - 32, 190}; }
-inline TRect booksAlso() { return TRect{16, 300, SCREEN_W - 32, 70}; }
-inline TRect booksAll() { return TRect{SCREEN_W - 150, 262, 134, 36}; }
-inline constexpr int BOOKS_STREAK_Y = 560;
+// Owner, 27 Nov: the cover large in the top half, no frame; the other book
+// and the streak lower down.
+inline constexpr int BOOKS_COVER_W = 198;  // 96:160 at 330 tall
+inline TRect booksNow() { return TRect{16, 64, SCREEN_W - 32, 330}; }
+inline TRect booksAlso() { return TRect{16, 470, SCREEN_W - 32, 70}; }
+inline TRect booksAll() { return TRect{SCREEN_W - 150, 432, 134, 36}; }
+inline constexpr int BOOKS_STREAK_Y = 588;
 // Calendar: the month, then today's list.
 inline TRect calPrev() { return TRect{8, 50, 64, 50}; }
 inline TRect calNext() { return TRect{SCREEN_W - 72, 50, 64, 50}; }

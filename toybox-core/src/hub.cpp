@@ -321,7 +321,7 @@ void standInCover(ToolsCanvas& c, int x, int y, int w, int h, const char* title)
 
 // The book's own cover when its small thumbnail is in flash (made on its first
 // open), scaled to fit the box and framed; false leaves the stand-in to draw.
-bool bookCover(ToolsCanvas& c, const char* file, int x, int y, int w, int h) {
+bool bookCover(ToolsCanvas& c, const char* file, int x, int y, int w, int h, bool frame = true) {
   static uint8_t bits[bthumb::BYTES];
   if (!file || !file[0] || !bthumb::load(file, bits)) return false;
   // Fit 96x160 into w x h, keeping its shape.
@@ -349,7 +349,7 @@ bool bookCover(ToolsCanvas& c, const char* file, int x, int y, int w, int h) {
       }
     }
   }
-  c.drawRect(ox, oy, dw, dh, 2, true);
+  if (frame) c.drawRect(ox, oy, dw, dh, 2, true);
   return true;
 }
 
@@ -403,11 +403,12 @@ void renderBooksHome(ToolsHost& host, ToolsCanvas& c, const recents::Entry* rec,
   homeTop(host, c, nullptr);
   const TRect nb = booksNow();
   if (recN > 0) {
-    if (!bookCover(c, rec[0].file, nb.x, nb.y, 132, nb.h)) standInCover(c, nb.x, nb.y, 132, nb.h, rec[0].title);
-    const int tx = nb.x + 150, tw = nb.w - 150;
+    const int cw = BOOKS_COVER_W;
+    if (!bookCover(c, rec[0].file, nb.x, nb.y, cw, nb.h, false)) standInCover(c, nb.x, nb.y, cw, nb.h, rec[0].title);
+    const int tx = nb.x + cw + 18, tw = nb.w - cw - 18;
     c.textTracked(tx, nb.y + 14, "READING NOW", TS_SMALL, true, false, 2);
-    char lines[3][64];
-    const int n = wrapLines(c, rec[0].title, TS_MED, true, tw, lines, 3);
+    char lines[5][64];
+    const int n = wrapLines(c, rec[0].title, TS_MED, true, tw, lines, 5);
     for (int i = 0; i < n; i++) c.text(tx, nb.y + 44 + i * (c.textHeight(TS_MED) + 4), lines[i], TS_MED, true, true);
     c.text(tx, nb.y + 44 + n * (c.textHeight(TS_MED) + 4) + 8, "tap to carry on", TS_SMALL, true);
   } else {
@@ -415,11 +416,11 @@ void renderBooksHome(ToolsHost& host, ToolsCanvas& c, const recents::Entry* rec,
     c.textCentered(SCREEN_W / 2, nb.y + 96, "open Books from the dock below", TS_SMALL, true);
   }
   // The other book, and the way to all of them.
-  c.textTracked(16, 270, "ALSO READING", TS_SMALL, true, false, 2);
-  const TRect al = booksAll();
-  c.text(al.x + al.w - c.textWidth("all books >", TS_SMALL), 270, "all books >", TS_SMALL, true, true);
-  c.fillRect(16, 294, SCREEN_W - 32, 1, true);
   const TRect ab = booksAlso();
+  c.textTracked(16, ab.y - 30, "ALSO READING", TS_SMALL, true, false, 2);
+  const TRect al = booksAll();
+  c.text(al.x + al.w - c.textWidth("all books >", TS_SMALL), ab.y - 30, "all books >", TS_SMALL, true, true);
+  c.fillRect(16, ab.y - 6, SCREEN_W - 32, 1, true);
   if (recN > 1) {
     c.textClipped(ab.x, ab.y + 12, ab.w - 40, rec[1].title, TS_MED, true, true);
     c.text(ab.x, ab.y + 12 + c.textHeight(TS_MED) + 4, "tap to carry on", TS_SMALL, true);
