@@ -778,23 +778,29 @@ inline void drawLoading(ToolsHost& h, ToolsCanvas& c, const char* file, const ch
   drawPlate(c, file, title);
 }
 
-// --- the homes' covers (v2, owner 27 Nov) ---------------------------------------
+// --- the homes' covers (v2, owner 27 Nov; sizes from the kit's final boards) ---
 // Made from the full-size cover on the card when a book opens: averaged down
 // (every source pixel counted, never sampled) and dithered again, so faces and
-// lettering survive. Two sizes, each its own file in flash:
-//   BIG   198x330, the Books home's "reading now" (8,250 bytes), kept for 2;
-//   SMALL 104x174, the Today block and the recent-books grids (2,262), kept for 6.
+// lettering survive. Three sizes, each its own file in flash:
+//   BIG   168x280, the Books home's "reading now" (5,880 bytes), kept for 2;
+//   LARGE 216x360, the two books read last in the Books app (9,720), kept for 3;
+//   MID   132x220, every other cover: also reading, the Today block, the
+//         Study drawer, the Books app's second row (3,740), kept for 6.
 struct Size {
   int w, h, stride;
-  char tag;           // the file name's letter: "/hc..." and "/sc..."
+  char tag;           // the file name's letter: "/bc...", "/lc...", "/mc..."
   const char* keys;   // the prefs key holding the kept books, newest first
   int keep;
 };
-inline constexpr Size HOME_BIG{198, 330, 25, 'h', "hc_keep", 2};
-inline constexpr Size HOME_SMALL{104, 174, 13, 's', "sc_keep", 6};
-inline constexpr int HOME_W = HOME_BIG.w, HOME_H = HOME_BIG.h, HOME_STRIDE = HOME_BIG.stride;
-inline constexpr int HOME_BYTES = HOME_STRIDE * HOME_H;
+inline constexpr Size HOME_BIG{168, 280, 21, 'b', "bc_keep", 2};
+inline constexpr Size HOME_LARGE{216, 360, 27, 'l', "lc_keep", 3};
+inline constexpr Size HOME_MID{132, 220, 17, 'm', "mc_keep", 6};
 inline constexpr int bytesOf(const Size& z) { return z.stride * z.h; }
+static_assert(HOME_BIG.stride * 8 >= HOME_BIG.w && HOME_LARGE.stride * 8 >= HOME_LARGE.w &&
+                  HOME_MID.stride * 8 >= HOME_MID.w, "a cover row must fit its stride");
+// d-test11..15 made 198x330 ('h') and 104x174 ('s'): those files go, once.
+struct OldSize { char tag; const char* keys; };
+inline constexpr OldSize OLD_SIZES[2] = {{'h', "hc_keep"}, {'s', "sc_keep"}};
 
 inline void coverPath(const Size& z, uint32_t k, char* out, int cap) {
   snprintf(out, cap, "/%cc%08lx.b", z.tag, (unsigned long)k);
@@ -817,7 +823,6 @@ inline bool loadCover(const Size& z, const char* file, uint8_t* dst) {
   return ok;
 }
 inline bool haveHome(const char* file) { return haveCover(HOME_BIG, file); }
-inline bool loadHome(const char* file, uint8_t* dst) { return loadCover(HOME_BIG, file, dst); }
 
 // Reads the big cover a band at a time (as the lock-screen copy does).
 inline bool makeCover(ToolsHost& h, const Size& z, const char* file) {
@@ -906,10 +911,26 @@ inline bool makeCover(ToolsHost& h, const Size& z, const char* file) {
   pr.putBytes(z.keys, now, (size_t)w * 4);
   return true;
 }
+// The files of the earlier sizes, and their lists, go the first time.
+inline void dropOldSizes(Preferences& pr) {
+  for (const OldSize& o : OLD_SIZES) {
+    if (!pr.isKey(o.keys)) continue;
+    uint32_t kept[8] = {};
+    const int had = (int)(pr.getBytes(o.keys, kept, sizeof(kept)) / 4);
+    for (int i = 0; i < had; i++) {
+      char old[20];
+      snprintf(old, sizeof(old), "/%cc%08lx.b", o.tag, (unsigned long)kept[i]);
+      tfs::remove(old);
+    }
+    pr.remove(o.keys);
+  }
+}
 inline bool makeHome(ToolsHost& h, const char* file) {
+  dropOldSizes(h.prefs());
   const bool a = makeCover(h, HOME_BIG, file);
-  const bool b = makeCover(h, HOME_SMALL, file);
-  return a && b;
+  const bool b = makeCover(h, HOME_LARGE, file);
+  const bool m = makeCover(h, HOME_MID, file);
+  return a && b && m;
 }
 
 // Draws a cover file at its own size, top-left at (x, y).
@@ -928,10 +949,9 @@ inline void inkCover(ToolsCanvas& c, const Size& z, const uint8_t* bits, int x, 
   }
 }
 
-// A book's small cover at (x, y), 104x174: the sharp one when made, else the
-// strip thumbnail fitted in, else an outlined stand-in with the title.
-inline void drawSmall(ToolsCanvas& c, const char* file, const char* title, int x, int y) {
-  const Size& z = HOME_SMALL;
+// A book's cover at (x, y) at size z: the sharp one when made, else the strip
+// thumbnail fitted in, else an outlined stand-in with the title.
+inline void drawCover(ToolsCanvas& c, const Size& z, const char* file, const char* title, int x, int y) {
   if (uint8_t* bits = (uint8_t*)malloc((size_t)bytesOf(z))) {
     const bool got = loadCover(z, file, bits);
     if (got) inkCover(c, z, bits, x, y);
@@ -940,12 +960,20 @@ inline void drawSmall(ToolsCanvas& c, const char* file, const char* title, int x
   }
   static uint8_t small[BYTES];
   if (load(file, small)) {
-    const int dh = z.h, dw = z.h * W / H, ox = x + (z.w - dw) / 2;
+    int dh = z.h, dw = z.h * W / H;
+    if (dw > z.w) { dw = z.w; dh = z.w * H / W; }
+    const int ox = x + (z.w - dw) / 2, oy = y + (z.h - dh) / 2;
     for (int ty = 0; ty < dh; ty++) {
       const uint8_t* row = small + (size_t)(ty * H / dh) * (W / 8);
-      for (int tx = 0; tx < dw; tx++) {
-        const int sx = tx * W / dw;
-        if (!(row[sx >> 3] & (0x80 >> (sx & 7)))) c.fillRect(ox + tx, y + ty, 1, 1, true);
+      int run = -1;
+      for (int tx = 0; tx <= dw; tx++) {
+        const int sx = tx * W / (dw ? dw : 1);
+        const bool ink = tx < dw && !(row[sx >> 3] & (0x80 >> (sx & 7)));
+        if (ink && run < 0) run = tx;
+        if (!ink && run >= 0) {
+          c.fillRect(ox + run, oy + ty, tx - run, 1, true);
+          run = -1;
+        }
       }
     }
     return;
@@ -958,9 +986,37 @@ inline void drawSmall(ToolsCanvas& c, const char* file, const char* title, int x
     if (len > y + z.h - 1 - y0) len = y + z.h - 1 - y0;
     if (len > 0) c.drawLine(x0, y0, x0 - len, y0 + len, 1, true);
   }
-  c.fillRect(x + 6, y + 10, z.w - 12, 28, false);
-  c.drawRect(x + 6, y + 10, z.w - 12, 28, 1, true);
-  c.textClipped(x + 10, y + 14, z.w - 20, title ? title : "", TS_SMALL, true, true);
+  // The title on a white plate in the middle, as the kit draws a cover.
+  const int pw = z.w * 2 / 3, ph = z.h / 5, px = x + (z.w - pw) / 2, py = y + (z.h - ph) / 2;
+  c.fillRect(px, py, pw, ph, false);
+  c.drawRect(px, py, pw, ph, 2, true);
+  c.textClipped(px + 4, py + 4, pw - 8, title ? title : "", TS_SMALL, true, true);
+}
+
+// How far through, as the kit draws it on a cover's foot: a white strip with
+// an outlined bar inside (owner, 27 Nov: bars, not percentages).
+inline void coverBar(ToolsCanvas& c, int x, int y, int w, int h, int pct) {
+  if (pct < 0) return;
+  if (pct > 100) pct = 100;
+  const int sy = y + h - 18;
+  c.fillRect(x, sy, w, 18, false);
+  c.drawRect(x + 4, sy + 4, w - 8, 10, 2, true);
+  const int fill = (w - 12) * pct / 100;
+  c.fillRect(x + 6, sy + 6, fill > 0 ? fill : 2, 6, true);
+}
+
+// An empty place: a dashed outline and "open a book".
+inline void openABook(ToolsCanvas& c, int x, int y, int w, int h) {
+  for (int k = 0; k < w; k += 10) {
+    c.fillRect(x + k, y, 5, 2, true);
+    c.fillRect(x + k, y + h - 2, 5, 2, true);
+  }
+  for (int k = 0; k < h; k += 10) {
+    c.fillRect(x, y + k, 2, 5, true);
+    c.fillRect(x + w - 2, y + k, 2, 5, true);
+  }
+  c.textCentered(x + w / 2, y + h / 2 - 20, "open a", TS_SMALL, true);
+  c.textCentered(x + w / 2, y + h / 2 + 2, "book", TS_SMALL, true);
 }
 
 }  // namespace bthumb

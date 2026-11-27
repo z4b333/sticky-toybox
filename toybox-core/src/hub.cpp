@@ -1,6 +1,6 @@
 #include "hub.h"
 #include "home_style.h"
-#include "tools/big_digits.h"
+#include "tools/mid_digits.h"
 #include "tools/book_thumbs.h"
 #include "tools/cal_store.h"
 
@@ -140,6 +140,9 @@ int stripTopFor(int cells) { return FOLDER_TOP + ((cells + COLS - 1) / COLS) * R
 // The strip fits only when the tiles stop at two rows; the third row (hidden
 // apps growing the + add cell) takes the space back.
 bool stripFits(int cells) { return cells > 0 && cells <= 2 * COLS; }
+// Under one row of tiles the strip is three covers (kit DrawerStudyFw);
+// under two it stays two title rows, which is all that fits above the dock.
+bool stripCovers(int cells) { return cells > 0 && cells <= COLS; }
 
 // Sentence case, the design's register: "Wordle", "Flashcards". A name of one
 // or two letters (XO) is an initialism and keeps its capitals; digits pass
@@ -184,18 +187,28 @@ void drawDock(ToolsCanvas& c, int active) {
   }
 }
 
-// The recently-read list: title rows, not covers. The dock owns the height
-// the 96 px thumbnails wanted, and a title answers "which book" faster at
-// arm's length than a stamp-sized cover ever did.
-void drawRecentStrip(ToolsCanvas& c, int stripTop, const recents::Entry* rec, int recN) {
+void midCover(ToolsCanvas& c, const recents::Entry& e, int x, int y, bool bar);
+
+// The recently-read strip. Under one row of tiles: three covers with how far
+// on each (owner, 27 Nov). Under two rows: title rows, as there is no room.
+void drawRecentStrip(ToolsCanvas& c, int stripTop, const recents::Entry* rec, int recN, bool covers) {
+  if (covers) {
+    c.textTracked(24, stripTop + REC_COVER_HEAD, "CARRY ON READING", TS_SMALL, true, false, 1);
+    c.fillRect(16, stripTop + REC_COVER_RULE, SCREEN_W - 32, 1, true);
+    for (int i = 0; i < recN && i < 3; i++) {
+      const TRect r = studyCover(i, stripTop);
+      midCover(c, rec[i], r.x, r.y, true);
+    }
+    return;
+  }
   c.textTracked(24, stripTop + 6, "CARRY ON READING", TS_SMALL, true, false, 1);
   c.fillRect(16, stripTop + 32, SCREEN_W - 32, 1, true);
-  for (int i = 0; i < recN; i++) {
+  for (int i = 0; i < recN && i < 2; i++) {
     const int y = stripTop + REC_HEAD_H + i * REC_ROW_H;
     c.textClipped(24, y + 8, SCREEN_W - 120, rec[i].title, TS_MED, true);
     const char* kind = rec[i].kind == recents::KIND_EPUB ? "epub" : "book";
     c.text(SCREEN_W - 24 - c.textWidth(kind, TS_SMALL), y + 14, kind, TS_SMALL, true);
-    if (i + 1 < recN) c.fillRect(24, y + REC_ROW_H - 2, SCREEN_W - 48, 1, true);
+    if (i + 1 < recN && i + 1 < 2) c.fillRect(24, y + REC_ROW_H - 2, SCREEN_W - 48, 1, true);
   }
 }
 
@@ -263,7 +276,7 @@ void renderFolder(ToolsHost& host, ToolsCanvas& c, int folder, int page,
     c.textCentered(icx, top + ih + 14 + (lh - c.textHeight(sz)) / 2, label, sz, true, true);
   });
   drawDock(c, folder);
-  if (strip) drawRecentStrip(c, stripTopFor(cellCount), rec, recN);
+  if (strip) drawRecentStrip(c, stripTopFor(cellCount), rec, recN, stripCovers(cellCount));
 }
 }  // namespace
 
@@ -291,8 +304,8 @@ void homeTop(ToolsHost& host, ToolsCanvas& c, const char* label) {
     if (date) {
       char ds[24];
       snprintf(ds, sizeof(ds), "%s %d %s", WD3[cal::weekday(y, mo, d)], d, MON[mo - 1]);
-      c.text(16 + c.textWidth(t, TS_LARGE, true) + 12, 8 + c.textHeight(TS_LARGE) - c.textHeight(TS_SMALL) - 4,
-             ds, TS_SMALL, true);
+      // Bold and a size up, beside the time (owner, 27 Nov: "make the date larger").
+      c.text(16 + c.textWidth(t, TS_LARGE, true) + 12, 14, ds, TS_MED, true, true);
     }
   }
   chrome2::moreDots(c, hubui::MORE_X, hubui::MORE_Y - 8);
@@ -354,8 +367,10 @@ bool bookCover(ToolsCanvas& c, const char* file, int x, int y, int w, int h, boo
   return true;
 }
 
-void smallCover(ToolsCanvas& c, const recents::Entry& e, int x, int y, const char* label) {
-  bthumb::drawSmall(c, e.file, label, x, y);
+// A recent book at the shared 132x220 size, how far through on its foot.
+void midCover(ToolsCanvas& c, const recents::Entry& e, int x, int y, bool bar) {
+  bthumb::drawCover(c, bthumb::HOME_MID, e.file, e.title, x, y);
+  if (bar) bthumb::coverBar(c, x, y, bthumb::HOME_MID.w, bthumb::HOME_MID.h, e.pct);
 }
 
 int wrapLines(ToolsCanvas& c, const char* s, TSize ts, bool bold, int maxW, char (*out)[64], int maxLines) {
@@ -388,18 +403,36 @@ int wrapLines(ToolsCanvas& c, const char* s, TSize ts, bool bold, int maxW, char
   return n;
 }
 
-void streakWeek(ToolsHost& host, ToolsCanvas& c, int x, int y, int boxW, int y2, int mo, int d) {
+// A week of reading, oldest first. On white: read days filled, today's box
+// heavier. Inverted (the Books home's black band): white outlines, read days
+// filled white, and today striped when it has been read (owner, 27 Nov).
+void streakWeek(ToolsHost& host, ToolsCanvas& c, int x, int y, int boxW, int y2, int mo, int d, bool inverted = false) {
   static const char* const L[7] = {"S", "M", "T", "W", "T", "F", "S"};
+  const bool ink = !inverted;
   for (int k = 0; k < 7; k++) {
     const int ago = 6 - k;
     const int bx = x + k * (boxW + 6);
     const bool on = homestyle::readOn(host.prefs(), y2, mo, d, ago);
-    if (on) c.fillRect(bx, y, boxW, 30, true);
-    else c.drawRect(bx, y, boxW, 30, ago == 0 ? 3 : 2, true);
+    if (inverted && ago == 0 && on) {
+      c.drawRect(bx, y, boxW, 30, 2, ink);
+      for (int s = 4; s < boxW + 30; s += 6) {  // 45-degree stripes inside
+        for (int t = 0; t < 3; t++) {
+          int x0 = bx + 2 + s + t, y0 = y + 2;
+          if (x0 > bx + boxW - 3) { y0 += x0 - (bx + boxW - 3); x0 = bx + boxW - 3; }
+          int len = x0 - (bx + 2);
+          if (len > y + 27 - y0) len = y + 27 - y0;
+          if (len > 0) c.drawLine(x0, y0, x0 - len, y0 + len, 1, ink);
+        }
+      }
+    } else if (on) {
+      c.fillRect(bx, y, boxW, 30, ink);
+    } else {
+      c.drawRect(bx, y, boxW, 30, ago == 0 ? 3 : 2, ink);
+    }
     const int32_t dn = cal::dayNum(y2, mo, d) - ago;
     int yy, mm2, dd;
     cal::fromDayNum(dn, yy, mm2, dd);
-    c.textCentered(bx + boxW / 2, y + 36, L[cal::weekday(yy, mm2, dd)], TS_SMALL, true, ago == 0);
+    c.textCentered(bx + boxW / 2, y + 34, L[cal::weekday(yy, mm2, dd)], TS_SMALL, ink, ago == 0);
   }
 }
 
@@ -408,69 +441,60 @@ void renderBooksHome(ToolsHost& host, ToolsCanvas& c, const recents::Entry* rec,
   homeTop(host, c, nullptr);
   const TRect nb = booksNow();
   if (recN > 0) {
-    const int cw = BOOKS_COVER_W;
-    uint8_t* home = (uint8_t*)malloc(bthumb::HOME_BYTES);  // 8 KB, only while drawing
-    if (home && bthumb::loadHome(rec[0].file, home)) {
-      // The sharp one, at its own size: made from the full-size cover.
-      bthumb::inkCover(c, bthumb::HOME_BIG, home, nb.x + (cw - bthumb::HOME_W) / 2, nb.y + (nb.h - bthumb::HOME_H) / 2);
-    } else if (!bookCover(c, rec[0].file, nb.x, nb.y, cw, nb.h, false)) {
-      standInCover(c, nb.x, nb.y, cw, nb.h, rec[0].title);
-    }
-    free(home);
-    const int tx = nb.x + cw + 18, tw = nb.w - cw - 18;
+    // The sharp one, at its own size: made from the full-size cover.
+    bthumb::drawCover(c, bthumb::HOME_BIG, rec[0].file, rec[0].title, nb.x, nb.y);
+    const int tx = BOOKS_TEXT_X, tw = BOOKS_TEXT_W;
     c.textTracked(tx, nb.y + 6, "READING NOW", TS_SMALL, true, false, 2);
-    char lines[4][64];
+    char lines[3][64];
     const int lh = c.textHeight(TS_MED) + 4;
-    const int n = wrapLines(c, rec[0].title, TS_MED, true, tw, lines, 4);
+    const int n = wrapLines(c, rec[0].title, TS_MED, true, tw, lines, 3);
     int ty = nb.y + 34;
     for (int i = 0; i < n; i++, ty += lh) c.text(tx, ty, lines[i], TS_MED, true, true);
     // Where it was left: the chapter, and how far through the whole book.
-    ty += 14;
+    // Fixed places (the kit's), so a short title leaves the rest where it is.
     if (rec[0].chap[0]) {
-      c.textTracked(tx, ty, "CHAPTER", TS_SMALL, true, false, 2);
-      ty += c.textHeight(TS_SMALL) + 4;
-      char cl[3][64];
-      const int m = wrapLines(c, rec[0].chap, TS_SMALL, false, tw, cl, 3);
-      for (int i = 0; i < m; i++, ty += c.textHeight(TS_SMALL) + 2) c.text(tx, ty, cl[i], TS_SMALL, true);
-      ty += 10;
+      c.textTracked(tx, nb.y + 132, "CHAPTER", TS_SMALL, true, false, 2);
+      char cl[2][64];
+      const int m = wrapLines(c, rec[0].chap, TS_SMALL, false, tw, cl, 2);
+      for (int i = 0; i < m; i++) c.text(tx, nb.y + 156 + i * (c.textHeight(TS_SMALL) + 2), cl[i], TS_SMALL, true);
     }
     if (rec[0].pct >= 0) {
       char pc[24];
       snprintf(pc, sizeof(pc), "%d%% of the book", rec[0].pct);
-      c.text(tx, ty, pc, TS_MED, true, true);
-      ty += c.textHeight(TS_MED) + 6;
-      c.drawRect(tx, ty, tw, 14, 2, true);
+      c.text(tx, nb.y + 206, pc, TS_MED, true, true);
+      c.drawRect(tx, nb.y + 238, tw, 14, 2, true);
       const int fill = (tw - 6) * rec[0].pct / 100;
-      if (fill > 0) c.fillRect(tx + 3, ty + 3, fill, 8, true);
-      ty += 24;
+      c.fillRect(tx + 3, nb.y + 241, fill > 0 ? fill : 2, 8, true);
     }
-    c.text(tx, nb.y + nb.h - c.textHeight(TS_SMALL), "tap to carry on", TS_SMALL, true);
+    c.text(tx, nb.y + 262, "tap to carry on", TS_SMALL, true);
   } else {
     c.textCentered(SCREEN_W / 2, nb.y + 60, "Nothing read yet", TS_MED, true, true);
     c.textCentered(SCREEN_W / 2, nb.y + 96, "open Books from the dock below", TS_SMALL, true);
   }
-  // The others: up to four covers, no titles, and the way to all of them.
+  // The others: three covers, no titles, how far on each; an empty place
+  // asks for a book; and the way to all of them.
   const TRect al = booksAll();
-  c.textTracked(16, al.y + 8, "ALSO READING", TS_SMALL, true, false, 2);
-  c.text(al.x + al.w - c.textWidth("all books >", TS_SMALL), al.y + 8, "all books >", TS_SMALL, true, true);
-  if (recN <= 1) c.text(16, BOOKS_ALSO_Y + 16, "one book at a time so far", TS_SMALL, true);
-  for (int i = 1; i < recN && i <= 4; i++) {
-    const TRect g = booksAlso(i - 1);
-    smallCover(c, rec[i], g.x, g.y, rec[i].title);
+  c.textTracked(16, BOOKS_ALSO_HEAD_Y, "ALSO READING", TS_SMALL, true, false, 2);
+  c.text(al.x + al.w - c.textWidth("all books >", TS_SMALL, true), BOOKS_ALSO_HEAD_Y, "all books >", TS_SMALL, true, true);
+  for (int i = 0; i < BOOKS_ALSO_N; i++) {
+    const TRect g = booksAlso(i);
+    if (i + 1 < recN) midCover(c, rec[i + 1], g.x, g.y, true);
+    else if (i + 1 == recN || (recN == 0 && i == 0)) bthumb::openABook(c, g.x, g.y, g.w, g.h);
   }
-  // The streak.
+  // The streak: a black band across the panel, white on it.
   int y = 0, mo = 0, d = 0;
   if (host.clockDate(y, mo, d) && y >= 2020) {
     const int sy = BOOKS_STREAK_Y;
-    chrome2::dottedRule(c, 16, sy, SCREEN_W - 32);
-    c.textTracked(16, sy + 14, "STREAK", TS_SMALL, true, false, 2);
+    c.fillRect(0, sy, SCREEN_W, BOOKS_STREAK_H, true);
+    c.textTracked(16, sy + 12, "STREAK", TS_SMALL, false, false, 2);
+    char best[24];
+    snprintf(best, sizeof(best), "\xc2\xb7 best %d", homestyle::best(host.prefs()));
+    c.text(112, sy + 12, best, TS_SMALL, false);
     const int run = homestyle::streak(host.prefs(), y, mo, d);
-    char big[16], sub[24];
+    char big[16];
     snprintf(big, sizeof(big), run == 1 ? "%d day" : "%d days", run);
-    snprintf(sub, sizeof(sub), "best %d", homestyle::best(host.prefs()));
-    c.text(16, sy + 40, big, TS_LARGE, true, true);
-    c.text(16, sy + 40 + c.textHeight(TS_LARGE) + 2, sub, TS_SMALL, true);
-    streakWeek(host, c, 196, sy + 44, 32, y, mo, d);
+    c.text(16, sy + 46, big, TS_LARGE, false, true);
+    streakWeek(host, c, 198, sy + 40, 32, y, mo, d, true);
   }
 }
 
@@ -588,40 +612,42 @@ void renderTodayHome(ToolsHost& host, ToolsCanvas& c, const recents::Entry* rec,
   using namespace hubui;
   homeTop(host, c, "TODAY");
   int hh = 0, mm = 0, y = 0, mo = 0, d = 0;
-  // The time in the big digits (the Timer's), the date in words under it.
+  // The time in the mid digits, the date in words under it, bold and large;
+  // no rule under them (kit HomeTodayFw, owner 27 Nov).
   if (host.clockHHMM(hh, mm)) {
     char a2[4], b2[4];
     snprintf(a2, sizeof(a2), "%02d", hh);
     snprintf(b2, sizeof(b2), "%02d", mm);
-    const int wa = bigdigits::width(a2), wb = bigdigits::width(b2), gap = 34;
+    const int wa = middigits::width(a2), wb = middigits::width(b2), gap = 28;
     const int x0 = SCREEN_W / 2 - (wa + gap + wb) / 2;
-    bigdigits::drawCentered(c, x0 + wa / 2, TODAY_CLOCK_Y, a2, true);
-    bigdigits::drawCentered(c, x0 + wa + gap + wb / 2, TODAY_CLOCK_Y, b2, true);
-    const int sq = 12, mx = x0 + wa + gap / 2 - sq / 2;
-    c.fillRect(mx, TODAY_CLOCK_Y + bigdigits::H * 3 / 10, sq, sq, true);
-    c.fillRect(mx, TODAY_CLOCK_Y + bigdigits::H * 7 / 10 - sq, sq, sq, true);
+    middigits::drawCentered(c, x0 + wa / 2, TODAY_CLOCK_Y, a2, true);
+    middigits::drawCentered(c, x0 + wa + gap + wb / 2, TODAY_CLOCK_Y, b2, true);
+    const int sq = 11, mx = x0 + wa + gap / 2 - sq / 2;
+    c.fillRect(mx, TODAY_CLOCK_Y + middigits::H * 3 / 10, sq, sq, true);
+    c.fillRect(mx, TODAY_CLOCK_Y + middigits::H * 7 / 10 - sq, sq, sq, true);
   }
   if (host.clockDate(y, mo, d) && mo >= 1 && mo <= 12) {
     char dl[40];
     snprintf(dl, sizeof(dl), "%s %d %s", WDAY[cal::weekday(y, mo, d)], d, MONTH[mo - 1]);
-    c.textCentered(SCREEN_W / 2, TODAY_CLOCK_Y + bigdigits::H + 10, dl, TS_MED, true, true);
+    c.textCentered(SCREEN_W / 2, TODAY_DATE_Y, dl, TS_LARGE, true, true);
   }
-  c.fillRect(16, TODAY_RULE_Y, SCREEN_W - 32, 3, true);
-  // Four tiles in a row: short labels, the number large, a word under it.
+  // Four tiles in a row: short labels, the number large and centred, a word under it.
   auto tile = [&](int i, const char* lab, const char* big, const char* sub, bool dark, bool thick) {
     const TRect r = todayTile(i);
     if (dark) c.fillRect(r.x, r.y, r.w, r.h, true);
     else c.drawRect(r.x, r.y, r.w, r.h, thick ? 3 : 2, true);
     c.textTracked(r.x + 8, r.y + 8, lab, TS_SMALL, !dark, false, 1);
-    const TSize bs = c.textWidth(big, TS_LARGE, true) <= r.w - 16 ? TS_LARGE : TS_MED;
-    c.text(r.x + 8, r.y + 30, big, bs, !dark, true);
-    c.textClipped(r.x + 8, r.y + r.h - 6 - c.textHeight(TS_SMALL), r.w - 12, sub, TS_SMALL, !dark);
+    if (big[0]) {
+      const TSize bs = c.textWidth(big, TS_LARGE, true) <= r.w - 8 ? TS_LARGE : TS_MED;
+      c.textCentered(r.x + r.w / 2, r.y + 30, big, bs, !dark, true);
+    }
+    if (sub[0]) c.textClipped(r.x + 8, r.y + 66, r.w - 12, sub, TS_SMALL, !dark);
   };
   char big[24], sub[32];
   int tdc = 0, rh = 0;
   if (host.climate(tdc, rh)) {
     snprintf(big, sizeof(big), "%d\xc2\xb0", (tdc + (tdc >= 0 ? 5 : -5)) / 10);
-    snprintf(sub, sizeof(sub), "%d%% humid", rh);
+    snprintf(sub, sizeof(sub), "%d%% RH", rh);
   } else {
     snprintf(big, sizeof(big), "--");
     snprintf(sub, sizeof(sub), "no reading");
@@ -630,63 +656,57 @@ void renderTodayHome(ToolsHost& host, ToolsCanvas& c, const recents::Entry* rec,
   const int pct = host.batteryPercent();
   if (pct >= 0) snprintf(big, sizeof(big), "%d%%", pct);
   else snprintf(big, sizeof(big), "--");
-  tile(1, "BATTERY", big, pct < 0 ? "" : pct <= 20 ? "charge me" : "left", false, false);
+  tile(1, "BATTERY", big, pct >= 0 && pct <= 20 ? "charge me" : "", false, false);
   const int run = (y >= 2020) ? homestyle::streak(host.prefs(), y, mo, d) : 0;
   snprintf(big, sizeof(big), "%d", run);
-  snprintf(sub, sizeof(sub), run == 1 ? "day, best %d" : "days, best %d", homestyle::best(host.prefs()));
+  snprintf(sub, sizeof(sub), "best %d", homestyle::best(host.prefs()));
   tile(2, "STREAK", big, sub, true, false);
-  snprintf(big, sizeof(big), "%d", (int)host.prefs().getInt("f_min", 25));
-  tile(3, "FOCUS", big, "min - start", false, true);
+  tile(3, "FOCUS", "", "start", false, true);
   // The book being read: a block of its own, cover, title, chapter, how far.
   const TRect b = todayBook();
   c.drawRect(b.x, b.y, b.w, b.h, 2, true);
   if (recN > 0) {
-    // The small home cover, made at this size (not shrunk from the big one).
-    const int cw = bthumb::HOME_SMALL.w, ch = bthumb::HOME_SMALL.h;
-    const int cx = b.x + 14, cy = b.y + (b.h - ch) / 2;
-    smallCover(c, rec[0], cx, cy, "");
+    // The shared 132x220 cover, made at this size (not shrunk from the big one).
+    const int cw = bthumb::HOME_MID.w, ch = bthumb::HOME_MID.h;
+    const int cx = b.x + 12, cy = b.y + (b.h - ch) / 2;
+    midCover(c, rec[0], cx, cy, false);
     const int tx = cx + cw + 16, tw = b.x + b.w - 34 - tx;
-    int ty = b.y + 16;
-    c.textTracked(tx, ty, "CONTINUE READING", TS_SMALL, true, false, 1);
-    ty += c.textHeight(TS_SMALL) + 8;
-    char lines[4][64];
-    const int n = wrapLines(c, rec[0].title, TS_MED, true, tw, lines, 4);
-    for (int i = 0; i < n; i++, ty += c.textHeight(TS_MED) + 2) c.text(tx, ty, lines[i], TS_MED, true, true);
-    ty += 8;
+    c.textTracked(tx, b.y + 16, "CONTINUE READING", TS_SMALL, true, false, 1);
+    // Fixed places, the kit's: title (three lines), chapter (two), how far.
+    char lines[3][64];
+    const int n = wrapLines(c, rec[0].title, TS_MED, true, tw, lines, 3);
+    for (int i = 0; i < n; i++) c.text(tx, b.y + 42 + i * 30, lines[i], TS_MED, true, true);
     if (rec[0].chap[0]) {
       char cl[2][64];
       const int m = wrapLines(c, rec[0].chap, TS_SMALL, false, tw, cl, 2);
-      for (int i = 0; i < m; i++, ty += c.textHeight(TS_SMALL) + 2) c.text(tx, ty, cl[i], TS_SMALL, true);
-      ty += 8;
+      for (int i = 0; i < m; i++) c.text(tx, b.y + 138 + i * (c.textHeight(TS_SMALL) + 2), cl[i], TS_SMALL, true);
     }
     if (rec[0].pct >= 0) {
       char pc[24];
       snprintf(pc, sizeof(pc), "%d%% of the book", rec[0].pct);
-      c.text(tx, ty, pc, TS_SMALL, true, true);
-      ty += c.textHeight(TS_SMALL) + 4;
-      c.drawRect(tx, ty, tw, 12, 2, true);
+      c.text(tx, b.y + 188, pc, TS_SMALL, true, true);
+      c.drawRect(tx, b.y + 214, tw, 12, 2, true);
       const int fill = (tw - 6) * rec[0].pct / 100;
-      if (fill > 0) c.fillRect(tx + 3, ty + 3, fill, 6, true);
+      c.fillRect(tx + 3, b.y + 217, fill > 0 ? fill : 2, 6, true);
     }
-    c.drawLine(b.x + b.w - 24, b.y + b.h / 2 - 10, b.x + b.w - 14, b.y + b.h / 2, 3, true);
-    c.drawLine(b.x + b.w - 14, b.y + b.h / 2, b.x + b.w - 24, b.y + b.h / 2 + 10, 3, true);
+    c.drawLine(b.x + b.w - 30, b.y + b.h / 2 - 12, b.x + b.w - 20, b.y + b.h / 2 - 2, 3, true);
+    c.drawLine(b.x + b.w - 20, b.y + b.h / 2 - 2, b.x + b.w - 30, b.y + b.h / 2 + 8, 3, true);
   } else {
     c.textCentered(b.x + b.w / 2, b.y + b.h / 2 - 20, "No book open yet", TS_MED, true, true);
     c.textCentered(b.x + b.w / 2, b.y + b.h / 2 + 14, "tap to choose one", TS_SMALL, true);
   }
   // The three apps opened last.
-  c.textTracked(16, TODAY_SC_Y + 2, "RECENT APPS", TS_SMALL, true, false, 2);
-  chrome2::dottedRule(c, 16, TODAY_SC_Y + 24, SCREEN_W - 32);
+  c.textTracked(16, TODAY_SC_Y - 2, "RECENT APPS", TS_SMALL, true, false, 2);
   homestyle::App ra[3];
   const int na = todayApps(host, ra);
   for (int i = 0; i < na; i++) {
     const TRect r = todayShortcut(i);
-    if (ra[i].game) gicons::draw(c, ra[i].idx, r.x + r.w / 2, r.y + 30, 48);
-    else ticons::draw(c, ra[i].idx, r.x + r.w / 2, r.y + 30, 48);
+    if (ra[i].game) gicons::draw(c, ra[i].idx, r.x + r.w / 2, r.y + 26, 48);
+    else ticons::draw(c, ra[i].idx, r.x + r.w / 2, r.y + 26, 48);
     char label[24];
     sentence(label, sizeof(label), ra[i].game ? gicons::NAMES[ra[i].idx] : ticons::NAMES[ra[i].idx]);
     const TSize sz = c.textWidth(label, TS_MED, true) <= r.w - 8 ? TS_MED : TS_SMALL;
-    c.textCentered(r.x + r.w / 2, r.y + 62, label, sz, true, true);
+    c.textCentered(r.x + r.w / 2, r.y + 58, label, sz, true, true);
   }
 }
 }  // namespace
@@ -715,7 +735,7 @@ void HubScreen::render(ToolsHost& host, ToolsCanvas& c) {
     recents::Entry* rec = g_recBuf;
     int recN = 0;
     if (_folder == 2 && !host.canExit()) recN = recents::list(host.prefs(), rec);
-    if (recN > 2) recN = 2;  // the drawer strip has room for two
+    if (recN > 3) recN = 3;  // three covers, or two title rows
     _recN = (int8_t)recN;
     renderFolder(host, c, _folder, _fpage, rec, recN);
     return;
@@ -913,9 +933,17 @@ HubScreen::Tap HubScreen::hit(const ToolsHost& host, int x, int y) const {
     // The recently-read covers, when the Study drawer is wearing them.
     const bool strip =
         folder == 2 && !guest && _recN > 0 && pages == 1 && stripFits(cellCount);
-    if (strip) {
+    if (strip && stripCovers(cellCount)) {
+      for (int i = 0; i < _recN && i < 3; i++)
+        if (studyCover(i, stripTopFor(cellCount)).hit(x, y)) {
+          t.kind = Tap::Recent;
+          t.idx = i;
+          return t;
+        }
+    } else if (strip) {
       const int rowTop = stripTopFor(cellCount) + REC_HEAD_H;
-      if (y >= rowTop && y < rowTop + _recN * REC_ROW_H) {
+      const int rows = _recN < 2 ? _recN : 2;
+      if (y >= rowTop && y < rowTop + rows * REC_ROW_H) {
         t.kind = Tap::Recent;
         t.idx = (y - rowTop) / REC_ROW_H;
         return t;
@@ -980,11 +1008,15 @@ HubScreen::Tap HubScreen::hit(const ToolsHost& host, int x, int y) const {
       if (_homeRecN > 0) { t.kind = Tap::Recent; t.idx = 0; }
       else app(10);
     } else {
-      for (int i = 0; i < 4; i++)
-        if (hubui::booksAlso(i).hit(x, y) && _homeRecN > i + 1) {
+      for (int i = 0; i < hubui::BOOKS_ALSO_N; i++) {
+        if (!hubui::booksAlso(i).hit(x, y)) continue;
+        if (_homeRecN > i + 1) {
           t.kind = Tap::Recent;
           t.idx = i + 1;
+        } else if (_homeRecN == i + 1 || (_homeRecN == 0 && i == 0)) {
+          app(10);  // "open a book": the Books app
         }
+      }
     }
   } else if (_style == homestyle::CALENDAR) {
     if (hubui::calPrev().hit(x, y)) t.kind = Tap::PagePrev;

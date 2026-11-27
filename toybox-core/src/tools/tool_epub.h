@@ -251,7 +251,6 @@ class EpubTool : public ToolApp {
     }
     if (recentPage()) {
       renderRecentGrid(c);
-      drawShelfPager(c, total);
       return;
     }
     const int lp = listPage();
@@ -299,14 +298,16 @@ class EpubTool : public ToolApp {
                    TS_SMALL, true);
   }
 
-  // --- the shelf's first page: the six books read last, as covers (owner,
-  // 27 Nov). Only at the top of the shelf; a folder or a series lists as before.
-  // Empty places say "open a book" until six have been read.
-  static constexpr int RECENT_CELLS = 6, RC_W = 104, RC_H = 174, RC_GAP = 24, RC_ROW = 218;
-  static constexpr int RC_X0 = (480 - (3 * RC_W + 2 * RC_GAP)) / 2, RC_Y0 = 104;
+  // --- the shelf's first page: the books read last, as covers (kit
+  // BooksReadLast, owner 27 Nov): the two latest large, three more under them,
+  // how far on each as a bar. Only at the top of the shelf; a folder or a
+  // series lists as before. Empty places say "open a book".
+  static constexpr int RECENT_CELLS = 5;
   static TRect recentCell(int i) {
-    return TRect{RC_X0 + (i % 3) * (RC_W + RC_GAP), RC_Y0 + (i / 3) * RC_ROW, RC_W, RC_H};
+    if (i < 2) return TRect{16 + i * 232, 86, bthumb::HOME_LARGE.w, bthumb::HOME_LARGE.h};
+    return TRect{16 + (i - 2) * 158, 458, bthumb::HOME_MID.w, bthumb::HOME_MID.h};
   }
+  static TRect moreBooksRect() { return TRect{16, 692, 448, 64}; }
 #ifdef TOYBOX_HOST
   // The older shelf guards tap rows on page one; they run with it off, and
   // the guard for this page turns it on.
@@ -332,33 +333,22 @@ class EpubTool : public ToolApp {
     c.textCentered(c.width() / 2, shelf::PAGER_Y + (shelf::PAGER_H - c.textHeight(TS_MED)) / 2, buf, TS_MED, true);
   }
   void renderRecentGrid(ToolsCanvas& c) {
-    c.textTracked(16, 72, "READ LAST", TS_SMALL, true, false, 2);
-    recents::Entry rec[recents::MAX];
-    const int n = recents::list(prefs(), rec);
+    c.textTracked(16, 60, "Recent", TS_SMALL, true, false, 2);
+    recents::Entry* rec = (recents::Entry*)malloc(sizeof(recents::Entry) * recents::MAX);
+    const int n = rec ? recents::list(prefs(), rec) : 0;
     for (int i = 0; i < RECENT_CELLS; i++) {
       const TRect r = recentCell(i);
       if (i < n) {
-        bthumb::drawSmall(c, rec[i].file, rec[i].title, r.x, r.y);
-        if (rec[i].pct >= 0) {
-          char pc[8];
-          snprintf(pc, sizeof(pc), "%d%%", rec[i].pct);
-          c.textCentered(r.x + r.w / 2, r.y + r.h + 6, pc, TS_SMALL, true);
-        }
-        continue;
+        bthumb::drawCover(c, i < 2 ? bthumb::HOME_LARGE : bthumb::HOME_MID, rec[i].file, rec[i].title, r.x, r.y);
+        bthumb::coverBar(c, r.x, r.y, r.w, r.h, rec[i].pct);
+      } else if (i == n) {
+        bthumb::openABook(c, r.x, r.y, r.w, r.h);
       }
-      // An empty place: a dashed outline and what fills it.
-      for (int k = 0; k < r.w; k += 10) {
-        c.fillRect(r.x + k, r.y, 5, 2, true);
-        c.fillRect(r.x + k, r.y + r.h - 2, 5, 2, true);
-      }
-      for (int k = 0; k < r.h; k += 10) {
-        c.fillRect(r.x, r.y + k, 2, 5, true);
-        c.fillRect(r.x + r.w - 2, r.y + k, 2, 5, true);
-      }
-      c.textCentered(r.x + r.w / 2, r.y + r.h / 2 - 20, "open a", TS_SMALL, true);
-      c.textCentered(r.x + r.w / 2, r.y + r.h / 2 + 2, "book", TS_SMALL, true);
     }
-    c.textCentered(c.width() / 2, RC_Y0 + 2 * RC_ROW + 20, "every book: ALL >", TS_SMALL, true);
+    free(rec);
+    const TRect m = moreBooksRect();
+    c.textInBox(m.x, m.y, m.w, m.h, "more books  >>", TS_MED, true, true);
+    if (_note) c.textCentered(c.width() / 2, 770, _note, TS_SMALL, true);
   }
 
   void onTap(int x, int y) override {
@@ -409,7 +399,7 @@ class EpubTool : public ToolApp {
       const int total = items();
       if (total <= 0) return;
       const int pages = shelfPages(total);
-      if (y >= shelf::PAGER_Y && pages > 1) {
+      if (!recentPage() && y >= shelf::PAGER_Y && pages > 1) {
         if (_lpage > 0 && shelf::prevRect().hit(x, y)) {
           _lpage--;
           host().beep(0);
@@ -422,17 +412,35 @@ class EpubTool : public ToolApp {
         return;
       }
       if (recentPage()) {
-        recents::Entry rec[recents::MAX];
-        const int n = recents::list(prefs(), rec);
-        for (int i = 0; i < n && i < RECENT_CELLS; i++)
-          if (recentCell(i).hit(x, y)) {
-            if (!openDirect(rec[i].file)) {
-              _note = "that book is not on the card now";
-              host().beep(2);
-              paint();
-            }
-            return;
+        if (moreBooksRect().hit(x, y)) {  // the whole list, as before
+          _lpage = 1;
+          _note = nullptr;
+          host().beep(0);
+          paint();
+          return;
+        }
+        recents::Entry* rec = (recents::Entry*)malloc(sizeof(recents::Entry) * recents::MAX);
+        const int n = rec ? recents::list(prefs(), rec) : 0;
+        int hit = -1;
+        for (int i = 0; i < n && i < RECENT_CELLS && hit < 0; i++)
+          if (recentCell(i).hit(x, y)) hit = i;
+        char file[sizeof(rec[0].file)] = {};
+        if (hit >= 0) snprintf(file, sizeof(file), "%s", rec[hit].file);
+        free(rec);
+        if (hit < 0) {
+          // "open a book": the list, to choose one.
+          if (n < RECENT_CELLS && recentCell(n).hit(x, y)) {
+            _lpage = 1;
+            host().beep(0);
+            paint();
           }
+          return;
+        }
+        if (!openDirect(file)) {
+          _note = "that book is not on the card now";
+          host().beep(2);
+          paint();
+        }
         return;
       }
       const int idx = shelf::hitRow(x, y, total, listPage());

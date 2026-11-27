@@ -6152,11 +6152,10 @@ int main() {
     stickyHost.refresh(true);
     g_dumpEnabled = false;
 
-    // The title rows sit under the one tile row; row 0 is the epub.
-    const int rowY = hubui::FOLDER_TOP + 1 * hubui::ROW_STEP + hubui::REC_GAP +
-                     hubui::REC_HEAD_H;
+    // The covers sit under the one tile row; the first is the epub.
+    const TRect c0 = hubui::studyCover(0, hubui::FOLDER_TOP + 1 * hubui::ROW_STEP + hubui::REC_GAP);
     stickyHost.hostResetPaints();
-    toybox.onTap(EPD_W / 4, rowY + 10);
+    toybox.onTap(c0.x + c0.w / 2, c0.y + c0.h / 2);
     if (!toybox.hostInApp() || strcmp(toybox.activeTitle(), "EPUB") != 0 ||
         static_cast<EpubTool*>(toybox.hostActive())->hostScreen() != 1) {
       printf("RECENTS FAIL: the epub cover did not reopen the book\n");
@@ -11311,8 +11310,9 @@ int main() {
       static uint8_t tb[bthumb::BYTES];
       const bool have = n > 0 && bthumb::load(rec[0].file, tb);
       printf("home cover: %s\n", have ? "thumbnail in flash" : "none (stand-in drawn)");
-      if (n > 0 && !bthumb::haveCover(bthumb::HOME_SMALL, rec[0].file)) {
-        printf("HOME FAIL: no small home cover was made for \"%s\"\n", rec[0].title);
+      if (n > 0 && (!bthumb::haveCover(bthumb::HOME_MID, rec[0].file) ||
+                    !bthumb::haveCover(bthumb::HOME_LARGE, rec[0].file))) {
+        printf("HOME FAIL: no 132x220 / 216x360 cover was made for \"%s\"\n", rec[0].title);
         abort();
       }
       if (n > 0 && !bthumb::haveHome(rec[0].file)) {
@@ -11358,7 +11358,9 @@ int main() {
       setScreen("tool_epub_read_last");
       stickyHost.refresh(true);
       setScreen("tool_epub_read_last_after");
-      tapRect(shelf::nextRect());  // ALL > : the list, as before
+      toybox.onTap(240, 720);  // the help card's Got it, on a first open
+      setScreen("tool_epub_read_last_list");
+      toybox.onTap(240, 720);  // "more books >>" : the list, as before
       EpubTool::g_hostRecentPage = false;
       toybox.goHub();
       g_dumpEnabled = false;

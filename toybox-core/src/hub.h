@@ -75,27 +75,29 @@ inline constexpr int REC_HEAD_H = 44;  // heading + rule
 inline constexpr int REC_GAP = 4;      // tiles to heading
 
 // --- home styles (kit "Home") -------------------------------------------------
-// Book collection: the book being read, the other one, the week's streak.
-// Owner, 27 Nov: the cover large in the top half, no frame; the other book
-// and the streak lower down.
-inline constexpr int BOOKS_COVER_W = 198;  // 96:160 at 330 tall
-inline TRect booksNow() { return TRect{16, 64, SCREEN_W - 32, 330}; }
-// Up to four more books under it as covers, no titles (owner, 27 Nov).
-inline constexpr int BOOKS_ALSO_Y = 438, BOOKS_GRID_W = 104, BOOKS_GRID_H = 174;
-inline TRect booksAlso(int i = 0) {
-  return TRect{16 + i * (BOOKS_GRID_W + 10), BOOKS_ALSO_Y, BOOKS_GRID_W, BOOKS_GRID_H};
-}
-inline TRect booksAll() { return TRect{SCREEN_W - 150, BOOKS_ALSO_Y - 40, 134, 36}; }
-inline constexpr int BOOKS_STREAK_Y = 620;
+// Book collection (kit HomeBooksFw, owner 27 Nov): the book being read as a
+// 168x280 cover, no frame, its place beside it; three more under it at the
+// shared 132x220 size; the streak a black band across the panel.
+inline constexpr int BOOKS_COVER_W = 168;
+inline TRect booksNow() { return TRect{16, 64, SCREEN_W - 32, 280}; }
+inline constexpr int BOOKS_TEXT_X = 202, BOOKS_TEXT_W = SCREEN_W - 16 - BOOKS_TEXT_X;  // 262
+inline constexpr int BOOKS_ALSO_HEAD_Y = 358, BOOKS_ALSO_Y = 390, BOOKS_GRID_W = 132, BOOKS_GRID_H = 220;
+inline constexpr int BOOKS_ALSO_N = 3;
+inline TRect booksAlso(int i = 0) { return TRect{16 + i * 158, BOOKS_ALSO_Y, BOOKS_GRID_W, BOOKS_GRID_H}; }
+inline TRect booksAll() { return TRect{SCREEN_W - 150, BOOKS_ALSO_HEAD_Y - 8, 134, 36}; }
+inline constexpr int BOOKS_STREAK_Y = 622, BOOKS_STREAK_H = 100;
+// The Study drawer's covers (kit DrawerStudyFw): three under one row of tiles.
+inline constexpr int REC_COVER_HEAD = 18, REC_COVER_RULE = 44, REC_COVER_TOP = 58;
+inline TRect studyCover(int i, int stripTop) { return TRect{16 + i * 158, stripTop + REC_COVER_TOP, 132, 220}; }
 // Calendar: the month, then today's list.
 inline TRect calPrev() { return TRect{8, 50, 64, 50}; }
 inline TRect calNext() { return TRect{SCREEN_W - 72, 50, 64, 50}; }
 inline constexpr int CAL_X = 16, CAL_CW = (SCREEN_W - 32) / 7, CAL_HEAD_Y = 100, CAL_HEAD_H = 30;
 inline constexpr int CAL_ROW_Y = CAL_HEAD_Y + CAL_HEAD_H, CAL_ROW_H = 44;
-// Today: four tiles, the book, three shortcuts.
-// Owner, 27 Nov: the whole panel used, the book a block of its own.
-// The clock in the big digits, the date under it, four tiles in one row.
-inline constexpr int TODAY_CLOCK_Y = 40, TODAY_RULE_Y = 214;
+// Today: four tiles, the book, three shortcuts (kit HomeTodayFw, owner 27 Nov).
+// The clock in the mid digits, the date larger under it, no rule; four tiles
+// in one row, the numbers centred.
+inline constexpr int TODAY_CLOCK_Y = 58, TODAY_DATE_Y = 168;
 inline TRect todayTile(int i) { return TRect{16 + i * 113, 224, 107, 96}; }
 inline TRect todayBook() { return TRect{16, 332, SCREEN_W - 32, 246}; }
 inline constexpr int TODAY_SC_Y = 588;
