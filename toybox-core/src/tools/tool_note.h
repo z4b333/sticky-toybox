@@ -232,7 +232,7 @@ class NoteTool : public ToolApp {
     // The moment a phone is on the access point, step two is the useful screen
     // and step one is a picture of a thing already done. The device can see
     // this, so it should not be asking.
-    if (!_altQr && !_got && _net.hasClient()) {
+    if (!_altQr && !_got && !_net.home() && _net.hasClient()) {
       _altQr = true;
       host().beep(1);
       host().refresh(true);
@@ -292,6 +292,8 @@ class NoteTool : public ToolApp {
   }
 
 #ifdef TOYBOX_HOST
+  bool hostNetHome() const { return _net.home(); }
+  bool hostNetUp() const { return _netOk; }
   // Where the preview harness should aim to hit a given kind of line. The tap
   // bands are laid out from the text metrics, so a harness that hard-codes a y
   // only tests the fonts it was written against -- and the CrossPoint pass
@@ -650,7 +652,19 @@ class NoteTool : public ToolApp {
     _altQr = false;
     _got = false;
     _answered = false;
-    _netOk = _net.start();
+    // The home Wi-Fi first when one is saved (owner, as the Picker): the
+    // phone keeps its own network. The Sticky's own access point is the backup.
+    _netNote = nullptr;
+    _netOk = false;
+    if (homenet::haveWifi(prefs())) {
+      homenet::wifiName(prefs(), _joinName, sizeof(_joinName));
+      _joining = true;
+      host().refresh(false);  // "Joining ..." while the radio looks
+      _netOk = _net.startHome(prefs(), "/write");
+      _joining = false;
+      if (!_netOk) _netNote = "the home Wi-Fi did not answer";
+    }
+    if (!_netOk) _netOk = _net.start();
     host().beep(_netOk ? 1 : 2);
     host().refresh(true);
   }
@@ -671,6 +685,13 @@ class NoteTool : public ToolApp {
       return;
     }
     if (_got) return renderPairDone(c);
+    if (_joining) return importui::drawJoining(c, _joinName);
+    if (_net.home()) {
+      static const importui::Words W{"Scan to write on your phone",
+                                     {"Type or dictate on the phone.", "Tap Send - it lands here.",
+                                      "Edits on the phone replace this copy."}};
+      return importui::draw(c, _net, false, W, nullptr);
+    }
 
     // Two steps, and the device moves between them itself when a phone joins
     // its access point: the Wi-Fi code first, then the page's own address
@@ -693,7 +714,9 @@ class NoteTool : public ToolApp {
       c.textCentered(c.width() / 2, QR_Y + QR_SIZE + 26, "Scan to join the Sticky's Wi-Fi", TS_MED, true, true);
       snprintf(buf, sizeof(buf), "%s   key %s", _net.ssid(), _net.password());
       c.textCentered(c.width() / 2, QR_Y + QR_SIZE + 70, buf, TS_MED, true);
-      c.textCentered(c.width() / 2, QR_Y + QR_SIZE + 108, "the page opens once the phone joins", TS_SMALL, true);
+      c.textCentered(c.width() / 2, QR_Y + QR_SIZE + 108,
+                     _netNote ? _netNote : "the page opens once the phone joins", _netNote ? TS_MED : TS_SMALL,
+                     true, _netNote != nullptr);
       importui::drawSteps(c, QR_Y + QR_SIZE + 150, kSteps);
       c.button(ALT_BTN.x, ALT_BTN.y, ALT_BTN.w, ALT_BTN.h, "Show the link", false, TS_MED);
     }
@@ -852,6 +875,15 @@ class NoteTool : public ToolApp {
     }
     if (DONE_BTN.hit(x, y)) return closePair();
     if (!_got && _netOk && nui::ALT_BTN.hit(x, y)) {
+      if (_net.home()) {  // the backup: the Sticky's own access point
+        _net.stop();
+        _netNote = nullptr;
+        _altQr = false;
+        _netOk = _net.start();
+        host().beep(_netOk ? 1 : 2);
+        host().refresh(true);
+        return;
+      }
       _altQr = !_altQr;
       host().beep(0);
       host().refresh(true);
@@ -894,6 +926,9 @@ class NoteTool : public ToolApp {
 
   nweb::NoteServer _net;
   bool _netOk = false, _altQr = false, _got = false;
+  bool _joining = false;
+  const char* _netNote = nullptr;
+  char _joinName[34] = {};
   bool _answered = false, _pinnedIt = false;
   char _gotName[note::NAME_LEN + 1] = {};
   int _gotBytes = 0;

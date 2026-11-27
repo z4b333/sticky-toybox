@@ -146,6 +146,7 @@ class HubScreen {
   uint32_t _dueOcc = 0;
   int _dueBottom = 0;
   void drawDue(ToolsHost& host, ToolsCanvas& c);
+  char _opening[48] = "";
   bool _upgrade = false;
   int8_t _calOff = 0;
   uint8_t _style = 0;     // the home style drawn last, for hit()
@@ -156,6 +157,15 @@ class HubScreen {
   int dueItem() const { return _dueItem; }
   // v2: the upgrade popup ("New: Setup") over home, for a device updated from
   // v1. The shell raises it once a boot; Later and Open setup take it down.
+  // Wake to Book: "Opening <title>" over home while the card is found, so a
+  // slow (or absent) card is a message rather than a frozen splash.
+  void showOpening(const char* title) {
+    if (!title) {
+      _opening[0] = 0;
+      return;
+    }
+    snprintf(_opening, sizeof(_opening), "%s", title);
+  }
   void showUpgrade(bool on) { _upgrade = on; }
   bool upgradeUp() const { return _upgrade; }
   // Calendar home: months away from this one.

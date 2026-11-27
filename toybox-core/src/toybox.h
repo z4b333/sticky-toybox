@@ -95,6 +95,10 @@ class Toybox {
   // What the preview harness needs to assert on: which app is up, and whether
   // the settings screen is showing.
   ToolApp* hostActive() { return _active; }
+  void hostGoHome() {
+    _hub.goHome();
+    goHub();
+  }
   bool hostIsGame() const { return _activeIsGame; }
   int hostIdx() const { return _activeIdx; }
   bool hostInApp() const { return _where == Where::App; }

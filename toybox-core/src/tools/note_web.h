@@ -18,6 +18,10 @@ namespace nweb {
 class NoteServer {
  public:
   bool start() { return _portal.begin(); }
+  bool startHome(Preferences& pr, const char* path) { return _portal.beginHome(pr, path); }
+  bool home() const { return _portal.home(); }
+  const char* homeUrl() const { return _portal.homeUrl(); }
+  const char* ipUrl() const { return _portal.ipUrl(); }
   void stop() { _portal.end(); }
   // Preview scaffolding: a phone joins on the first poll and posts a note a
   // couple of polls later, which is the order it happens in.
@@ -59,6 +63,25 @@ class NoteServer {
     if (!_portal.begin()) return false;
 
     _portal.serveIndex([this] { sendPage(); });
+    routes();
+    return true;
+  }
+  // On the home Wi-Fi (v2, as the Picker does): the page at toybox.local/write,
+  // the phone keeping its own network. The access point stays the backup.
+  bool startHome(Preferences& pr, const char* path) {
+    _received = false;
+    if (!_portal.beginHome(pr, path)) return false;
+    _portal.on("/", HTTP_GET, [this] { sendPage(); });
+    _portal.on(path, HTTP_GET, [this] { sendPage(); });
+    routes();
+    return true;
+  }
+  bool home() const { return _portal.home(); }
+  const char* homeUrl() const { return _portal.homeUrl(); }
+  const char* ipUrl() const { return _portal.ipUrl(); }
+
+ private:
+  void routes() {
     _portal.on("/notes", HTTP_GET, [this] { listNotes(); });
     _portal.on("/note", HTTP_GET, [this] { getNote(); });
     _portal.on("/save", HTTP_POST, [this] { saveNote(); });
@@ -81,8 +104,9 @@ class NoteServer {
     _portal.on("/picstat", HTTP_GET, [this] {
       _portal.server().send(200, "text/plain", lockimg::have() ? "1" : "0");
     });
-    return true;
   }
+
+ public:
   void stop() { _portal.end(); }
   void loop() { _portal.loop(); }
 

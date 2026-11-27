@@ -11282,8 +11282,13 @@ int main() {
     g_dumpEnabled = false;
     recents::Entry rec[recents::MAX];
     const int n = recents::list(prefs, rec);
-    toybox.goHub();
+    toybox.hostGoHome();
+    homestyle::set(prefs, homestyle::TODAY);  // the banner over a styled home
+    g_dumpEnabled = true;
+    setScreen("wake_opening_book");
     const bool opened = toybox.openLastBook();
+    g_dumpEnabled = false;
+    homestyle::set(prefs, homestyle::WALL);
     if (n > 0 && (!opened || !toybox.hostInApp())) {
       printf("WAKE FAIL: Wake to Book did not open \"%s\"\n", rec[0].title);
       abort();
@@ -11294,7 +11299,50 @@ int main() {
     }
     toybox.goHub();
     printf("wake to book ok (%s)\n", n > 0 ? rec[0].title : "nothing read: home");
+    {  // the styled homes with a real cover (made on the book's first open)
+      static uint8_t tb[bthumb::BYTES];
+      const bool have = n > 0 && bthumb::load(rec[0].file, tb);
+      printf("home cover: %s\n", have ? "thumbnail in flash" : "none (stand-in drawn)");
+      g_dumpEnabled = true;
+      toybox.hostGoHome();
+      homestyle::set(prefs, homestyle::BOOKS);
+      setScreen("home_books_cover");
+      stickyHost.refresh(true);
+      homestyle::set(prefs, homestyle::TODAY);
+      setScreen("home_today_cover");
+      stickyHost.refresh(true);
+      setScreen("home_after_covers");
+      g_dumpEnabled = false;
+      homestyle::set(prefs, homestyle::WALL);
+    }
     g_dumpEnabled = wasDump;
+  }
+  // --- v2 Notes on the home Wi-Fi (as the Picker): toybox.local/write first,
+  // the Sticky's own access point one tap away.
+  {
+    homenet::saveWifi(stickyHost.prefs(), "Home-2.4", "secret123");
+    homenet::g_hostNet = homenet::Result::Ok;
+    toybox.open(false, 6);
+    auto* nt = static_cast<NoteTool*>(toybox.hostActive());
+    nt->openPairing();
+    if (!nt->hostNetHome()) {
+      printf("NOTE FAIL: a saved home Wi-Fi did not carry the notes page\n");
+      abort();
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_note_pair_home");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    tapRect(nui::ALT_BTN);
+    if (nt->hostNetHome() || !nt->hostNetUp()) {
+      printf("NOTE FAIL: the backup did not switch to the access point\n");
+      abort();
+    }
+    tapRect(nui::DONE_BTN);
+    homenet::forgetWifi(stickyHost.prefs());
+    toybox.goHub();
+    printf("notes home wifi ok (toybox.local/write, own access point as backup)\n");
+    g_dumpEnabled = true;
   }
 
   // Every drawer carries More in its top-right corner, and it opens Settings.

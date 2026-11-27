@@ -30,6 +30,7 @@ struct Text {
 inline constexpr TRect OK_BTN{20, 714, 440, 60};
 inline constexpr TRect NEVER_BTN{0, 628, 480, 76};  // the switch row
 inline bool g_never = false;                        // the switch, until the card closes
+inline const void* g_card = nullptr;                // whose switch it is
 enum class Tap : uint8_t { None, Dismiss, Never, Toggle };  // Toggle: repaint
 
 // NVS keys are short; "h_" plus the game's own name keeps them unique and
@@ -73,23 +74,37 @@ inline const char* okLabel(const char* heading) {
 
 inline void render(ToolsCanvas& c, const Text& t, const char* heading = "HOW TO PLAY",
                    const char* way_back = "the ? above brings this back") {
+  // A switch left on in another app's card (closed with Back) is not this one's.
+  if (g_card != &t) {
+    g_never = false;
+    g_card = &t;
+  }
   // "HOW TO PLAY" in caps belongs to a bar; here it reads as a sentence.
   char head[32];
   size_t n = 0;
   for (const char* p = heading; *p && n < sizeof(head) - 1; p++, n++)
     head[n] = (n == 0 || *p < 'A' || *p > 'Z') ? *p : (char)(*p + 32);
   head[n] = 0;
-  constexpr int TOP = TOPBAR_H + 20, ICON = 64, LINE = 34;
+  constexpr int TOP = TOPBAR_H + 20, ICON = 76;
   c.text(20, TOP, head, TS_LARGE, true, true);
   int lines = 0;
   for (int i = 0; i < MAX_LINES && t.lines[i]; i++) lines++;
-  int y = TOP + c.textHeight(TS_LARGE) + 18;
+  // The card fills the panel between the heading and the switch: the line
+  // step grows up to 46 px, and what is left is shared above and below
+  // (owner, 27 Nov: the cards left the lower half empty).
+  const int top = TOP + c.textHeight(TS_LARGE) + 16, bottom = NEVER_BTN.y - 16;
+  const int iconH = t.icon >= 0 ? ICON + 24 : 0;
+  int LINE = lines > 0 ? (bottom - top - iconH) / lines : 34;
+  if (LINE > 46) LINE = 46;
+  if (LINE < 34) LINE = 34;
+  int y = top + (bottom - top - iconH - lines * LINE) / 2;
+  if (y < top) y = top;
   if (t.icon >= 0) {
     if (t.game)
       gicons::draw(c, t.icon, 20 + ICON / 2, y + ICON / 2, ICON);
     else
       ticons::draw(c, t.icon, 20 + ICON / 2, y + ICON / 2, ICON);
-    y += ICON + 16;
+    y += ICON + 24;
   }
   for (int i = 0; i < lines; i++) {
     if (t.lines[i][0]) c.text(20, y, t.lines[i], TS_LARGE, true);
@@ -117,25 +132,38 @@ inline Tap hit(int x, int y) {
 inline constexpr TRect OK_WIDE{420, 384, 360, 60};
 inline constexpr TRect NEVER_WIDE{0, 372, 410, 84};
 inline void renderWide(ToolsCanvas& c, const Text& t, const char* heading, const char* way_back) {
+  // A switch left on in another app's card (closed with Back) is not this one's.
+  if (g_card != &t) {
+    g_never = false;
+    g_card = &t;
+  }
   char head[32];
   size_t n = 0;
   for (const char* p = heading; *p && n < sizeof(head) - 1; p++, n++)
     head[n] = (n == 0 || *p < 'A' || *p > 'Z') ? *p : (char)(*p + 32);
   head[n] = 0;
-  constexpr int TOP = TOPBAR_H + 12, LINE = 30, ICON = 100;
+  constexpr int TOP = TOPBAR_H + 12, ICON = 120;
   c.text(20, TOP, head, TS_LARGE, true, true);
   int lines = 0;
   for (int i = 0; i < MAX_LINES && t.lines[i]; i++) lines++;
-  const int y0 = TOP + c.textHeight(TS_LARGE) + 14;
+  // Rules at the large size, spread over the room down to the switch row and
+  // centred in it, the emblem centred beside them.
+  const int top = TOP + c.textHeight(TS_LARGE) + 10, bottom = NEVER_WIDE.y - 8;
+  int LINE = lines > 0 ? (bottom - top) / lines : 34;
+  if (LINE > 40) LINE = 40;
+  if (LINE < 30) LINE = 30;
+  const TSize ts = LINE >= 34 ? TS_LARGE : TS_MED;
+  int y = top + (bottom - top - lines * LINE) / 2;
+  if (y < top) y = top;
   if (t.icon >= 0) {
+    const int iy = top + (bottom - top) / 2;
     if (t.game)
-      gicons::draw(c, t.icon, 20 + ICON / 2, y0 + ICON / 2, ICON);
+      gicons::draw(c, t.icon, 30 + ICON / 2, iy, ICON);
     else
-      ticons::draw(c, t.icon, 20 + ICON / 2, y0 + ICON / 2, ICON);
+      ticons::draw(c, t.icon, 30 + ICON / 2, iy, ICON);
   }
-  int y = y0;
   for (int i = 0; i < lines; i++) {
-    if (t.lines[i][0]) c.text(t.icon >= 0 ? 150 : 20, y, t.lines[i], TS_MED, true);
+    if (t.lines[i][0]) c.text(t.icon >= 0 ? 190 : 20, y, t.lines[i], ts, true);
     y += LINE;
   }
   footer(c, OK_WIDE, NEVER_WIDE, okLabel(heading), way_back);

@@ -257,6 +257,13 @@ void Toybox::render(ToolsCanvas& c) {
 bool Toybox::openLastBook() {
   recents::Entry rec[recents::MAX];
   if (recents::list(_host->prefs(), rec) < 1) return false;
+  // Said on the panel first: finding the card can take seconds, and with no
+  // card in, the mount ladder's retries are all there is to see.
+  _where = Where::Hub;
+  _hub.goHome();
+  _hub.showOpening(rec[0].title);
+  _host->refresh(false);
+  _hub.showOpening(nullptr);
   open(false, rec[0].kind == recents::KIND_EPUB ? 10 : 9, false);
   if (_active && _active->openDirect(rec[0].file)) return true;
   release();  // the book is gone: back to home, which the caller paints

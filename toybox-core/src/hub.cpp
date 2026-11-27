@@ -1,5 +1,6 @@
 #include "hub.h"
 #include "home_style.h"
+#include "tools/book_thumbs.h"
 #include "tools/cal_store.h"
 
 #include "tools/book_thumbs.h"
@@ -318,6 +319,40 @@ void standInCover(ToolsCanvas& c, int x, int y, int w, int h, const char* title)
   c.textClipped(x + 10, y + 11, lw - 4, title, TS_SMALL, true, true);
 }
 
+// The book's own cover when its small thumbnail is in flash (made on its first
+// open), scaled to fit the box and framed; false leaves the stand-in to draw.
+bool bookCover(ToolsCanvas& c, const char* file, int x, int y, int w, int h) {
+  static uint8_t bits[bthumb::BYTES];
+  if (!file || !file[0] || !bthumb::load(file, bits)) return false;
+  // Fit 96x160 into w x h, keeping its shape.
+  int dw = w, dh = w * bthumb::H / bthumb::W;
+  if (dh > h) {
+    dh = h;
+    dw = h * bthumb::W / bthumb::H;
+  }
+  const int ox = x + (w - dw) / 2, oy = y + (h - dh) / 2;
+  c.fillRect(ox, oy, dw, dh, false);
+  const int stride = bthumb::W / 8;
+  for (int ty = 0; ty < dh; ty++) {
+    const uint8_t* row = bits + (size_t)(ty * bthumb::H / dh) * stride;
+    int run = -1;
+    for (int tx = 0; tx <= dw; tx++) {
+      bool ink = false;
+      if (tx < dw) {
+        const int sx = tx * bthumb::W / dw;
+        ink = !(row[sx >> 3] & (0x80 >> (sx & 7)));  // 1 = white
+      }
+      if (ink && run < 0) run = tx;
+      if (!ink && run >= 0) {
+        c.fillRect(ox + run, oy + ty, tx - run, 1, true);
+        run = -1;
+      }
+    }
+  }
+  c.drawRect(ox, oy, dw, dh, 2, true);
+  return true;
+}
+
 int wrapLines(ToolsCanvas& c, const char* s, TSize ts, bool bold, int maxW, char (*out)[64], int maxLines) {
   int n = 0;
   const char* p = s;
@@ -368,7 +403,7 @@ void renderBooksHome(ToolsHost& host, ToolsCanvas& c, const recents::Entry* rec,
   homeTop(host, c, nullptr);
   const TRect nb = booksNow();
   if (recN > 0) {
-    standInCover(c, nb.x, nb.y, 132, nb.h, rec[0].title);
+    if (!bookCover(c, rec[0].file, nb.x, nb.y, 132, nb.h)) standInCover(c, nb.x, nb.y, 132, nb.h, rec[0].title);
     const int tx = nb.x + 150, tw = nb.w - 150;
     c.textTracked(tx, nb.y + 14, "READING NOW", TS_SMALL, true, false, 2);
     char lines[3][64];
@@ -550,7 +585,7 @@ void renderTodayHome(ToolsHost& host, ToolsCanvas& c, const recents::Entry* rec,
   const TRect b = todayBook();
   c.drawRect(b.x, b.y, b.w, b.h, 2, true);
   if (recN > 0) {
-    standInCover(c, b.x + 10, b.y + 8, 44, b.h - 16, "");
+    if (!bookCover(c, rec[0].file, b.x + 10, b.y + 8, 44, b.h - 16)) standInCover(c, b.x + 10, b.y + 8, 44, b.h - 16, "");
     c.textClipped(b.x + 68, b.y + 14, b.w - 110, rec[0].title, TS_MED, true, true);
     c.text(b.x + 68, b.y + 14 + c.textHeight(TS_MED) + 4, "continue", TS_SMALL, true);
     c.drawLine(b.x + b.w - 26, b.y + b.h / 2 - 10, b.x + b.w - 16, b.y + b.h / 2, 3, true);
@@ -607,7 +642,10 @@ void HubScreen::render(ToolsHost& host, ToolsCanvas& c) {
     else if (_style == homestyle::CALENDAR) renderCalendarHome(host, c, _calOff);
     else renderTodayHome(host, c, rec, recN);
     drawDock(c, -1);
-    if (_upgrade) drawUpgrade(host, c);
+    if (_opening[0]) {
+      host.fadeBehind();
+      chrome2::working(c, SCREEN_H / 2, "Opening your book", _opening, 0, 0);
+    } else if (_upgrade) drawUpgrade(host, c);
     else drawDue(host, c);
     return;
   }
@@ -664,7 +702,10 @@ void HubScreen::render(ToolsHost& host, ToolsCanvas& c) {
     const int py = hubui::MORE_Y - c.textHeight(TS_MED) / 2;
     hubmarks::haloed([&](int dx, int dy, bool black) { c.text(px + dx, py + dy, pct, TS_MED, black, true); });
   }
-  if (_upgrade) drawUpgrade(host, c);
+  if (_opening[0]) {
+    host.fadeBehind();
+    chrome2::working(c, SCREEN_H / 2, "Opening your book", _opening, 0, 0);
+  } else if (_upgrade) drawUpgrade(host, c);
   else drawDue(host, c);
 }
 
