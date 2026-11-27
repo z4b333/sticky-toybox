@@ -10,7 +10,7 @@
 // as pixel constants throughout.
 constexpr int SCREEN_W = 480, SCREEN_H = 800;
 
-constexpr int TOPBAR_H = 40;
+constexpr int TOPBAR_H = 52;  // v2: the kit's bar (was 40)
 constexpr int BACK_W = 110;
 constexpr int HELP_W = 56;
 
@@ -18,11 +18,11 @@ constexpr int HELP_W = 56;
 // thumb is least accurate, so their touch areas reach ten pixels below the bar
 // they are drawn in. Nothing is drawn there; it is depth you cannot see.
 //
-// 50 is the ceiling, not a preference: several screens put their first row of
-// controls at y=50, and a control inside this zone would become unreachable
+// 56 is the ceiling, not a preference (50 under the old 40 px bar): a screen's
+// first row of controls starts at the bar's foot plus a little, and a control inside this zone would become unreachable
 // rather than merely hard to hit, because the back tap is tested first. The
 // preview harness holds that line with static assertions.
-constexpr int BAR_TOUCH_H = 50;
+constexpr int BAR_TOUCH_H = 56;
 
 // v2 chrome (kit "Toybox v2 UI", 21 Nov 2026). Back is a peeled paper corner
 // with an arrow on its black underside -- no word beside it -- and the bar is

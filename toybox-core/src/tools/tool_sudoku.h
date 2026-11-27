@@ -18,7 +18,7 @@
 
 namespace sdui {
 constexpr int CELL = 50;
-constexpr int GX = (480 - sud::N * CELL) / 2, GY = 52;  // 15, 52
+constexpr int GX = (480 - sud::N * CELL) / 2, GY = 60;  // 15, 60
 constexpr int GRID = sud::N * CELL;                      // 450
 
 constexpr int KEY_W = 48, KEY_H = 66, KEY_GAP = 4;

@@ -9,8 +9,8 @@
 #include "tools_draw.h"
 
 namespace timerui {
-inline constexpr TRect MODE_CD{20, 52, 220, 52};
-inline constexpr TRect MODE_SW{240, 52, 220, 52};
+inline constexpr TRect MODE_CD{20, 60, 220, 48};
+inline constexpr TRect MODE_SW{240, 60, 220, 48};
 
 // countdown
 inline constexpr int PRESET_W = 104, PRESET_H = 52, PRESET_GAP = 8;

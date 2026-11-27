@@ -10,8 +10,8 @@
 namespace randui {
 // v2 (kit "Random"): Number | Card; from and to; the result big in a box
 // you can tap; no repeats and what came before on one line.
-inline constexpr TRect MODE_NUM{20, 52, 220, 52};
-inline constexpr TRect MODE_CARD{240, 52, 220, 52};
+inline constexpr TRect MODE_NUM{20, 60, 220, 52};
+inline constexpr TRect MODE_CARD{240, 60, 220, 52};
 
 // From and To are boxes: a tap types the number on the keypad (owner).
 inline constexpr TRect FROM_BOX{96, 120, 140, 56};

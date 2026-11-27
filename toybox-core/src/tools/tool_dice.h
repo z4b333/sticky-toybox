@@ -12,7 +12,7 @@ namespace diceui {
 // the dice large, the total under them, earlier rolls as small chips.
 inline constexpr int TYPE_W = 70, TYPE_H = 52, TYPE_GAP = 4;
 inline constexpr int TYPE_X0 = (480 - (6 * TYPE_W + 5 * TYPE_GAP)) / 2;
-inline constexpr int TYPE_Y0 = 52;
+inline constexpr int TYPE_Y0 = 60;
 inline constexpr int STEP = 52;
 inline constexpr TRect CNT_DN{240, 120, STEP, STEP};
 inline constexpr TRect CNT_UP{408, 120, STEP, STEP};

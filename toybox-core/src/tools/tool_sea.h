@@ -32,7 +32,7 @@ inline constexpr TRect CANCEL_BTN{40, 690, 400, 60};
 inline constexpr int FOUND_Y = 200, FOUND_H = 76, FOUND_GAP = 12;
 
 // placing the fleet
-inline constexpr int SET_CELL = 42, SET_X = 30, SET_Y = 54;  // 420 square
+inline constexpr int SET_CELL = 42, SET_X = 30, SET_Y = 58;  // 420 square
 inline constexpr int CHIP_Y = SET_Y + 10 * SET_CELL + 16;    // 490
 inline constexpr int CHIP_H = 44;
 inline constexpr TRect TURN_BTN{20, CHIP_Y + CHIP_H + 18, 140, 64};

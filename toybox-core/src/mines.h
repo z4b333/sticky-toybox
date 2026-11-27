@@ -12,7 +12,7 @@
 
 namespace minesui {
 inline constexpr int CELL = 50;
-inline constexpr int GX = (SCREEN_W - mns::N * CELL) / 2, GY = 52;  // Sudoku's
+inline constexpr int GX = (SCREEN_W - mns::N * CELL) / 2, GY = 60;  // Sudoku's
 inline constexpr int GRID = mns::N * CELL;                          // 450
 inline constexpr int STAT_Y = GY + GRID + 18;                       // 520
 inline TRect statRect(int i) { return TRect{20 + i * 150, STAT_Y, 140, gk::STAT_H}; }

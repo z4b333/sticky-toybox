@@ -13,7 +13,7 @@
 #include "record.h"
 
 namespace cbui {
-inline constexpr int ROW_Y = 52, ROW_H = 44;  // ten rows: 52..492
+inline constexpr int ROW_Y = 56, ROW_H = 44;  // ten rows: 56..496
 inline constexpr int SLOT = 44, SLOT_X = 56;
 inline constexpr int SYM = 28;                // a symbol in a slot
 inline constexpr int PEG_X = 316, PEG_STEP = 26, PEG_R = 9;

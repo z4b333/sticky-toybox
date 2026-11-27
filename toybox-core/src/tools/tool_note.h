@@ -32,7 +32,7 @@ inline TRect cardRow(int i) {
 }
 
 // view
-inline constexpr TRect BODY{20, 52, 440, 590};
+inline constexpr TRect BODY{20, 60, 440, 582};
 inline constexpr TRect PREV_BTN{20, 654, 130, 50};
 inline constexpr TRect NEXT_BTN{160, 654, 130, 50};
 inline constexpr TRect PIN_BTN{20, 716, 150, 50};
