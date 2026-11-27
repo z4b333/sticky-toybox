@@ -19,6 +19,26 @@
 
 namespace cweb {
 
+// The page's "Your Sticky" card (v2, kit "PhoneHub"): what the device is
+// running, its battery and its font, and the home Wi-Fi it knows. Built by the
+// settings page before the portal starts, served at /i as JSON.
+inline void infoJson(char* out, size_t n, const char* fw, int battery, const char* font,
+                     const char* wifi) {
+  auto clean = [](const char* in, char* o, size_t m) {
+    size_t k = 0;
+    for (const char* q = in ? in : ""; *q && k + 2 < m; q++) {
+      if (*q == '"' || *q == '\\') o[k++] = '\\';
+      if ((unsigned char)*q >= 0x20) o[k++] = *q;
+    }
+    o[k] = 0;
+  };
+  char a[48], b[48], c[72];
+  clean(fw, a, sizeof(a));
+  clean(font, b, sizeof(b));
+  clean(wifi, c, sizeof(c));
+  snprintf(out, n, "{\"fw\":\"%s\",\"bat\":%d,\"font\":\"%s\",\"wifi\":\"%s\"}", a, battery, b, c);
+}
+
 #ifdef TOYBOX_HOST
 
 // Preview scaffolding, in the order a real session goes in: the phone joins on
@@ -33,6 +53,10 @@ class ClockServer {
     _wifiSaved = false;
     return _portal.begin();
   }
+  void setInfo(const char* fw, int battery, const char* font, const char* wifi) {
+    infoJson(_info, sizeof(_info), fw, battery, font, wifi);
+  }
+  const char* hostInfo() const { return _info; }
   void stop() { _portal.end(); }
   void loop() {
     _ticks++;
@@ -72,6 +96,7 @@ class ClockServer {
   Preferences* _prefs = nullptr;
   bool _set = false, _refused = false, _wifiSaved = false;
   int _ticks = 0;
+  char _info[256] = "{}";
 };
 
 #else
@@ -91,6 +116,7 @@ class ClockServer {
     _portal.on("/k", HTTP_POST, [this] { takeAccount(); });
     _portal.on("/l", HTTP_POST, [this] { takePlace(); });
     _portal.on("/s", HTTP_GET, [this] { sendScan(); });
+    _portal.on("/i", HTTP_GET, [this] { _portal.server().send(200, "application/json", _info); });
     // The networks around, for the page's pick list: the station half of the
     // radio scans while the access point keeps serving. Started now, so the
     // list is usually ready by the time the page asks.
@@ -100,6 +126,9 @@ class ClockServer {
   }
   void stop() { _portal.end(); }
   void loop() { _portal.loop(); }
+  void setInfo(const char* fw, int battery, const char* font, const char* wifi) {
+    infoJson(_info, sizeof(_info), fw, battery, font, wifi);
+  }
   bool wasSet() const { return _set; }
   // The phone sent, the firmware could not keep it. Its own state, because a
   // page that shows "waiting for the phone" after a refusal sends somebody
@@ -224,6 +253,7 @@ class ClockServer {
   portal::Portal _portal;
   Preferences* _prefs = nullptr;
   bool _set = false, _refused = false, _wifiSaved = false;
+  char _info[256] = "{}";
 };
 
 // The phone's page. It sends on load and says what it sent, because the device
@@ -232,26 +262,54 @@ class ClockServer {
 inline void ClockServer::sendPage() {
   static const char kPage[] PROGMEM = R"HTML(<!doctype html><html><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Set the device clock</title><style>
-body{font:16px/1.5 -apple-system,system-ui,sans-serif;margin:0;padding:24px;background:#fff;color:#111}
-h1{font-size:20px;margin:0 0 4px}p{margin:0 0 16px;color:#444}
-#now{font-size:44px;font-weight:600;letter-spacing:1px;margin:24px 0 8px}
-#msg{padding:12px;border:1px solid #ccc;border-radius:8px;margin-bottom:16px}
-button{font-size:17px;padding:12px 18px;width:100%;border:1px solid #111;border-radius:8px;
-background:#111;color:#fff}
-small{color:#666;display:block;margin-top:20px}
-h2{font-size:17px;margin:28px 0 4px}h2 span{font-weight:400;color:#666}
-input{font-size:17px;padding:10px;width:100%;box-sizing:border-box;border:1px solid #999;
-border-radius:8px;margin-bottom:10px}#wm{margin-top:8px;color:#444}
-select{font-size:17px;padding:10px;width:100%;box-sizing:border-box;border:1px solid #999;
-border-radius:8px;margin-bottom:10px;background:#fff;color:#111}.band{font-size:14px}
+<title>Toybox on your phone</title><style>
+*{box-sizing:border-box}
+body{font:500 16px/1.5 -apple-system,system-ui,"Noto Sans",sans-serif;margin:0;color:#111;
+background:#F5F1E6 radial-gradient(#D9D2BF 1px,transparent 1.2px) 0 0/16px 16px}
+header{display:flex;align-items:center;gap:12px;padding:14px 16px;border-bottom:2px solid #111;background:#F5F1E6}
+.logo{width:44px;height:44px;background:#FFD84D;border:2px solid #111;box-shadow:2px 2px 0 #111;
+display:flex;align-items:center;justify-content:center}
+.logo b{background:#111;color:#fff;font:800 12px/1 sans-serif;padding:5px 4px 4px;letter-spacing:.5px}
+.lab{font:600 11px/1.3 ui-monospace,"Noto Sans Mono",monospace;letter-spacing:2px;text-transform:uppercase}
+header h1{font-size:19px;font-weight:800;margin:0;line-height:1.2}
+main{padding:16px;max-width:560px;margin:0 auto}
+.card{background:#fff;border:2px solid #111;box-shadow:4px 4px 0 #111;padding:16px;margin:0 0 22px}
+.dev h2{font-size:21px;font-weight:800;margin:0 0 6px}
+.dev .lab{color:#4D483D;letter-spacing:1px;text-transform:none;font-size:12px;margin:2px 0}
+.bar{height:14px;border:2px solid #111;margin-top:10px;background:#fff;position:relative}
+.bar i{position:absolute;left:0;top:0;bottom:0;background:repeating-linear-gradient(135deg,#111 0 4px,#FFD84D 4px 8px)}
+.sec{display:flex;align-items:center;gap:8px;margin:26px 0 10px}
+.sec b{background:#111;color:#FFD84D;font:600 12px/1 ui-monospace,monospace;padding:4px 7px}
+h3{font-size:18px;font-weight:800;margin:0 0 4px}h3 span{font-weight:500;color:#4D483D;font-size:14px}
+p{margin:0 0 12px;color:#4D483D}
+#now{font-size:44px;font-weight:800;letter-spacing:1px;margin:4px 0 6px}
+#msg{padding:10px 12px;border:2px dashed #111;margin-bottom:12px;background:#fff}
+button{font-size:17px;font-weight:700;line-height:1;padding:14px 18px;width:100%;border:2px solid #111;background:#111;color:#fff;
+cursor:pointer;font-family:inherit}
+button:active{transform:translate(2px,2px)}
+input,select{font-size:17px;font-family:inherit;padding:11px;width:100%;border:2px solid #111;
+margin-bottom:10px;background:#fff;color:#111;border-radius:0}
+#wm,#bm,#lm,#km{margin-top:8px;color:#111;font-weight:600}.band{font-size:14px}
+small{color:#4D483D;display:block;margin:8px 0 28px}
+footer{background:#111;color:#F5F1E6;text-align:center;padding:14px;font-size:13px}
 </style></head><body>
-<h1>Set the device clock</h1>
-<p>Toybox takes the time and time zone from this phone.</p>
+<header><div class="logo"><b>TB</b></div><div><div class="lab">Served by your Sticky</div>
+<h1>Toybox on your phone</h1></div></header>
+<main>
+<div class="card dev"><h2>Your Sticky</h2>
+<div class="lab" id="ifw">FIRMWARE &hellip;</div><div class="lab" id="iwifi">WI-FI &hellip;</div>
+<div class="lab" id="ifont">FONT &hellip;</div><div class="bar"><i id="ibat" style="width:0"></i></div>
+<div class="lab" id="ibatt" style="text-align:right">&nbsp;</div></div>
+
+<div class="sec"><b>01</b><span class="lab">Clock</span></div>
+<div class="card"><h3>The time, from this phone</h3>
+<p>Sent as soon as this page opened, with the time zone.</p>
 <div id="now">--:--</div>
 <div id="msg">Sending&hellip;</div>
-<button id="again">Send this time again</button>
-<h2>Home Wi-Fi <span>(optional)</span></h2>
+<button id="again">Send this time again</button></div>
+
+<div class="sec"><b>02</b><span class="lab">Home Wi-Fi</span></div>
+<div class="card"><h3>Home Wi-Fi <span>(optional)</span></h3>
 <p>Lets the device set its own clock from the internet later, and sync your
 reading. The password stays on the device.</p>
 <p class="band">This device uses <b>2.4&nbsp;GHz</b> Wi-Fi only &mdash; it cannot join a
@@ -260,27 +318,35 @@ can join are listed.</p>
 <form id="wf"><select id="wl"><option value="">Looking for networks&hellip;</option></select>
 <input id="ws" placeholder="Wi-Fi name" autocapitalize="off" autocomplete="off" maxlength="32">
 <input id="wp" type="password" placeholder="Password" autocomplete="off" maxlength="63">
-<button>Save home Wi-Fi</button></form><div id="wm"></div>
-<h2>Backup Wi-Fi <span>(optional)</span></h2>
+<button>Save home Wi-Fi</button></form><div id="wm"></div></div>
+
+<div class="sec"><b>03</b><span class="lab">Backup Wi-Fi</span></div>
+<div class="card"><h3>Backup Wi-Fi <span>(optional)</span></h3>
 <p>Tried when the home Wi-Fi is not there: a phone hotspot, a second router.</p>
 <form id="bf"><select id="bl"><option value="">Looking for networks&hellip;</option></select>
 <input id="bs" placeholder="Wi-Fi name" autocapitalize="off" autocomplete="off" maxlength="32">
 <input id="bp" type="password" placeholder="Password" autocomplete="off" maxlength="63">
-<button>Save backup Wi-Fi</button></form><div id="bm"></div>
-<h2>Weather place <span>(optional)</span></h2>
+<button>Save backup Wi-Fi</button></form><div id="bm"></div></div>
+
+<div class="sec"><b>04</b><span class="lab">Weather place</span></div>
+<div class="card"><h3>Weather place <span>(optional)</span></h3>
 <p>For Climate's outdoor reading: a town or city name.</p>
 <form id="lf"><input id="lc" placeholder="City, e.g. Bangkok" autocomplete="off" maxlength="47">
-<button>Save place</button></form><div id="lm"></div>
-<h2>Other sync server <span>(optional)</span></h2>
-<p>For Readest, skip this: on the device open a book, then Options &rarr;
-Sync position, and scan its code. Here only for a KOReader sync server
+<button>Save place</button></form><div id="lm"></div></div>
+
+<div class="sec"><b>05</b><span class="lab">Other sync server</span></div>
+<div class="card"><h3>Other sync server <span>(optional)</span></h3>
+<p>For Readest, skip this: on the device open a book, then More &rarr;
+Reading sync, and scan its code. Here only for a KOReader sync server
 (matching: Binary).</p>
 <form id="kf"><input id="ku" placeholder="User name" autocapitalize="off" autocomplete="off" maxlength="63">
 <input id="kp" type="password" placeholder="Password" autocomplete="off">
 <input id="ks" placeholder="Server (blank = sync.koreader.rocks)" autocapitalize="off" autocomplete="off" maxlength="95">
-<button>Save sync account</button></form><div id="km"></div>
+<button>Save sync account</button></form><div id="km"></div></div>
 <small>Your time zone is sent with the time. If you travel, open this page
 again and send.</small>
+</main>
+<footer>This page is served by your Sticky &mdash; nothing leaves your Wi-Fi.</footer>
 <script>
 function posixTz(){
  function off(t){return -new Date(t).getTimezoneOffset()}
@@ -312,6 +378,11 @@ function send(){
     'Could not reach the device. Still connected to its wifi?'});
 }
 document.getElementById('again').addEventListener('click',send);
+fetch('/i').then(function(r){return r.json()}).then(function(j){
+ function t(id,v){document.getElementById(id).textContent=v}
+ if(j.fw)t('ifw','FIRMWARE '+j.fw);t('iwifi','WI-FI '+(j.wifi||'none yet'));
+ if(j.font)t('ifont','FONT '+j.font);
+ if(j.bat>=0){document.getElementById('ibat').style.width=j.bat+'%';t('ibatt',j.bat+'%')}}).catch(function(){});
 send();
 document.getElementById('kf').addEventListener('submit',function(e){
  e.preventDefault();var m=document.getElementById('km'),u=document.getElementById('ku').value,
@@ -321,7 +392,7 @@ document.getElementById('kf').addEventListener('submit',function(e){
  fetch('/k',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},
   body:'u='+encodeURIComponent(u)+'&p='+encodeURIComponent(k)+'&s='+encodeURIComponent(v)})
  .then(function(r){return r.json()}).then(function(j){m.textContent=j.ok?
-  'Saved. Open a book, then Options \u2192 Sync position.':'The device did not accept that.'})
+  'Saved. Open a book, then More \u2192 Reading sync.':'The device did not accept that.'})
  .catch(function(){m.textContent='Could not reach the device. Still connected to its wifi?'})});
 document.getElementById('lf').addEventListener('submit',function(e){
  e.preventDefault();var m=document.getElementById('lm'),c=document.getElementById('lc').value.trim();

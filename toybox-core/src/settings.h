@@ -378,6 +378,7 @@ class SettingsScreen {
   bool _setupWifi = false;  // the clock page was opened from setup's Wi-Fi step
   bool _setupPhone = false; // ...as "With my phone": leaving it ends the setup
   void renderHomeStyle(ToolsHost& host, ToolsCanvas& c);
+  void clockInfo(ToolsHost& host);
   bool tapHomeStyle(ToolsHost& host, int x, int y);
   void renderSetup(ToolsHost& host, ToolsCanvas& c);
   bool tapSetup(ToolsHost& host, int x, int y);

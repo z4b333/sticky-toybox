@@ -1721,6 +1721,7 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
 
   if (rowHit(ACT_CLOCK)) {
     host.beep(1);
+    clockInfo(host);
     _clockOk = _clock.start(host.prefs());
     _netStage = 0;
     _clockSawClient = false;
@@ -2444,6 +2445,16 @@ constexpr uint8_t kSetupSleep[5] = {1, 2, 3, 4, 0};
 constexpr int kSetupFace[2] = {0, 2};  // Noto Sans, IBM Plex Sans
 }  // namespace
 
+// The phone page's "Your Sticky" card: version, battery, font, home Wi-Fi.
+void SettingsScreen::clockInfo(ToolsHost& host) {
+  ota::Device* d = host.otaDevice();
+  const char* font = host.fontFor(ToolsHost::FONT_DEVICE);
+  char wifi[homenet::SSID_MAX] = {};
+  if (homenet::haveWifi(host.prefs())) homenet::wifiName(host.prefs(), wifi, sizeof(wifi));
+  _clock.setInfo(d ? d->version() : "", host.batteryPercent(), font && font[0] ? font : host.typefaceName(0),
+                 wifi);
+}
+
 void SettingsScreen::startSetup(bool fromBoot) {
   _armed = false;
   _note = nullptr;
@@ -2593,6 +2604,7 @@ bool SettingsScreen::tapSetup(ToolsHost& host, int x, int y) {
   auto openPhone = [&] {
     host.beep(1);
     _setupWifi = true;
+    clockInfo(host);
     _clockOk = _clock.start(host.prefs());
     _netStage = 0;
     _clockSawClient = false;

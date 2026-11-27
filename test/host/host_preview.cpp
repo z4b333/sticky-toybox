@@ -2618,6 +2618,15 @@ int main() {
     if (!toybox.hostInSettings()) toybox.openSettings();
     toybox.onTap(BACK_W / 2, TOPBAR_H / 2);
     printf("home styles ok (books, calendar, today; settings page; upgrade popup)\n");
+    {  // the phone page's "Your Sticky" card
+      char j[256];
+      cweb::infoJson(j, sizeof(j), "d-test9", 82, "Noto \"Sans\"", "\xE0\xB8\x9A\xE0\xB9\x89\xE0\xB8\xB2\xE0\xB8\x99 5G");
+      if (!strstr(j, "\"bat\":82") || !strstr(j, "Noto \\\"Sans\\\"") || !strstr(j, "\"fw\":\"d-test9\"")) {
+        printf("PHONE FAIL: info json %s\n", j);
+        abort();
+      }
+      printf("phone page info ok %s\n", j);
+    }
     g_dumpEnabled = wasDump;
   }
 
