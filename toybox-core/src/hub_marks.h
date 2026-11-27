@@ -62,24 +62,39 @@ inline void utility(ToolsCanvas& c, int cx, int cy, int s, bool black) {
 // An open book: two thin pages either side of a spine gap, a line of text on
 // each.
 inline void study(ToolsCanvas& c, int cx, int cy, int s, bool black) {
-  // An open book, front on: both page edges sag toward the spine, the way a
-  // book actually lies open. The old mark was two boxed panels that read as a
-  // window at dock size -- and the Epub tile wears that shape now anyway.
-  const int w = (s * 45) / 100;          // half-width of the spread
-  const int topO = cy - (s * 29) / 100;  // outer top corners
-  const int topC = cy - (s * 15) / 100;  // where the top edges meet the spine
-  const int botO = cy + (s * 15) / 100;
-  const int botC = cy + (s * 29) / 100;
+  // The kit's open book (owner, 27 Nov): two pages bowing down to the spine,
+  // no lines of text. Drawn from the kit's 44-unit path, the curves as short
+  // segments.
+  auto P = [&](float ux, float uy, int& x, int& y) {
+    x = cx + (int)lroundf((ux - 22.0f) * (float)s / 34.0f);  // the path spans 30 of 44: fill the mark
+    y = cy + (int)lroundf((uy - 23.0f) * (float)s / 34.0f);
+  };
+  auto cubic = [&](float x0, float y0, float x1, float y1, float x2, float y2, float x3, float y3) {
+    int px = 0, py = 0;
+    for (int i = 0; i <= 10; i++) {
+      const float t = (float)i / 10.0f, u = 1.0f - t;
+      const float bx = u * u * u * x0 + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t * x3;
+      const float by = u * u * u * y0 + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * y3;
+      int x, y;
+      P(bx, by, x, y);
+      if (i) c.drawLine(px, py, x, y, 2, black);
+      px = x;
+      py = y;
+    }
+  };
   for (int sgn = -1; sgn <= 1; sgn += 2) {
-    const int xo = cx + sgn * w;
-    c.drawLine(cx, topC, xo, topO, 2, black);  // top page edge
-    c.drawLine(xo, topO, xo, botO, 2, black);  // outer page edge
-    c.drawLine(xo, botO, cx, botC, 2, black);  // bottom page edge
-    // one line of text, following the page's slant
-    c.drawLine(cx + sgn * (s * 14) / 100, cy - (s * 3) / 100,
-               cx + sgn * (w - (s * 9) / 100), cy - (s * 7) / 100, 2, black);
+    const float m = (float)sgn;
+    cubic(22, 14, 22 + m * -4, 11, 22 + m * -9, 10, 22 + m * -15, 10.5f);  // top edge
+    int x0, y0, x1, y1;
+    P(22 + m * -15, 10.5f, x0, y0);
+    P(22 + m * -15, 32, x1, y1);
+    c.drawLine(x0, y0, x1, y1, 2, black);  // outer edge
+    cubic(22 + m * -15, 32, 22 + m * -9, 31.5f, 22 + m * -4, 32.5f, 22, 35.5f);  // bottom edge
   }
-  c.drawLine(cx, topC, cx, botC, 2, black);  // the spine
+  int sx0, sy0, sx1, sy1;
+  P(22, 14, sx0, sy0);
+  P(22, 35.5f, sx1, sy1);
+  c.drawLine(sx0, sy0, sx1, sy1, 2, black);  // the spine
 }
 
 inline void folder(ToolsCanvas& c, int f, int cx, int cy, int s, bool black) {
