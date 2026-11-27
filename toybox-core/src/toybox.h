@@ -59,6 +59,9 @@ class Toybox {
   // v2 Wake to Book: open the book read last, at its place. False when
   // there is none (or it is gone), and the caller shows home instead.
   bool openLastBook();
+  // v2 Wake to Last app (owner, 27 Nov, in place of Wake to Book): the app
+  // open last; a reader goes on into its book. False when there is none.
+  bool openLastApp();
   // v2: an updated device that has not opened setup sees "New: Setup" over
   // home, once each power-on, until it does.
   void offerSetup() { _hub.showUpgrade(!_host->prefs().getBool("su_seen", false)); }

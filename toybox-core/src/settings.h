@@ -248,7 +248,7 @@ inline TRect sleepChipRect(int i) {
   const int pos = i == 0 ? 4 : i - 1;
   return TRect{x0 + pos * SEG_W, r.y + (r.h - SEG_H) / 2, pos == 4 ? SEG_NEVER_W : SEG_W, SEG_H};
 }
-// Where the power button wakes to: the note, the book being read, or home.
+// Where the power button wakes to: the note, the last app (a reader: its book), or home.
 inline constexpr int WAKE_SEG_W = 96;
 inline TRect wakeChipRect(int i) {
   const TRect r = lockRect(LR_WAKE);

@@ -3189,8 +3189,8 @@ int main() {
         abort();
       }
       tapRect(setui::wakeChipRect(1));
-      if (lock::config().wake != lock::WAKE_BOOK) {
-        printf("LOCK FAIL: the book wake chip did not take\n");
+      if (lock::config().wake != lock::WAKE_APP) {
+        printf("LOCK FAIL: the last-app wake chip did not take\n");
         abort();
       }
       tapRect(setui::wakeChipRect(0));
@@ -3198,7 +3198,7 @@ int main() {
         printf("LOCK FAIL: the note wake chip did not take\n");
         abort();
       }
-      tapRect(setui::wakeChipRect(wasWake == lock::WAKE_HUB ? 2 : wasWake == lock::WAKE_BOOK ? 1 : 0));
+      tapRect(setui::wakeChipRect(wasWake == lock::WAKE_HUB ? 2 : wasWake == lock::WAKE_APP ? 1 : 0));
     }
 
     // Every chip has to be reachable and has to be the one that ends up filled.
@@ -11299,6 +11299,15 @@ int main() {
     }
     toybox.goHub();
     printf("wake to book ok (%s)\n", n > 0 ? rec[0].title : "nothing read: home");
+    // Wake to Last app: a game reopens itself; a reader goes on into its book.
+    toybox.open(true, 3);  // XO
+    toybox.hostGoHome();
+    if (!toybox.openLastApp() || !toybox.hostInApp() || !toybox.hostIsGame() || toybox.hostIdx() != 3) {
+      printf("WAKE FAIL: Wake to Last app did not reopen XO\n");
+      abort();
+    }
+    toybox.goHub();
+    printf("wake to last app ok (XO)\n");
     {  // the styled homes with a real cover (made on the book's first open)
       static uint8_t tb[bthumb::BYTES];
       const bool have = n > 0 && bthumb::load(rec[0].file, tb);

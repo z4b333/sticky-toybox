@@ -254,6 +254,19 @@ void Toybox::render(ToolsCanvas& c) {
   }
 }
 
+bool Toybox::openLastApp() {
+  Preferences& p = _host->prefs();
+  if (!p.isKey("last_i")) return false;
+  const bool game = p.getBool("last_g", false);
+  const int idx = (int)p.getInt("last_i", -1);
+  if (idx < 0) return false;
+  if (!game && (idx == 9 || idx == 10)) return openLastBook();
+  if (!appvis::visible(game, idx)) return false;  // hidden since: home
+  _hub.goHome();
+  open(game, idx, true);
+  return _where == Where::App;
+}
+
 bool Toybox::openLastBook() {
   recents::Entry rec[recents::MAX];
   if (recents::list(_host->prefs(), rec) < 1) return false;

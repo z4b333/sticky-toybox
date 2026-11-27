@@ -77,7 +77,7 @@ inline int emptyIndexOf(uint8_t v) {
   return 1;  // GOODBYE's place
 }
 
-enum Wake : uint8_t { WAKE_NOTE = 0, WAKE_HUB = 1, WAKE_BOOK = 2 };
+enum Wake : uint8_t { WAKE_NOTE = 0, WAKE_HUB = 1, WAKE_APP = 2 };  // APP: the last app (was Book)
 
 // How far the page behind the lock picture is knocked back. On one bit there
 // is no dimming, only how much of the ink is left standing, so these are the
@@ -137,7 +137,7 @@ inline Config load(Preferences& p) {
   c.showBattery = p.getBool("ls_batt", true);
   c.autoRotate = p.getBool("ls_rot", true);
   c.wake = (uint8_t)p.getInt("ls_wake", WAKE_NOTE);
-  if (c.wake > WAKE_BOOK) c.wake = WAKE_NOTE;
+  if (c.wake > WAKE_APP) c.wake = WAKE_NOTE;
   c.pageDim = (uint8_t)p.getInt("ls_pdim", PAGE_SOFT);
   if (c.pageDim > PAGE_GHOST) c.pageDim = PAGE_SOFT;
   return c;

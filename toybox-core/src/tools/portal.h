@@ -95,7 +95,16 @@ class Portal {
     _pass[8] = 0;
 
     WiFi.mode(WIFI_AP);
-    if (!WiFi.softAP(_ssid, _pass)) return false;
+    if (!WiFi.softAP(_ssid, _pass)) {
+      // Straight after a home Wi-Fi attempt the radio can still be on its way
+      // down (owner, 27 Nov: Notes said "could not start wifi" after trying
+      // home). Let it settle, then once more.
+      WiFi.mode(WIFI_OFF);
+      delay(400);
+      WiFi.mode(WIFI_AP);
+      delay(100);
+      if (!WiFi.softAP(_ssid, _pass)) return false;
+    }
     delay(200);
     _ip = WiFi.softAPIP();
 

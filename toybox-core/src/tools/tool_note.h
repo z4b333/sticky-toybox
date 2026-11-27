@@ -662,7 +662,10 @@ class NoteTool : public ToolApp {
       host().refresh(false);  // "Joining ..." while the radio looks
       _netOk = _net.startHome(prefs(), "/write");
       _joining = false;
-      if (!_netOk) _netNote = "the home Wi-Fi did not answer";
+      if (!_netOk) {
+        _netNote = "the home Wi-Fi did not answer";
+        _net.stop();
+      }
     }
     if (!_netOk) _netOk = _net.start();
     host().beep(_netOk ? 1 : 2);
@@ -680,7 +683,12 @@ class NoteTool : public ToolApp {
   void renderPair(ToolsCanvas& c) {
     using namespace nui;
     if (!_netOk) {
-      c.textCentered(c.width() / 2, 300, "could not start wifi", TS_LARGE, true, true);
+      c.textCentered(c.width() / 2, 280, "Could not start Wi-Fi", TS_LARGE, true, true);
+      if (_netNote) c.textCentered(c.width() / 2, 330, _netNote, TS_MED, true);
+      c.textCentered(c.width() / 2, 370,
+                     _netNote ? "and the Sticky's own Wi-Fi did not start" : "the Sticky's own Wi-Fi did not start",
+                     TS_MED, true);
+      c.button(ALT_BTN.x, ALT_BTN.y, ALT_BTN.w, ALT_BTN.h, "Try again", false, TS_MED);
       c.button(DONE_BTN.x, DONE_BTN.y, DONE_BTN.w, DONE_BTN.h, "Back", true, TS_LARGE);
       return;
     }
@@ -874,6 +882,10 @@ class NoteTool : public ToolApp {
       return;
     }
     if (DONE_BTN.hit(x, y)) return closePair();
+    if (!_netOk && nui::ALT_BTN.hit(x, y)) {  // the radio refused: once more
+      _net.stop();
+      return openPair();
+    }
     if (!_got && _netOk && nui::ALT_BTN.hit(x, y)) {
       if (_net.home()) {  // the backup: the Sticky's own access point
         _net.stop();
