@@ -10794,16 +10794,15 @@ int main() {
              stickyHost.prefs().getUInt("nt_size", 99), stickyHost.canvasRotation());
       abort();
     }
-    // The TURN button is gone: a tap where it was does nothing.
+    // TAP TO LOCK (owner, 27 Nov): the plate at the top, and a tap anywhere on
+    // the note keeps the angle it follows.
+    g_dumpEnabled = true;
+    setScreen("note_orient_tap_to_lock");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
     {
-      const int w = stickyHost.canvas().width(), h = stickyHost.canvas().height();
-      tapRect(nui::turnRect(w, h));
-      if (stickyHost.canvasRotation() != 2) {
-        printf("ORIENT IMU FAIL: the retired TURN button still turns\n");
-        abort();
-      }
-      // The confirmation stays a button: KEEP saves the followed angle.
-      tapRect(nui::keepRect(w, h));
+      const int w = stickyHost.canvas().width();
+      tapRect(rmenu::lockPlate(w));
     }
     if (lock::config().pinRotation != 2 || stickyHost.canvasRotation() != 0) {
       printf("ORIENT IMU FAIL: kept %d at rotation %d\n", lock::config().pinRotation,

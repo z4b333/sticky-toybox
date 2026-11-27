@@ -10,6 +10,7 @@
 #include "note_md.h"
 #include "note_store.h"
 #include "note_web.h"
+#include "reader_menu.h"
 #include "tools_draw.h"
 
 namespace nui {
@@ -826,6 +827,16 @@ class NoteTool : public ToolApp {
     c.fillRect(a.x - 4, a.y - 4, a.w + 8, a.h + 8, false);
     c.button(a.x, a.y, a.w, a.h, "A", false,
              nmd::g_body == TS_MED ? TS_SMALL : nmd::g_body == TS_LARGE ? TS_MED : TS_LARGE);
+    if (_gyro) {
+      // Owner, 27 Nov: the reader's way. The note turns with the device by
+      // itself; a black plate at the top says TAP TO LOCK, and a tap anywhere
+      // (but the size button) keeps the angle it is at.
+      const TRect r = rmenu::lockPlate(c.width());
+      c.fillRect(r.x, r.y, r.w, r.h, true);
+      c.textTracked(r.x + (r.w - c.textTrackedWidth("TAP TO LOCK", TS_SMALL, true, 2)) / 2,
+                    r.y + (r.h - c.textHeight(TS_SMALL)) / 2, "TAP TO LOCK", TS_SMALL, false, true, 2);
+      return;
+    }
     const TRect t = turnRect(c.width(), c.height());
     const TRect k = keepRect(c.width(), c.height());
     // Painted over the note rather than beside it: there is no beside. White
@@ -854,7 +865,8 @@ class NoteTool : public ToolApp {
       host().refreshUi();  // the note reflows; every pixel may change
       return;
     }
-    if (!_gyro && turnRect(canvas().width(), canvas().height()).hit(x, y)) {
+    if (_gyro) return closeOrient(true);  // TAP TO LOCK: anywhere on the note
+    if (turnRect(canvas().width(), canvas().height()).hit(x, y)) {
       _orient = (_orient + 1) & 3;
       host().setCanvasRotation(_orient);
       host().beep(0);

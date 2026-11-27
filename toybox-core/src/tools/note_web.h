@@ -242,7 +242,12 @@ button.send:disabled{background:#999}
 h2{font-size:13px;margin:22px 0 8px;text-transform:uppercase;letter-spacing:.06em;color:#555}
 /* The preview mimics the panel: 800x480 of pure black on white, scaled down. */
 #pv{background:#fff;border:2px solid #111;border-radius:4px;padding:16px;
-font-family:ui-monospace,Menlo,monospace;color:#000;aspect-ratio:5/3;overflow:hidden}
+font-family:ui-monospace,Menlo,monospace;color:#000;aspect-ratio:5/3;overflow:hidden;margin:0 auto}
+#pv.up{aspect-ratio:3/5;max-width:340px}
+.turn{display:flex;gap:6px;margin:0 0 8px}
+.turn button{flex:1;padding:9px;background:#fff;color:#111;border:1px solid #bbb;border-radius:8px;
+font:600 14px system-ui;cursor:pointer}
+.turn button.on{background:#111;color:#fff;border-color:#111}
 #pv .h1{font-size:22px;font-weight:700;border-bottom:2px solid #000;padding-bottom:3px;margin:8px 0 6px}
 #pv .h2{font-size:18px;font-weight:700;margin:8px 0 4px}
 #pv .h3{font-size:15px;font-weight:700;margin:6px 0 3px}
@@ -290,12 +295,14 @@ line and tap a button above to format it.</p>
 <div class="ok" id="ok"></div>
 
 <h2>How it will look on the device</h2>
+<div class="turn"><button type="button" id="side" class="on">Sideways</button>
+<button type="button" id="upr">Upright</button></div>
 <div id="pv"></div>
 <p class="hint">The box is one screenful. Anything below it becomes page 2 &mdash; the
 device gets a MORE button. Tap a checkbox on the device to tick it off.</p>
 
 <script>
-var t=document.getElementById('t'),pv=document.getElementById('pv'),
+var prevV='',t=document.getElementById('t'),pv=document.getElementById('pv'),
     nameI=document.getElementById('name'),pick=document.getElementById('pick'),
     ok=document.getElementById('ok');
 
@@ -335,8 +342,31 @@ function clamp(){
  cnt.textContent=LIMIT+' / '+LIMIT+' \u2014 full: the note was cut off here';
  cnt.className='cnt over';
 }
-function upd(){clamp();pv.innerHTML=render(t.value)}
-t.addEventListener('input',upd);
+function upd(){clamp();pv.innerHTML=render(t.value);prevV=t.value}
+// Enter on a list line starts the next one: 2. after 1., another box after a
+// box, another bullet. Enter on an empty item ends the list instead. Read from
+// the text itself rather than the key, because phone keyboards rarely say
+// which key it was.
+function carry(){
+ var v=t.value,c=t.selectionStart;
+ if(v.length!==prevV.length+1||c<1||v.charAt(c-1)!=='\n'||t.selectionEnd!==c){prevV=v;return}
+ var a=v.lastIndexOf('\n',c-2)+1,line=v.slice(a,c-1),m,next=null;
+ if((m=line.match(/^(\s*)(\d+)\.\s+(.*)$/)))next=m[3].trim()?m[1]+(parseInt(m[2],10)+1)+'. ':'';
+ else if((m=line.match(/^(\s*)([-*])\s+\[[ xX]\]\s*(.*)$/)))next=m[3].trim()?m[1]+m[2]+' [ ] ':'';
+ else if((m=line.match(/^(\s*)([-*])\s+(.*)$/)))next=m[3].trim()?m[1]+m[2]+' ':'';
+ if(next===null){prevV=v;return}
+ if(next===''){  // an empty item: the marker goes, and so does the new line
+  t.value=v.slice(0,a)+v.slice(c);t.selectionStart=t.selectionEnd=a;
+ }else{
+  t.value=v.slice(0,c)+next+v.slice(c);t.selectionStart=t.selectionEnd=c+next.length;
+ }
+ prevV=t.value;
+}
+t.addEventListener('input',function(){carry();upd()});
+var sideB=document.getElementById('side'),uprB=document.getElementById('upr');
+function turn(up){pv.className=up?'up':'';sideB.className=up?'':'on';uprB.className=up?'on':''}
+sideB.addEventListener('click',function(){turn(false)});
+uprB.addEventListener('click',function(){turn(true)});
 upd();
 
 // Toolbar: line prefixes toggle on every selected line; Bold wraps the selection.
