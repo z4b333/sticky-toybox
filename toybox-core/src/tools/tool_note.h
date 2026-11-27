@@ -657,6 +657,7 @@ class NoteTool : public ToolApp {
     // phone keeps its own network. The Sticky's own access point is the backup.
     _netNote = nullptr;
     _netOk = false;
+    _net.stop();  // one network at a time: whatever ran before goes first
     if (homenet::haveWifi(prefs())) {
       homenet::wifiName(prefs(), _joinName, sizeof(_joinName));
       _joining = true;

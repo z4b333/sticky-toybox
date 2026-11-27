@@ -1186,6 +1186,8 @@ class EpubTool : public ToolApp {
     // into flash now. After the decode above, so the very first open of a
     // book still gets one.
     bthumb::noteForLock(host(), _books[i].file);
+    // The Books home's cover, made from the full-size one (once per book).
+    if (bthumb::haveBig(host(), _books[i].file)) bthumb::makeHome(host(), _books[i].file);
 
     // Every picture in the book, prepared now if it was not before -- the
     // loading screen counts them off. Before the layout, which asks how many

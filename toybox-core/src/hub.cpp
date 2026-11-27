@@ -404,7 +404,26 @@ void renderBooksHome(ToolsHost& host, ToolsCanvas& c, const recents::Entry* rec,
   const TRect nb = booksNow();
   if (recN > 0) {
     const int cw = BOOKS_COVER_W;
-    if (!bookCover(c, rec[0].file, nb.x, nb.y, cw, nb.h, false)) standInCover(c, nb.x, nb.y, cw, nb.h, rec[0].title);
+    uint8_t* home = (uint8_t*)malloc(bthumb::HOME_BYTES);  // 8 KB, only while drawing
+    if (home && bthumb::loadHome(rec[0].file, home)) {
+      // The sharp one, at its own size: made from the full-size cover.
+      const int ox = nb.x + (cw - bthumb::HOME_W) / 2, oy = nb.y + (nb.h - bthumb::HOME_H) / 2;
+      for (int y = 0; y < bthumb::HOME_H; y++) {
+        const uint8_t* row = home + (size_t)y * bthumb::HOME_STRIDE;
+        int run = -1;
+        for (int x = 0; x <= bthumb::HOME_W; x++) {
+          const bool ink = x < bthumb::HOME_W && !(row[x >> 3] & (0x80 >> (x & 7)));
+          if (ink && run < 0) run = x;
+          if (!ink && run >= 0) {
+            c.fillRect(ox + run, oy + y, x - run, 1, true);
+            run = -1;
+          }
+        }
+      }
+    } else if (!bookCover(c, rec[0].file, nb.x, nb.y, cw, nb.h, false)) {
+      standInCover(c, nb.x, nb.y, cw, nb.h, rec[0].title);
+    }
+    free(home);
     const int tx = nb.x + cw + 18, tw = nb.w - cw - 18;
     c.textTracked(tx, nb.y + 14, "READING NOW", TS_SMALL, true, false, 2);
     char lines[5][64];

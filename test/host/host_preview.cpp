@@ -11311,6 +11311,10 @@ int main() {
       static uint8_t tb[bthumb::BYTES];
       const bool have = n > 0 && bthumb::load(rec[0].file, tb);
       printf("home cover: %s\n", have ? "thumbnail in flash" : "none (stand-in drawn)");
+      if (n > 0 && !bthumb::haveHome(rec[0].file)) {
+        printf("HOME FAIL: no sharp home cover was made for \"%s\"\n", rec[0].title);
+        abort();
+      }
       g_dumpEnabled = true;
       toybox.hostGoHome();
       homestyle::set(prefs, homestyle::BOOKS);

@@ -94,6 +94,12 @@ class Portal {
     for (int i = 0; i < 8; i++) _pass[i] = '0' + (char)(esp_random() % 10);
     _pass[8] = 0;
 
+    // From a clean radio: a station half left from a home Wi-Fi attempt (or
+    // still joining) must be down before the access point comes up (owner,
+    // 27 Nov: Notes failed when both were on at once).
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    delay(150);
     WiFi.mode(WIFI_AP);
     if (!WiFi.softAP(_ssid, _pass)) {
       // Straight after a home Wi-Fi attempt the radio can still be on its way

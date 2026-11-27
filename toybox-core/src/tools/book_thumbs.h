@@ -778,4 +778,114 @@ inline void drawLoading(ToolsHost& h, ToolsCanvas& c, const char* file, const ch
   drawPlate(c, file, title);
 }
 
+// --- the home screen's cover (v2, owner 27 Nov) ---------------------------------
+// The Books home shows the cover at 198x330. The 96x160 strip thumbnail blown
+// up to that was blocks; this one is made from the full-size cover on the
+// card: averaged down (every source pixel counted, never sampled) and
+// dithered again, so the faces and the lettering come back. 200 bits a row,
+// 8,250 bytes in flash; kept for the two books the home screen shows.
+inline constexpr int HOME_W = 198, HOME_H = 330, HOME_STRIDE = 25;
+inline constexpr int HOME_BYTES = HOME_STRIDE * HOME_H;  // 8,250
+
+inline void homePath(uint32_t k, char* out, int cap) { snprintf(out, cap, "/hc%08lx.b", (unsigned long)k); }
+inline bool haveHome(const char* file) {
+  char p[20];
+  homePath(key(file), p, sizeof(p));
+  return tfs::size(p) == (size_t)HOME_BYTES;
+}
+// Fills `dst` (HOME_BYTES); false when there is none.
+inline bool loadHome(const char* file, uint8_t* dst) {
+  char p[20];
+  homePath(key(file), p, sizeof(p));
+  size_t len = 0;
+  char* buf = tfs::readAlloc(p, len);
+  if (!buf) return false;
+  const bool ok = len == (size_t)HOME_BYTES;
+  if (ok) memcpy(dst, buf, HOME_BYTES);
+  free(buf);
+  return ok;
+}
+
+// Made on a book's open when it has a full-size cover and no home cover yet.
+// Reads the big cover a band at a time (as the lock-screen copy does).
+inline bool makeHome(ToolsHost& h, const char* file) {
+  if (haveHome(file)) return true;
+  char src[bstore::PATH_CAP];
+  bigPath(file, src, sizeof(src));
+  uint8_t* band = (uint8_t*)malloc(BAND_BYTES);
+  uint8_t* out = (uint8_t*)malloc(HOME_BYTES);
+  uint16_t* sum = (uint16_t*)calloc(HOME_W, sizeof(uint16_t));
+  int16_t* err = (int16_t*)calloc(2 * (HOME_W + 2), sizeof(int16_t));
+  bool ok = band && out && sum && err;
+  if (ok) memset(out, 0xFF, HOME_BYTES);  // 1 = white
+  int curTy = 0, rowsIn = 0;
+  auto flush = [&](int ty) {
+    // One output row: the white share of its box, then Floyd-Steinberg.
+    int16_t* e0 = err + (ty & 1) * (HOME_W + 2) + 1;
+    int16_t* e1 = err + ((ty + 1) & 1) * (HOME_W + 2) + 1;
+    for (int x = -1; x <= HOME_W; x++) e1[x] = 0;
+    uint8_t* row = out + (size_t)ty * HOME_STRIDE;
+    for (int tx = 0; tx < HOME_W; tx++) {
+      const int sx0 = tx * BIG_W / HOME_W, sx1 = (tx + 1) * BIG_W / HOME_W;
+      const int n = (sx1 - sx0) * (rowsIn ? rowsIn : 1);
+      int v = n ? (int)sum[tx] * 255 / n : 255;
+      v += e0[tx];
+      const int q = v >= 128 ? 255 : 0;
+      const int d = v - q;
+      e0[tx + 1] += d * 7 / 16;
+      e1[tx - 1] += d * 3 / 16;
+      e1[tx] += d * 5 / 16;
+      e1[tx + 1] += d / 16;
+      if (!q) row[tx >> 3] &= (uint8_t) ~(0x80 >> (tx & 7));
+      sum[tx] = 0;
+    }
+    rowsIn = 0;
+  };
+  for (uint32_t off = 0; ok && off < (uint32_t)BIG_BYTES; off += BAND_BYTES) {
+    const uint32_t n = (uint32_t)BIG_BYTES - off < BAND_BYTES ? (uint32_t)BIG_BYTES - off : BAND_BYTES;
+    if (h.sdReadSlice(src, off, band, (int)n) != (int)n) {
+      ok = false;
+      break;
+    }
+    for (uint32_t r = 0; r < n / BAND_ROW_BYTES; r++) {
+      const int sy = (int)(off / BAND_ROW_BYTES + r);
+      const int ty = sy * HOME_H / BIG_H;
+      if (ty != curTy) {
+        flush(curTy);
+        curTy = ty;
+      }
+      const uint8_t* srow = band + r * BAND_ROW_BYTES;
+      for (int tx = 0; tx < HOME_W; tx++) {
+        const int sx0 = tx * BIG_W / HOME_W, sx1 = (tx + 1) * BIG_W / HOME_W;
+        uint16_t w = 0;
+        for (int sx = sx0; sx < sx1; sx++) w += (srow[sx >> 3] >> (7 - (sx & 7))) & 1;
+        sum[tx] += w;
+      }
+      rowsIn++;
+    }
+  }
+  if (ok) flush(curTy);
+  char p[20];
+  homePath(key(file), p, sizeof(p));
+  if (ok) ok = tfs::write(p, (const char*)out, HOME_BYTES);
+  free(band);
+  free(out);
+  free(sum);
+  free(err);
+  if (!ok) return false;
+  // Two kept: this book and the one before it. The third goes.
+  Preferences& pr = h.prefs();
+  const uint32_t k = key(file), a = pr.getUInt("hc_a", 0), b = pr.getUInt("hc_b", 0);
+  if (k != a) {
+    if (b && b != k) {
+      char old[20];
+      homePath(b, old, sizeof(old));
+      tfs::remove(old);
+    }
+    pr.putUInt("hc_b", a);
+    pr.putUInt("hc_a", k);
+  }
+  return true;
+}
+
 }  // namespace bthumb
