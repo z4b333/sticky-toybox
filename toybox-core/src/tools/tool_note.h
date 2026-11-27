@@ -5,6 +5,7 @@
 #pragma once
 #include "card_text.h"
 #include "flash_qr.h"
+#include "import_screen.h"
 #include "lockscreen.h"
 #include "note_md.h"
 #include "note_store.h"
@@ -72,8 +73,8 @@ inline constexpr int QR_X = 110, QR_Y = 140, QR_SIZE = 260;
 // The way out sits in the bottom band on every screen that has one. White space
 // above a bottom-anchored action reads as breathing room; the same white space
 // below it reads as a screen that stopped early.
-inline constexpr TRect ALT_BTN{40, 588, 400, 60};
-inline constexpr TRect DONE_BTN{40, 672, 400, 72};
+inline constexpr TRect ALT_BTN = importui::ALT_BTN;  // v2: the shared phone page (kit "NotesPair")
+inline constexpr TRect DONE_BTN = importui::DONE_BTN;
 
 inline TRect rowRect(int i) { return TRect{LIST_X, LIST_Y + i * ROW_H, LIST_W, ROW_H - 6}; }
 inline TRect delRect(int i) {
@@ -666,39 +667,37 @@ class NoteTool : public ToolApp {
     using namespace nui;
     if (!_netOk) {
       c.textCentered(c.width() / 2, 300, "could not start wifi", TS_LARGE, true, true);
-      c.button(DONE_BTN.x, DONE_BTN.y, DONE_BTN.w, DONE_BTN.h, "BACK", true, TS_LARGE);
+      c.button(DONE_BTN.x, DONE_BTN.y, DONE_BTN.w, DONE_BTN.h, "Back", true, TS_LARGE);
       return;
     }
     if (_got) return renderPairDone(c);
 
-    char buf[64];
     // Two steps, and the device moves between them itself when a phone joins
-    // its access point. It used to ask -- a button reading PAGE DIDN'T OPEN?
-    // under a QR code that is only a wifi credential, which promised something
-    // the code does not do and made the honest answer ("it joins the wifi, and
-    // then your phone usually opens the page on its own") sound like an excuse.
+    // its access point: the Wi-Fi code first, then the page's own address
+    // (kit "NotesPair": the QR in its shadowed frame, three numbered steps,
+    // the dark Done).
+    using importui::QR_SIZE;
+    using importui::QR_Y;
+    static const char* const kSteps[3] = {"Type or dictate on the phone.", "Tap Send - it lands here.",
+                                          "Edits on the phone replace this copy."};
+    char buf[64];
     if (_altQr) {
-      c.textCentered(c.width() / 2, 64, "STEP 2 OF 2", TS_MED, true, true);
-      c.textCentered(c.width() / 2, 96, "phone joined", TS_MED, true);
-      fqr::draw(c, QR_X, QR_Y, QR_SIZE, _net.url());
-      c.textCentered(c.width() / 2, 406, "The editor should have opened.", TS_MED, true);
-      c.textCentered(c.width() / 2, 434, "If not, scan this or type it in:", TS_MED, true);
-      c.textCentered(c.width() / 2, 470, _net.url(), TS_MED, true, true);
-      c.button(ALT_BTN.x, ALT_BTN.y, ALT_BTN.w, ALT_BTN.h, "BACK TO THE WIFI CODE", false,
-               TS_MED);
+      importui::drawQr(c, _net.url());
+      c.textCentered(c.width() / 2, QR_Y + QR_SIZE + 26, "Scan to write on your phone", TS_MED, true, true);
+      importui::drawAddress(c, QR_Y + QR_SIZE + 62, _net.url());
+      importui::drawSteps(c, QR_Y + QR_SIZE + 150, kSteps);
+      c.button(ALT_BTN.x, ALT_BTN.y, ALT_BTN.w, ALT_BTN.h, "Back to the Wi-Fi code", false, TS_MED);
     } else {
-      c.textCentered(c.width() / 2, 64, "STEP 1 OF 2", TS_MED, true, true);
-      c.textCentered(c.width() / 2, 96, "join the device's wifi", TS_MED, true);
       const String wifi = _net.wifiPayload();
-      fqr::draw(c, QR_X, QR_Y, QR_SIZE, wifi.c_str());
-      c.textCentered(c.width() / 2, 406, "Scan with your phone camera", TS_MED, true, true);
+      importui::drawQr(c, wifi.c_str());
+      c.textCentered(c.width() / 2, QR_Y + QR_SIZE + 26, "Scan to join the Sticky's Wi-Fi", TS_MED, true, true);
       snprintf(buf, sizeof(buf), "%s   key %s", _net.ssid(), _net.password());
-      c.textCentered(c.width() / 2, 444, buf, TS_MED, true);
-      c.textCentered(c.width() / 2, 480, "this code joins the wifi, nothing more", TS_SMALL,
-                     true);
-      c.button(ALT_BTN.x, ALT_BTN.y, ALT_BTN.w, ALT_BTN.h, "SHOW THE LINK", false, TS_MED);
+      c.textCentered(c.width() / 2, QR_Y + QR_SIZE + 70, buf, TS_MED, true);
+      c.textCentered(c.width() / 2, QR_Y + QR_SIZE + 108, "the page opens once the phone joins", TS_SMALL, true);
+      importui::drawSteps(c, QR_Y + QR_SIZE + 150, kSteps);
+      c.button(ALT_BTN.x, ALT_BTN.y, ALT_BTN.w, ALT_BTN.h, "Show the link", false, TS_MED);
     }
-    c.button(DONE_BTN.x, DONE_BTN.y, DONE_BTN.w, DONE_BTN.h, "DONE", false, TS_LARGE);
+    c.button(DONE_BTN.x, DONE_BTN.y, DONE_BTN.w, DONE_BTN.h, "Done", true, TS_LARGE);
   }
 
   void renderPairDone(ToolsCanvas& c) {
@@ -710,11 +709,11 @@ class NoteTool : public ToolApp {
     if (!_answered) {
       c.textCentered(c.width() / 2, 210, "Leave this on the screen", TS_MED, true);
       c.textCentered(c.width() / 2, 236, "when the device sleeps?", TS_MED, true);
-      c.button(PINNOW_BTN.x, PINNOW_BTN.y, PINNOW_BTN.w, PINNOW_BTN.h, "SHOW ON SCREEN", true,
+      c.button(PINNOW_BTN.x, PINNOW_BTN.y, PINNOW_BTN.w, PINNOW_BTN.h, "Show on screen", true,
                TS_LARGE);
       c.textCentered(PINNOW_BTN.x + PINNOW_BTN.w / 2, PINNOW_BTN.y + PINNOW_BTN.h + 12,
                      "stays on with the power off", TS_MED, true);
-      c.button(KEEP_BTN.x, KEEP_BTN.y, KEEP_BTN.w, KEEP_BTN.h, "JUST SAVE", false, TS_LARGE);
+      c.button(KEEP_BTN.x, KEEP_BTN.y, KEEP_BTN.w, KEEP_BTN.h, "Just save", false, TS_LARGE);
       c.textCentered(KEEP_BTN.x + KEEP_BTN.w / 2, KEEP_BTN.y + KEEP_BTN.h + 12,
                      "keep it in the notes list", TS_MED, true);
       return;
@@ -736,7 +735,7 @@ class NoteTool : public ToolApp {
     c.textCentered(c.width() / 2, 420, "keep editing on your phone", TS_MED, true);
     c.textCentered(c.width() / 2, 446, "and send again, or tap DONE", TS_MED, true);
     c.textCentered(c.width() / 2, 472, "to read it here", TS_MED, true);
-    c.button(DONE_BTN.x, DONE_BTN.y, DONE_BTN.w, DONE_BTN.h, "DONE", true, TS_LARGE);
+    c.button(DONE_BTN.x, DONE_BTN.y, DONE_BTN.w, DONE_BTN.h, "Done", true, TS_LARGE);
   }
 
   // --- which way up ------------------------------------------------------
