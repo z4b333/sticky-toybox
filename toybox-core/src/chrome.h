@@ -117,6 +117,30 @@ inline int banner(ToolsCanvas& c, int cy, BannerIcon icon, const char* label, co
   if (sub && sub[0]) c.textClipped(28, y + 8, w - 56, sub, TS_SMALL, true);
   return top + h;
 }
+// The kit's Working banner ("SysWorking"): a wait that knows how far it has
+// got. The banner's strip with the two-by-two mark, "WORKING", a bold line
+// for what is happening, a bar for how much, and a quiet line for the step
+// ("Drawing covers 3 of 5"). total <= 0 draws no bar. Returns the strip's
+// bottom edge.
+inline int working(ToolsCanvas& c, int cy, const char* title, const char* detail, long done,
+                   long total, const char* label = "WORKING") {
+  const int w = c.width();
+  const int barH = 22, dh = c.textHeight(TS_SMALL);
+  const int extra = (total > 0 ? 16 + barH : 0) + (detail && detail[0] ? 10 + dh : 0);
+  const int bottom = banner(c, cy, BI_WORKING, label, title, nullptr, extra);
+  int y = bottom - 28 - extra;
+  if (total > 0) {
+    y += 16;
+    c.drawRect(82, y, w - 82 - 28, barH, 2, true);
+    if (done > total) done = total;
+    const int fill = (int)((long long)(w - 82 - 28 - 6) * (done < 0 ? 0 : done) / total);
+    if (fill > 0) c.fillRect(85, y + 3, fill, barH - 6, true);
+    y += barH;
+  }
+  if (detail && detail[0]) c.textClipped(82, y + 10, w - 82 - 28, detail, TS_SMALL, true);
+  return bottom;
+}
+
 // The kit's Confirm (owner rule: the first tap arms it, the second does it).
 // An armed control turns black and asks: the question at the left, "tap
 // again" at the right; on a narrow one the two stack in the middle. Any tap

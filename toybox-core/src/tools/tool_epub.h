@@ -193,13 +193,9 @@ class EpubTool : public ToolApp {
       if (_artTotal > 0) {
         // The first open's wait, said plainly and counted, on a white band
         // over the cover so it reads whatever the cover is.
-        const int W = c.width();
-        c.fillRect(24, 640, W - 48, 112, false);
-        c.drawRect(24, 640, W - 48, 112, 2, true);
         char line[48];
-        snprintf(line, sizeof(line), "preparing artwork %d of %d", _artDone + 1, _artTotal);
-        c.textCentered(W / 2, 662, line, TS_MED, true);
-        c.textCentered(W / 2, 712, "first open only - later opens are quick", TS_SMALL, true);
+        snprintf(line, sizeof(line), "Picture %d of %d - first open only", _artDone + 1, _artTotal);
+        chrome2::working(c, c.height() - 150, "Preparing the pictures", line, _artDone, _artTotal);
       }
       return;
     }
@@ -2591,12 +2587,7 @@ class EpubTool : public ToolApp {
         return;
       case LIB_DOWNLOAD: {
         const kosync::LibBook& b = _lib[_libDlIdx];
-        c.textCentered(W / 2, 200, "DOWNLOADING", TS_MED, true, true);
-        c.textCentered(W / 2, 260, b.title, TS_MED, true);
-        const int bx = 40, by = 340, bw = W - 80, bh = 36;
-        c.drawRect(bx, by, bw, bh, 2, true);
         const uint32_t got = _dl.got, total = _dl.total;
-        if (total) c.fillRect(bx + 4, by + 4, (int)((uint64_t)(bw - 8) * got / total), bh - 8, true);
         // KB below a megabyte: a small book would otherwise read "0.0 of 0.0".
         const bool mb = (total ? total : got) >= 1048576;
         const double unit = mb ? 1048576.0 : 1024.0;
@@ -2606,8 +2597,8 @@ class EpubTool : public ToolApp {
                    total / unit, u);
         else
           snprintf(buf, sizeof(buf), mb ? "%.1f %s" : "%.0f %s", got / unit, u);
-        c.textCentered(W / 2, 400, buf, TS_SMALL, true);
-        c.textCentered(W / 2, 450, "into /books/Readest", TS_SMALL, true);
+        strncat(buf, " - into /books/Readest", sizeof(buf) - strlen(buf) - 1);
+        chrome2::working(c, 300, b.title, buf, (long)got, (long)total, "DOWNLOADING");
         c.button(16, LIB_BTN_Y, W - 32, LIB_BTN_H, "Cancel", false);
         return;
       }
