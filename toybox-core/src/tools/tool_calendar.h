@@ -512,8 +512,8 @@ class CalendarTool : public ToolApp {
     c.button(EDIT_BTN.x, EDIT_BTN.y, EDIT_BTN.w, EDIT_BTN.h, "Edit", false);
     c.button(DONE_BTN.x, DONE_BTN.y, DONE_BTN.w, DONE_BTN.h, doneToday ? "Done (undo)" : "Mark done",
              !doneToday);
-    c.button(DEL_BTN.x, DEL_BTN.y, DEL_BTN.w, DEL_BTN.h, _delArmed ? "Tap again to delete" : "Delete",
-             _delArmed);
+    if (_delArmed) chrome2::armed(c, DEL_BTN, "Delete it?");
+    else c.button(DEL_BTN.x, DEL_BTN.y, DEL_BTN.w, DEL_BTN.h, "Delete", false);
   }
 
   void tapItem(int x, int y) {

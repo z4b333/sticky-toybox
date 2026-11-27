@@ -117,6 +117,28 @@ inline int banner(ToolsCanvas& c, int cy, BannerIcon icon, const char* label, co
   if (sub && sub[0]) c.textClipped(28, y + 8, w - 56, sub, TS_SMALL, true);
   return top + h;
 }
+// The kit's Confirm (owner rule: the first tap arms it, the second does it).
+// An armed control turns black and asks: the question at the left, "tap
+// again" at the right; on a narrow one the two stack in the middle. Any tap
+// elsewhere disarms it, which each screen already does.
+inline void armed(ToolsCanvas& c, const TRect& r, const char* question) {
+  c.fillRect(r.x, r.y, r.w, r.h, true);
+  const int qw = c.textWidth(question, TS_MED, true), aw = c.textWidth("tap again", TS_MED, true);
+  if (qw + aw + 48 <= r.w) {
+    const int ty = r.y + (r.h - c.textHeight(TS_MED)) / 2;
+    c.text(r.x + 16, ty, question, TS_MED, false, true);
+    c.text(r.x + r.w - 16 - aw, ty, "tap again", TS_MED, false, true);
+    return;
+  }
+  const int lh = c.textHeight(TS_SMALL);
+  if (r.h >= 2 * lh + 10) {
+    const int ty = r.y + (r.h - 2 * lh - 2) / 2;
+    c.textCentered(r.x + r.w / 2, ty, question, TS_SMALL, false, true);
+    c.textCentered(r.x + r.w / 2, ty + lh + 2, "tap again", TS_SMALL, false);
+  } else {
+    c.textInBox(r.x, r.y, r.w, r.h, "tap again", TS_SMALL, false, true);
+  }
+}
 }  // namespace chrome2
 
 // backLabel is kept for the callers that pass one (a series shelf names the

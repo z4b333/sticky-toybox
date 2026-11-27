@@ -124,8 +124,7 @@ inline void menu(ToolsHost& h, ToolsCanvas& c, const char* title, const Row* row
   for (int i = 0; i < n && i < MENU_MAX; i++) {
     const TRect r = menuRect(i, c.width());
     if (rows[i].armed) {
-      c.drawRect(r.x, r.y, r.w, r.h, 3, true);
-      c.textInBox(r.x, r.y, r.w, r.h, "Tap again to clear", TS_MED, true, true);
+      chrome2::armed(c, r, "Clear the record?");
       continue;
     }
     c.text(r.x + 12, r.y + (r.h - c.textHeight(TS_MED)) / 2, rows[i].label, TS_MED, true);

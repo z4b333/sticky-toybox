@@ -11233,7 +11233,10 @@ int main() {
 
     toybox.open(true, 3);
     toybox.onTap(EPD_W - 28, 20);  // More
+    g_dumpEnabled = true;
+    setScreen("confirm_menu_armed");
     toybox.onTap(CX, CY);  // arms
+    g_dumpEnabled = false;
     if (prefs.getInt("x_w", -1) != 3) {
       printf("RECORD FAIL: one tap cleared XO\n");
       abort();

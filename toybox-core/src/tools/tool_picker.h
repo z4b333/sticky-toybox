@@ -295,8 +295,8 @@ class PickerTool : public ToolApp {
     }
     c.button(ADD_BTN.x, ADD_BTN.y, ADD_BTN.w, ADD_BTN.h, "Add one", false, TS_MED);
     c.button(PHONE_BTN.x, PHONE_BTN.y, PHONE_BTN.w, PHONE_BTN.h, "From your phone", false, TS_MED);
-    c.button(CLEAR_BTN.x, CLEAR_BTN.y, CLEAR_BTN.w, CLEAR_BTN.h, _clearArm ? "Tap again to clear all" : "Clear all",
-             _clearArm, TS_MED);
+    if (_clearArm) chrome2::armed(c, CLEAR_BTN, "Clear every choice?");
+    else c.button(CLEAR_BTN.x, CLEAR_BTN.y, CLEAR_BTN.w, CLEAR_BTN.h, "Clear all", false, TS_MED);
     snprintf(buf, sizeof(buf), "%d of %d choices", _count, MAX_ITEMS);
     c.textCentered(c.width() / 2, 700, buf, TS_MED, true);
     c.textCentered(c.width() / 2, 734, pages() > 1 ? "x takes one out  -  UP / DOWN pages" : "x takes one out",

@@ -84,8 +84,8 @@ class CoinTool : public ToolApp {
                total < 20 ? "early days" : (off <= 50 ? "fair enough" : "leaning"));
       c.textCentered(c.width() / 2, 688, buf, TS_MED, true);
     }
-    c.button(RESET.x, RESET.y, RESET.w, RESET.h, _resetArm ? "Tap again to reset the tally" : "Reset the tally",
-             false, TS_MED);
+    if (_resetArm) chrome2::armed(c, RESET, "Reset the tally?");
+    else c.button(RESET.x, RESET.y, RESET.w, RESET.h, "Reset the tally", false, TS_MED);
   }
 
   void onTap(int x, int y) override {
@@ -325,8 +325,8 @@ class CoinTool : public ToolApp {
     snprintf(buf, sizeof(buf), "page %d of %d  -  %d flips kept", _hPage + 1, hPages(), _hn);
     c.textCentered(c.width() / 2, 646, buf, TS_MED, true);
     c.button(H_PREV.x, H_PREV.y, H_PREV.w, H_PREV.h, "<", false, TS_LARGE);
-    c.button(H_CLEAR.x, H_CLEAR.y, H_CLEAR.w, H_CLEAR.h, _clearArm ? "Tap again to clear" : "Clear history",
-             _clearArm, TS_MED);
+    if (_clearArm) chrome2::armed(c, H_CLEAR, "Clear history?");
+    else c.button(H_CLEAR.x, H_CLEAR.y, H_CLEAR.w, H_CLEAR.h, "Clear history", false, TS_MED);
     c.button(H_NEXT.x, H_NEXT.y, H_NEXT.w, H_NEXT.h, ">", false, TS_LARGE);
   }
 

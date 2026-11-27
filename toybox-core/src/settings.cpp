@@ -2182,10 +2182,12 @@ void SettingsScreen::renderUpdate(ToolsHost& host, ToolsCanvas& c) {
   c.fillRect(16, 596, SCREEN_W - 32, 1, true);
   {
     const TRect a = updResetRect();
-    if (_armed) c.fillRect(a.x, a.y, a.w, a.h, true);
-    setico::draw(c, -1, a.x + 22, a.y + a.h / 2, !_armed);
-    c.text(a.x + 52, a.y + (a.h - c.textHeight(TS_MED)) / 2,
-           _armed ? "Tap again to erase scores" : "Reset stats and tallies", TS_MED, !_armed);
+    if (_armed) {
+      chrome2::armed(c, a, "Erase every score?");
+    } else {
+      setico::draw(c, -1, a.x + 22, a.y + a.h / 2, true);
+      c.text(a.x + 52, a.y + (a.h - c.textHeight(TS_MED)) / 2, "Reset stats and tallies", TS_MED, true);
+    }
   }
   c.textCentered(SCREEN_W / 2, 776, _note ? _note : "notes and settings stay through every update",
                  TS_SMALL, true);
