@@ -33,6 +33,7 @@
 #include "reader_menu.h"
 #include "recents.h"
 #include "read_order.h"
+#include "../home_style.h"
 #include "shelf.h"
 #include "sync_page.h"
 #include "tools_ui.h"
@@ -1155,6 +1156,10 @@ class EpubTool : public ToolApp {
     _nmarks = 0;
     recents::note(prefs(), recents::KIND_EPUB, _books[i].file, _books[i].title);
     readorder::note(host(), _books[i].file);  // the shelf puts it first next time
+    {  // the home screen's reading streak counts days with a book opened
+      int sy = 0, sm = 0, sd = 0;
+      if (host().clockDate(sy, sm, sd) && sy >= 2020) homestyle::noteRead(prefs(), sy, sm, sd);
+    }
 
     // The decode: every book with no cover of the owner's (tried above,
     // before the loading paint) pays for it -- once, and a cover that will

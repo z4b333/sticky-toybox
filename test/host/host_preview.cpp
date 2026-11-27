@@ -24,6 +24,7 @@
 #include "tools/tool_calendar.h"
 #include "tools/tool_focus.h"
 #include "settings.h"
+#include "home_style.h"
 
 // The harness's stand-in for the firmware's ota::Device (src/ota.cpp): scripted
 // answers, so every screen of Settings > Update & about can be drawn and every
@@ -2451,14 +2452,31 @@ int main() {
   }
 
   // --- v2 setup steps ---------------------------------------------------------
-  // From Settings > DEVICE > Setup: four steps, each drawn; sleep and beep
-  // rows write what they say; back on step 1 returns to the settings root.
+  // From Settings > DEVICE > Setup: seven steps, each drawn; the How step's
+  // three ways, the home tiles, sleep and beep write what they say; back on
+  // step 1 returns to the settings root.
   {
     const bool wasDump = g_dumpEnabled;
     g_dumpEnabled = true;
+    auto back = [] { toybox.onTap(BACK_W / 2, TOPBAR_H / 2); };
     tapAct(setui::ACT_SETUP);
+    setScreen("setup_language");
+    stickyHost.refresh(true);
+    tapRect(setui::setupNext());
+    setScreen("setup_how");
+    stickyHost.refresh(true);
+    tapRect(setui::setupRow(0));  // On this device
     setScreen("setup_font");
     stickyHost.refresh(true);
+    tapRect(setui::setupNext());
+    setScreen("setup_home");
+    tapRect(setui::setupHomeTile(homestyle::TODAY));
+    if (homestyle::get(stickyHost.prefs()) != homestyle::TODAY) {
+      printf("SETUP FAIL: the Today tile did not set the home style\n");
+      abort();
+    }
+    stickyHost.refresh(true);
+    tapRect(setui::setupHomeTile(homestyle::WALL));
     tapRect(setui::setupNext());
     setScreen("setup_sleep");
     tapRect(setui::setupRow(2));  // 15 min
@@ -2480,28 +2498,126 @@ int main() {
     setScreen("setup_wifi");
     stickyHost.refresh(true);
     g_dumpEnabled = false;
-    toybox.onTap(BACK_W / 2, TOPBAR_H / 2);  // to beep
-    toybox.onTap(BACK_W / 2, TOPBAR_H / 2);  // to sleep
-    toybox.onTap(BACK_W / 2, TOPBAR_H / 2);  // to font
-    toybox.onTap(BACK_W / 2, TOPBAR_H / 2);  // to the settings root
+    for (int i = 0; i < setui::SETUP_STEPS - 1; i++) back();  // to step 1
+    back();                                                    // to the settings root
     if (!toybox.hostInSettings() || toybox.hostSettings().inSetup()) {
       printf("SETUP FAIL: back from step 1 did not land on the settings root\n");
       abort();
     }
     // A new device: Done on the last step goes to the hub.
+    auto walk = [] {
+      tapRect(setui::setupNext());  // language
+      tapRect(setui::setupRow(0));  // how: on this device
+      for (int i = setui::SU_FONT; i < setui::SU_WIFI; i++) tapRect(setui::setupNext());
+    };
+    auto atHub = [] { return !toybox.hostInSettings() && !toybox.hostInApp(); };
     toybox.openSetup(true);
-    for (int i = 0; i < setui::SETUP_STEPS - 1; i++) tapRect(setui::setupNext());
+    walk();
     tapRect(setui::setupDone());
-    if (toybox.hostInSettings() || toybox.hostInApp()) {
+    if (!atHub()) {
       printf("SETUP FAIL: a new device's setup did not end at the hub\n");
+      abort();
+    }
+    // Skip ends it at once.
+    toybox.openSetup(true);
+    tapRect(setui::setupNext());
+    tapRect(setui::setupRow(2));
+    if (!atHub()) {
+      printf("SETUP FAIL: Skip did not end the setup at the hub\n");
+      abort();
+    }
+    // With my phone: the clock page, and back from it ends the setup.
+    toybox.openSetup(true);
+    tapRect(setui::setupNext());
+    tapRect(setui::setupRow(1));
+    if (!toybox.hostInSettings() || toybox.hostSettings().inSetup()) {
+      printf("SETUP FAIL: With my phone did not open the clock page\n");
+      abort();
+    }
+    back();
+    if (!atHub()) {
+      printf("SETUP FAIL: back from the phone page did not end the setup\n");
       abort();
     }
     toybox.openSettings();
     tapRect(setui::tabRect(setui::TAB_DEVICE));
     tapAct(setui::ACT_SOUND);  // back to muted, the state the walk expects
     if (stickyHost.soundLevel() != 0) tapAct(setui::ACT_SOUND);
-    printf("setup steps ok (%d steps, sleep and beep write, back and boot ends)\n",
+    printf("setup steps ok (%d steps, how/home/sleep/beep write, skip and phone end)\n",
            setui::SETUP_STEPS);
+    g_dumpEnabled = wasDump;
+  }
+
+  // --- v2 home styles: Books, Calendar and Today; Settings > Home screen; the
+  // upgrade popup over home. ------------------------------------------------------
+  {
+    const bool wasDump = g_dumpEnabled;
+    Preferences& pr = stickyHost.prefs();
+    // A streak: today and the two days before, so the week row has three ink.
+    int y = 0, mo = 0, d = 0;
+    stickyHost.clockDate(y, mo, d);
+    for (int ago = 2; ago >= 0; ago--) {
+      int yy, mm, dd;
+      cal::fromDayNum(cal::dayNum(y, mo, d) - ago, yy, mm, dd);
+      homestyle::noteRead(pr, yy, mm, dd);
+    }
+    if (homestyle::streak(pr, y, mo, d) != 3 || !homestyle::readOn(pr, y, mo, d, 2) ||
+        homestyle::readOn(pr, y, mo, d, 3)) {
+      printf("HOME FAIL: streak %d after three days\n", homestyle::streak(pr, y, mo, d));
+      abort();
+    }
+    g_dumpEnabled = true;
+    toybox.openSettings();
+    tapRect(setui::tabRect(setui::TAB_LOOK));
+    setScreen("settings_look_home_row");
+    stickyHost.refresh(true);
+    tapAct(setui::ACT_HOME);
+    setScreen("settings_home_screen");
+    stickyHost.refresh(true);
+    tapRect(setui::homeStyleTile(homestyle::BOOKS));
+    if (homestyle::get(pr) != homestyle::BOOKS) {
+      printf("HOME FAIL: the Books tile did not set the style\n");
+      abort();
+    }
+    g_dumpEnabled = false;
+    toybox.onTap(BACK_W / 2, TOPBAR_H / 2);
+    toybox.onTap(BACK_W / 2, TOPBAR_H / 2);  // out of settings, to home
+    g_dumpEnabled = true;
+    setScreen("home_books");
+    stickyHost.refresh(true);
+    homestyle::set(pr, homestyle::CALENDAR);
+    setScreen("home_calendar");
+    stickyHost.refresh(true);
+    toybox.onTap(hubui::calNext().x + 20, hubui::calNext().y + 20);
+    setScreen("home_calendar_next_month");
+    stickyHost.refresh(true);
+    toybox.onTap(hubui::calPrev().x + 20, hubui::calPrev().y + 20);
+    homestyle::set(pr, homestyle::TODAY);
+    setScreen("home_today");
+    stickyHost.refresh(true);
+    // The upgrade popup: Later hides it; Open setup opens setup and marks it.
+    pr.remove("su_seen");
+    toybox.offerSetup();
+    setScreen("home_upgrade_popup");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    tapRect(hubui::upLater());
+    if (toybox.hostInSettings() || pr.getBool("su_seen", false)) {
+      printf("HOME FAIL: Later did not just close the popup\n");
+      abort();
+    }
+    toybox.offerSetup();
+    tapRect(hubui::upOpen());
+    if (!toybox.hostInSettings() || !toybox.hostSettings().inSetup() || !pr.getBool("su_seen", false)) {
+      printf("HOME FAIL: Open setup did not open setup and mark it seen\n");
+      abort();
+    }
+    toybox.onTap(BACK_W / 2, TOPBAR_H / 2);
+    toybox.offerSetup();  // seen: no popup any more
+    homestyle::set(pr, homestyle::WALL);
+    if (!toybox.hostInSettings()) toybox.openSettings();
+    toybox.onTap(BACK_W / 2, TOPBAR_H / 2);
+    printf("home styles ok (books, calendar, today; settings page; upgrade popup)\n");
     g_dumpEnabled = wasDump;
   }
 

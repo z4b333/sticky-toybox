@@ -73,6 +73,27 @@ inline int cellTop(int i) { return FOLDER_TOP + cellRow(i) * ROW_STEP; }
 inline constexpr int REC_ROW_H = 48;   // a recently-read title row
 inline constexpr int REC_HEAD_H = 44;  // heading + rule
 inline constexpr int REC_GAP = 4;      // tiles to heading
+
+// --- home styles (kit "Home") -------------------------------------------------
+// Book collection: the book being read, the other one, the week's streak.
+inline TRect booksNow() { return TRect{16, 64, SCREEN_W - 32, 190}; }
+inline TRect booksAlso() { return TRect{16, 300, SCREEN_W - 32, 70}; }
+inline TRect booksAll() { return TRect{SCREEN_W - 150, 262, 134, 36}; }
+inline constexpr int BOOKS_STREAK_Y = 560;
+// Calendar: the month, then today's list.
+inline TRect calPrev() { return TRect{8, 50, 64, 50}; }
+inline TRect calNext() { return TRect{SCREEN_W - 72, 50, 64, 50}; }
+inline constexpr int CAL_X = 16, CAL_CW = (SCREEN_W - 32) / 7, CAL_HEAD_Y = 100, CAL_HEAD_H = 30;
+inline constexpr int CAL_ROW_Y = CAL_HEAD_Y + CAL_HEAD_H, CAL_ROW_H = 44;
+// Today: four tiles, the book, three shortcuts.
+inline TRect todayTile(int i) { return TRect{16 + (i % 2) * 228, 166 + (i / 2) * 102, 220, 94}; }
+inline TRect todayBook() { return TRect{16, 376, SCREEN_W - 32, 80}; }
+inline constexpr int TODAY_SC_Y = 470;
+inline TRect todayShortcut(int i) { return TRect{16 + i * 150, TODAY_SC_Y + 40, 148, 110}; }
+// The upgrade popup's two buttons.
+inline constexpr int UP_Y = 196, UP_H = 330;
+inline TRect upLater() { return TRect{24, UP_Y + UP_H - 24 - 60, (SCREEN_W - 60) / 2, 60}; }
+inline TRect upOpen() { return TRect{36 + (SCREEN_W - 60) / 2, UP_Y + UP_H - 24 - 60, (SCREEN_W - 60) / 2, 60}; }
 }  // namespace hubui
 
 #ifdef TOYBOX_HOST
@@ -86,7 +107,9 @@ class HubScreen {
   struct Tap {
     enum Kind : uint8_t {
       None, App, Folder, Home, Settings, Exit, Recent, PagePrev, PageNext,
-      DueLater, DueDone, DueSwallow  // v2: the calendar's due popup over home
+      DueLater, DueDone, DueSwallow,  // v2: the calendar's due popup over home
+      Repaint,                        // home styles: something on home changed (a month turned)
+      UpLater, UpOpen                 // v2: the "New: Setup" popup for an updated device
     } kind = None;
     // Settings is also the answer for the drawers' "+ add" cell, which exists
     // to bring hidden apps back.
@@ -123,9 +146,21 @@ class HubScreen {
   uint32_t _dueOcc = 0;
   int _dueBottom = 0;
   void drawDue(ToolsHost& host, ToolsCanvas& c);
+  bool _upgrade = false;
+  int8_t _calOff = 0;
+  uint8_t _style = 0;     // the home style drawn last, for hit()
+  int8_t _homeRecN = 0;   // recently-read books home showed
+  void drawUpgrade(ToolsHost& host, ToolsCanvas& c);
 
  public:
   int dueItem() const { return _dueItem; }
+  // v2: the upgrade popup ("New: Setup") over home, for a device updated from
+  // v1. The shell raises it once a boot; Later and Open setup take it down.
+  void showUpgrade(bool on) { _upgrade = on; }
+  bool upgradeUp() const { return _upgrade; }
+  // Calendar home: months away from this one.
+  void stepMonth(int d) { _calOff = (int8_t)(_calOff + d); }
+  int hostCalOff() const { return _calOff; }
   uint32_t dueOccurrence() const { return _dueOcc; }
   int hostDueBottom() const { return _dueBottom; }
 

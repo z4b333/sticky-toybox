@@ -331,9 +331,21 @@ void Toybox::onTap(int x, int y) {
       return;
     case HubScreen::Tap::PagePrev:
     case HubScreen::Tap::PageNext:
-      // Turning a drawer's page is tiles over tiles: partial is plenty.
-      _hub.folderPageStep(t.kind == HubScreen::Tap::PageNext ? 1 : -1);
+      // Turning a drawer's page is tiles over tiles: partial is plenty. On the
+      // Calendar home the same two answers turn the month.
+      if (_hub.atHome()) _hub.stepMonth(t.kind == HubScreen::Tap::PageNext ? 1 : -1);
+      else _hub.folderPageStep(t.kind == HubScreen::Tap::PageNext ? 1 : -1);
       _host->refresh(false);
+      return;
+    case HubScreen::Tap::UpLater:
+      // Not now: again on the next power-on, until setup has been opened.
+      _hub.showUpgrade(false);
+      _host->refresh(wallimg::have());
+      return;
+    case HubScreen::Tap::UpOpen:
+      _hub.showUpgrade(false);
+      _host->prefs().putBool("su_seen", true);
+      openSetup(false);
       return;
     case HubScreen::Tap::Recent: {
       // A recently-read cover: open its reader, then the book itself, which

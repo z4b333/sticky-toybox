@@ -51,36 +51,68 @@ inline bool pending(Preferences& p) {
 
 inline void markSeen(Preferences& p) { p.putString("welcome", version()); }
 
-// The one button, low enough for a thumb holding the device.
-inline constexpr TRect BEGIN_BTN{60, 640, 360, 84};
+// Dismissed by any tap or button; the rectangle stays for older callers.
+inline constexpr TRect BEGIN_BTN{0, 0, 480, 800};
+
+// The TB basket with its sparkles (kit "SysWelcome").
+inline void logo(ToolsCanvas& c, int x, int y) {
+  // the basket: a rim, then a body that narrows to the foot
+  c.fillRect(x, y + 14, 56, 6, true);
+  for (int r = 0; r < 34; r++) {
+    const int in = 4 + r / 6;
+    c.fillRect(x + in, y + 20 + r, 56 - 2 * in, 1, true);
+  }
+  c.text(x + 10, y + 24, "TB", TS_MED, false, true);
+  auto star = [&](int cx, int cy, int s) {
+    c.drawLine(cx - s, cy, cx + s, cy, 2, true);
+    c.drawLine(cx, cy - s, cx, cy + s, 2, true);
+  };
+  star(x + 28, y - 2, 8);
+  star(x + 12, y + 6, 5);
+  star(x + 46, y + 6, 5);
+}
 
 inline void render(ToolsCanvas& c, bool updated) {
   const int W = c.width();
   char buf[80];
 
-  decor::ornament(c, W / 2, 96, 300, true);
-  c.textTrackedCentered(W / 2, 140, "TOYBOX", TS_HUGE, true, true, 8);
+  logo(c, 118, 34);
+  c.textTracked(220, 30, "TOYBOX", TS_SMALL, true, true, 4);
   // "Hello" on a device that has been flashed twenty times reads as amnesia,
   // so it says which of the two things just happened.
-  c.textCentered(W / 2, 200, updated ? "updated and ready" : "hello", TS_LARGE, true);
+  c.text(220, 52, updated ? "Updated" : "Hello", TS_LARGE, true, true);
+  const int vy = 52 + c.textHeight(TS_LARGE) + 2;
+  snprintf(buf, sizeof(buf), "%s \xc2\xb7 build %s", version(), built());
+  if (c.textWidth(buf, TS_SMALL) <= W - 236) {
+    c.text(220, vy, buf, TS_SMALL, true);
+  } else {  // a long version name: two lines rather than off the edge
+    c.textClipped(220, vy, W - 236, version(), TS_SMALL, true);
+    snprintf(buf, sizeof(buf), "build %s", built());
+    c.text(220, vy + c.textHeight(TS_SMALL) + 2, buf, TS_SMALL, true);
+  }
 
-  snprintf(buf, sizeof(buf), "%s  ·  %s", version(), built());
-  c.textCentered(W / 2, 244, buf, TS_MED, true);
-  decor::ornament(c, W / 2, 292, 300, true);
+  // The check: a drawn device the right way up, for the owner to compare.
+  const int dx = 138, dy = 150, dw = 204, dh = 244;
+  c.drawRect(dx, dy, dw, dh, 3, true);
+  for (int k = 0; k < 3; k++) c.fillRect(dx + dw + 2, dy + 62 + k * 48, 12, 34, true);
+  c.drawLine(dx + 16, dy + 20, dx + 23, dy + 27, 2, true);
+  c.drawLine(dx + 16, dy + 20, dx + 22, dy + 20, 2, true);
+  c.drawLine(dx + 16, dy + 20, dx + 16, dy + 26, 2, true);
+  c.text(dx + 30, dy + 16, "this corner", TS_SMALL, true, true);
+  c.textCentered(dx + dw / 2, dy + 96, "Aa", TS_HUGE, true, true);
+  c.textCentered(dx + dw / 2, dy + 146, "reads left to right", TS_SMALL, true);
 
-  // The part that earns the screen. Phrased as something to check rather than
-  // something to know: a new owner cannot be told their panel is wrong, but
-  // they can be asked whether this text reads normally.
-  c.textCentered(W / 2, 352, "Does this read the right way up,", TS_MED, true);
-  c.textCentered(W / 2, 384, "with TOYBOX at the top?", TS_MED, true);
+  c.textTracked(24, 426, "DOES IT LOOK LIKE THIS?", TS_SMALL, true, false, 2);
+  for (int x = 24; x < W - 24; x += 4) c.fillRect(x, 446, 2, 2, true);
+  c.text(24, 470, "Yes \xe2\x80\x94 tap anywhere", TS_MED, true);
+  c.text(24, 470 + c.textHeight(TS_MED) + 2, "or press any button to start", TS_SMALL, true);
+  c.fillRect(24, 520, W - 48, 1, true);
+  c.text(24, 543, "Mirrored or upside down?", TS_MED, true);
+  c.text(24, 543 + c.textHeight(TS_MED) + 2, "hold UP while switching on to fix it", TS_SMALL, true);
+  c.fillRect(24, 593, W - 48, 1, true);
 
-  c.textCentered(W / 2, 440, "If it is upside down or mirrored,", TS_MED, true);
-  c.textCentered(W / 2, 472, "hold either side button while the", TS_MED, true);
-  c.textCentered(W / 2, 504, "device powers on, and correct it", TS_MED, true);
-  c.textCentered(W / 2, 536, "on the screen that appears.", TS_MED, true);
-
-  c.button(BEGIN_BTN.x, BEGIN_BTN.y, BEGIN_BTN.w, BEGIN_BTN.h, "BEGIN", true, TS_LARGE);
-  c.textCentered(W / 2, 752, "a side button works too", TS_SMALL, true);
+  for (int x = 0; x < W; x += 4) c.fillRect(x, 756, 2, 1, true);
+  c.textCentered(W / 2, 770, "the version shows here after every update", TS_SMALL, true);
 }
 
 }  // namespace welcome

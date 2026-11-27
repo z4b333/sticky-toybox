@@ -1,4 +1,5 @@
 #include "settings.h"
+#include "home_style.h"
 #include "tools/sync_page.h"
 
 #include "applist.h"
@@ -168,6 +169,12 @@ inline void draw(ToolsCanvas& c, int act, int cx, int cy, bool dark) {
       c.drawLine(cx, cy, cx, cy - 8, 2, dark);
       c.drawLine(cx, cy, cx + 6, cy + 3, 2, dark);
       break;
+    case ACT_HOME:  // a house
+      c.drawLine(cx - 13, cy - 1, cx, cy - 13, 2, dark);
+      c.drawLine(cx, cy - 13, cx + 13, cy - 1, 2, dark);
+      c.drawRect(cx - 10, cy - 2, 20, 15, 2, dark);
+      c.fillRect(cx - 3, cy + 5, 6, 8, dark);
+      break;
     case ACT_SETUP:  // a wand: a stick and a small star
       c.drawLine(cx - 12, cy + 12, cx + 4, cy - 4, 3, dark);
       decor::star(c, cx + 8, cy - 8, 8, 3, 4, 0.f, dark);
@@ -255,11 +262,22 @@ bool SettingsScreen::back() {
     return true;
   }
   if (_page == 6 && _setupWifi) {
-    // The clock page, opened from the setup's Wi-Fi step, goes back to it.
+    // The clock page, opened from the setup's Wi-Fi step, goes back to it --
+    // or, chosen as "With my phone", that was the setup: it is over.
     leaveClock();
     _netStage = 0;
     _setupWifi = false;
-    _page = 13;
+    if (_setupPhone) {
+      _setupPhone = false;
+      if (_setupBoot) {
+        _setupBoot = false;
+        _page = 0;
+        return false;  // the shell takes a new device to the hub
+      }
+      _page = 0;
+      return true;
+    }
+    _page = 10 + setui::SU_WIFI;
     return true;
   }
   leaveFiles();  // no-op unless the files page was the one being left
@@ -1063,6 +1081,10 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
     renderSync(host, c);
     return;
   }
+  if (_page == 22) {
+    renderHomeStyle(host, c);
+    return;
+  }
   drawTopBar(c, "SETTINGS");
 
   using namespace setui;
@@ -1109,6 +1131,7 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
     bool page;  // opens a page of its own
   };
   const Row rows[ACT_COUNT] = {
+      {ACT_HOME, "Home screen", homestyle::NAMES[homestyle::get(host.prefs())], true},
       {ACT_WALL, "Wallpaper", wallimg::have() ? "set" : "none", true},
       {ACT_LOCK, "Lock screen", emptyLabelSmall(lock::config().empty), true},
       {ACT_FONT, "Font", host.fontFor(ToolsHost::FONT_DEVICE)[0]
@@ -1626,6 +1649,7 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
   if (_page == 3) return tapApps(host, x, y);
   if (_page == 20) return tapDash(host, x, y);
   if (_page == 21) return tapSync(host, x, y);
+  if (_page == 22) return tapHomeStyle(host, x, y);
   if (_page == 4) return tapFiles(host, x, y);
   if (_page == 6) return tapClock(host, x, y);
   if (_page == 7) return tapFontWho(host, x, y);
@@ -1736,6 +1760,11 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
     // the note says so, because a Sticky left off on the cable fills up.
     host.setBatteryCare(!host.batteryCare());
     _note = host.batteryCare() ? "holds 80% while the screen is on" : "charges to 100%";
+    host.beep(1);
+    return true;
+  }
+  if (rowHit(ACT_HOME)) {
+    _page = 22;
     host.beep(1);
     return true;
   }
@@ -2418,9 +2447,42 @@ void SettingsScreen::startSetup(bool fromBoot) {
   _setupBoot = fromBoot;
   _setupLeft = false;
   _setupWifi = false;
+  _setupPhone = false;
   _lock = lock::config();
   _page = 10;
 }
+
+namespace {
+// A setup choice with a small drawn mark at its left: the How step's rows.
+void setupChoiceDraw(ToolsCanvas& c, const TRect& r, int icon, const char* label, const char* sub, bool on) {
+  if (on) c.fillRect(r.x, r.y, r.w, r.h, true);
+  else c.drawRect(r.x, r.y, r.w, r.h, 2, true);
+  const bool ink = !on;
+  const int ix = r.x + 34, iy = r.y + r.h / 2;
+  switch (icon) {
+    case 0:  // a device
+      c.drawRect(ix - 11, iy - 16, 22, 32, 2, ink);
+      for (int k = 0; k < 3; k++) c.fillRect(ix - 6, iy - 8 + k * 6, 12, 2, ink);
+      break;
+    case 1:  // a code to scan
+      c.drawRect(ix - 15, iy - 15, 12, 12, 2, ink);
+      c.drawRect(ix + 3, iy - 15, 12, 12, 2, ink);
+      c.drawRect(ix - 15, iy + 3, 12, 12, 2, ink);
+      c.fillRect(ix + 4, iy + 4, 5, 5, ink);
+      c.fillRect(ix + 10, iy + 10, 5, 5, ink);
+      break;
+    default:  // an arrow on
+      c.drawLine(ix - 14, iy, ix + 12, iy, 3, ink);
+      c.drawLine(ix + 4, iy - 8, ix + 12, iy, 3, ink);
+      c.drawLine(ix + 4, iy + 8, ix + 12, iy, 3, ink);
+      break;
+  }
+  const int lh = c.textHeight(TS_MED), sh = c.textHeight(TS_SMALL);
+  const int ty = r.y + (r.h - (lh + 2 + sh)) / 2;
+  c.text(r.x + 70, ty, label, TS_MED, ink, true);
+  c.text(r.x + 70, ty + lh + 2, sub, TS_SMALL, ink);
+}
+}  // namespace
 
 void SettingsScreen::renderSetup(ToolsHost& host, ToolsCanvas& c) {
   using namespace setui;
@@ -2429,17 +2491,31 @@ void SettingsScreen::renderSetup(ToolsHost& host, ToolsCanvas& c) {
   snprintf(corner, sizeof(corner), "%d / %d", step + 1, SETUP_STEPS);
   drawTopBar(c, "SETUP", false, "", corner);
 
-  static const char* kTitle[SETUP_STEPS] = {"Font", "Sleep after", "Beep level", "Wi-Fi"};
+  static const char* kTitle[SETUP_STEPS] = {"Language", "How do you want to set up?", "Font",
+                                            "Home screen", "Sleep after", "Beep level", "Wi-Fi"};
   static const char* kSub[SETUP_STEPS] = {
+      "For menus and help. Books keep their own.",
+      "You can change it all later.",
       "For menus. Books can have their own.",
+      "What you see when it wakes.",
       "No taps for this long, it sleeps.",
       "Tap one to hear it.",
       "For the clock, sync and updates. Optional."};
-  c.text(16, SU_TITLE_Y, kTitle[step], TS_LARGE, true, true);
+  const TSize tts = c.textWidth(kTitle[step], TS_LARGE, true) <= SCREEN_W - 32 ? TS_LARGE : TS_MED;
+  c.text(16, SU_TITLE_Y, kTitle[step], tts, true, true);
   c.text(16, SU_TITLE_Y + c.textHeight(TS_LARGE) + 6, kSub[step], TS_SMALL, true);
 
   const char* hint = nullptr;
-  if (step == 0) {
+  if (step == SU_LANG) {
+    // Only English is in the firmware for now: the one honest row.
+    setupRowDraw(c, setupRow(0), "English", "the menus and help", true);
+    hint = "More languages come with updates";
+  } else if (step == SU_HOW) {
+    setupChoiceDraw(c, setupRow(0), 0, "On this device", "One step at a time. About a minute.", true);
+    setupChoiceDraw(c, setupRow(1), 1, "With my phone", "Scan a code; Wi-Fi and the clock there.", false);
+    setupChoiceDraw(c, setupRow(2), 2, "Skip", "Start with the defaults.", false);
+    hint = "tap a choice";
+  } else if (step == SU_FONT) {
     const char* cur = host.fontFor(ToolsHost::FONT_DEVICE);
     for (int i = 0; i < 2; i++) {
       const char* name = host.typefaceName(kSetupFace[i]);
@@ -2452,14 +2528,26 @@ void SettingsScreen::renderSetup(ToolsHost& host, ToolsCanvas& c) {
       host.setTypeface(was);
     }
     hint = "More faces in Settings > LOOK > Font";
-  } else if (step == 1) {
+  } else if (step == SU_HOME) {
+    const uint8_t cur = homestyle::get(host.prefs());
+    for (int i = 0; i < homestyle::COUNT; i++) {
+      const TRect t = setupHomeTile(i);
+      const bool on = cur == i;
+      if (on) c.fillRect(t.x, t.y, t.w, t.h, true);
+      else c.drawRect(t.x, t.y, t.w, t.h, 2, true);
+      const int tw = 86, th = 112;
+      homestyle::thumb(c, (uint8_t)i, t.x + (t.w - tw) / 2, t.y + 12, tw, th, !on);
+      c.textCentered(t.x + t.w / 2, t.y + t.h - 30, homestyle::NAMES[i], TS_SMALL, !on, true);
+    }
+    hint = "Or later: Settings > LOOK > Home screen";
+  } else if (step == SU_SLEEP) {
     static const char* kLab[5] = {"1 min", "5 min", "15 min", "30 min", "Never"};
     static const char* kNote[5] = {"Longest battery", "Recommended", nullptr, nullptr,
                                    "Uses the most battery"};
     for (int i = 0; i < 5; i++)
       setupRowDraw(c, setupRow(i), kLab[i], kNote[i], _lock.sleepIdx == kSetupSleep[i]);
     hint = "The last screen stays on while it sleeps";
-  } else if (step == 2) {
+  } else if (step == SU_BEEP) {
     static const char* kLab[4] = {"Off", "Low", "Mid", "High"};
     static const char* kNote[4] = {"No beeps at all", nullptr, "Default", nullptr};
     const int lv = host.soundLevel();
@@ -2476,10 +2564,10 @@ void SettingsScreen::renderSetup(ToolsHost& host, ToolsCanvas& c) {
     hint = "Or later: Settings > CONNECT > Clock";
   }
   if (hint) c.textCentered(SCREEN_W / 2, setupNext().y - 34, hint, TS_SMALL, true);
-  if (step == SETUP_STEPS - 1) {
+  if (step == SU_WIFI) {
     c.button(setupLater().x, setupLater().y, setupLater().w, setupLater().h, "Later", false);
     c.button(setupDone().x, setupDone().y, setupDone().w, setupDone().h, "Done", true);
-  } else {
+  } else if (step != SU_HOW) {
     const TRect n = setupNext();
     c.button(n.x, n.y, n.w, n.h, "Next", true);
   }
@@ -2499,18 +2587,32 @@ bool SettingsScreen::tapSetup(ToolsHost& host, int x, int y) {
     _page = 0;
     return true;
   };
-  if (step == SETUP_STEPS - 1) {
+  auto openPhone = [&] {
+    host.beep(1);
+    _setupWifi = true;
+    _clockOk = _clock.start(host.prefs());
+    _netStage = 0;
+    _clockSawClient = false;
+    _clockSawSet = false;
+    _page = 6;
+    return true;
+  };
+  if (step == SU_WIFI) {
     if (setupLater().hit(x, y) || setupDone().hit(x, y)) return finish();
-    if (setupRow(1).hit(x, y)) {
+    if (setupRow(1).hit(x, y)) return openPhone();
+    return false;
+  }
+  if (step == SU_HOW) {
+    if (setupRow(0).hit(x, y)) {
       host.beep(1);
-      _setupWifi = true;
-      _clockOk = _clock.start(host.prefs());
-      _netStage = 0;
-      _clockSawClient = false;
-      _clockSawSet = false;
-      _page = 6;
+      _page++;
       return true;
     }
+    if (setupRow(1).hit(x, y)) {
+      _setupPhone = true;  // the phone page is the whole setup
+      return openPhone();
+    }
+    if (setupRow(2).hit(x, y)) return finish();
     return false;
   }
   if (setupNext().hit(x, y)) {
@@ -2518,7 +2620,7 @@ bool SettingsScreen::tapSetup(ToolsHost& host, int x, int y) {
     _page++;
     return true;
   }
-  if (step == 0) {
+  if (step == SU_FONT) {
     for (int i = 0; i < 2; i++) {
       if (!setupRow(i).hit(x, y)) continue;
       host.beep(0);
@@ -2526,7 +2628,14 @@ bool SettingsScreen::tapSetup(ToolsHost& host, int x, int y) {
       host.refresh(true);  // every glyph on the panel just changed
       return false;
     }
-  } else if (step == 1) {
+  } else if (step == SU_HOME) {
+    for (int i = 0; i < homestyle::COUNT; i++) {
+      if (!setupHomeTile(i).hit(x, y)) continue;
+      homestyle::set(host.prefs(), (uint8_t)i);
+      host.beep(0);
+      return true;
+    }
+  } else if (step == SU_SLEEP) {
     for (int i = 0; i < 5; i++) {
       if (!setupRow(i).hit(x, y)) continue;
       _lock.sleepIdx = kSetupSleep[i];
@@ -2535,12 +2644,65 @@ bool SettingsScreen::tapSetup(ToolsHost& host, int x, int y) {
       host.beep(0);
       return true;
     }
-  } else if (step == 2) {
+  } else if (step == SU_BEEP) {
     for (int i = 0; i < 4; i++) {
       if (!setupRow(i).hit(x, y)) continue;
       const int n = host.soundLevels();
       host.setSoundLevel(i < n ? i : n - 1);
       host.beep(0);  // at the level just chosen
+      return true;
+    }
+  }
+  return false;
+}
+
+// --- Settings > LOOK > Home screen (v2) -------------------------------------------
+void SettingsScreen::renderHomeStyle(ToolsHost& host, ToolsCanvas& c) {
+  using namespace setui;
+  drawTopBar(c, "HOME SCREEN");
+  const uint8_t cur = homestyle::get(host.prefs());
+  for (int i = 0; i < homestyle::COUNT; i++) {
+    const TRect t = homeStyleTile(i);
+    homestyle::thumb(c, (uint8_t)i, t.x, t.y, t.w, t.h, true);
+    if (cur == i) c.drawRect(t.x - 4, t.y - 4, t.w + 8, t.h + 8, 3, true);
+    const char* name = i == homestyle::BOOKS ? "Books" : homestyle::NAMES[i];
+    const int ly = t.y + t.h + 12;
+    if (cur == i) {
+      const int lw = c.textWidth(name, TS_SMALL, true) + 30;
+      c.fillRect(t.x + (t.w - lw) / 2, ly - 4, lw, c.textHeight(TS_SMALL) + 8, true);
+      const int tx = t.x + (t.w - lw) / 2 + 8, cy = ly + c.textHeight(TS_SMALL) / 2;
+      c.drawLine(tx, cy, tx + 4, cy + 4, 2, false);
+      c.drawLine(tx + 4, cy + 4, tx + 11, cy - 4, 2, false);
+      c.text(tx + 16, ly, name, TS_SMALL, false, true);
+    } else {
+      c.textCentered(t.x + t.w / 2, ly, name, TS_SMALL, true, true);
+    }
+  }
+  {  // the dashed promise
+    const TRect t = homeStyleTile(homestyle::COUNT);
+    for (int k = 0; k < t.w; k += 10) {
+      c.fillRect(t.x + k, t.y, 5, 2, true);
+      c.fillRect(t.x + k, t.y + t.h - 2, 5, 2, true);
+    }
+    for (int k = 0; k < t.h; k += 10) {
+      c.fillRect(t.x, t.y + k, 2, 5, true);
+      c.fillRect(t.x + t.w - 2, t.y + k, 2, 5, true);
+    }
+    c.textCentered(t.x + t.w / 2, t.y + t.h / 2 - 30, "More styles", TS_SMALL, true);
+    c.textCentered(t.x + t.w / 2, t.y + t.h / 2 - 8, "come with", TS_SMALL, true);
+    c.textCentered(t.x + t.w / 2, t.y + t.h / 2 + 14, "updates", TS_SMALL, true);
+  }
+  c.textCentered(SCREEN_W / 2, 776, "tap a style: home changes at once", TS_SMALL, true);
+}
+
+bool SettingsScreen::tapHomeStyle(ToolsHost& host, int x, int y) {
+  using namespace setui;
+  for (int i = 0; i < homestyle::COUNT; i++) {
+    const TRect t = homeStyleTile(i);
+    if (x >= t.x - 8 && x < t.x + t.w + 8 && y >= t.y - 8 && y < t.y + t.h + 40) {
+      if (homestyle::get(host.prefs()) == i) return false;
+      homestyle::set(host.prefs(), (uint8_t)i);
+      host.beep(1);
       return true;
     }
   }

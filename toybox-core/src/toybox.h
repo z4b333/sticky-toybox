@@ -56,6 +56,9 @@ class Toybox {
   void openSettings();
   // The setup steps; fromBoot = a new device, which ends at the hub.
   void openSetup(bool fromBoot);
+  // v2: an updated device that has not opened setup sees "New: Setup" over
+  // home, once each power-on, until it does.
+  void offerSetup() { _hub.showUpgrade(!_host->prefs().getBool("su_seen", false)); }
   // Reopens the last app that was opened, from NVS, so it survives power-off.
   // False means there is nothing to resume (or it is hidden), and the caller
   // owns the low beep that says so.

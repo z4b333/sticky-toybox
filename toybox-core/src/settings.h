@@ -35,6 +35,7 @@ enum Action : int {
   ACT_CARE,    // C6: battery care, stop charging at 80 %
   ACT_DASH,    // C6: the charging dashboard on plug-in
   ACT_SYNC,    // D: Reading sync (Readest account, highlights, auto sync)
+  ACT_HOME,    // v2: the home screen's style (kit "Settings > Home screen")
   ACT_COUNT
 };
 // Visual order groups the rows by what they are about (LOOK first -- the
@@ -52,9 +53,9 @@ enum Action : int {
 // and the rows of the open tab under them. The enum order stays put so a
 // caller aiming at a row by name never has to care which tab it sits in.
 inline constexpr int TAB_LOOK = 0, TAB_CONNECT = 1, TAB_DEVICE = 2, TAB_COUNT = 3;
-//                                      APPS WALL LOCK FILES SOUND UPDATE CLOCK FONT VOLUME SETUP CARE DASH SYNC
-inline constexpr int TAB_OF[ACT_COUNT] = {2,   0,   0,   1,    2,    2,     1,    0,   2,     2,    2,   2,   1};
-inline constexpr int TAB_POS[ACT_COUNT] = {5,  0,   1,   0,    0,    6,     1,    2,   1,     4,    2,   3,   2};
+//                                      APPS WALL LOCK FILES SOUND UPDATE CLOCK FONT VOLUME SETUP CARE DASH SYNC HOME
+inline constexpr int TAB_OF[ACT_COUNT] = {2,   0,   0,   1,    2,    2,     1,    0,   2,     2,    2,   2,   1,   0};
+inline constexpr int TAB_POS[ACT_COUNT] = {5,  1,   2,   0,    0,    6,     1,    3,   1,     4,    2,   3,   2,   0};
 inline constexpr int TAB_Y = TOPBAR_H + 12, TAB_H = 48, TAB_GAP = 8;
 inline constexpr int TAB_W = (SCREEN_W - 32 - 2 * TAB_GAP) / TAB_COUNT;
 inline constexpr int TAB_ROWS_Y = TAB_Y + TAB_H + 14;
@@ -91,10 +92,21 @@ inline TRect dashPicRow(int i) { return TRect{BTN_X, DASH_PIC_Y + i * DASH_PIC_H
 // The kit's light switch: a 68x34 rectangle with a rectangular slider.
 inline constexpr int SWITCH_W = syncpg::SWITCH_W, SWITCH_H = syncpg::SWITCH_H;
 
-// The setup steps (v2, kit "Setup"): font, sleep, beep, Wi-Fi. Big outlined
-// rows, the chosen one filled, and Next at the foot. Language, "how to set
-// up" and the home-screen style join when the firmware has them to offer.
-inline constexpr int SETUP_STEPS = 4;
+// The setup steps (v2, kit "Setup"): language, how, font, home screen,
+// sleep, beep, Wi-Fi. Big outlined rows, the chosen one filled, and Next at
+// the foot.
+inline constexpr int SETUP_STEPS = 7;
+enum : int { SU_LANG = 0, SU_HOW, SU_FONT, SU_HOME, SU_SLEEP, SU_BEEP, SU_WIFI };
+// Home screen step: four tiles, two by two.
+inline TRect setupHomeTile(int i) {
+  const int w = (SCREEN_W - 32 - 12) / 2, h = 168;
+  return TRect{16 + (i % 2) * (w + 12), 150 + (i / 2) * (h + 12), w, h};
+}
+// Settings > LOOK > Home screen: three to a row, the dashed "more" last.
+inline TRect homeStyleTile(int i) {
+  const int w = 138, h = 196;
+  return TRect{16 + (i % 3) * (w + 17), 70 + (i / 3) * (h + 64), w, h};
+}
 inline constexpr int SU_TITLE_Y = TOPBAR_H + 22, SU_ROW_Y = 168, SU_ROW_H = 76, SU_ROW_STEP = 88;
 inline TRect setupRow(int i) { return TRect{16, SU_ROW_Y + i * SU_ROW_STEP, SCREEN_W - 32, SU_ROW_H}; }
 inline TRect setupNext() { return TRect{16, SCREEN_H - 84, SCREEN_W - 32, 64}; }
@@ -364,6 +376,9 @@ class SettingsScreen {
   bool _setupBoot = false;  // the setup steps were started by a new device
   bool _setupLeft = false;  // ...and have just been left: go to the hub
   bool _setupWifi = false;  // the clock page was opened from setup's Wi-Fi step
+  bool _setupPhone = false; // ...as "With my phone": leaving it ends the setup
+  void renderHomeStyle(ToolsHost& host, ToolsCanvas& c);
+  bool tapHomeStyle(ToolsHost& host, int x, int y);
   void renderSetup(ToolsHost& host, ToolsCanvas& c);
   bool tapSetup(ToolsHost& host, int x, int y);
   lock::Config _lock;

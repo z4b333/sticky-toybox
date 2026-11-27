@@ -847,6 +847,7 @@ void setup() {
     showPinned();
   } else {
     TB_LOG("opening the hub\n");
+    toybox.offerSetup();  // v2: "New: Setup" over home, until it has been opened
     stickyHost.refresh(true);
   }
   // One note when setup finishes, so a board with a dead panel can still say it
