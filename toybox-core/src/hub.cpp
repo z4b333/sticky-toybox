@@ -709,7 +709,7 @@ void HubScreen::render(ToolsHost& host, ToolsCanvas& c) {
   if (_folder >= 0) {
     // The Study drawer's recently-read strip. Loaded here, at render, and the
     // count cached so the const hit() agrees with what is on the glass.
-    recents::Entry rec[recents::MAX];
+    static recents::Entry rec[recents::MAX];  // 1.4 KB: off the stack
     int recN = 0;
     if (_folder == 2 && !host.canExit()) recN = recents::list(host.prefs(), rec);
     if (recN > 2) recN = 2;  // the drawer strip has room for two
@@ -721,7 +721,7 @@ void HubScreen::render(ToolsHost& host, ToolsCanvas& c) {
   // --- home ------------------------------------------------------------------
   _style = homestyle::get(host.prefs());
   if (_style != homestyle::WALL) {
-    recents::Entry rec[recents::MAX];
+    static recents::Entry rec[recents::MAX];  // 1.4 KB: off the stack
     const int recN = recents::list(host.prefs(), rec);
     _homeRecN = (int8_t)recN;
     if (_style == homestyle::BOOKS) renderBooksHome(host, c, rec, recN);

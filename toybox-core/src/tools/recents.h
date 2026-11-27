@@ -37,11 +37,15 @@ struct EntryV2 {
 inline int list(Preferences& p, Entry* out) {
   int w = 0;
   if (p.isKey("recents3")) {
-    Entry e[MAX];
-    const size_t got = p.getBytes("recents3", e, sizeof(e));
+    // Straight into the caller's array (it holds MAX), then kept in place:
+    // a second array of six entries is 1.4 KB of stack.
+    const size_t got = p.getBytes("recents3", out, sizeof(Entry) * MAX);
     const int n = (int)(got / sizeof(Entry));
     for (int i = 0; i < n && i < MAX; i++)
-      if (e[i].kind == KIND_EPUB) out[w++] = e[i];
+      if (out[i].kind == KIND_EPUB) {
+        if (w != i) out[w] = out[i];
+        w++;
+      }
     return w;
   }
   if (p.isKey("recents2")) {
@@ -67,9 +71,9 @@ inline void save(Preferences& p, const Entry* e, int n) {
 }
 
 inline void note(Preferences& p, uint8_t kind, const char* file, const char* title) {
-  Entry old[MAX];
+  static Entry old[MAX], now[MAX];  // 2.8 KB: off the stack (nothing here re-enters)
   const int n = list(p, old);
-  Entry now[MAX] = {};
+  for (int i = 0; i < MAX; i++) now[i] = Entry{};
   now[0].kind = kind;
   strncpy(now[0].file, file, sizeof(now[0].file) - 1);
   strncpy(now[0].title, title, sizeof(now[0].title) - 1);
@@ -88,7 +92,7 @@ inline void note(Preferences& p, uint8_t kind, const char* file, const char* tit
 // Where a book was left, for the Books home. Written only when it changed,
 // so closing a book twice at the same place costs no flash.
 inline void place(Preferences& p, const char* file, const char* chap, int pct) {
-  Entry e[MAX];
+  static Entry e[MAX];
   const int n = list(p, e);
   for (int i = 0; i < n; i++) {
     if (strcmp(e[i].file, file) != 0) continue;
