@@ -702,6 +702,9 @@ void HubScreen::openFolder(int f) {
   _fpage = 0;  // a drawer opens on its first page
 }
 
+// One list for both branches of render: 1.4 KB, off the stack.
+static recents::Entry g_recBuf[recents::MAX];
+
 void HubScreen::render(ToolsHost& host, ToolsCanvas& c) {
   // A guest has no home page at all: the drawers are its top level, so any
   // path that would have landed home lands on the first drawer instead.
@@ -709,7 +712,7 @@ void HubScreen::render(ToolsHost& host, ToolsCanvas& c) {
   if (_folder >= 0) {
     // The Study drawer's recently-read strip. Loaded here, at render, and the
     // count cached so the const hit() agrees with what is on the glass.
-    static recents::Entry rec[recents::MAX];  // 1.4 KB: off the stack
+    recents::Entry* rec = g_recBuf;
     int recN = 0;
     if (_folder == 2 && !host.canExit()) recN = recents::list(host.prefs(), rec);
     if (recN > 2) recN = 2;  // the drawer strip has room for two
@@ -721,7 +724,7 @@ void HubScreen::render(ToolsHost& host, ToolsCanvas& c) {
   // --- home ------------------------------------------------------------------
   _style = homestyle::get(host.prefs());
   if (_style != homestyle::WALL) {
-    static recents::Entry rec[recents::MAX];  // 1.4 KB: off the stack
+    recents::Entry* rec = g_recBuf;
     const int recN = recents::list(host.prefs(), rec);
     _homeRecN = (int8_t)recN;
     if (_style == homestyle::BOOKS) renderBooksHome(host, c, rec, recN);

@@ -7,6 +7,7 @@
 // openDirect() always means the same book. (KIND_TBK entries are left over
 // from the manga reader, removed in v2; list() drops them.)
 #pragma once
+#include <stdlib.h>
 #include <string.h>
 
 #include "tools_ui.h"
@@ -71,7 +72,14 @@ inline void save(Preferences& p, const Entry* e, int n) {
 }
 
 inline void note(Preferences& p, uint8_t kind, const char* file, const char* title) {
-  static Entry old[MAX], now[MAX];  // 2.8 KB: off the stack (nothing here re-enters)
+  // 2.8 KB: on the heap for the moment it takes, not the stack or for ever.
+  Entry* old = (Entry*)malloc(sizeof(Entry) * MAX);
+  Entry* now = (Entry*)malloc(sizeof(Entry) * MAX);
+  if (!old || !now) {
+    free(old);
+    free(now);
+    return;
+  }
   const int n = list(p, old);
   for (int i = 0; i < MAX; i++) now[i] = Entry{};
   now[0].kind = kind;
@@ -87,21 +95,25 @@ inline void note(Preferences& p, uint8_t kind, const char* file, const char* tit
     now[w++] = old[i];
   }
   save(p, now, w);
+  free(old);
+  free(now);
 }
 
 // Where a book was left, for the Books home. Written only when it changed,
 // so closing a book twice at the same place costs no flash.
 inline void place(Preferences& p, const char* file, const char* chap, int pct) {
-  static Entry e[MAX];
+  Entry* e = (Entry*)malloc(sizeof(Entry) * MAX);
+  if (!e) return;
   const int n = list(p, e);
   for (int i = 0; i < n; i++) {
     if (strcmp(e[i].file, file) != 0) continue;
-    if (e[i].pct == pct && strncmp(e[i].chap, chap, sizeof(e[i].chap) - 1) == 0) return;
+    if (e[i].pct == pct && strncmp(e[i].chap, chap, sizeof(e[i].chap) - 1) == 0) break;
     snprintf(e[i].chap, sizeof(e[i].chap), "%s", chap);
     e[i].pct = (int8_t)pct;
     save(p, e, n);
-    return;
+    break;
   }
+  free(e);
 }
 
 }  // namespace recents
