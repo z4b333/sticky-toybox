@@ -1515,7 +1515,8 @@ void SettingsScreen::renderLock(ToolsHost& host, ToolsCanvas& c) {
     const TRect r = lockRect(LR_WAKE);
     c.text(r.x + 4, r.y + (r.h - c.textHeight(TS_MED)) / 2, "Wake to", TS_MED, true);
     segment(c, wakeChipRect(0), "Note", _lock.wake == lock::WAKE_NOTE, false);
-    segment(c, wakeChipRect(1), "Home", _lock.wake == lock::WAKE_HUB, false);
+    segment(c, wakeChipRect(1), "Book", _lock.wake == lock::WAKE_BOOK, false);
+    segment(c, wakeChipRect(2), "Home", _lock.wake == lock::WAKE_HUB, false);
   }
   {
     const TRect r = lockRect(LR_ROTATE);
@@ -1615,9 +1616,9 @@ bool SettingsScreen::tapLock(ToolsHost& host, int x, int y) {
     host.beep(0);
     return true;
   }
-  for (int k = 0; k < 2; k++) {
+  for (int k = 0; k < 3; k++) {
     if (!wakeChipRect(k).hit(x, y)) continue;
-    _lock.wake = k == 0 ? lock::WAKE_NOTE : lock::WAKE_HUB;
+    _lock.wake = k == 0 ? lock::WAKE_NOTE : k == 1 ? lock::WAKE_BOOK : lock::WAKE_HUB;
     lock::save(host.prefs(), _lock);
     lock::setConfig(_lock);
     host.beep(0);

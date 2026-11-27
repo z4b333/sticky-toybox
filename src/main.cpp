@@ -841,6 +841,8 @@ void setup() {
     // Setup runs them again on request.
     TB_LOG("new device: opening setup\n");
     toybox.openSetup(true);
+  } else if (lock::config().wake == lock::WAKE_BOOK && toybox.openLastBook()) {
+    TB_LOG("woke to the last book\n");
   } else if (note::getPinned(pinned) && lock::config().wake == lock::WAKE_NOTE) {
     TB_LOG("opening the pinned note \"%s\"\n", pinned);
     g_pinnedMode = true;

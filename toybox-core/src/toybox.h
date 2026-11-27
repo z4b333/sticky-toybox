@@ -56,6 +56,9 @@ class Toybox {
   void openSettings();
   // The setup steps; fromBoot = a new device, which ends at the hub.
   void openSetup(bool fromBoot);
+  // v2 Wake to Book: open the book read last, at its place. False when
+  // there is none (or it is gone), and the caller shows home instead.
+  bool openLastBook();
   // v2: an updated device that has not opened setup sees "New: Setup" over
   // home, once each power-on, until it does.
   void offerSetup() { _hub.showUpgrade(!_host->prefs().getBool("su_seen", false)); }

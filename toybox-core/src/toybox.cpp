@@ -254,6 +254,16 @@ void Toybox::render(ToolsCanvas& c) {
   }
 }
 
+bool Toybox::openLastBook() {
+  recents::Entry rec[recents::MAX];
+  if (recents::list(_host->prefs(), rec) < 1) return false;
+  open(false, rec[0].kind == recents::KIND_EPUB ? 10 : 9, false);
+  if (_active && _active->openDirect(rec[0].file)) return true;
+  release();  // the book is gone: back to home, which the caller paints
+  _where = Where::Hub;
+  return false;
+}
+
 void Toybox::onTap(int x, int y) {
   if (_where == Where::App) {
     if (_active) _active->onTap(x, y);

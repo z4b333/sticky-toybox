@@ -3174,9 +3174,14 @@ int main() {
       }
       tapRect(setui::sleepChipRect(wasIdx));
       const uint8_t wasWake = lock::config().wake;
-      tapRect(setui::wakeChipRect(1));
+      tapRect(setui::wakeChipRect(2));
       if (lock::config().wake != lock::WAKE_HUB) {
         printf("LOCK FAIL: the hub wake chip did not take\n");
+        abort();
+      }
+      tapRect(setui::wakeChipRect(1));
+      if (lock::config().wake != lock::WAKE_BOOK) {
+        printf("LOCK FAIL: the book wake chip did not take\n");
         abort();
       }
       tapRect(setui::wakeChipRect(0));
@@ -3184,7 +3189,7 @@ int main() {
         printf("LOCK FAIL: the note wake chip did not take\n");
         abort();
       }
-      tapRect(setui::wakeChipRect(wasWake == lock::WAKE_HUB ? 1 : 0));
+      tapRect(setui::wakeChipRect(wasWake == lock::WAKE_HUB ? 2 : wasWake == lock::WAKE_BOOK ? 1 : 0));
     }
 
     // Every chip has to be reachable and has to be the one that ends up filled.
@@ -11259,6 +11264,28 @@ int main() {
     }
     g_dumpEnabled = true;
     printf("record clears ok (two taps, disarms, app-local)\n");
+  }
+
+  // --- v2 Wake to Book: the book read last opens at its place; with none,
+  // the caller is told and stays home.
+  {
+    const bool wasDump = g_dumpEnabled;
+    g_dumpEnabled = false;
+    recents::Entry rec[recents::MAX];
+    const int n = recents::list(prefs, rec);
+    toybox.goHub();
+    const bool opened = toybox.openLastBook();
+    if (n > 0 && (!opened || !toybox.hostInApp())) {
+      printf("WAKE FAIL: Wake to Book did not open \"%s\"\n", rec[0].title);
+      abort();
+    }
+    if (n == 0 && (opened || toybox.hostInApp())) {
+      printf("WAKE FAIL: Wake to Book opened something with nothing read\n");
+      abort();
+    }
+    toybox.goHub();
+    printf("wake to book ok (%s)\n", n > 0 ? rec[0].title : "nothing read: home");
+    g_dumpEnabled = wasDump;
   }
 
   // Every drawer carries More in its top-right corner, and it opens Settings.
