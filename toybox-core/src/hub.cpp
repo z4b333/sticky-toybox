@@ -354,17 +354,8 @@ bool bookCover(ToolsCanvas& c, const char* file, int x, int y, int w, int h, boo
   return true;
 }
 
-// The small home cover (104x174) at (x, y): the sharp one when it has been
-// made, else the strip thumbnail fitted in, else the striped stand-in.
 void smallCover(ToolsCanvas& c, const recents::Entry& e, int x, int y, const char* label) {
-  const bthumb::Size& z = bthumb::HOME_SMALL;
-  if (uint8_t* bits = (uint8_t*)malloc((size_t)bthumb::bytesOf(z))) {
-    const bool got = bthumb::loadCover(z, e.file, bits);
-    if (got) bthumb::inkCover(c, z, bits, x, y);
-    free(bits);
-    if (got) return;
-  }
-  if (!bookCover(c, e.file, x, y, z.w, z.h, false)) standInCover(c, x, y, z.w, z.h, label);
+  bthumb::drawSmall(c, e.file, label, x, y);
 }
 
 int wrapLines(ToolsCanvas& c, const char* s, TSize ts, bool bold, int maxW, char (*out)[64], int maxLines) {

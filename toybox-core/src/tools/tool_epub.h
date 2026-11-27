@@ -249,8 +249,14 @@ class EpubTool : public ToolApp {
       c.textCentered(c.width() / 2, 348, "put .epub files in /books", TS_SMALL, true);
       return;
     }
+    if (recentPage()) {
+      renderRecentGrid(c);
+      drawShelfPager(c, total);
+      return;
+    }
+    const int lp = listPage();
     for (int k = 0; k < shelf::PER_PAGE; k++) {
-      const int idx = _lpage * shelf::PER_PAGE + k;
+      const int idx = lp * shelf::PER_PAGE + k;
       if (idx >= total) break;
       const Row r = rowAt(idx);
       if (r.kind == Row::Library) {
@@ -287,10 +293,72 @@ class EpubTool : public ToolApp {
       shelf::drawBookRow(c, k, name, placeLine(_books[b], sub, sizeof(sub)),
                          shelf::rowSep(k, idx, total), _books[b].synced);
     }
-    shelf::drawPager(c, _lpage, total);
+    drawShelfPager(c, total);
     c.textCentered(c.width() / 2, 770,
                    _note ? _note : "positions are kept on the card, with each book",
                    TS_SMALL, true);
+  }
+
+  // --- the shelf's first page: the six books read last, as covers (owner,
+  // 27 Nov). Only at the top of the shelf; a folder or a series lists as before.
+  // Empty places say "open a book" until six have been read.
+  static constexpr int RECENT_CELLS = 6, RC_W = 104, RC_H = 174, RC_GAP = 24, RC_ROW = 218;
+  static constexpr int RC_X0 = (480 - (3 * RC_W + 2 * RC_GAP)) / 2, RC_Y0 = 104;
+  static TRect recentCell(int i) {
+    return TRect{RC_X0 + (i % 3) * (RC_W + RC_GAP), RC_Y0 + (i / 3) * RC_ROW, RC_W, RC_H};
+  }
+#ifdef TOYBOX_HOST
+  // The older shelf guards tap rows on page one; they run with it off, and
+  // the guard for this page turns it on.
+  static inline bool g_hostRecentPage = false;
+  bool hasRecentPage() const {
+    return g_hostRecentPage && _inGroup < 0 && !inFolder() && _n > 0 && items() > 0;
+  }
+#else
+  bool hasRecentPage() const { return _inGroup < 0 && !inFolder() && _n > 0 && items() > 0; }
+#endif
+  bool recentPage() const { return hasRecentPage() && _lpage == 0; }
+  int listPage() const { return hasRecentPage() ? _lpage - 1 : _lpage; }
+  int shelfPages(int total) const { return shelf::pageCount(total) + (hasRecentPage() ? 1 : 0); }
+  void drawShelfPager(ToolsCanvas& c, int total) {
+    const int pages = shelfPages(total);
+    if (pages <= 1) return;
+    c.fillRect(16, shelf::PAGER_Y - 12, c.width() - 32, 1, true);
+    const TRect p = shelf::prevRect(), n = shelf::nextRect();
+    if (_lpage > 0) c.button(p.x, p.y, p.w, p.h, "< PREV", false, TS_MED);
+    if (_lpage < pages - 1) c.button(n.x, n.y, n.w, n.h, recentPage() ? "ALL >" : "NEXT >", false, TS_MED);
+    char buf[24];
+    snprintf(buf, sizeof(buf), "%d / %d", _lpage + 1, pages);
+    c.textCentered(c.width() / 2, shelf::PAGER_Y + (shelf::PAGER_H - c.textHeight(TS_MED)) / 2, buf, TS_MED, true);
+  }
+  void renderRecentGrid(ToolsCanvas& c) {
+    c.textTracked(16, 72, "READ LAST", TS_SMALL, true, false, 2);
+    recents::Entry rec[recents::MAX];
+    const int n = recents::list(prefs(), rec);
+    for (int i = 0; i < RECENT_CELLS; i++) {
+      const TRect r = recentCell(i);
+      if (i < n) {
+        bthumb::drawSmall(c, rec[i].file, rec[i].title, r.x, r.y);
+        if (rec[i].pct >= 0) {
+          char pc[8];
+          snprintf(pc, sizeof(pc), "%d%%", rec[i].pct);
+          c.textCentered(r.x + r.w / 2, r.y + r.h + 6, pc, TS_SMALL, true);
+        }
+        continue;
+      }
+      // An empty place: a dashed outline and what fills it.
+      for (int k = 0; k < r.w; k += 10) {
+        c.fillRect(r.x + k, r.y, 5, 2, true);
+        c.fillRect(r.x + k, r.y + r.h - 2, 5, 2, true);
+      }
+      for (int k = 0; k < r.h; k += 10) {
+        c.fillRect(r.x, r.y + k, 2, 5, true);
+        c.fillRect(r.x + r.w - 2, r.y + k, 2, 5, true);
+      }
+      c.textCentered(r.x + r.w / 2, r.y + r.h / 2 - 20, "open a", TS_SMALL, true);
+      c.textCentered(r.x + r.w / 2, r.y + r.h / 2 + 2, "book", TS_SMALL, true);
+    }
+    c.textCentered(c.width() / 2, RC_Y0 + 2 * RC_ROW + 20, "every book: ALL >", TS_SMALL, true);
   }
 
   void onTap(int x, int y) override {
@@ -340,7 +408,7 @@ class EpubTool : public ToolApp {
       }
       const int total = items();
       if (total <= 0) return;
-      const int pages = shelf::pageCount(total);
+      const int pages = shelfPages(total);
       if (y >= shelf::PAGER_Y && pages > 1) {
         if (_lpage > 0 && shelf::prevRect().hit(x, y)) {
           _lpage--;
@@ -353,7 +421,21 @@ class EpubTool : public ToolApp {
         }
         return;
       }
-      const int idx = shelf::hitRow(x, y, total, _lpage);
+      if (recentPage()) {
+        recents::Entry rec[recents::MAX];
+        const int n = recents::list(prefs(), rec);
+        for (int i = 0; i < n && i < RECENT_CELLS; i++)
+          if (recentCell(i).hit(x, y)) {
+            if (!openDirect(rec[i].file)) {
+              _note = "that book is not on the card now";
+              host().beep(2);
+              paint();
+            }
+            return;
+          }
+        return;
+      }
+      const int idx = shelf::hitRow(x, y, total, listPage());
       if (idx < 0) return;
       const Row r = rowAt(idx);
       if (r.kind == Row::Library) {

@@ -783,7 +783,7 @@ inline void drawLoading(ToolsHost& h, ToolsCanvas& c, const char* file, const ch
 // (every source pixel counted, never sampled) and dithered again, so faces and
 // lettering survive. Two sizes, each its own file in flash:
 //   BIG   198x330, the Books home's "reading now" (8,250 bytes), kept for 2;
-//   SMALL 104x174, the Today block and the recent-books grid (2,436), kept for 5.
+//   SMALL 104x174, the Today block and the recent-books grids (2,262), kept for 6.
 struct Size {
   int w, h, stride;
   char tag;           // the file name's letter: "/hc..." and "/sc..."
@@ -791,7 +791,7 @@ struct Size {
   int keep;
 };
 inline constexpr Size HOME_BIG{198, 330, 25, 'h', "hc_keep", 2};
-inline constexpr Size HOME_SMALL{104, 174, 13, 's', "sc_keep", 5};
+inline constexpr Size HOME_SMALL{104, 174, 13, 's', "sc_keep", 6};
 inline constexpr int HOME_W = HOME_BIG.w, HOME_H = HOME_BIG.h, HOME_STRIDE = HOME_BIG.stride;
 inline constexpr int HOME_BYTES = HOME_STRIDE * HOME_H;
 inline constexpr int bytesOf(const Size& z) { return z.stride * z.h; }
@@ -926,6 +926,41 @@ inline void inkCover(ToolsCanvas& c, const Size& z, const uint8_t* bits, int x, 
       }
     }
   }
+}
+
+// A book's small cover at (x, y), 104x174: the sharp one when made, else the
+// strip thumbnail fitted in, else an outlined stand-in with the title.
+inline void drawSmall(ToolsCanvas& c, const char* file, const char* title, int x, int y) {
+  const Size& z = HOME_SMALL;
+  if (uint8_t* bits = (uint8_t*)malloc((size_t)bytesOf(z))) {
+    const bool got = loadCover(z, file, bits);
+    if (got) inkCover(c, z, bits, x, y);
+    free(bits);
+    if (got) return;
+  }
+  static uint8_t small[BYTES];
+  if (load(file, small)) {
+    const int dh = z.h, dw = z.h * W / H, ox = x + (z.w - dw) / 2;
+    for (int ty = 0; ty < dh; ty++) {
+      const uint8_t* row = small + (size_t)(ty * H / dh) * (W / 8);
+      for (int tx = 0; tx < dw; tx++) {
+        const int sx = tx * W / dw;
+        if (!(row[sx >> 3] & (0x80 >> (sx & 7)))) c.fillRect(ox + tx, y + ty, 1, 1, true);
+      }
+    }
+    return;
+  }
+  c.drawRect(x, y, z.w, z.h, 2, true);
+  for (int k = 8; k < z.w + z.h; k += 14) {  // light hatching
+    int x0 = x + k, y0 = y;
+    if (x0 > x + z.w - 1) { y0 += x0 - (x + z.w - 1); x0 = x + z.w - 1; }
+    int len = x0 - x;
+    if (len > y + z.h - 1 - y0) len = y + z.h - 1 - y0;
+    if (len > 0) c.drawLine(x0, y0, x0 - len, y0 + len, 1, true);
+  }
+  c.fillRect(x + 6, y + 10, z.w - 12, 28, false);
+  c.drawRect(x + 6, y + 10, z.w - 12, 28, 1, true);
+  c.textClipped(x + 10, y + 14, z.w - 20, title ? title : "", TS_SMALL, true, true);
 }
 
 }  // namespace bthumb

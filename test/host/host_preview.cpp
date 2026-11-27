@@ -11351,6 +11351,16 @@ int main() {
       setScreen("home_today_cover");
       stickyHost.refresh(true);
       setScreen("home_after_covers");
+      stickyHost.refresh(true);
+      // The Books app's first page: the six read last as covers, blanks after.
+      EpubTool::g_hostRecentPage = true;
+      toybox.open(false, 10);
+      setScreen("tool_epub_read_last");
+      stickyHost.refresh(true);
+      setScreen("tool_epub_read_last_after");
+      tapRect(shelf::nextRect());  // ALL > : the list, as before
+      EpubTool::g_hostRecentPage = false;
+      toybox.goHub();
       g_dumpEnabled = false;
       homestyle::set(prefs, homestyle::WALL);
     }

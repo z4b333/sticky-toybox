@@ -15,7 +15,7 @@ namespace recents {
 
 // Three (v2, owner 27 Nov): the Books home shows the one being read and two
 // more. The Study drawer's strip still shows two.
-inline constexpr int MAX = 5;  // the one being read and four in the grid (owner, 27 Nov)
+inline constexpr int MAX = 6;  // the Books app shelf's six covers (owner, 27 Nov)
 inline constexpr uint8_t KIND_TBK = 0, KIND_EPUB = 1;
 
 struct Entry {
