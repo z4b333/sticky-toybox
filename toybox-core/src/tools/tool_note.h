@@ -684,6 +684,10 @@ class NoteTool : public ToolApp {
 
   void renderPair(ToolsCanvas& c) {
     using namespace nui;
+    // "Joining ..." first: while the radio looks for the home Wi-Fi nothing is
+    // up yet, and the failure screen drawn then was the owner's 27 Nov report
+    // (buttons dead for the wait, then the QR).
+    if (_joining) return importui::drawJoining(c, _joinName);
     if (!_netOk) {
       c.textCentered(c.width() / 2, 280, "Could not start Wi-Fi", TS_LARGE, true, true);
       if (_netNote) c.textCentered(c.width() / 2, 330, _netNote, TS_MED, true);
@@ -695,7 +699,6 @@ class NoteTool : public ToolApp {
       return;
     }
     if (_got) return renderPairDone(c);
-    if (_joining) return importui::drawJoining(c, _joinName);
     if (_net.home()) {
       static const importui::Words W{"Scan to write on your phone",
                                      {"Type or dictate on the phone.", "Tap Send - it lands here.",

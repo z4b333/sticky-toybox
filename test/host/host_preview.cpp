@@ -11360,7 +11360,10 @@ int main() {
     homenet::g_hostNet = homenet::Result::Ok;
     toybox.open(false, 6);
     auto* nt = static_cast<NoteTool*>(toybox.hostActive());
+    g_dumpEnabled = true;
+    setScreen("tool_note_pair_joining");  // the paint made while the radio looks
     nt->openPairing();
+    g_dumpEnabled = false;
     if (!nt->hostNetHome()) {
       printf("NOTE FAIL: a saved home Wi-Fi did not carry the notes page\n");
       abort();
