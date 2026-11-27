@@ -337,7 +337,7 @@ button:disabled{background:#F5F1E6;border-style:dashed;box-shadow:none;color:#4D
 <main>
 <div class="card"><span class="lbl">ON THE DEVICE NOW</span><span class="mono">%VER%</span></div>
 <div class="card" id="step1"><label for="code">The six digits on the Sticky's screen</label>
-<input id="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}">
+<input id="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" autofocus>
 <button id="go1">Pair</button><div class="msg" id="m1" role="status"></div></div>
 <div class="card" id="step2" hidden><label for="file">A Toybox firmware file (toybox-app.bin)</label>
 <input id="file" type="file" accept=".bin,application/octet-stream">
@@ -350,11 +350,15 @@ var code='';
 function $(i){return document.getElementById(i)}
 $('go1').onclick=function(){
  code=$('code').value.trim();
+ if(!/^[0-9]{6}$/.test(code)){$('m1').textContent='Six digits, as on the Sticky.';return}
  fetch('/p?c='+encodeURIComponent(code),{method:'POST'}).then(function(r){return r.json()}).then(function(j){
   if(j.ok){$('step1').hidden=true;$('step2').hidden=false;}
   else $('m1').textContent=j.locked?'Too many tries. Open the page again on the Sticky.':'That is not the code on the screen.';
  }).catch(function(){$('m1').textContent='The Sticky did not answer.'});
 };
+// Six digits only, and Enter pairs (owner, 27 Nov).
+$('code').oninput=function(){var v=this.value.replace(/[^0-9]/g,'').slice(0,6);if(v!==this.value)this.value=v};
+$('code').onkeydown=function(e){if(e.key==='Enter'||e.keyCode===13){e.preventDefault();$('go1').click()}};
 $('file').onchange=function(){$('go2').disabled=!this.files.length};
 $('go2').onclick=function(){
  var f=$('file').files[0];if(!f)return;
