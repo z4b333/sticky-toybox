@@ -80,8 +80,10 @@ inline constexpr int REC_GAP = 4;      // tiles to heading
 // and the streak lower down.
 inline constexpr int BOOKS_COVER_W = 198;  // 96:160 at 330 tall
 inline TRect booksNow() { return TRect{16, 64, SCREEN_W - 32, 330}; }
-inline TRect booksAlso() { return TRect{16, 470, SCREEN_W - 32, 70}; }
-inline TRect booksAll() { return TRect{SCREEN_W - 150, 432, 134, 36}; }
+// Two more books under it (owner, 27 Nov), a row each.
+inline constexpr int BOOKS_ALSO_Y = 438, BOOKS_ALSO_H = 62;
+inline TRect booksAlso(int i = 0) { return TRect{16, BOOKS_ALSO_Y + i * BOOKS_ALSO_H, SCREEN_W - 32, BOOKS_ALSO_H}; }
+inline TRect booksAll() { return TRect{SCREEN_W - 150, BOOKS_ALSO_Y - 40, 134, 36}; }
 inline constexpr int BOOKS_STREAK_Y = 588;
 // Calendar: the month, then today's list.
 inline TRect calPrev() { return TRect{8, 50, 64, 50}; }
@@ -89,10 +91,11 @@ inline TRect calNext() { return TRect{SCREEN_W - 72, 50, 64, 50}; }
 inline constexpr int CAL_X = 16, CAL_CW = (SCREEN_W - 32) / 7, CAL_HEAD_Y = 100, CAL_HEAD_H = 30;
 inline constexpr int CAL_ROW_Y = CAL_HEAD_Y + CAL_HEAD_H, CAL_ROW_H = 44;
 // Today: four tiles, the book, three shortcuts.
-inline TRect todayTile(int i) { return TRect{16 + (i % 2) * 228, 166 + (i / 2) * 102, 220, 94}; }
-inline TRect todayBook() { return TRect{16, 376, SCREEN_W - 32, 80}; }
-inline constexpr int TODAY_SC_Y = 470;
-inline TRect todayShortcut(int i) { return TRect{16 + i * 150, TODAY_SC_Y + 40, 148, 110}; }
+// Owner, 27 Nov: the whole panel used, the book a block of its own.
+inline TRect todayTile(int i) { return TRect{16 + (i % 2) * 228, 162 + (i / 2) * 100, 220, 92}; }
+inline TRect todayBook() { return TRect{16, 366, SCREEN_W - 32, 206}; }
+inline constexpr int TODAY_SC_Y = 584;
+inline TRect todayShortcut(int i) { return TRect{16 + i * 150, TODAY_SC_Y + 32, 148, 104}; }
 // The upgrade popup's two buttons.
 inline constexpr int UP_Y = 196, UP_H = 330;
 inline TRect upLater() { return TRect{24, UP_Y + UP_H - 24 - 60, (SCREEN_W - 60) / 2, 60}; }

@@ -755,7 +755,14 @@ class EpubTool : public ToolApp {
     snprintf(line, sizeof(line), "sync: on the way out (%s) done", sleeping ? "sleep" : "close");
     host().perfLog(line);
   }
-  void beforeSleep() override { syncOnTheWayOut(true); }
+  void beforeSleep() override {
+    syncOnTheWayOut(true);
+    if (_open && _cur >= 0 && _page < _lutN) {  // the Books home, after a sleep mid-book
+      char name[ToolsHost::PLACE_LEN + 1];
+      chapterName(_spine, name, sizeof(name));
+      noteHomePlace(name);
+    }
+  }
 
   bool inFolder() const { return !shelf::isTop(_dir); }
   const char* seriesName() const {
@@ -1326,6 +1333,12 @@ class EpubTool : public ToolApp {
     snprintf(_books[_cur].place, sizeof(_books[_cur].place), "%s", name);
     _books[_cur].page = (uint16_t)(_page + 1);
     _books[_cur].pageCount = (uint16_t)(_chapterPages > 0 ? _chapterPages : 0);
+    // The Books home's "chapter and how far" line.
+    noteHomePlace(name);
+  }
+  void noteHomePlace(const char* chap) {
+    if (_cur < 0) return;
+    recents::place(prefs(), _books[_cur].file, chap, (int)(bookFraction() * 100 + 0.5));
   }
 
   void closeBook(bool beep) {

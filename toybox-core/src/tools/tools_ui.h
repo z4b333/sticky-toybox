@@ -593,7 +593,7 @@ class ToolsHost {
 
   struct EpubInfo {
     char file[128];  // absolute card path; real release filenames run long
-    char title[41];
+    char title[61];  // 60 characters (owner, 27 Nov; was 40)
     bool cont = false;  // a reading position already exists on the card
     bool synced = false;  // its position has synced with Readest at least once
     // Where that position is, in the book's own words: the name of the chapter

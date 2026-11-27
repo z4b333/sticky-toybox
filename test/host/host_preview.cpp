@@ -11315,6 +11315,30 @@ int main() {
         printf("HOME FAIL: no sharp home cover was made for \"%s\"\n", rec[0].title);
         abort();
       }
+      // Where they were left, and a third book, as a week of reading would leave them.
+      recents::Entry all[recents::MAX];
+      int m = recents::list(prefs, all);
+      if (m > 0) recents::place(prefs, all[0].file, "Chapter 5: The Lizardmen and the Ogres", 42);
+      m = recents::list(prefs, all);
+      if (m >= 2) {
+        snprintf(all[1].chap, sizeof(all[1].chap), "%s", "Interlude");
+        all[1].pct = 78;
+        if (m == 2) {
+          all[2] = recents::Entry{};
+          all[2].kind = recents::KIND_EPUB;
+          snprintf(all[2].file, sizeof(all[2].file), "/books/Mushoku Tensei - Volume 04.epub");
+          snprintf(all[2].title, sizeof(all[2].title), "Mushoku Tensei - Volume 04");
+          snprintf(all[2].chap, sizeof(all[2].chap), "Chapter 2");
+          all[2].pct = 12;
+          m = 3;
+        }
+        recents::save(prefs, all, m);
+      }
+      recents::list(prefs, all);
+      if (all[0].pct != 42 || strcmp(all[0].chap, "Chapter 5: The Lizardmen and the Ogres") != 0) {
+        printf("HOME FAIL: the place did not stick (%d, %s)\n", all[0].pct, all[0].chap);
+        abort();
+      }
       g_dumpEnabled = true;
       toybox.hostGoHome();
       homestyle::set(prefs, homestyle::BOOKS);

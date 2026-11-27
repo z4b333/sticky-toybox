@@ -425,30 +425,55 @@ void renderBooksHome(ToolsHost& host, ToolsCanvas& c, const recents::Entry* rec,
     }
     free(home);
     const int tx = nb.x + cw + 18, tw = nb.w - cw - 18;
-    c.textTracked(tx, nb.y + 14, "READING NOW", TS_SMALL, true, false, 2);
-    char lines[5][64];
-    const int n = wrapLines(c, rec[0].title, TS_MED, true, tw, lines, 5);
-    for (int i = 0; i < n; i++) c.text(tx, nb.y + 44 + i * (c.textHeight(TS_MED) + 4), lines[i], TS_MED, true, true);
-    c.text(tx, nb.y + 44 + n * (c.textHeight(TS_MED) + 4) + 8, "tap to carry on", TS_SMALL, true);
+    c.textTracked(tx, nb.y + 6, "READING NOW", TS_SMALL, true, false, 2);
+    char lines[4][64];
+    const int lh = c.textHeight(TS_MED) + 4;
+    const int n = wrapLines(c, rec[0].title, TS_MED, true, tw, lines, 4);
+    int ty = nb.y + 34;
+    for (int i = 0; i < n; i++, ty += lh) c.text(tx, ty, lines[i], TS_MED, true, true);
+    // Where it was left: the chapter, and how far through the whole book.
+    ty += 14;
+    if (rec[0].chap[0]) {
+      c.textTracked(tx, ty, "CHAPTER", TS_SMALL, true, false, 2);
+      ty += c.textHeight(TS_SMALL) + 4;
+      char cl[3][64];
+      const int m = wrapLines(c, rec[0].chap, TS_SMALL, false, tw, cl, 3);
+      for (int i = 0; i < m; i++, ty += c.textHeight(TS_SMALL) + 2) c.text(tx, ty, cl[i], TS_SMALL, true);
+      ty += 10;
+    }
+    if (rec[0].pct >= 0) {
+      char pc[24];
+      snprintf(pc, sizeof(pc), "%d%% of the book", rec[0].pct);
+      c.text(tx, ty, pc, TS_MED, true, true);
+      ty += c.textHeight(TS_MED) + 6;
+      c.drawRect(tx, ty, tw, 14, 2, true);
+      const int fill = (tw - 6) * rec[0].pct / 100;
+      if (fill > 0) c.fillRect(tx + 3, ty + 3, fill, 8, true);
+      ty += 24;
+    }
+    c.text(tx, nb.y + nb.h - c.textHeight(TS_SMALL), "tap to carry on", TS_SMALL, true);
   } else {
     c.textCentered(SCREEN_W / 2, nb.y + 60, "Nothing read yet", TS_MED, true, true);
     c.textCentered(SCREEN_W / 2, nb.y + 96, "open Books from the dock below", TS_SMALL, true);
   }
-  // The other book, and the way to all of them.
-  const TRect ab = booksAlso();
-  c.textTracked(16, ab.y - 30, "ALSO READING", TS_SMALL, true, false, 2);
+  // The other two, and the way to all of them.
   const TRect al = booksAll();
-  c.text(al.x + al.w - c.textWidth("all books >", TS_SMALL), ab.y - 30, "all books >", TS_SMALL, true, true);
-  c.fillRect(16, ab.y - 6, SCREEN_W - 32, 1, true);
-  if (recN > 1) {
-    c.textClipped(ab.x, ab.y + 12, ab.w - 40, rec[1].title, TS_MED, true, true);
-    c.text(ab.x, ab.y + 12 + c.textHeight(TS_MED) + 4, "tap to carry on", TS_SMALL, true);
-    c.drawLine(ab.x + ab.w - 16, ab.y + 22, ab.x + ab.w - 6, ab.y + 32, 2, true);
-    c.drawLine(ab.x + ab.w - 6, ab.y + 32, ab.x + ab.w - 16, ab.y + 42, 2, true);
-  } else {
-    c.text(ab.x, ab.y + 16, "one book at a time so far", TS_SMALL, true);
+  c.textTracked(16, al.y + 8, "ALSO READING", TS_SMALL, true, false, 2);
+  c.text(al.x + al.w - c.textWidth("all books >", TS_SMALL), al.y + 8, "all books >", TS_SMALL, true, true);
+  c.fillRect(16, BOOKS_ALSO_Y - 4, SCREEN_W - 32, 1, true);
+  if (recN <= 1) c.text(16, BOOKS_ALSO_Y + 16, "one book at a time so far", TS_SMALL, true);
+  for (int i = 1; i < recN && i < 3; i++) {
+    const TRect ab = booksAlso(i - 1);
+    c.textClipped(ab.x, ab.y + 8, ab.w - 40, rec[i].title, TS_MED, true, true);
+    char sub[64];
+    if (rec[i].pct >= 0 && rec[i].chap[0]) snprintf(sub, sizeof(sub), "%d%% - %s", rec[i].pct, rec[i].chap);
+    else if (rec[i].pct >= 0) snprintf(sub, sizeof(sub), "%d%% of the book", rec[i].pct);
+    else snprintf(sub, sizeof(sub), "tap to carry on");
+    c.textClipped(ab.x, ab.y + 10 + c.textHeight(TS_MED) + 2, ab.w - 40, sub, TS_SMALL, true);
+    c.drawLine(ab.x + ab.w - 16, ab.y + 20, ab.x + ab.w - 6, ab.y + 30, 2, true);
+    c.drawLine(ab.x + ab.w - 6, ab.y + 30, ab.x + ab.w - 16, ab.y + 40, 2, true);
+    c.fillRect(16, ab.y + ab.h - 2, SCREEN_W - 32, 1, true);
   }
-  c.fillRect(16, ab.y + ab.h, SCREEN_W - 32, 1, true);
   // The streak.
   int y = 0, mo = 0, d = 0;
   if (host.clockDate(y, mo, d) && y >= 2020) {
@@ -601,27 +626,49 @@ void renderTodayHome(ToolsHost& host, ToolsCanvas& c, const recents::Entry* rec,
   tile(2, "READING STREAK", big, sub, true, false);
   snprintf(big, sizeof(big), "%d min", (int)host.prefs().getInt("f_min", 25));
   tile(3, "FOCUS NOW", big, "tap to start", false, true);
-  // The book being read.
+  // The book being read: a block of its own, cover, title, chapter, how far.
   const TRect b = todayBook();
   c.drawRect(b.x, b.y, b.w, b.h, 2, true);
   if (recN > 0) {
-    if (!bookCover(c, rec[0].file, b.x + 10, b.y + 8, 44, b.h - 16)) standInCover(c, b.x + 10, b.y + 8, 44, b.h - 16, "");
-    c.textClipped(b.x + 68, b.y + 14, b.w - 110, rec[0].title, TS_MED, true, true);
-    c.text(b.x + 68, b.y + 14 + c.textHeight(TS_MED) + 4, "continue", TS_SMALL, true);
+    const int cx = b.x + 14, cy = b.y + (b.h - bthumb::H) / 2;
+    if (!bookCover(c, rec[0].file, cx, cy, bthumb::W, bthumb::H, false))
+      standInCover(c, cx, cy, bthumb::W, bthumb::H, "");
+    const int tx = cx + bthumb::W + 16, tw = b.x + b.w - 40 - tx;
+    int ty = b.y + 14;
+    c.textTracked(tx, ty, "CONTINUE READING", TS_SMALL, true, false, 2);
+    ty += c.textHeight(TS_SMALL) + 8;
+    char lines[3][64];
+    const int n = wrapLines(c, rec[0].title, TS_MED, true, tw, lines, 3);
+    for (int i = 0; i < n; i++, ty += c.textHeight(TS_MED) + 2) c.text(tx, ty, lines[i], TS_MED, true, true);
+    ty += 6;
+    if (rec[0].chap[0]) {
+      c.textClipped(tx, ty, tw, rec[0].chap, TS_SMALL, true);
+      ty += c.textHeight(TS_SMALL) + 8;
+    }
+    if (rec[0].pct >= 0) {
+      char pc[24];
+      snprintf(pc, sizeof(pc), "%d%% of the book", rec[0].pct);
+      c.text(tx, ty, pc, TS_SMALL, true, true);
+      ty += c.textHeight(TS_SMALL) + 4;
+      c.drawRect(tx, ty, tw, 12, 2, true);
+      const int fill = (tw - 6) * rec[0].pct / 100;
+      if (fill > 0) c.fillRect(tx + 3, ty + 3, fill, 6, true);
+    }
     c.drawLine(b.x + b.w - 26, b.y + b.h / 2 - 10, b.x + b.w - 16, b.y + b.h / 2, 3, true);
     c.drawLine(b.x + b.w - 16, b.y + b.h / 2, b.x + b.w - 26, b.y + b.h / 2 + 10, 3, true);
   } else {
-    c.text(b.x + 16, b.y + (b.h - c.textHeight(TS_MED)) / 2, "No book open yet", TS_MED, true);
+    c.textCentered(b.x + b.w / 2, b.y + b.h / 2 - 20, "No book open yet", TS_MED, true, true);
+    c.textCentered(b.x + b.w / 2, b.y + b.h / 2 + 14, "tap to choose one", TS_SMALL, true);
   }
   // Shortcuts.
-  c.textTracked(16, TODAY_SC_Y + 6, "SHORTCUTS", TS_SMALL, true, false, 2);
-  chrome2::dottedRule(c, 16, TODAY_SC_Y + 30, SCREEN_W - 32);
+  c.textTracked(16, TODAY_SC_Y + 2, "SHORTCUTS", TS_SMALL, true, false, 2);
+  chrome2::dottedRule(c, 16, TODAY_SC_Y + 24, SCREEN_W - 32);
   static const int SC[3] = {2, 6, 12};  // Timer, Notes, Calendar
   static const char* const SCN[3] = {"Timer", "Notes", "Calendar"};
   for (int i = 0; i < 3; i++) {
     const TRect r = todayShortcut(i);
     ticons::draw(c, SC[i], r.x + r.w / 2, r.y + 30, 48);
-    c.textCentered(r.x + r.w / 2, r.y + 66, SCN[i], TS_MED, true, true);
+    c.textCentered(r.x + r.w / 2, r.y + 62, SCN[i], TS_MED, true, true);
   }
 }
 }  // namespace
@@ -647,6 +694,7 @@ void HubScreen::render(ToolsHost& host, ToolsCanvas& c) {
     recents::Entry rec[recents::MAX];
     int recN = 0;
     if (_folder == 2 && !host.canExit()) recN = recents::list(host.prefs(), rec);
+    if (recN > 2) recN = 2;  // the drawer strip has room for two
     _recN = (int8_t)recN;
     renderFolder(host, c, _folder, _fpage, rec, recN);
     return;
@@ -910,9 +958,12 @@ HubScreen::Tap HubScreen::hit(const ToolsHost& host, int x, int y) const {
     else if (hubui::booksNow().hit(x, y)) {
       if (_homeRecN > 0) { t.kind = Tap::Recent; t.idx = 0; }
       else app(10);
-    } else if (hubui::booksAlso().hit(x, y) && _homeRecN > 1) {
+    } else if (hubui::booksAlso(0).hit(x, y) && _homeRecN > 1) {
       t.kind = Tap::Recent;
       t.idx = 1;
+    } else if (hubui::booksAlso(1).hit(x, y) && _homeRecN > 2) {
+      t.kind = Tap::Recent;
+      t.idx = 2;
     }
   } else if (_style == homestyle::CALENDAR) {
     if (hubui::calPrev().hit(x, y)) t.kind = Tap::PagePrev;
