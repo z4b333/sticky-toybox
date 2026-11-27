@@ -1708,7 +1708,8 @@ static void checkLockOverPage() {
       {true, false, true, 0, false, "a note is pinned -- the note owns the panel"},
       {false, true, true, 0, false, "the battery is flat and has to say so"},
       {false, false, false, 0, false, "not on a page -- a shelf or a menu"},
-      {false, false, true, 1, false, "reading sideways -- the picture is portrait"},
+      {false, false, true, 1, true, "reading sideways -- the page stays, the picture upright over it"},
+      {false, false, true, 3, true, "reading sideways the other way"},
   };
   for (const Case& k : kCases) {
     if (lock::keepsPage(page, k.pinned, k.low, k.showing, k.rot) != k.want) {
@@ -6383,6 +6384,30 @@ int main() {
         printf("SERIES FAIL: back from the row went to group %d\n", es->hostInGroup());
         abort();
       }
+      // Owner, 26 Nov: the shelf puts the book read last first. The last
+      // loose book, opened and closed, leads the list after it.
+      {
+        const int bi = es->hostViewBook(es->hostViewCount() - 1);
+        char want[128], first[128], got[128];
+        es->hostFile(bi, want, sizeof(want));
+        es->hostFile(es->hostViewBook(0), first, sizeof(first));
+        if (!strcmp(want, first)) {
+          printf("SHELF ORDER FAIL: the last book is already first\n");
+          abort();
+        }
+        es->hostOpen(bi);
+        toybox.onTap(40, 20);  // close: the shelf re-lists
+        es->hostFile(es->hostViewBook(0), got, sizeof(got));
+        if (strcmp(got, want) != 0) {
+          printf("SHELF ORDER FAIL: after reading %s the shelf starts with %s\n", want, got);
+          abort();
+        }
+        g_dumpEnabled = true;
+        setScreen("tool_epub_shelf_recent_first");
+        stickyHost.refresh(true);
+        g_dumpEnabled = false;
+        printf("shelf order ok (the book read last leads)\n");
+      }
       sdcard::hostClearBooks();
       toybox.goHub();
       printf("series rows ok (three spellings grouped, volume order, back to the shelf)\n");
@@ -10810,6 +10835,24 @@ int main() {
                                                                            : lock::config().pageDim);
       if (!bthumb::drawOverPage(lc, m)) {
         printf("COVER LOCK FAIL: mode %d did not draw over the page\n", m);
+        abort();
+      }
+      epd.displayFull();
+    }
+    // Owner, 27 Nov: a book read sideways keeps its sideways page, and the
+    // cover goes over it upright -- the way power-off now does it.
+    {
+      setScreen("lockscreen_cover_on_sideways_page");
+      epd.setRotation(3);
+      epd.clear();
+      ToolsCanvas& lc = stickyHost.sharedCanvas();
+      for (int ly = 30, k = 0; ly < 440; ly += 34, k++)
+        lc.text(24, ly, k % 3 ? "The rain had not stopped since dusk, and she kept on" :
+                                "turned another page, and the little lamp went", TS_MED, true);
+      epd.dim(2);
+      epd.setRotation(0);
+      if (!bthumb::drawOverPage(stickyHost.sharedCanvas(), lock::EMPTY_COVER_ON_PAGE)) {
+        printf("COVER LOCK FAIL: the cover did not go over a sideways page\n");
         abort();
       }
       epd.displayFull();

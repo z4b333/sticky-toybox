@@ -32,6 +32,7 @@
 #include "lock_image.h"
 #include "reader_menu.h"
 #include "recents.h"
+#include "read_order.h"
 #include "shelf.h"
 #include "sync_page.h"
 #include "tools_ui.h"
@@ -850,13 +851,25 @@ class EpubTool : public ToolApp {
     buildView();
   }
 
-  // The books listed at this level: ungrouped ones in card order, or -- inside
-  // a series row -- that row's books by volume.
+  // The books listed at this level: ungrouped ones most recently read first
+  // (owner, 26 Nov), the never-read after them in card order; or -- inside a
+  // series row -- that row's books by volume.
   void buildView() {
     _nv = 0;
     const int n = _n < 0 ? 0 : _n;
     for (int i = 0; i < n; i++)
       if (_bookGroup[i] == (_inGroup >= 0 ? _inGroup : -1)) _view[_nv++] = (int16_t)i;
+    if (_inGroup < 0 && _nv > 1) {
+      const readorder::Table& t = readorder::current(host());
+      static uint32_t rk[epubui::MAX_BOOKS];
+      for (int k = 0; k < n; k++) rk[k] = readorder::rank(t, _books[k].file);
+      for (int a = 1; a < _nv; a++)  // stable: equal ranks keep card order
+        for (int b = a; b > 0 && rk[_view[b - 1]] < rk[_view[b]]; b--) {
+          const int16_t tmp = _view[b];
+          _view[b] = _view[b - 1];
+          _view[b - 1] = tmp;
+        }
+    }
     if (_inGroup >= 0)
       for (int a = 1; a < _nv; a++)
         for (int b = a; b > 0 && _volume[_view[b - 1]] > _volume[_view[b]]; b--) {
@@ -1141,6 +1154,7 @@ class EpubTool : public ToolApp {
     _ntoc = -1;
     _nmarks = 0;
     recents::note(prefs(), recents::KIND_EPUB, _books[i].file, _books[i].title);
+    readorder::note(host(), _books[i].file);  // the shelf puts it first next time
 
     // The decode: every book with no cover of the owner's (tried above,
     // before the loading paint) pays for it -- once, and a cover that will
@@ -1331,6 +1345,10 @@ class EpubTool : public ToolApp {
     _open = false;
     _cur = -1;
     _screen = Screen::List;
+    // The book just read goes to the top of its shelf (owner, 26 Nov), and
+    // the shelf shows the top, where it is.
+    buildView();
+    if (_inGroup < 0) _lpage = 0;
     if (beep) {
       host().beep(0);
       host().refresh(true);  // full: the controller's RAM was just reset

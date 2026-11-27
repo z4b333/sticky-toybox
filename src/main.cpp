@@ -255,7 +255,17 @@ bool usbIn() { return digitalRead(PIN_USB_IN) == HIGH; }
 void powerOff(bool lowBattery = false, bool announce = false) {
   // D: an open book sends its place to Readest first, when the owner has
   // asked for that on sleep. Not on a low battery: that power-off is urgent.
-  if (!lowBattery) toybox.beforeSleep();
+  if (!lowBattery) {
+    toybox.beforeSleep();
+    // The sync strip ("SYNCING · THEN SLEEP") went over the page; the page
+    // kept under the lock screen is the page, not the strip (owner, 27 Nov:
+    // the popup showed under the cover). Into the framebuffer only -- the
+    // sleep below puts it on the glass once.
+    if (toybox.showingOwnPage()) {
+      epd.clear();
+      toybox.render(stickyHost.sharedCanvas());
+    }
+  }
   // First, while the card and the app are both still there: a reader that
   // has turned a page in the last few seconds has not saved its place yet.
   toybox.flush();
@@ -284,6 +294,9 @@ void powerOff(bool lowBattery = false, bool announce = false) {
     const uint8_t dimLv = lock::config().empty == lock::EMPTY_COVER_ON_PAGE && lock::config().pageDim < 2
                               ? 2 : lock::config().pageDim;
     epd.dim(dimLv);
+    // A sideways page stays sideways; the cover and the picture are portrait
+    // and go over it upright (owner, 27 Nov).
+    epd.setRotation(0);
     switch (lock::config().empty) {
       case lock::EMPTY_COVER_INK:
       case lock::EMPTY_COVER_ON_PAGE:

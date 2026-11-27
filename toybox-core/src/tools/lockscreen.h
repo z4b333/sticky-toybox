@@ -160,13 +160,14 @@ inline void save(Preferences& p, const Config& c) {
 // and nothing has to thread a Preferences reference through the draw calls.
 // Does this power-off keep the panel as it is? Pure, so the harness can ask it
 // without a panel or a power button. Every "no" here is a case where the frame
-// on the glass is not a page: a pinned note owns the panel, a flat battery has
-// to say so, and the picture is portrait so a book being read sideways cannot
-// wear it.
+// on the glass is not a page: a pinned note owns the panel, and a flat battery
+// has to say so. A book read sideways keeps its sideways page too (owner,
+// 27 Nov): the cover or picture goes over it upright, as it always stands.
 inline bool keepsPage(const Config& c, bool pinned, bool lowBattery, bool showingPage,
                       int rotation) {
+  (void)rotation;
   return (c.empty == EMPTY_PAGE || c.empty == EMPTY_COVER_ON_PAGE || c.empty == EMPTY_COVER_INK) &&
-         showingPage && !pinned && !lowBattery && rotation == 0;
+         showingPage && !pinned && !lowBattery;
 }
 
 inline Config g_config;

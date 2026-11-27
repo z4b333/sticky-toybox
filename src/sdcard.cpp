@@ -446,7 +446,7 @@ struct FakeSide {
 // Each book leaves a position, a chapter note and a bookmarks file, the
 // guards plant old-layout files to watch them move, and the harness opens
 // several books.
-FakeSide g_side[24];
+FakeSide g_side[32];
 }  // namespace
 
 // The second invented book exists to exercise long paths: real release
