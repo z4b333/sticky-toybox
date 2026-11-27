@@ -1,5 +1,6 @@
 #include "hub.h"
 #include "home_style.h"
+#include "tools/big_digits.h"
 #include "tools/book_thumbs.h"
 #include "tools/cal_store.h"
 
@@ -581,69 +582,121 @@ void renderCalendarHome(ToolsHost& host, ToolsCanvas& c, int off) {
   }
 }
 
+// The three apps opened last, still on the hub; Timer, Notes and Calendar
+// fill in until three have been used. Books (the block above) is left out.
+int todayApps(ToolsHost& host, homestyle::App* out) {
+  homestyle::App ra[3];
+  const int n = homestyle::recentApps(host.prefs(), ra);
+  int w = 0;
+  auto add = [&](bool g, int i) {
+    if (w >= 3 || (!g && i == 10) || !appvis::visible(g, i)) return;
+    for (int k = 0; k < w; k++)
+      if (out[k].game == g && out[k].idx == i) return;
+    out[w++] = homestyle::App{g, (uint8_t)i};
+  };
+  for (int i = 0; i < n; i++) add(ra[i].game, ra[i].idx);
+  add(false, 2);
+  add(false, 6);
+  add(false, 12);
+  return w;
+}
+
 void renderTodayHome(ToolsHost& host, ToolsCanvas& c, const recents::Entry* rec, int recN) {
   using namespace hubui;
   homeTop(host, c, "TODAY");
   int hh = 0, mm = 0, y = 0, mo = 0, d = 0;
+  // The time in the big digits (the Timer's), the date in words under it.
   if (host.clockHHMM(hh, mm)) {
-    char t[8];
-    snprintf(t, sizeof(t), "%02d:%02d", hh, mm);
-    c.text(16, 52, t, TS_HUGE, true, true);
+    char a2[4], b2[4];
+    snprintf(a2, sizeof(a2), "%02d", hh);
+    snprintf(b2, sizeof(b2), "%02d", mm);
+    const int wa = bigdigits::width(a2), wb = bigdigits::width(b2), gap = 34;
+    const int x0 = SCREEN_W / 2 - (wa + gap + wb) / 2;
+    bigdigits::drawCentered(c, x0 + wa / 2, TODAY_CLOCK_Y, a2, true);
+    bigdigits::drawCentered(c, x0 + wa + gap + wb / 2, TODAY_CLOCK_Y, b2, true);
+    const int sq = 12, mx = x0 + wa + gap / 2 - sq / 2;
+    c.fillRect(mx, TODAY_CLOCK_Y + bigdigits::H * 3 / 10, sq, sq, true);
+    c.fillRect(mx, TODAY_CLOCK_Y + bigdigits::H * 7 / 10 - sq, sq, sq, true);
   }
   if (host.clockDate(y, mo, d) && mo >= 1 && mo <= 12) {
-    const char* wd = WDAY[cal::weekday(y, mo, d)];
-    char dm[16];
-    snprintf(dm, sizeof(dm), "%d %s", d, MON[mo - 1]);
-    c.text(SCREEN_W - 16 - c.textWidth(wd, TS_MED, true), 66, wd, TS_MED, true, true);
-    c.text(SCREEN_W - 16 - c.textWidth(dm, TS_MED), 66 + c.textHeight(TS_MED) + 4, dm, TS_MED, true);
+    char dl[40];
+    snprintf(dl, sizeof(dl), "%s %d %s", WDAY[cal::weekday(y, mo, d)], d, MONTH[mo - 1]);
+    c.textCentered(SCREEN_W / 2, TODAY_CLOCK_Y + bigdigits::H + 10, dl, TS_MED, true, true);
   }
-  c.fillRect(16, 150, SCREEN_W - 32, 3, true);
+  c.fillRect(16, TODAY_RULE_Y, SCREEN_W - 32, 3, true);
+  // Four tiles in a row: short labels, the number large, a word under it.
   auto tile = [&](int i, const char* lab, const char* big, const char* sub, bool dark, bool thick) {
     const TRect r = todayTile(i);
     if (dark) c.fillRect(r.x, r.y, r.w, r.h, true);
     else c.drawRect(r.x, r.y, r.w, r.h, thick ? 3 : 2, true);
-    c.textTracked(r.x + 12, r.y + 10, lab, TS_SMALL, !dark, false, 2);
-    c.text(r.x + 12, r.y + 32, big, TS_LARGE, !dark, true);
-    c.text(r.x + 12, r.y + r.h - 4 - c.textHeight(TS_SMALL), sub, TS_SMALL, !dark);
+    c.textTracked(r.x + 8, r.y + 8, lab, TS_SMALL, !dark, false, 1);
+    const TSize bs = c.textWidth(big, TS_LARGE, true) <= r.w - 16 ? TS_LARGE : TS_MED;
+    c.text(r.x + 8, r.y + 30, big, bs, !dark, true);
+    c.textClipped(r.x + 8, r.y + r.h - 6 - c.textHeight(TS_SMALL), r.w - 12, sub, TS_SMALL, !dark);
   };
   char big[24], sub[32];
   int tdc = 0, rh = 0;
   if (host.climate(tdc, rh)) {
     snprintf(big, sizeof(big), "%d\xc2\xb0", (tdc + (tdc >= 0 ? 5 : -5)) / 10);
-    snprintf(sub, sizeof(sub), "%d%% humidity \xc2\xb7 room", rh);
+    snprintf(sub, sizeof(sub), "%d%% humid", rh);
   } else {
     snprintf(big, sizeof(big), "--");
     snprintf(sub, sizeof(sub), "no reading");
   }
-  tile(0, "INDOORS", big, sub, false, false);
+  tile(0, "ROOM", big, sub, false, false);
   const int pct = host.batteryPercent();
   if (pct >= 0) snprintf(big, sizeof(big), "%d%%", pct);
   else snprintf(big, sizeof(big), "--");
-  tile(1, "BATTERY", big, pct < 0 ? "" : pct <= 20 ? "time to charge" : "on battery", false, false);
+  tile(1, "BATTERY", big, pct < 0 ? "" : pct <= 20 ? "charge me" : "left", false, false);
   const int run = (y >= 2020) ? homestyle::streak(host.prefs(), y, mo, d) : 0;
-  snprintf(big, sizeof(big), run == 1 ? "%d day" : "%d days", run);
-  snprintf(sub, sizeof(sub), "best %d", homestyle::best(host.prefs()));
-  tile(2, "READING STREAK", big, sub, true, false);
-  snprintf(big, sizeof(big), "%d min", (int)host.prefs().getInt("f_min", 25));
-  tile(3, "FOCUS NOW", big, "tap to start", false, true);
+  snprintf(big, sizeof(big), "%d", run);
+  snprintf(sub, sizeof(sub), run == 1 ? "day, best %d" : "days, best %d", homestyle::best(host.prefs()));
+  tile(2, "STREAK", big, sub, true, false);
+  snprintf(big, sizeof(big), "%d", (int)host.prefs().getInt("f_min", 25));
+  tile(3, "FOCUS", big, "min - start", false, true);
   // The book being read: a block of its own, cover, title, chapter, how far.
   const TRect b = todayBook();
   c.drawRect(b.x, b.y, b.w, b.h, 2, true);
   if (recN > 0) {
-    const int cx = b.x + 14, cy = b.y + (b.h - bthumb::H) / 2;
-    if (!bookCover(c, rec[0].file, cx, cy, bthumb::W, bthumb::H, false))
-      standInCover(c, cx, cy, bthumb::W, bthumb::H, "");
-    const int tx = cx + bthumb::W + 16, tw = b.x + b.w - 40 - tx;
-    int ty = b.y + 14;
-    c.textTracked(tx, ty, "CONTINUE READING", TS_SMALL, true, false, 2);
+    // The sharp home cover at two thirds (132x220), else the small one.
+    const int cw = 132, ch = 220, cx = b.x + 12, cy = b.y + (b.h - ch) / 2;
+    bool drawn = false;
+    if (uint8_t* home = (uint8_t*)malloc(bthumb::HOME_BYTES)) {
+      if (bthumb::loadHome(rec[0].file, home)) {
+        for (int ty = 0; ty < ch; ty++) {
+          const uint8_t* row = home + (size_t)(ty * bthumb::HOME_H / ch) * bthumb::HOME_STRIDE;
+          int run2 = -1;
+          for (int tx = 0; tx <= cw; tx++) {
+            bool ink = false;
+            if (tx < cw) {
+              const int sx = tx * bthumb::HOME_W / cw;
+              ink = !(row[sx >> 3] & (0x80 >> (sx & 7)));
+            }
+            if (ink && run2 < 0) run2 = tx;
+            if (!ink && run2 >= 0) {
+              c.fillRect(cx + run2, cy + ty, tx - run2, 1, true);
+              run2 = -1;
+            }
+          }
+        }
+        drawn = true;
+      }
+      free(home);
+    }
+    if (!drawn && !bookCover(c, rec[0].file, cx, cy, cw, ch, false)) standInCover(c, cx, cy, cw, ch, "");
+    const int tx = cx + cw + 16, tw = b.x + b.w - 34 - tx;
+    int ty = b.y + 16;
+    c.textTracked(tx, ty, "CONTINUE READING", TS_SMALL, true, false, 1);
     ty += c.textHeight(TS_SMALL) + 8;
-    char lines[3][64];
-    const int n = wrapLines(c, rec[0].title, TS_MED, true, tw, lines, 3);
+    char lines[4][64];
+    const int n = wrapLines(c, rec[0].title, TS_MED, true, tw, lines, 4);
     for (int i = 0; i < n; i++, ty += c.textHeight(TS_MED) + 2) c.text(tx, ty, lines[i], TS_MED, true, true);
-    ty += 6;
+    ty += 8;
     if (rec[0].chap[0]) {
-      c.textClipped(tx, ty, tw, rec[0].chap, TS_SMALL, true);
-      ty += c.textHeight(TS_SMALL) + 8;
+      char cl[2][64];
+      const int m = wrapLines(c, rec[0].chap, TS_SMALL, false, tw, cl, 2);
+      for (int i = 0; i < m; i++, ty += c.textHeight(TS_SMALL) + 2) c.text(tx, ty, cl[i], TS_SMALL, true);
+      ty += 8;
     }
     if (rec[0].pct >= 0) {
       char pc[24];
@@ -654,21 +707,25 @@ void renderTodayHome(ToolsHost& host, ToolsCanvas& c, const recents::Entry* rec,
       const int fill = (tw - 6) * rec[0].pct / 100;
       if (fill > 0) c.fillRect(tx + 3, ty + 3, fill, 6, true);
     }
-    c.drawLine(b.x + b.w - 26, b.y + b.h / 2 - 10, b.x + b.w - 16, b.y + b.h / 2, 3, true);
-    c.drawLine(b.x + b.w - 16, b.y + b.h / 2, b.x + b.w - 26, b.y + b.h / 2 + 10, 3, true);
+    c.drawLine(b.x + b.w - 24, b.y + b.h / 2 - 10, b.x + b.w - 14, b.y + b.h / 2, 3, true);
+    c.drawLine(b.x + b.w - 14, b.y + b.h / 2, b.x + b.w - 24, b.y + b.h / 2 + 10, 3, true);
   } else {
     c.textCentered(b.x + b.w / 2, b.y + b.h / 2 - 20, "No book open yet", TS_MED, true, true);
     c.textCentered(b.x + b.w / 2, b.y + b.h / 2 + 14, "tap to choose one", TS_SMALL, true);
   }
-  // Shortcuts.
-  c.textTracked(16, TODAY_SC_Y + 2, "SHORTCUTS", TS_SMALL, true, false, 2);
+  // The three apps opened last.
+  c.textTracked(16, TODAY_SC_Y + 2, "RECENT APPS", TS_SMALL, true, false, 2);
   chrome2::dottedRule(c, 16, TODAY_SC_Y + 24, SCREEN_W - 32);
-  static const int SC[3] = {2, 6, 12};  // Timer, Notes, Calendar
-  static const char* const SCN[3] = {"Timer", "Notes", "Calendar"};
-  for (int i = 0; i < 3; i++) {
+  homestyle::App ra[3];
+  const int na = todayApps(host, ra);
+  for (int i = 0; i < na; i++) {
     const TRect r = todayShortcut(i);
-    ticons::draw(c, SC[i], r.x + r.w / 2, r.y + 30, 48);
-    c.textCentered(r.x + r.w / 2, r.y + 62, SCN[i], TS_MED, true, true);
+    if (ra[i].game) gicons::draw(c, ra[i].idx, r.x + r.w / 2, r.y + 30, 48);
+    else ticons::draw(c, ra[i].idx, r.x + r.w / 2, r.y + 30, 48);
+    char label[24];
+    sentence(label, sizeof(label), ra[i].game ? gicons::NAMES[ra[i].idx] : ticons::NAMES[ra[i].idx]);
+    const TSize sz = c.textWidth(label, TS_MED, true) <= r.w - 8 ? TS_MED : TS_SMALL;
+    c.textCentered(r.x + r.w / 2, r.y + 62, label, sz, true, true);
   }
 }
 }  // namespace
@@ -975,9 +1032,13 @@ HubScreen::Tap HubScreen::hit(const ToolsHost& host, int x, int y) const {
       if (_homeRecN > 0) { t.kind = Tap::Recent; t.idx = 0; }
       else app(10);
     } else {
-      static const int SC[3] = {2, 6, 12};
-      for (int i = 0; i < 3; i++)
-        if (hubui::todayShortcut(i).hit(x, y)) app(SC[i]);
+      homestyle::App ra[3];
+      const int na = todayApps(const_cast<ToolsHost&>(host), ra);
+      for (int i = 0; i < na; i++)
+        if (hubui::todayShortcut(i).hit(x, y)) {
+          app(ra[i].idx);
+          t.game = ra[i].game;
+        }
     }
   }
   return t;

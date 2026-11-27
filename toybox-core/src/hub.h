@@ -92,9 +92,11 @@ inline constexpr int CAL_X = 16, CAL_CW = (SCREEN_W - 32) / 7, CAL_HEAD_Y = 100,
 inline constexpr int CAL_ROW_Y = CAL_HEAD_Y + CAL_HEAD_H, CAL_ROW_H = 44;
 // Today: four tiles, the book, three shortcuts.
 // Owner, 27 Nov: the whole panel used, the book a block of its own.
-inline TRect todayTile(int i) { return TRect{16 + (i % 2) * 228, 162 + (i / 2) * 100, 220, 92}; }
-inline TRect todayBook() { return TRect{16, 366, SCREEN_W - 32, 206}; }
-inline constexpr int TODAY_SC_Y = 584;
+// The clock in the big digits, the date under it, four tiles in one row.
+inline constexpr int TODAY_CLOCK_Y = 40, TODAY_RULE_Y = 214;
+inline TRect todayTile(int i) { return TRect{16 + i * 113, 224, 107, 96}; }
+inline TRect todayBook() { return TRect{16, 332, SCREEN_W - 32, 246}; }
+inline constexpr int TODAY_SC_Y = 588;
 inline TRect todayShortcut(int i) { return TRect{16 + i * 150, TODAY_SC_Y + 32, 148, 104}; }
 // The upgrade popup's two buttons.
 inline constexpr int UP_Y = 196, UP_H = 330;

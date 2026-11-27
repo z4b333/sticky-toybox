@@ -7,6 +7,7 @@
 #include "tools/tool_coin.h"
 #include "tools/tool_epub.h"
 #include "tools/recents.h"
+#include "home_style.h"
 #include "tools/tool_dice.h"
 #include "tools/tool_flash.h"
 #include "tools/tool_note.h"
@@ -147,6 +148,7 @@ void Toybox::open(bool game, int idx, bool paint) {
   const bool sameI = p.isKey("last_i") && (int)p.getInt("last_i") == idx;
   if (!sameG) p.putBool("last_g", game);
   if (!sameI) p.putInt("last_i", idx);
+  homestyle::noteApp(p, game, idx);  // the Today home's shortcuts
   _active->enter(*_host);
   // The app's own face, if it has been given one. Loaded here rather than
   // inside every app: it is the same act for all of them, and the shell is

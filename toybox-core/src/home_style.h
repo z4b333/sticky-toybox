@@ -115,4 +115,32 @@ inline void thumb(ToolsCanvas& c, uint8_t style, int x, int y, int w, int h, boo
   }
 }
 
+
+// --- the Today home's shortcuts: the three apps opened last (owner, 27 Nov) --
+struct App {
+  bool game;
+  uint8_t idx;
+};
+inline int recentApps(Preferences& p, App* out) {
+  uint8_t b[6] = {};
+  const size_t n = p.isKey("ra") ? p.getBytes("ra", b, sizeof(b)) / 2 : 0;
+  int w = 0;
+  for (size_t i = 0; i < n && w < 3; i++) out[w++] = App{(b[2 * i] & 1) != 0, b[2 * i + 1]};
+  return w;
+}
+inline void noteApp(Preferences& p, bool game, int idx) {
+  App a[3];
+  const int n = recentApps(p, a);
+  if (n > 0 && a[0].game == game && a[0].idx == idx) return;  // already first: no write
+  uint8_t b[6];
+  int w = 0;
+  b[w++] = game ? 1 : 0;
+  b[w++] = (uint8_t)idx;
+  for (int i = 0; i < n && w < 6; i++) {
+    if (a[i].game == game && a[i].idx == idx) continue;
+    b[w++] = a[i].game ? 1 : 0;
+    b[w++] = a[i].idx;
+  }
+  p.putBytes("ra", b, (size_t)w);
+}
 }  // namespace homestyle
