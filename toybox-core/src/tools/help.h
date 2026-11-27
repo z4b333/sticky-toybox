@@ -9,6 +9,8 @@
 // show again" would be a door that locks behind you, and nobody would dare
 // press it.
 #pragma once
+#include <string.h>
+#include "../chrome.h"
 #include "decor.h"
 #include "tool_icons.h"
 #include "tools_ui.h"
@@ -23,10 +25,12 @@ struct Text {
   int8_t icon;  // index into it, -1 for a card with no emblem
 };
 
-inline constexpr TRect OK_BTN{40, 620, 400, 66};
-inline constexpr TRect NEVER_BTN{40, 702, 400, 56};
-
-enum class Tap : uint8_t { None, Dismiss, Never };
+// v2 (kit "SysHelp"): the dark button at the foot starts; above it a row with
+// a switch, "Don't show this again", which the button then honours.
+inline constexpr TRect OK_BTN{20, 714, 440, 60};
+inline constexpr TRect NEVER_BTN{0, 628, 480, 76};  // the switch row
+inline bool g_never = false;                        // the switch, until the card closes
+enum class Tap : uint8_t { None, Dismiss, Never, Toggle };  // Toggle: repaint
 
 // NVS keys are short; "h_" plus the game's own name keeps them unique and
 // readable in a dump.
@@ -48,86 +52,104 @@ inline void suppress(Preferences& p, const char* game) {
 
 // The heading is a parameter because not every card is about a game: the
 // flashcards card explains a tool, and "HOW TO PLAY" over a study screen reads
-// like a mistake.
+// like a mistake. The caller's bar carries the app's name; the heading sits
+// under it, bold, at the left (kit "SysHelp").
+inline void footer(ToolsCanvas& c, const TRect& ok, const TRect& sw, const char* label,
+                   const char* way_back) {
+  const int W = c.width();
+  const int sy = sw.y + (sw.h - 34) / 2;
+  c.text(sw.x + 20, sw.y + 12, "Don't show this again", TS_MED, true);
+  c.text(sw.x + 20, sw.y + 12 + c.textHeight(TS_MED) + 2, way_back, TS_SMALL, true);
+  const int sx = sw.x + sw.w - 20 - 68;
+  if (g_never) c.fillRect(sx, sy, 68, 34, true);
+  else c.drawRect(sx, sy, 68, 34, 2, true);
+  c.fillRect(g_never ? sx + 68 - 32 : sx + 4, sy + 4, 28, 26, !g_never);
+  c.fillRect(sw.x + 20, sw.y + sw.h - 1, (sw.w < W ? sw.w : W) - 40, 1, true);
+  c.button(ok.x, ok.y, ok.w, ok.h, label, true, TS_LARGE);
+}
+inline const char* okLabel(const char* heading) {
+  return strcmp(heading, "HOW TO PLAY") == 0 ? "Play" : "Got it";
+}
+
 inline void render(ToolsCanvas& c, const Text& t, const char* heading = "HOW TO PLAY",
                    const char* way_back = "the ? above brings this back") {
-  c.textCentered(c.width() / 2, 46, heading, TS_LARGE, true, true);
-  decor::ornament(c, c.width() / 2, 80, 300, true);
-
-  // The buttons are pinned to the bottom where the thumb is, so the emblem and
-  // the rules are centred in what is left rather than pushed against the top.
-  // A six-line card and an eleven-line one then sit the same way on the panel
-  // instead of one of them leaving a hole above GOT IT.
-  constexpr int TOP = 96, ICON = 76, ICON_GAP = 20, LINE = 34;
+  // "HOW TO PLAY" in caps belongs to a bar; here it reads as a sentence.
+  char head[32];
+  size_t n = 0;
+  for (const char* p = heading; *p && n < sizeof(head) - 1; p++, n++)
+    head[n] = (n == 0 || *p < 'A' || *p > 'Z') ? *p : (char)(*p + 32);
+  head[n] = 0;
+  constexpr int TOP = TOPBAR_H + 20, ICON = 64, LINE = 34;
+  c.text(20, TOP, head, TS_LARGE, true, true);
   int lines = 0;
   for (int i = 0; i < MAX_LINES && t.lines[i]; i++) lines++;
-
-  const int blockH = (t.icon >= 0 ? ICON + ICON_GAP : 0) + lines * LINE;
-  int y = TOP + (OK_BTN.y - 16 - TOP - blockH) / 2;
-  if (y < TOP) y = TOP;
-
-  // The game's own hub icon, big, above its rules -- so the card that opens
-  // every game still looks like that particular game.
+  int y = TOP + c.textHeight(TS_LARGE) + 18;
   if (t.icon >= 0) {
     if (t.game)
-      gicons::draw(c, t.icon, c.width() / 2, y + ICON / 2, ICON);
+      gicons::draw(c, t.icon, 20 + ICON / 2, y + ICON / 2, ICON);
     else
-      ticons::draw(c, t.icon, c.width() / 2, y + ICON / 2, ICON);
-    y += ICON + ICON_GAP;
+      ticons::draw(c, t.icon, 20 + ICON / 2, y + ICON / 2, ICON);
+    y += ICON + 16;
   }
-
-  // The rules read at the next size up now that the face is proportional: the
-  // same 26-character lines that filled the panel in the old pixel font take
-  // barely half of it, and rules are the one screen you actually read.
   for (int i = 0; i < lines; i++) {
-    if (t.lines[i][0]) c.text(34, y, t.lines[i], TS_LARGE, true);
+    if (t.lines[i][0]) c.text(20, y, t.lines[i], TS_LARGE, true);
     y += LINE;  // blank entries are deliberate paragraph breaks
   }
-
-  c.button(OK_BTN.x, OK_BTN.y, OK_BTN.w, OK_BTN.h, "GOT IT", true, TS_LARGE);
-  c.button(NEVER_BTN.x, NEVER_BTN.y, NEVER_BTN.w, NEVER_BTN.h, "DON'T SHOW AGAIN", false,
-           TS_MED);
-  c.textCentered(c.width() / 2, NEVER_BTN.y + NEVER_BTN.h + 8, way_back, TS_SMALL, true);
+  footer(c, OK_BTN, NEVER_BTN, okLabel(heading), way_back);
 }
 
 inline Tap hit(int x, int y) {
-  if (OK_BTN.hit(x, y)) return Tap::Dismiss;
-  if (NEVER_BTN.hit(x, y)) return Tap::Never;
+  if (NEVER_BTN.hit(x, y)) {
+    g_never = !g_never;
+    return Tap::Toggle;
+  }
+  if (OK_BTN.hit(x, y)) {
+    const bool never = g_never;
+    g_never = false;
+    return never ? Tap::Never : Tap::Dismiss;
+  }
   return Tap::None;
 }
 
 // The same card on a landscape screen (C4: Hanoi is played on its side): the
 // emblem on the left, the rules beside it, the two buttons side by side along
 // the foot. A card of up to nine lines fits under the heading.
-inline constexpr TRect OK_WIDE{40, 392, 344, 60};
-inline constexpr TRect NEVER_WIDE{416, 392, 344, 60};
+inline constexpr TRect OK_WIDE{420, 384, 360, 60};
+inline constexpr TRect NEVER_WIDE{0, 372, 410, 84};
 inline void renderWide(ToolsCanvas& c, const Text& t, const char* heading, const char* way_back) {
-  c.textCentered(c.width() / 2, 46, heading, TS_LARGE, true, true);
-  decor::ornament(c, c.width() / 2, 80, 300, true);
-  constexpr int TOP = 100, LINE = 30, ICON = 120;
+  char head[32];
+  size_t n = 0;
+  for (const char* p = heading; *p && n < sizeof(head) - 1; p++, n++)
+    head[n] = (n == 0 || *p < 'A' || *p > 'Z') ? *p : (char)(*p + 32);
+  head[n] = 0;
+  constexpr int TOP = TOPBAR_H + 12, LINE = 30, ICON = 100;
+  c.text(20, TOP, head, TS_LARGE, true, true);
   int lines = 0;
   for (int i = 0; i < MAX_LINES && t.lines[i]; i++) lines++;
-  int y = TOP + (OK_WIDE.y - 12 - TOP - lines * LINE) / 2;
-  if (y < TOP) y = TOP;
+  const int y0 = TOP + c.textHeight(TS_LARGE) + 14;
   if (t.icon >= 0) {
-    const int iy = TOP + (OK_WIDE.y - 12 - TOP) / 2;
     if (t.game)
-      gicons::draw(c, t.icon, 150, iy, ICON);
+      gicons::draw(c, t.icon, 20 + ICON / 2, y0 + ICON / 2, ICON);
     else
-      ticons::draw(c, t.icon, 150, iy, ICON);
+      ticons::draw(c, t.icon, 20 + ICON / 2, y0 + ICON / 2, ICON);
   }
+  int y = y0;
   for (int i = 0; i < lines; i++) {
-    if (t.lines[i][0]) c.text(290, y, t.lines[i], TS_MED, true);
+    if (t.lines[i][0]) c.text(t.icon >= 0 ? 150 : 20, y, t.lines[i], TS_MED, true);
     y += LINE;
   }
-  c.button(OK_WIDE.x, OK_WIDE.y, OK_WIDE.w, OK_WIDE.h, "GOT IT", true, TS_LARGE);
-  c.button(NEVER_WIDE.x, NEVER_WIDE.y, NEVER_WIDE.w, NEVER_WIDE.h, "DON'T SHOW AGAIN", false,
-           TS_MED);
-  c.textCentered(c.width() / 2, OK_WIDE.y + OK_WIDE.h + 6, way_back, TS_SMALL, true);
+  footer(c, OK_WIDE, NEVER_WIDE, okLabel(heading), way_back);
 }
 inline Tap hitWide(int x, int y) {
-  if (OK_WIDE.hit(x, y)) return Tap::Dismiss;
-  if (NEVER_WIDE.hit(x, y)) return Tap::Never;
+  if (NEVER_WIDE.hit(x, y)) {
+    g_never = !g_never;
+    return Tap::Toggle;
+  }
+  if (OK_WIDE.hit(x, y)) {
+    const bool never = g_never;
+    g_never = false;
+    return never ? Tap::Never : Tap::Dismiss;
+  }
   return Tap::None;
 }
 

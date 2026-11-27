@@ -331,6 +331,11 @@ class EpubTool : public ToolApp {
       if (_help) {
         const help::Tap t = help::hit(x, y);
         if (t == help::Tap::None) return;
+        if (t == help::Tap::Toggle) {
+          host().beep(0);
+          paint();
+          return;
+        }
         if (t == help::Tap::Never) help::suppress(prefs(), "ep");
         _help = false;
         host().beep(1);

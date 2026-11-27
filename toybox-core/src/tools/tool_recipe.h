@@ -110,6 +110,11 @@ class RecipeTool : public ToolApp {
     if (_help && _screen == Screen::List) {
       const help::Tap t = help::hit(x, y);
       if (t == help::Tap::None) return;
+      if (t == help::Tap::Toggle) {
+        host().beep(0);
+        host().refreshUi();
+        return;
+      }
       if (t == help::Tap::Never) help::suppress(prefs(), "rcp");
       _help = false;
       host().beep(1);

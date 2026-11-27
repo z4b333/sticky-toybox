@@ -61,6 +61,11 @@ class KitGame : public ToolApp {
     if (_view == View::Rules) {
       const help::Tap t = wide() ? help::hitWide(x, y) : help::hit(x, y);
       if (t == help::Tap::None) return;
+      if (t == help::Tap::Toggle) {
+        host().beep(0);
+        host().refreshUi();
+        return;
+      }
       if (t == help::Tap::Never) help::suppress(prefs(), helpKey());
       _view = View::Play;
       _rulesFromMore = false;

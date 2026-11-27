@@ -4184,7 +4184,8 @@ int main() {
     epd.clear();
     toybox.render(stickyHost.sharedCanvas());
     epd.displayFull();
-    toybox.onTap(help::NEVER_BTN.x + 10, help::NEVER_BTN.y + 10);
+    toybox.onTap(help::NEVER_BTN.x + 10, help::NEVER_BTN.y + 10);  // the switch on
+    toybox.onTap(help::OK_BTN.x + 10, help::OK_BTN.y + 10);        // then Got it
     if (!help::suppressed(stickyHost.prefs(), "ep")) {
       printf("EPUB APP FAIL: DON'T SHOW AGAIN did not stick\n");
       abort();
@@ -8117,7 +8118,7 @@ int main() {
     }
     toybox.open(false, 11);  // fresh entry: the card is up again
     auto* rt = static_cast<RecipeTool*>(toybox.hostActive());
-    toybox.onTap(240, 650);  // GOT IT
+    tapRect(help::OK_BTN);  // Got it
     if (rt->hostCount() != 1) {
       printf("RECIPE FAIL: the card recipe did not list (%d)\n", rt->hostCount());
       abort();
@@ -8250,7 +8251,7 @@ int main() {
       sdcard::hostPutCardFile("/recipes/pizza.json", kPizza, (int)strlen(kPizza));
       toybox.open(false, 11);  // a fresh entry re-reads /recipes
       rt = static_cast<RecipeTool*>(toybox.hostActive());
-      toybox.onTap(240, 650);  // GOT IT, the help card again
+      tapRect(help::OK_BTN);  // Got it, the help card again
       bool found = false;
       for (int k = 0; k < rcpui::LIST_PER && !found; k++) {
         toybox.onTap(240, rcpui::LIST_Y0 + k * rcpui::LIST_ROW + 20);
@@ -8793,6 +8794,7 @@ int main() {
     printf("WORDLE FAIL: leaving and coming back changed today's word\n");
     abort();
   }
+  tapRect(help::OK_BTN);  // the card again: this visit only
   for (const char* p = "SLO"; *p; p++) wordleKey(*p);
   g_dumpEnabled = true;
   setScreen("wordle_typing");
@@ -11156,8 +11158,8 @@ int main() {
     g_dumpEnabled = false;
     const TRect q = wordui::keyRect('Q');
     const int KEY_X = q.x + q.w / 2, KEY_Y = q.y + q.h / 2;  // a letter on Wordle's keyboard
-    const int OK_X = 240, OK_Y = 653;             // GOT IT
-    const int NEVER_X = 240, NEVER_Y = 730;       // DON'T SHOW AGAIN
+    const int OK_X = help::OK_BTN.x + help::OK_BTN.w / 2, OK_Y = help::OK_BTN.y + 20;  // Play
+    const int NEVER_X = help::NEVER_BTN.x + 40, NEVER_Y = help::NEVER_BTN.y + 20;     // the switch
     const int HELP_X = EPD_W - 28, HELP_Y = 20;   // More, in the top bar
     const TRect howTo = gk::menuRect(0);          // More > How to play
 
@@ -11186,6 +11188,11 @@ int main() {
       abort();
     }
     toybox.onTap(NEVER_X, NEVER_Y);
+    if (help::suppressed(prefs, "wrd")) {
+      printf("HELP FAIL: the switch alone closed the card for good\n");
+      abort();
+    }
+    toybox.onTap(OK_X, OK_Y);
     if (!help::suppressed(prefs, "wrd")) {
       printf("HELP FAIL: DON'T SHOW AGAIN was not recorded\n");
       abort();
