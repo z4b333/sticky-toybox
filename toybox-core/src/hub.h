@@ -80,11 +80,13 @@ inline constexpr int REC_GAP = 4;      // tiles to heading
 // and the streak lower down.
 inline constexpr int BOOKS_COVER_W = 198;  // 96:160 at 330 tall
 inline TRect booksNow() { return TRect{16, 64, SCREEN_W - 32, 330}; }
-// Two more books under it (owner, 27 Nov), a row each.
-inline constexpr int BOOKS_ALSO_Y = 438, BOOKS_ALSO_H = 62;
-inline TRect booksAlso(int i = 0) { return TRect{16, BOOKS_ALSO_Y + i * BOOKS_ALSO_H, SCREEN_W - 32, BOOKS_ALSO_H}; }
+// Up to four more books under it as covers, no titles (owner, 27 Nov).
+inline constexpr int BOOKS_ALSO_Y = 438, BOOKS_GRID_W = 104, BOOKS_GRID_H = 174;
+inline TRect booksAlso(int i = 0) {
+  return TRect{16 + i * (BOOKS_GRID_W + 10), BOOKS_ALSO_Y, BOOKS_GRID_W, BOOKS_GRID_H};
+}
 inline TRect booksAll() { return TRect{SCREEN_W - 150, BOOKS_ALSO_Y - 40, 134, 36}; }
-inline constexpr int BOOKS_STREAK_Y = 588;
+inline constexpr int BOOKS_STREAK_Y = 620;
 // Calendar: the month, then today's list.
 inline TRect calPrev() { return TRect{8, 50, 64, 50}; }
 inline TRect calNext() { return TRect{SCREEN_W - 72, 50, 64, 50}; }

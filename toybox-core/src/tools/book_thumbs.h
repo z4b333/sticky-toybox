@@ -778,55 +778,68 @@ inline void drawLoading(ToolsHost& h, ToolsCanvas& c, const char* file, const ch
   drawPlate(c, file, title);
 }
 
-// --- the home screen's cover (v2, owner 27 Nov) ---------------------------------
-// The Books home shows the cover at 198x330. The 96x160 strip thumbnail blown
-// up to that was blocks; this one is made from the full-size cover on the
-// card: averaged down (every source pixel counted, never sampled) and
-// dithered again, so the faces and the lettering come back. 200 bits a row,
-// 8,250 bytes in flash; kept for the two books the home screen shows.
-inline constexpr int HOME_W = 198, HOME_H = 330, HOME_STRIDE = 25;
-inline constexpr int HOME_BYTES = HOME_STRIDE * HOME_H;  // 8,250
+// --- the homes' covers (v2, owner 27 Nov) ---------------------------------------
+// Made from the full-size cover on the card when a book opens: averaged down
+// (every source pixel counted, never sampled) and dithered again, so faces and
+// lettering survive. Two sizes, each its own file in flash:
+//   BIG   198x330, the Books home's "reading now" (8,250 bytes), kept for 2;
+//   SMALL 104x174, the Today block and the recent-books grid (2,436), kept for 5.
+struct Size {
+  int w, h, stride;
+  char tag;           // the file name's letter: "/hc..." and "/sc..."
+  const char* keys;   // the prefs key holding the kept books, newest first
+  int keep;
+};
+inline constexpr Size HOME_BIG{198, 330, 25, 'h', "hc_keep", 2};
+inline constexpr Size HOME_SMALL{104, 174, 13, 's', "sc_keep", 5};
+inline constexpr int HOME_W = HOME_BIG.w, HOME_H = HOME_BIG.h, HOME_STRIDE = HOME_BIG.stride;
+inline constexpr int HOME_BYTES = HOME_STRIDE * HOME_H;
+inline constexpr int bytesOf(const Size& z) { return z.stride * z.h; }
 
-inline void homePath(uint32_t k, char* out, int cap) { snprintf(out, cap, "/hc%08lx.b", (unsigned long)k); }
-inline bool haveHome(const char* file) {
-  char p[20];
-  homePath(key(file), p, sizeof(p));
-  return tfs::size(p) == (size_t)HOME_BYTES;
+inline void coverPath(const Size& z, uint32_t k, char* out, int cap) {
+  snprintf(out, cap, "/%cc%08lx.b", z.tag, (unsigned long)k);
 }
-// Fills `dst` (HOME_BYTES); false when there is none.
-inline bool loadHome(const char* file, uint8_t* dst) {
+inline bool haveCover(const Size& z, const char* file) {
   char p[20];
-  homePath(key(file), p, sizeof(p));
+  coverPath(z, key(file), p, sizeof(p));
+  return tfs::size(p) == (size_t)bytesOf(z);
+}
+// Fills `dst` (bytesOf(z)); false when there is none.
+inline bool loadCover(const Size& z, const char* file, uint8_t* dst) {
+  char p[20];
+  coverPath(z, key(file), p, sizeof(p));
   size_t len = 0;
   char* buf = tfs::readAlloc(p, len);
   if (!buf) return false;
-  const bool ok = len == (size_t)HOME_BYTES;
-  if (ok) memcpy(dst, buf, HOME_BYTES);
+  const bool ok = len == (size_t)bytesOf(z);
+  if (ok) memcpy(dst, buf, (size_t)bytesOf(z));
   free(buf);
   return ok;
 }
+inline bool haveHome(const char* file) { return haveCover(HOME_BIG, file); }
+inline bool loadHome(const char* file, uint8_t* dst) { return loadCover(HOME_BIG, file, dst); }
 
-// Made on a book's open when it has a full-size cover and no home cover yet.
 // Reads the big cover a band at a time (as the lock-screen copy does).
-inline bool makeHome(ToolsHost& h, const char* file) {
-  if (haveHome(file)) return true;
+inline bool makeCover(ToolsHost& h, const Size& z, const char* file) {
+  if (haveCover(z, file)) return true;
   char src[bstore::PATH_CAP];
   bigPath(file, src, sizeof(src));
+  const int OW = z.w, OH = z.h, OS = z.stride;
   uint8_t* band = (uint8_t*)malloc(BAND_BYTES);
-  uint8_t* out = (uint8_t*)malloc(HOME_BYTES);
-  uint16_t* sum = (uint16_t*)calloc(HOME_W, sizeof(uint16_t));
-  int16_t* err = (int16_t*)calloc(2 * (HOME_W + 2), sizeof(int16_t));
+  uint8_t* out = (uint8_t*)malloc((size_t)bytesOf(z));
+  uint16_t* sum = (uint16_t*)calloc((size_t)OW, sizeof(uint16_t));
+  int16_t* err = (int16_t*)calloc((size_t)2 * (OW + 2), sizeof(int16_t));
   bool ok = band && out && sum && err;
-  if (ok) memset(out, 0xFF, HOME_BYTES);  // 1 = white
+  if (ok) memset(out, 0xFF, (size_t)bytesOf(z));  // 1 = white
   int curTy = 0, rowsIn = 0;
   auto flush = [&](int ty) {
     // One output row: the white share of its box, then Floyd-Steinberg.
-    int16_t* e0 = err + (ty & 1) * (HOME_W + 2) + 1;
-    int16_t* e1 = err + ((ty + 1) & 1) * (HOME_W + 2) + 1;
-    for (int x = -1; x <= HOME_W; x++) e1[x] = 0;
-    uint8_t* row = out + (size_t)ty * HOME_STRIDE;
-    for (int tx = 0; tx < HOME_W; tx++) {
-      const int sx0 = tx * BIG_W / HOME_W, sx1 = (tx + 1) * BIG_W / HOME_W;
+    int16_t* e0 = err + (ty & 1) * (OW + 2) + 1;
+    int16_t* e1 = err + ((ty + 1) & 1) * (OW + 2) + 1;
+    for (int x = -1; x <= OW; x++) e1[x] = 0;
+    uint8_t* row = out + (size_t)ty * OS;
+    for (int tx = 0; tx < OW; tx++) {
+      const int sx0 = tx * BIG_W / OW, sx1 = (tx + 1) * BIG_W / OW;
       const int n = (sx1 - sx0) * (rowsIn ? rowsIn : 1);
       int v = n ? (int)sum[tx] * 255 / n : 255;
       v += e0[tx];
@@ -849,14 +862,14 @@ inline bool makeHome(ToolsHost& h, const char* file) {
     }
     for (uint32_t r = 0; r < n / BAND_ROW_BYTES; r++) {
       const int sy = (int)(off / BAND_ROW_BYTES + r);
-      const int ty = sy * HOME_H / BIG_H;
+      const int ty = sy * OH / BIG_H;
       if (ty != curTy) {
         flush(curTy);
         curTy = ty;
       }
       const uint8_t* srow = band + r * BAND_ROW_BYTES;
-      for (int tx = 0; tx < HOME_W; tx++) {
-        const int sx0 = tx * BIG_W / HOME_W, sx1 = (tx + 1) * BIG_W / HOME_W;
+      for (int tx = 0; tx < OW; tx++) {
+        const int sx0 = tx * BIG_W / OW, sx1 = (tx + 1) * BIG_W / OW;
         uint16_t w = 0;
         for (int sx = sx0; sx < sx1; sx++) w += (srow[sx >> 3] >> (7 - (sx & 7))) & 1;
         sum[tx] += w;
@@ -866,26 +879,53 @@ inline bool makeHome(ToolsHost& h, const char* file) {
   }
   if (ok) flush(curTy);
   char p[20];
-  homePath(key(file), p, sizeof(p));
-  if (ok) ok = tfs::write(p, (const char*)out, HOME_BYTES);
+  coverPath(z, key(file), p, sizeof(p));
+  if (ok) ok = tfs::write(p, (const char*)out, (size_t)bytesOf(z));
   free(band);
   free(out);
   free(sum);
   free(err);
   if (!ok) return false;
-  // Two kept: this book and the one before it. The third goes.
+  // Kept for the newest `keep` books; the one pushed out goes.
   Preferences& pr = h.prefs();
-  const uint32_t k = key(file), a = pr.getUInt("hc_a", 0), b = pr.getUInt("hc_b", 0);
-  if (k != a) {
-    if (b && b != k) {
+  uint32_t kept[8] = {};
+  const int had = pr.isKey(z.keys) ? (int)(pr.getBytes(z.keys, kept, sizeof(kept)) / 4) : 0;
+  const uint32_t k = key(file);
+  uint32_t now[8] = {k};
+  int w = 1;
+  for (int i = 0; i < had; i++) {
+    if (kept[i] == k) continue;
+    if (w < z.keep) {
+      now[w++] = kept[i];
+    } else {
       char old[20];
-      homePath(b, old, sizeof(old));
+      coverPath(z, kept[i], old, sizeof(old));
       tfs::remove(old);
     }
-    pr.putUInt("hc_b", a);
-    pr.putUInt("hc_a", k);
   }
+  pr.putBytes(z.keys, now, (size_t)w * 4);
   return true;
+}
+inline bool makeHome(ToolsHost& h, const char* file) {
+  const bool a = makeCover(h, HOME_BIG, file);
+  const bool b = makeCover(h, HOME_SMALL, file);
+  return a && b;
+}
+
+// Draws a cover file at its own size, top-left at (x, y).
+inline void inkCover(ToolsCanvas& c, const Size& z, const uint8_t* bits, int x, int y) {
+  for (int ty = 0; ty < z.h; ty++) {
+    const uint8_t* row = bits + (size_t)ty * z.stride;
+    int run = -1;
+    for (int tx = 0; tx <= z.w; tx++) {
+      const bool ink = tx < z.w && !(row[tx >> 3] & (0x80 >> (tx & 7)));
+      if (ink && run < 0) run = tx;
+      if (!ink && run >= 0) {
+        c.fillRect(x + run, y + ty, tx - run, 1, true);
+        run = -1;
+      }
+    }
+  }
 }
 
 }  // namespace bthumb

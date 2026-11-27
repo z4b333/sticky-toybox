@@ -354,6 +354,19 @@ bool bookCover(ToolsCanvas& c, const char* file, int x, int y, int w, int h, boo
   return true;
 }
 
+// The small home cover (104x174) at (x, y): the sharp one when it has been
+// made, else the strip thumbnail fitted in, else the striped stand-in.
+void smallCover(ToolsCanvas& c, const recents::Entry& e, int x, int y, const char* label) {
+  const bthumb::Size& z = bthumb::HOME_SMALL;
+  if (uint8_t* bits = (uint8_t*)malloc((size_t)bthumb::bytesOf(z))) {
+    const bool got = bthumb::loadCover(z, e.file, bits);
+    if (got) bthumb::inkCover(c, z, bits, x, y);
+    free(bits);
+    if (got) return;
+  }
+  if (!bookCover(c, e.file, x, y, z.w, z.h, false)) standInCover(c, x, y, z.w, z.h, label);
+}
+
 int wrapLines(ToolsCanvas& c, const char* s, TSize ts, bool bold, int maxW, char (*out)[64], int maxLines) {
   int n = 0;
   const char* p = s;
@@ -408,19 +421,7 @@ void renderBooksHome(ToolsHost& host, ToolsCanvas& c, const recents::Entry* rec,
     uint8_t* home = (uint8_t*)malloc(bthumb::HOME_BYTES);  // 8 KB, only while drawing
     if (home && bthumb::loadHome(rec[0].file, home)) {
       // The sharp one, at its own size: made from the full-size cover.
-      const int ox = nb.x + (cw - bthumb::HOME_W) / 2, oy = nb.y + (nb.h - bthumb::HOME_H) / 2;
-      for (int y = 0; y < bthumb::HOME_H; y++) {
-        const uint8_t* row = home + (size_t)y * bthumb::HOME_STRIDE;
-        int run = -1;
-        for (int x = 0; x <= bthumb::HOME_W; x++) {
-          const bool ink = x < bthumb::HOME_W && !(row[x >> 3] & (0x80 >> (x & 7)));
-          if (ink && run < 0) run = x;
-          if (!ink && run >= 0) {
-            c.fillRect(ox + run, oy + y, x - run, 1, true);
-            run = -1;
-          }
-        }
-      }
+      bthumb::inkCover(c, bthumb::HOME_BIG, home, nb.x + (cw - bthumb::HOME_W) / 2, nb.y + (nb.h - bthumb::HOME_H) / 2);
     } else if (!bookCover(c, rec[0].file, nb.x, nb.y, cw, nb.h, false)) {
       standInCover(c, nb.x, nb.y, cw, nb.h, rec[0].title);
     }
@@ -457,23 +458,14 @@ void renderBooksHome(ToolsHost& host, ToolsCanvas& c, const recents::Entry* rec,
     c.textCentered(SCREEN_W / 2, nb.y + 60, "Nothing read yet", TS_MED, true, true);
     c.textCentered(SCREEN_W / 2, nb.y + 96, "open Books from the dock below", TS_SMALL, true);
   }
-  // The other two, and the way to all of them.
+  // The others: up to four covers, no titles, and the way to all of them.
   const TRect al = booksAll();
   c.textTracked(16, al.y + 8, "ALSO READING", TS_SMALL, true, false, 2);
   c.text(al.x + al.w - c.textWidth("all books >", TS_SMALL), al.y + 8, "all books >", TS_SMALL, true, true);
-  c.fillRect(16, BOOKS_ALSO_Y - 4, SCREEN_W - 32, 1, true);
   if (recN <= 1) c.text(16, BOOKS_ALSO_Y + 16, "one book at a time so far", TS_SMALL, true);
-  for (int i = 1; i < recN && i < 3; i++) {
-    const TRect ab = booksAlso(i - 1);
-    c.textClipped(ab.x, ab.y + 8, ab.w - 40, rec[i].title, TS_MED, true, true);
-    char sub[64];
-    if (rec[i].pct >= 0 && rec[i].chap[0]) snprintf(sub, sizeof(sub), "%d%% - %s", rec[i].pct, rec[i].chap);
-    else if (rec[i].pct >= 0) snprintf(sub, sizeof(sub), "%d%% of the book", rec[i].pct);
-    else snprintf(sub, sizeof(sub), "tap to carry on");
-    c.textClipped(ab.x, ab.y + 10 + c.textHeight(TS_MED) + 2, ab.w - 40, sub, TS_SMALL, true);
-    c.drawLine(ab.x + ab.w - 16, ab.y + 20, ab.x + ab.w - 6, ab.y + 30, 2, true);
-    c.drawLine(ab.x + ab.w - 6, ab.y + 30, ab.x + ab.w - 16, ab.y + 40, 2, true);
-    c.fillRect(16, ab.y + ab.h - 2, SCREEN_W - 32, 1, true);
+  for (int i = 1; i < recN && i <= 4; i++) {
+    const TRect g = booksAlso(i - 1);
+    smallCover(c, rec[i], g.x, g.y, rec[i].title);
   }
   // The streak.
   int y = 0, mo = 0, d = 0;
@@ -658,32 +650,10 @@ void renderTodayHome(ToolsHost& host, ToolsCanvas& c, const recents::Entry* rec,
   const TRect b = todayBook();
   c.drawRect(b.x, b.y, b.w, b.h, 2, true);
   if (recN > 0) {
-    // The sharp home cover at two thirds (132x220), else the small one.
-    const int cw = 132, ch = 220, cx = b.x + 12, cy = b.y + (b.h - ch) / 2;
-    bool drawn = false;
-    if (uint8_t* home = (uint8_t*)malloc(bthumb::HOME_BYTES)) {
-      if (bthumb::loadHome(rec[0].file, home)) {
-        for (int ty = 0; ty < ch; ty++) {
-          const uint8_t* row = home + (size_t)(ty * bthumb::HOME_H / ch) * bthumb::HOME_STRIDE;
-          int run2 = -1;
-          for (int tx = 0; tx <= cw; tx++) {
-            bool ink = false;
-            if (tx < cw) {
-              const int sx = tx * bthumb::HOME_W / cw;
-              ink = !(row[sx >> 3] & (0x80 >> (sx & 7)));
-            }
-            if (ink && run2 < 0) run2 = tx;
-            if (!ink && run2 >= 0) {
-              c.fillRect(cx + run2, cy + ty, tx - run2, 1, true);
-              run2 = -1;
-            }
-          }
-        }
-        drawn = true;
-      }
-      free(home);
-    }
-    if (!drawn && !bookCover(c, rec[0].file, cx, cy, cw, ch, false)) standInCover(c, cx, cy, cw, ch, "");
+    // The small home cover, made at this size (not shrunk from the big one).
+    const int cw = bthumb::HOME_SMALL.w, ch = bthumb::HOME_SMALL.h;
+    const int cx = b.x + 14, cy = b.y + (b.h - ch) / 2;
+    smallCover(c, rec[0], cx, cy, "");
     const int tx = cx + cw + 16, tw = b.x + b.w - 34 - tx;
     int ty = b.y + 16;
     c.textTracked(tx, ty, "CONTINUE READING", TS_SMALL, true, false, 1);
@@ -1015,12 +985,12 @@ HubScreen::Tap HubScreen::hit(const ToolsHost& host, int x, int y) const {
     else if (hubui::booksNow().hit(x, y)) {
       if (_homeRecN > 0) { t.kind = Tap::Recent; t.idx = 0; }
       else app(10);
-    } else if (hubui::booksAlso(0).hit(x, y) && _homeRecN > 1) {
-      t.kind = Tap::Recent;
-      t.idx = 1;
-    } else if (hubui::booksAlso(1).hit(x, y) && _homeRecN > 2) {
-      t.kind = Tap::Recent;
-      t.idx = 2;
+    } else {
+      for (int i = 0; i < 4; i++)
+        if (hubui::booksAlso(i).hit(x, y) && _homeRecN > i + 1) {
+          t.kind = Tap::Recent;
+          t.idx = i + 1;
+        }
     }
   } else if (_style == homestyle::CALENDAR) {
     if (hubui::calPrev().hit(x, y)) t.kind = Tap::PagePrev;

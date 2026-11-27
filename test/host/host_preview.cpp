@@ -11311,6 +11311,10 @@ int main() {
       static uint8_t tb[bthumb::BYTES];
       const bool have = n > 0 && bthumb::load(rec[0].file, tb);
       printf("home cover: %s\n", have ? "thumbnail in flash" : "none (stand-in drawn)");
+      if (n > 0 && !bthumb::haveCover(bthumb::HOME_SMALL, rec[0].file)) {
+        printf("HOME FAIL: no small home cover was made for \"%s\"\n", rec[0].title);
+        abort();
+      }
       if (n > 0 && !bthumb::haveHome(rec[0].file)) {
         printf("HOME FAIL: no sharp home cover was made for \"%s\"\n", rec[0].title);
         abort();
@@ -11323,14 +11327,13 @@ int main() {
       if (m >= 2) {
         snprintf(all[1].chap, sizeof(all[1].chap), "%s", "Interlude");
         all[1].pct = 78;
-        if (m == 2) {
-          all[2] = recents::Entry{};
-          all[2].kind = recents::KIND_EPUB;
-          snprintf(all[2].file, sizeof(all[2].file), "/books/Mushoku Tensei - Volume 04.epub");
-          snprintf(all[2].title, sizeof(all[2].title), "Mushoku Tensei - Volume 04");
-          snprintf(all[2].chap, sizeof(all[2].chap), "Chapter 2");
-          all[2].pct = 12;
-          m = 3;
+        static const char* const more[3] = {"Mushoku Tensei - Volume 04", "Overlord 01", "Spice and Wolf"};
+        for (int k = 0; m < recents::MAX && k < 3; k++, m++) {
+          all[m] = recents::Entry{};
+          all[m].kind = recents::KIND_EPUB;
+          snprintf(all[m].file, sizeof(all[m].file), "/books/%s.epub", more[k]);
+          snprintf(all[m].title, sizeof(all[m].title), "%s", more[k]);
+          all[m].pct = 12;
         }
         recents::save(prefs, all, m);
       }
