@@ -22,8 +22,9 @@ inline constexpr int PANEL_X = 20, PANEL_W = 440;
 // Two ways in, side by side: the phone, and a file already on the card. WRITE
 // keeps the wider half because it is the one most people use and the one the
 // three steps below the rule are about.
-inline constexpr TRect WRITE_BTN{PANEL_X, 448, 268, 72};
-inline constexpr TRect CARD_BTN{PANEL_X + 280, 448, 160, 72};
+// d19: at the foot (owner), the list above them.
+inline constexpr TRect WRITE_BTN{PANEL_X, 672, 268, 72};
+inline constexpr TRect CARD_BTN{PANEL_X + 280, 672, 160, 72};
 
 // the card list: the same rows as the note list, under a line saying where
 // they came from -- the folder is half the instruction, and a screen that just
