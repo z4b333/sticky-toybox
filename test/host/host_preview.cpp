@@ -9135,6 +9135,10 @@ int main() {
       abort();
     }
     // d22: twelve slots, eight taken: 1:30 goes straight in.
+    g_dumpEnabled = true;
+    setScreen("tool_timer_free");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
     tapRect(timerui::SAVE_BTN);
     if (tt->hostPresets() != 9 || tt->hostPreset(1) != 90) {
       printf("TIMER FAIL: 1:30 not saved into a free slot (%d, [1]=%d)\n", tt->hostPresets(), tt->hostPreset(1));
@@ -9147,7 +9151,8 @@ int main() {
       key(numpad::ZERO);
       key(numpad::ZERO);
       key(numpad::DONE);
-      tapRect(timerui::SAVE_BTN);
+      // d23: the last one by tapping a free "+" slot instead of Save.
+      tapRect(d == 6 ? timerui::presetRect(11) : timerui::SAVE_BTN);
     }
     if (tt->hostPresets() != 12) {
       printf("TIMER FAIL: %d presets after filling (want 12)\n", tt->hostPresets());

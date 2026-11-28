@@ -195,9 +195,27 @@ class TimerTool : public ToolApp {
 
     char buf[40];
     c.text(PRESET_X0, PRESET_Y0 - 30, "PRESETS", TS_MED, true);
-    if (_nPre == 0)
-      c.textInBox(PRESET_X0, PRESET_Y0, 440, PRESET_Y1 + PRESET_H - PRESET_Y0, "none yet: save one below", TS_MED,
-                  true);
+    // d23 (owner): how a preset goes, beside the heading.
+    if (_nPre > 0) {
+      const char* h = "hold one to delete it";
+      c.text(PRESET_X0 + 440 - c.textWidth(h, TS_SMALL), PRESET_Y0 - 28, h, TS_SMALL, true);
+    }
+    // The free slots as dashed placeholders: they say how many more fit, and
+    // tapping one saves the time on the clock, as Save does.
+    for (int i = _nPre; i < MAX_PRESETS; i++) {
+      const TRect r = presetRect(i);
+      for (int x = r.x; x < r.x + r.w; x += 8) {
+        const int w = x + 4 <= r.x + r.w ? 4 : r.x + r.w - x;
+        c.fillRect(x, r.y, w, 2, true);
+        c.fillRect(x, r.y + r.h - 2, w, 2, true);
+      }
+      for (int y = r.y; y < r.y + r.h; y += 8) {
+        const int h = y + 4 <= r.y + r.h ? 4 : r.y + r.h - y;
+        c.fillRect(r.x, y, 2, h, true);
+        c.fillRect(r.x + r.w - 2, y, 2, h, true);
+      }
+      c.textInBox(r.x, r.y, r.w, r.h, "+", TS_MED, true);
+    }
     for (int i = 0; i < _nPre; i++) {
       const TRect r = presetRect(i);
       if (i == _armPre) {
@@ -248,6 +266,8 @@ class TimerTool : public ToolApp {
       return;
     }
     if (SAVE_BTN.hit(x, y)) return savePreset();
+    for (int i = _nPre; i < MAX_PRESETS; i++)
+      if (presetRect(i).hit(x, y)) return savePreset();  // a free slot (d23)
     for (int i = 0; i < _nPre; i++) {
       if (presetRect(i).hit(x, y)) {
         if (armed >= 0) break;  // a tap away from Remove just puts it back
