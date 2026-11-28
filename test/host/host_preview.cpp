@@ -4923,6 +4923,10 @@ int main() {
       }
       // ...and it is the same answer settings gives, because it is one
       // setting now rather than two.
+      g_dumpEnabled = true;
+      setScreen("tool_epub_koho");  // the page in the second built-in face
+      stickyHost.refresh(true);
+      g_dumpEnabled = false;
       if (strcmp(stickyHost.fontFor(ToolsHost::FONT_READER), "KoHo") != 0) {
         printf("EPUB APP FAIL: settings and the reader disagree about the face\n");
         abort();
@@ -12192,6 +12196,27 @@ int main() {
   } else {
     printf("no text overflows\n");
   }
+
+  // The second built-in face on the device's own screens: the drawers and
+  // settings in KoHo, for judging its weight against Noto's.
+#ifndef TOYBOX_CP_FONTS
+  {
+    stickyHost.fontSet(ToolsHost::FONT_DEVICE, "KoHo");
+    toybox.goHub();
+    static const char* kKoho[3] = {"koho_play", "koho_utility", "koho_study"};
+    for (int f = 0; f < 3; f++) {
+      g_dumpEnabled = false;
+      toybox.hostHub().goHome();
+      g_dumpEnabled = true;
+      setScreen(kKoho[f]);
+      toybox.onTap(80 + f * 160, hubui::DOCK_Y + hubui::DOCK_H / 2);
+    }
+    g_dumpEnabled = true;
+    setScreen("koho_settings");
+    toybox.openSettings();
+    stickyHost.fontSet(ToolsHost::FONT_DEVICE, "");
+  }
+#endif
 
 #ifdef TOYBOX_CP_FONTS
   printf("%d guard%s failed under CrossPoint's fonts\n", g_softFails,

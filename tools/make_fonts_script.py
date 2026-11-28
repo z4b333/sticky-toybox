@@ -38,7 +38,7 @@ HERE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'fonts')
 FAMILIES = [
     ('NOTO', HERE + '/NotoSans-Regular.ttf', HERE + '/NotoSansThaiLooped-Regular.ttf'),
     # KoHo draws its own Latin and Thai (owner, 28 Nov), so one file serves both.
-    ('PLX', HERE + '/KoHo-Medium.ttf', HERE + '/KoHo-Medium.ttf'),
+    ('PLX', HERE + '/KoHo-SemiBold.ttf', HERE + '/KoHo-SemiBold.ttf'),
 ]
 SIZES = [20, 24, 32, 44]  # 18 -> 20 with the UI (owner, 28 Nov)
 BASIC = ImageFont.Layout.BASIC

@@ -73,10 +73,11 @@ FAMILIES = [
     # place of IBM Plex Sans. The tables keep the PLX_ prefix so nothing that
     # names them has to move; the name people see is KoHo.
     ('PLX_', {
-        # Medium for the same reason as Noto (owner, 21 Nov).
-        'REG': HERE + '/KoHo-Medium.ttf',
-        'BOLD': HERE + '/KoHo-SemiBold.ttf',
-        'ITAL': HERE + '/KoHo-Italic.ttf',
+        # KoHo's Medium is a one-pixel stem on the panel and came out uneven
+        # (owner's photo, 28 Nov); SemiBold is two pixels, Noto Medium's weight.
+        'REG': HERE + '/KoHo-SemiBold.ttf',
+        'BOLD': HERE + '/KoHo-Bold.ttf',
+        'ITAL': HERE + '/KoHo-SemiBoldItalic.ttf',
     }),
 ]
 # name -> pixel height of the line box, one per TSize.
@@ -117,8 +118,24 @@ SMALL_FACES = {
 SAMPLE = 'ÅÉÀÊÖgjpqy|()'
 
 
+# KoHo (owner, 28 Nov: "normal in reader is too small"): its accented capitals
+# and descenders are tall for its small x-height, so fitting them shrank every
+# letter by a fifth next to Noto. KoHo fits lowercase accents, capitals and
+# descenders instead; that matches Noto's x-height at every size, and a stacked
+# capital accent may reach two or three pixels into the gap above its line.
+SAMPLE_FOR = {'KoHo': 'éèêHgjpqy|()'}
+
+
+def sample_of(font):
+    path = getattr(font, 'path', '') or ''
+    for key, sample in SAMPLE_FOR.items():
+        if key in __import__('os').path.basename(path):
+            return sample
+    return SAMPLE
+
+
 def ink_rows(font):
-    _, t, _, b = font.getbbox(SAMPLE)
+    _, t, _, b = font.getbbox(sample_of(font))
     return t, b
 
 
