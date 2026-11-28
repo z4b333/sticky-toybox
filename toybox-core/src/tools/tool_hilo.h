@@ -95,14 +95,14 @@ class HiLoTool : public KitGame {
     c.textCentered(c.width() / 2, MSG_Y, msg, TS_LARGE, true, true);
     if (_s.over) {
       c.button(AGAIN.x, AGAIN.y, AGAIN.w, AGAIN.h, "Play again", true, TS_HUGE);
-      gk::foot(c, "OK plays again");
+      gk::foot(c, "");
       return;
     }
     c.button(HIGHER.x, HIGHER.y, HIGHER.w, HIGHER.h, "Higher", false, TS_HUGE);
     c.button(LOWER.x, LOWER.y, LOWER.w, LOWER.h, "Lower", false, TS_HUGE);
     arrow(c, HIGHER, true);
     arrow(c, LOWER, false);
-    gk::foot(c, "Up says higher - Down says lower");
+    gk::foot(c, "");
   }
 
   void tapPlay(int x, int y) override {

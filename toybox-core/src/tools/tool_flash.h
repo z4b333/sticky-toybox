@@ -291,8 +291,6 @@ class FlashTool : public ToolApp {
     c.text(PANEL_X, IMPORT_BTN.y - 32, "ADD A DECK", TS_MED, true, true);
     c.button(IMPORT_BTN.x, IMPORT_BTN.y, IMPORT_BTN.w, IMPORT_BTN.h, "From your phone", false, TS_MED);
     c.button(CARD_BTN.x, CARD_BTN.y, CARD_BTN.w, CARD_BTN.h, "From card", false, TS_MED);
-    c.textCentered(c.width() / 2, 748, _deckCount ? "hold a deck to delete it" : "add one from your phone",
-                   TS_MED, true);
   }
 
   // A choice of two: the chosen one outlined thick, nothing filled black.
@@ -535,7 +533,6 @@ class FlashTool : public ToolApp {
     c.button(AGAIN_BTN.x, AGAIN_BTN.y, AGAIN_BTN.w, AGAIN_BTN.h, "Put back", false, TS_MED);
     c.button(TURN_BTN.x, TURN_BTN.y, TURN_BTN.w, TURN_BTN.h, "Flip", false, TS_MED);
     c.button(GOOD_BTN.x, GOOD_BTN.y, GOOD_BTN.w, GOOD_BTN.h, "Next", true, TS_MED);
-    c.textCentered(c.width() / 2, 700, "UP put back  -  DOWN flip, then next", TS_MED, true);
     if (_srs) {
       snprintf(buf, sizeof(buf), "box %d of %d  -  %d%% known", card.box, fcard::MAX_BOX,
                progressPermille() / 10);

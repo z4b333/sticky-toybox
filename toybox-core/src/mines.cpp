@@ -147,9 +147,7 @@ void MinesApp::renderBoard(ToolsCanvas& c) {
   gk::statInt(c, statRect(2), "WON", prefs().getInt(k, 0));
   c.button(NEW.x, NEW.y, NEW.w, NEW.h, "New game", lost, TS_LARGE);
   if (_msg[0]) c.textCentered(c.width() / 2, MSG_Y, _msg, TS_MED, true, true);
-  gk::foot(c, lost                ? "every mine is showing"
-              : mns::won(_b) ? "cleared - New game for another"
-                             : "tap to dig - hold to flag");
+  gk::foot(c, lost ? "every mine is showing" : mns::won(_b) ? "cleared" : "");
 }
 
 void MinesApp::renderResult(ToolsCanvas& c) {

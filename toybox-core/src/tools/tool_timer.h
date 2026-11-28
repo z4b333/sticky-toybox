@@ -221,13 +221,6 @@ class TimerTool : public ToolApp {
       c.drawRect(SAVE_BTN.x, SAVE_BTN.y, SAVE_BTN.w, SAVE_BTN.h, 1, true);
       c.textInBox(SAVE_BTN.x, SAVE_BTN.y, SAVE_BTN.w, SAVE_BTN.h, buf, TS_MED, true);
     }
-    if (!_running) {
-      c.textCentered(c.width() / 2, 620, "tap the time to type one", TS_MED, true);
-      c.textCentered(c.width() / 2, 654, "hold a preset to remove it", TS_MED, true);
-    }
-
-    if (_running && remainMs() > 61000u)
-      c.textCentered(c.width() / 2, 726, "the time steps every 10 s", TS_MED, true);
   }
 
   void tapCountdown(int x, int y) {

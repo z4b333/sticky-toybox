@@ -138,8 +138,7 @@ class LevelTool : public KitGame {
     const TRect z = zeroRect(w, h), cl = clearRect(w, h);
     c.button(z.x, z.y, z.w, z.h, "Set zero", false, TS_LARGE);
     if (hasZero()) c.button(cl.x, cl.y, cl.w, cl.h, "Clear zero", false, TS_LARGE);
-    gk::foot(c, _r.mode == lvl::FLAT ? "lay it flat - or stand it on an edge"
-                                     : "standing on an edge - or lay it flat");
+    gk::foot(c, "");
   }
 
   void tapPlay(int x, int y) override {

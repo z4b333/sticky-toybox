@@ -299,7 +299,7 @@ void WordleApp::renderResult(ToolsCanvas& c) {
            TS_LARGE);
   c.button(gk::RES_RIGHT.x, gk::RES_RIGHT.y, gk::RES_RIGHT.w, gk::RES_RIGHT.h, "New word", true,
            TS_LARGE);
-  gk::foot(c, "a new word every day - or play more");
+  gk::foot(c, "");
 }
 
 int WordleApp::menuRows(gk::Row* rows) {
@@ -337,7 +337,7 @@ void WordleApp::render(ToolsCanvas& c) {
   drawKeyboard(c);
   char buf[48];
   if (_over)
-    gk::foot(c, "tap the board for the result");
+    gk::foot(c, "");
   else {
     snprintf(buf, sizeof(buf), "%s - streak %d - best %d", _daily ? "today's word" : "extra word",
              prefs().getInt("w_streak", 0), prefs().getInt("w_max", 0));

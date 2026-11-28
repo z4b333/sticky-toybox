@@ -299,8 +299,6 @@ class PickerTool : public ToolApp {
     else c.button(CLEAR_BTN.x, CLEAR_BTN.y, CLEAR_BTN.w, CLEAR_BTN.h, "Clear all", false, TS_MED);
     snprintf(buf, sizeof(buf), "%d of %d choices", _count, MAX_ITEMS);
     c.textCentered(c.width() / 2, 700, buf, TS_MED, true);
-    c.textCentered(c.width() / 2, 734, pages() > 1 ? "x takes one out  -  UP / DOWN pages" : "x takes one out",
-                   TS_MED, true);
   }
 
   void turnPage(int d) {
@@ -396,7 +394,6 @@ class PickerTool : public ToolApp {
     }
     if (_nLists < plist::MAX_LISTS)
       c.button(NEW_BTN.x, NEW_BTN.y, NEW_BTN.w, NEW_BTN.h, "New list", false, TS_MED);
-    c.textCentered(c.width() / 2, 700, "tap one to use it  -  hold to rename or delete", TS_MED, true);
     snprintf(buf, sizeof(buf), "%d of %d lists", _nLists, plist::MAX_LISTS);
     c.textCentered(c.width() / 2, 734, buf, TS_MED, true);
   }

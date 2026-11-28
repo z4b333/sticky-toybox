@@ -83,7 +83,7 @@ inline void render(ToolsCanvas& c, Preferences& p, bool armed, const char* note)
     }
     c.fillRect(r.x, r.y + r.h + 1, r.w, 1, true);
   }
-  c.textCentered(SCREEN_W / 2, 776, note ? note : "Sync now from any book: More > Sync", TS_SMALL, true);
+  if (note) c.textCentered(SCREEN_W / 2, 776, note, TS_SMALL, true);
 }
 
 // True when the page changed. `armed` and `note` are the caller's to keep.

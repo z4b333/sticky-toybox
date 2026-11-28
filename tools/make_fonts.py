@@ -90,7 +90,19 @@ FAMILIES = [
 # text -- 16 px is 1.7 mm, which several people read by holding the device
 # closer. 18 is 1.9 mm, about six point. The table name keeps the pixel height
 # so nothing has to guess which is which.
-SIZES = [('18', 18), ('24', 24), ('32', 32), ('44', 44)]
+SIZES = [('20', 20), ('24', 24), ('32', 32), ('44', 44)]
+# The smallest moved from 18 to 20 (owner, 28 Nov, after a test build on glass:
+# 18 px Medium "barely readable"), and one weight up as well: at 20 px the
+# regular face is SemiBold, bold is Bold and italic is SemiBold Italic. A one-
+# pixel stem is what made small text break up on the panel; a heavier cut at
+# nearly the same width fixed it where two more pixels of height alone did not.
+SMALL_PX = 20
+SMALL_FACES = {
+    '': {'REG': HERE + '/NotoSans-SemiBold.ttf', 'BOLD': HERE + '/NotoSans-Bold.ttf',
+         'ITAL': HERE + '/NotoSans-SemiBoldItalic.ttf'},
+    'PLX_': {'REG': HERE + '/IBMPlexSans-SemiBold.ttf', 'BOLD': HERE + '/IBMPlexSans-Bold.ttf',
+             'ITAL': HERE + '/IBMPlexSans-SemiBoldItalic.ttf'},
+}
 
 
 # What a line box has to hold: the tallest accented capitals Western text uses
@@ -216,6 +228,8 @@ def main():
     for prefix, faces in FAMILIES:
         for label, px in SIZES:
             for face, path in faces.items():
+                if px == SMALL_PX:
+                    path = SMALL_FACES[prefix][face]
                 total += emit('%s%s_%s' % (prefix, label, face), path, px)
     print('// %d bytes of glyph data.' % total, file=sys.stderr)
 

@@ -43,6 +43,12 @@ def main():
                   % (ital, fam), file=sys.stderr)
             ital = reg
         for label, px in mf.SIZES:
+            # The smallest a step heavier, as the UI faces (owner, 28 Nov).
+            if px == mf.SMALL_PX:
+                total += mf.emit('%s_%s_REG' % (fam, label), 'tools/fonts/Literata-SemiBold.ttf', px)
+                total += mf.emit('%s_%s_BOLD' % (fam, label), bold, px)
+                total += mf.emit('%s_%s_ITAL' % (fam, label), ital, px)
+                continue
             total += mf.emit('%s_%s_REG' % (fam, label), reg, px)
             total += mf.emit('%s_%s_BOLD' % (fam, label), bold, px)
             total += mf.emit('%s_%s_ITAL' % (fam, label), ital, px)

@@ -192,9 +192,9 @@ void XoApp::render(ToolsCanvas& c) {
 
   char buf[48];
   if (_over)
-    gk::foot(c, "tap the board to play again");
+    gk::foot(c, "");
   else if (friendly)
-    gk::foot(c, "pass the Sticky each turn");
+    gk::foot(c, "");
   else {
     snprintf(buf, sizeof(buf), "streak %d - best %d", prefs().getInt("x_strk", 0),
              prefs().getInt("x_best", 0));

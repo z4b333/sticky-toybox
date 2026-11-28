@@ -184,7 +184,7 @@ class BlackjackTool : public KitGame {
       c.button(STAND.x, STAND.y, STAND.w, STAND.h, "Stand", false, TS_LARGE);
       if (bj::canDouble(_t))
         c.button(DOUBLE.x, DOUBLE.y, DOUBLE.w, DOUBLE.h, "Double", false, TS_LARGE);
-      gk::foot(c, "your move - Up hits, Down stands");
+      gk::foot(c, "");
       return;
     }
     if (_t.phase == bj::DEALER) {
@@ -200,7 +200,7 @@ class BlackjackTool : public KitGame {
     gk::choice(c, BET, buf, true, TS_LARGE);
     const bool over = _t.phase == bj::DONE;
     c.button(DEAL.x, DEAL.y, DEAL.w, DEAL.h, over ? "Deal again" : "Deal", true, TS_LARGE);
-    gk::foot(c, over ? "hand over - tap Deal again" : "choose a bet, then Deal");
+    gk::foot(c, "");
   }
 
   void tapPlay(int x, int y) override {

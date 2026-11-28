@@ -293,9 +293,7 @@ class EpubTool : public ToolApp {
                          shelf::rowSep(k, idx, total), _books[b].synced);
     }
     drawShelfPager(c, total);
-    c.textCentered(c.width() / 2, 770,
-                   _note ? _note : "positions are kept on the card, with each book",
-                   TS_SMALL, true);
+    if (_note) c.textCentered(c.width() / 2, 770, _note, TS_SMALL, true);
   }
 
   // --- the shelf's first page: the books read last, as covers (kit
@@ -4355,9 +4353,7 @@ class EpubTool : public ToolApp {
     }
     shelf::drawPager(c, _mpage, total);
     if (!contents)
-      c.textCentered(c.width() / 2, 770,
-                     _listArmed >= 0 ? "tap x again: removed in Readest too" : "tap a highlight to go to its page",
-                     TS_SMALL, true);
+      if (_listArmed >= 0) c.textCentered(c.width() / 2, 770, "tap x again: removed in Readest too", TS_SMALL, true);
   }
 
   // The x on Highlights row `slot`.

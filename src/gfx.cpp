@@ -87,14 +87,14 @@ const UiFont* faceFor(int px, bool bold) {
         case 24: return &FONT_LIT_24_ITAL;
         case 32: return &FONT_LIT_32_ITAL;
         case 44: return &FONT_LIT_44_ITAL;
-        default: return &FONT_LIT_18_ITAL;
+        default: return &FONT_LIT_20_ITAL;
       }
     }
     switch (px) {
       case 24: return bold ? &FONT_LIT_24_BOLD : &FONT_LIT_24_REG;
       case 32: return bold ? &FONT_LIT_32_BOLD : &FONT_LIT_32_REG;
       case 44: return bold ? &FONT_LIT_44_BOLD : &FONT_LIT_44_REG;
-      default: return bold ? &FONT_LIT_18_BOLD : &FONT_LIT_18_REG;
+      default: return bold ? &FONT_LIT_20_BOLD : &FONT_LIT_20_REG;
     }
   }
 #endif
@@ -105,14 +105,14 @@ const UiFont* faceFor(int px, bool bold) {
         case 24: return &FONT_PLX_24_ITAL;
         case 32: return &FONT_PLX_32_ITAL;
         case 44: return &FONT_PLX_44_ITAL;
-        default: return &FONT_PLX_18_ITAL;
+        default: return &FONT_PLX_20_ITAL;
       }
     }
     switch (px) {
       case 24: return bold ? &FONT_PLX_24_BOLD : &FONT_PLX_24_REG;
       case 32: return bold ? &FONT_PLX_32_BOLD : &FONT_PLX_32_REG;
       case 44: return bold ? &FONT_PLX_44_BOLD : &FONT_PLX_44_REG;
-      default: return bold ? &FONT_PLX_18_BOLD : &FONT_PLX_18_REG;
+      default: return bold ? &FONT_PLX_20_BOLD : &FONT_PLX_20_REG;
     }
   }
 #endif
@@ -122,7 +122,7 @@ const UiFont* faceFor(int px, bool bold) {
       case 24: return &FONT_24_ITAL;
       case 32: return &FONT_32_ITAL;
       case 44: return &FONT_44_ITAL;
-      default: return &FONT_18_ITAL;
+      default: return &FONT_20_ITAL;
     }
   }
 #endif
@@ -130,7 +130,7 @@ const UiFont* faceFor(int px, bool bold) {
     case 24: return bold ? &FONT_24_BOLD : &FONT_24_REG;
     case 32: return bold ? &FONT_32_BOLD : &FONT_32_REG;
     case 44: return bold ? &FONT_44_BOLD : &FONT_44_REG;
-    default: return bold ? &FONT_18_BOLD : &FONT_18_REG;
+    default: return bold ? &FONT_20_BOLD : &FONT_20_REG;
   }
 }
 
@@ -250,9 +250,9 @@ struct Hit {
 // four sizes: the largest that is not taller than the line. Plex falls back to
 // Noto for the few letters it does not draw; Literata uses Noto's.
 const IntlFace* scriptFor(int px, bool plex) {
-  static const IntlFace* const noto[4] = {&SCRIPT_NOTO_18, &SCRIPT_NOTO_24, &SCRIPT_NOTO_32,
+  static const IntlFace* const noto[4] = {&SCRIPT_NOTO_20, &SCRIPT_NOTO_24, &SCRIPT_NOTO_32,
                                           &SCRIPT_NOTO_44};
-  static const IntlFace* const plx[4] = {&SCRIPT_PLX_18, &SCRIPT_PLX_24, &SCRIPT_PLX_32,
+  static const IntlFace* const plx[4] = {&SCRIPT_PLX_20, &SCRIPT_PLX_24, &SCRIPT_PLX_32,
                                          &SCRIPT_PLX_44};
   const int i = px >= 44 ? 3 : px >= 32 ? 2 : px >= 24 ? 1 : 0;
   return plex ? plx[i] : noto[i];
@@ -376,7 +376,7 @@ struct CardFace {
   bool live = false;
 };
 constexpr int CARD_BOXES = 4;
-constexpr int CARD_BOX_PX[CARD_BOXES] = {18, 24, 32, 44};
+constexpr int CARD_BOX_PX[CARD_BOXES] = {20, 24, 32, 44};
 
 // Two sets, because the device has two kinds of text. The UNIVERSAL face is
 // the firmware's own -- menus, labels, the hub, every screen that is Toybox

@@ -189,9 +189,7 @@ class FourRowTool : public KitGame {
     c.textInBox(UNDO.x, UNDO.y, UNDO.w, UNDO.h, "Undo", TS_MED, true, undoOk);
     gk::choice(c, CHIP_AI, "vs Sticky", !friendly);
     gk::choice(c, CHIP_FRIEND, "2 players", friendly);
-    gk::foot(c, c4::over(_s.g) ? "tap the board to play again"
-                : friendly     ? "tap a column - pass the Sticky"
-                               : "tap a column to drop");
+
   }
 
   void tapPlay(int x, int y) override {

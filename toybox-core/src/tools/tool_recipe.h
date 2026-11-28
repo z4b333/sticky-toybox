@@ -340,7 +340,6 @@ class RecipeTool : public ToolApp {
     }
     c.button(PHONE_BTN.x, PHONE_BTN.y, PHONE_BTN.w, PHONE_BTN.h, "Add from your phone", false, TS_MED);
     if (_note) c.textCentered(c.width() / 2, 620, _note, TS_MED, true);
-    else if (_nFlash) c.textCentered(c.width() / 2, 750, "hold one from the phone to delete it", TS_MED, true);
   }
 
   void onHold(int x, int y) override {

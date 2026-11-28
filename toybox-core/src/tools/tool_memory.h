@@ -120,9 +120,7 @@ class MemoryTool : public KitGame {
       }
     }
     const bool odd = _g.a >= 0 && _g.b >= 0;
-    gk::foot(c, mp::won(_g) ? "tap the board for a new game"
-                : odd       ? "no pair - tap to turn them back"
-                            : "turn two cards");
+    gk::foot(c, mp::won(_g) || !odd ? "" : "no pair");
   }
 
   void tapPlay(int x, int y) override {

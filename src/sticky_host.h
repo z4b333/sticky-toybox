@@ -69,7 +69,7 @@ class StickyCanvas : public ToolsCanvas {
       // moved up one step the first time somebody actually held the device,
       // and the smallest moved again -- 16 to 18 -- when holding it closer
       // turned out to be how people were reading the sub-labels.
-      case TS_SMALL: return 18;
+      case TS_SMALL: return 20;  // 18 -> 20, one weight heavier (owner, 28 Nov)
       case TS_LARGE: return 32;
       case TS_HUGE: return 44;
       default: return 24;

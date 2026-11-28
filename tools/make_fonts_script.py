@@ -39,7 +39,7 @@ FAMILIES = [
     ('NOTO', HERE + '/NotoSans-Regular.ttf', HERE + '/NotoSansThaiLooped-Regular.ttf'),
     ('PLX', HERE + '/IBMPlexSans-Regular.ttf', HERE + '/IBMPlexSansThaiLooped-Regular.ttf'),
 ]
-SIZES = [18, 24, 32, 44]
+SIZES = [20, 24, 32, 44]  # 18 -> 20 with the UI (owner, 28 Nov)
 BASIC = ImageFont.Layout.BASIC
 
 

@@ -474,9 +474,7 @@ void SettingsScreen::renderWall(ToolsHost& host, ToolsCanvas& c) {
     drawWallPager(c, false, _wallPage, pages);
   }
 
-  c.textCentered(SCREEN_W / 2, 776,
-                 _note ? _note : "a chosen picture is copied in, so the card can come out",
-                 TS_SMALL, true);
+  if (_note) c.textCentered(SCREEN_W / 2, 776, _note, TS_SMALL, true);
 }
 
 bool SettingsScreen::tapWall(ToolsHost& host, int x, int y) {
@@ -566,9 +564,7 @@ void SettingsScreen::renderLockPic(ToolsHost& host, ToolsCanvas& c) {
   c.fillRect(ph.x, ph.y - 8, ph.w, 1, true);
   c.text(ph.x + 4, ph.y + 8, "or send one from a phone", TS_SMALL, true);
 
-  c.textCentered(SCREEN_W / 2, 776,
-                 _note ? _note : "a chosen picture is copied in, so the card can come out",
-                 TS_SMALL, true);
+  if (_note) c.textCentered(SCREEN_W / 2, 776, _note, TS_SMALL, true);
 }
 
 bool SettingsScreen::tapLockPic(ToolsHost& host, int x, int y) {
@@ -825,8 +821,6 @@ void SettingsScreen::renderFont(ToolsHost& host, ToolsCanvas& c) {
     c.textCentered(SCREEN_W / 2, y0 + 196, "github.com/uxjulia/crossink-fonts", TS_SMALL, true,
                    true);
   }
-  else
-    c.textCentered(SCREEN_W / 2, 776, "apps can each be given their own face", TS_SMALL, true);
 }
 
 bool SettingsScreen::tapFont(ToolsHost& host, int x, int y) {
@@ -1189,8 +1183,7 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
     }
   }
 
-  c.textCentered(SCREEN_W / 2, 776, _note ? _note : "tap a row to open or change it", TS_SMALL,
-                 true);
+  if (_note) c.textCentered(SCREEN_W / 2, 776, _note, TS_SMALL, true);
 }
 
 // --- the apps page ------------------------------------------------------------
@@ -1229,7 +1222,6 @@ void SettingsScreen::renderApps(ToolsHost& host, ToolsCanvas& c) {
   const TRect r = setui::appsCardsRect();
   c.button(r.x, r.y, r.w, r.h, _note ? "THE CARDS WILL SHOW AGAIN" : "SHOW THE HOW-TO CARDS AGAIN",
            false, TS_MED);
-  c.textCentered(SCREEN_W / 2, 776, "hiding an app keeps everything saved in it", TS_SMALL, true);
 }
 
 // --- Reading sync (D) ----------------------------------------------------------------
@@ -1532,8 +1524,7 @@ void SettingsScreen::renderLock(ToolsHost& host, ToolsCanvas& c) {
     c.fillCircle(on ? tx + tw - th / 2 : tx + th / 2, ty + th / 2, th / 2 - 6, !on);
   }
 
-  c.textCentered(SCREEN_W / 2, 776, _note ? _note : "everything here takes effect at once",
-                 TS_SMALL, true);
+  if (_note) c.textCentered(SCREEN_W / 2, 776, _note, TS_SMALL, true);
 }
 
 bool SettingsScreen::tapLock(ToolsHost& host, int x, int y) {
@@ -2191,8 +2182,7 @@ void SettingsScreen::renderUpdate(ToolsHost& host, ToolsCanvas& c) {
       c.text(a.x + 52, a.y + (a.h - c.textHeight(TS_MED)) / 2, "Reset stats and tallies", TS_MED, true);
     }
   }
-  c.textCentered(SCREEN_W / 2, 776, _note ? _note : "notes and settings stay through every update",
-                 TS_SMALL, true);
+  if (_note) c.textCentered(SCREEN_W / 2, 776, _note, TS_SMALL, true);
 }
 
 bool SettingsScreen::tapUpdate(ToolsHost& host, int x, int y) {
@@ -2707,7 +2697,6 @@ void SettingsScreen::renderHomeStyle(ToolsHost& host, ToolsCanvas& c) {
     c.textCentered(t.x + t.w / 2, t.y + t.h / 2 - 8, "come with", TS_SMALL, true);
     c.textCentered(t.x + t.w / 2, t.y + t.h / 2 + 14, "updates", TS_SMALL, true);
   }
-  c.textCentered(SCREEN_W / 2, 776, "tap a style: home changes at once", TS_SMALL, true);
 }
 
 bool SettingsScreen::tapHomeStyle(ToolsHost& host, int x, int y) {

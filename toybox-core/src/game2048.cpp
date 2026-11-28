@@ -238,7 +238,7 @@ void G2048App::renderBoard(ToolsCanvas& c) {
 
   c.button(UNDO.x, UNDO.y, UNDO.w, UNDO.h, "Undo", false, TS_LARGE);
   c.button(NEW.x, NEW.y, NEW.w, NEW.h, "New game", false, TS_LARGE);
-  gk::foot(c, _over ? "no moves left - New game" : "swipe - or UP / DOWN");
+  gk::foot(c, _over ? "no moves left" : "");
 }
 
 void G2048App::renderResult(ToolsCanvas& c) {

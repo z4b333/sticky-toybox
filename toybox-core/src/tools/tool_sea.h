@@ -597,7 +597,7 @@ class SeaTool : public ToolApp {
     } else if (all) {
       c.textCentered(c.width() / 2, SET_MSG_Y, "all five are down - Start", TS_MED, true);
     }
-    gk::foot(c, all ? "tap a ship's chip to move it" : "tap a square - striped = where it goes");
+    gk::foot(c, "");
   }
 
   void tapSetup(int x, int y) {
@@ -713,7 +713,6 @@ class SeaTool : public ToolApp {
     ty += 40;
     c.text(OWN_TEXT_X, ty, againRule() ? "a hit fires again" : "one shot a turn", TS_SMALL, true);
     ty += 28;
-    c.text(OWN_TEXT_X, ty, "UP / DOWN aim - OK fire", TS_SMALL, true);
 
     if (fire && _sel >= 0)
       snprintf(buf, sizeof(buf), "tap %c%d again to fire", 'A' + sea::xOf(_sel), sea::yOf(_sel) + 1);

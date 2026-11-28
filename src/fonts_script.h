@@ -5,11 +5,11 @@
 #pragma once
 #include "fonts_intl.h"
 
-extern const IntlFace SCRIPT_NOTO_18;
+extern const IntlFace SCRIPT_NOTO_20;
 extern const IntlFace SCRIPT_NOTO_24;
 extern const IntlFace SCRIPT_NOTO_32;
 extern const IntlFace SCRIPT_NOTO_44;
-extern const IntlFace SCRIPT_PLX_18;
+extern const IntlFace SCRIPT_PLX_20;
 extern const IntlFace SCRIPT_PLX_24;
 extern const IntlFace SCRIPT_PLX_32;
 extern const IntlFace SCRIPT_PLX_44;

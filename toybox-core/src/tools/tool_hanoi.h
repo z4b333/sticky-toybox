@@ -177,10 +177,10 @@ class HanoiTool : public KitGame {
       else
         snprintf(line, sizeof(line), "Solved in %d moves", _g.moves);
       c.textCentered(W / 2, LIFT_Y, line, TS_LARGE, true, true);
-      gk::foot(c, "tap or OK to play again");
+      gk::foot(c, "");
       return;
     }
-    gk::foot(c, _g.held >= 0 ? "tap a peg to put it down" : "tap a peg to lift its top disc");
+    gk::foot(c, "");
   }
 
   void tapPlay(int x, int y) override {

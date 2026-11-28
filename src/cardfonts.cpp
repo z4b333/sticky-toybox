@@ -52,7 +52,7 @@ int ptOf(const char* file) {
 // The boxes Toybox draws in, and the order they are filled. Every one that
 // finds no reasonable file is simply left baked, which is why a family that
 // only ships small sizes still works for body text and leaves headings alone.
-constexpr int BOXES[4] = {18, 24, 32, 44};
+constexpr int BOXES[4] = {20, 24, 32, 44};
 
 // A file's own idea of its line height, from the header and the first style's
 // table of contents -- 96 bytes, not the megabyte behind them. Reading every

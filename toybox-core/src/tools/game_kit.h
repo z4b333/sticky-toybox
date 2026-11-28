@@ -89,7 +89,10 @@ inline void stripes(ToolsCanvas& c, int x, int y, int w, int h) {
 // Measured from the canvas's own foot, so a game turned on its side (Hanoi)
 // gets its hint at the bottom of the landscape screen too.
 inline constexpr int FOOT_Y = SCREEN_H - 46;
+// Status and records only (owner, 28 Nov): how-to lines went, the "?" card
+// explains the controls. An empty foot draws nothing, not even the rule.
 inline void foot(ToolsCanvas& c, const char* text) {
+  if (!text || !text[0]) return;
   const int fy = c.height() - 46;
   chrome2::dottedRule(c, 0, fy, c.width());
   if (text && text[0])
@@ -138,7 +141,7 @@ inline void menu(ToolsHost& h, ToolsCanvas& c, const char* title, const Row* row
     }
     chrome2::dottedRule(c, r.x, r.y + r.h + 2, r.w);
   }
-  foot(c, "tap a row");
+  foot(c, "");
 }
 inline int menuHit(int x, int y, int n, int w = SCREEN_W) {
   for (int i = 0; i < n && i < MENU_MAX; i++)

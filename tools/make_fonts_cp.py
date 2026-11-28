@@ -29,7 +29,7 @@ FIRST, LAST = 32, 126
 # Toybox bucket -> (CrossPoint regular face, bold face or None).
 # This is the mapping in src/activities/toybox/ToolsCanvasCp.h::fontOf.
 BUCKETS = [
-    ('18', 'notosans_8_regular', None),                    # TS_SMALL  -> SMALL_FONT_ID
+    ('20', 'notosans_8_regular', None),                    # TS_SMALL  -> SMALL_FONT_ID
     ('24', 'ubuntu_10_regular', 'ubuntu_10_bold'),         # TS_MED    -> UI_10_FONT_ID
     ('32', 'ubuntu_12_regular', 'ubuntu_12_bold'),         # TS_LARGE  -> UI_12_FONT_ID
     ('44', 'notosans_18_regular', 'notosans_18_bold'),     # TS_HUGE   -> NOTOSANS_18_FONT_ID
