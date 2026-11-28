@@ -14,13 +14,15 @@ inline constexpr TRect MODE_SW{240, 60, 220, 48};
 
 // countdown
 inline constexpr int PRESET_W = 104, PRESET_H = 52, PRESET_GAP = 8;
-// d21 (owner): spread down the page, for the "tap the time" line under the
-// bar and the room the foot had left empty.
-inline constexpr int PRESET_X0 = 20, PRESET_Y0 = 392, PRESET_Y1 = 456;
+// d22 (owner): three rows of four -- twelve presets, so the eight a first
+// start has leave four free before Save has to ask which one to replace.
+inline constexpr int PRESET_X0 = 20, PRESET_Y0 = 344, PRESET_STEP = 60, PRESET_ROWS = 3;
+inline constexpr int PRESET_Y1 = PRESET_Y0 + (PRESET_ROWS - 1) * PRESET_STEP;  // the last row
 // The presets a first start has; the owner's own replace them (24 Nov: the
 // time is typed on a keypad, and "Save as preset" keeps it as a chip).
-inline constexpr int MAX_PRESETS = 8;
-inline constexpr int PRESET_DEF_MIN[MAX_PRESETS] = {1, 3, 5, 10, 15, 25, 30, 60};
+inline constexpr int MAX_PRESETS = 12;  // d22: was 8
+inline constexpr int DEF_PRESETS = 8;
+inline constexpr int PRESET_DEF_MIN[DEF_PRESETS] = {1, 3, 5, 10, 15, 25, 30, 60};
 inline constexpr int MIN_SEC = 5, MAX_SEC = 99 * 60 + 59;
 inline constexpr TRect CD_START{40, 556, 200, 66};
 inline constexpr TRect CD_RESET{260, 556, 180, 66};
@@ -36,7 +38,7 @@ inline constexpr TRect SW_LAP{340, 300, 100, 66};
 inline TRect presetRect(int i) {
   const int col = i % 4, row = i / 4;
   return TRect{PRESET_X0 + col * (PRESET_W + PRESET_GAP),
-               row ? PRESET_Y1 : PRESET_Y0, PRESET_W, PRESET_H};
+               PRESET_Y0 + row * PRESET_STEP, PRESET_W, PRESET_H};
 }
 }  // namespace timerui
 
@@ -359,7 +361,7 @@ class TimerTool : public ToolApp {
   }
 
   // --- presets ----------------------------------------------------------------
-  // NVS "t_pre": a count, then up to eight times in seconds.
+  // NVS "t_pre": a count, then up to twelve times in seconds.
   void loadPresets() {
     using namespace timerui;
     uint16_t b[1 + MAX_PRESETS] = {};
@@ -369,8 +371,8 @@ class TimerTool : public ToolApp {
         if (b[1 + i] >= MIN_SEC && b[1 + i] <= MAX_SEC) _pre[_nPre++] = b[1 + i];
       return;
     }
-    _nPre = MAX_PRESETS;
-    for (int i = 0; i < MAX_PRESETS; i++) _pre[i] = PRESET_DEF_MIN[i] * 60;
+    _nPre = DEF_PRESETS;
+    for (int i = 0; i < DEF_PRESETS; i++) _pre[i] = PRESET_DEF_MIN[i] * 60;
   }
   void savePresets() {
     uint16_t b[1 + timerui::MAX_PRESETS] = {};

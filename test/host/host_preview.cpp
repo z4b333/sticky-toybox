@@ -9095,7 +9095,7 @@ int main() {
   setScreen("tool_timer");
   g_dumpEnabled = false;
   toybox.open(false, 2);
-    quietTap(20 + 112 + 52, 372 + 26);  // 25 min preset (row 1, col 1)
+    tapRect(timerui::presetRect(5));  // 25 min preset (row 1, col 1)
   g_dumpEnabled = true;
   tapRect(timerui::CD_START);
 
@@ -9134,21 +9134,48 @@ int main() {
       printf("TIMER FAIL: 9 0 set %d s (want 90)\n", tt->hostSetSec());
       abort();
     }
-    // d20: eight presets: Save asks which one to replace, and the tapped
-    // chip gives way to 1:30 in its sorted place.
+    // d22: twelve slots, eight taken: 1:30 goes straight in.
     tapRect(timerui::SAVE_BTN);
-    if (tt->hostPresets() != 8) {
-      printf("TIMER FAIL: a ninth preset was saved\n");
+    if (tt->hostPresets() != 9 || tt->hostPreset(1) != 90) {
+      printf("TIMER FAIL: 1:30 not saved into a free slot (%d, [1]=%d)\n", tt->hostPresets(), tt->hostPreset(1));
+      abort();
+    }
+    // Fill the last three: 2, 4 and 6 minutes.
+    for (const int d : {2, 4, 6}) {
+      tapRect(timerui::TIME_TAP);
+      key(d - 1);
+      key(numpad::ZERO);
+      key(numpad::ZERO);
+      key(numpad::DONE);
+      tapRect(timerui::SAVE_BTN);
+    }
+    if (tt->hostPresets() != 12) {
+      printf("TIMER FAIL: %d presets after filling (want 12)\n", tt->hostPresets());
+      abort();
+    }
+    // Full: 1:45 asks which one to replace, and the tapped chip gives way.
+    tapRect(timerui::TIME_TAP);
+    key(0);  // 1
+    key(3);  // 4
+    key(4);  // 5
+    key(numpad::DONE);
+    if (tt->hostSetSec() != 105) {
+      printf("TIMER FAIL: 1 4 5 set %d s\n", tt->hostSetSec());
+      abort();
+    }
+    tapRect(timerui::SAVE_BTN);
+    if (tt->hostPresets() != 12) {
+      printf("TIMER FAIL: a thirteenth preset was saved\n");
       abort();
     }
     g_dumpEnabled = true;
     setScreen("tool_timer_full");
     stickyHost.refresh(true);
     g_dumpEnabled = false;
-    tapRect(timerui::presetRect(7));  // 60 min goes
-    if (tt->hostPresets() != 8 || tt->hostPreset(1) != 90 || tt->hostPreset(7) != 30 * 60) {
-      printf("TIMER FAIL: presets after replace: %d, [1]=%d [7]=%d\n", tt->hostPresets(), tt->hostPreset(1),
-             tt->hostPreset(7));
+    tapRect(timerui::presetRect(11));  // 60 min goes
+    if (tt->hostPresets() != 12 || tt->hostPreset(2) != 105 || tt->hostPreset(11) != 30 * 60) {
+      printf("TIMER FAIL: presets after replace: %d, [2]=%d [11]=%d\n", tt->hostPresets(), tt->hostPreset(2),
+             tt->hostPreset(11));
       abort();
     }
     g_dumpEnabled = true;
@@ -9165,14 +9192,14 @@ int main() {
     stickyHost.refresh(true);
     g_dumpEnabled = false;
     tapRect(timerui::presetRect(0));
-    if (tt->hostPresets() != 7 || tt->hostPreset(0) != 90) {
+    if (tt->hostPresets() != 11 || tt->hostPreset(0) != 90) {
       printf("TIMER FAIL: hold + Remove left %d, [0]=%d\n", tt->hostPresets(), tt->hostPreset(0));
       abort();
     }
     toybox.goHub();
     toybox.open(false, 2);
     tt = static_cast<TimerTool*>(toybox.hostActive());
-    if (tt->hostPresets() != 7 || tt->hostPreset(0) != 90 || tt->hostSetSec() != 90) {
+    if (tt->hostPresets() != 11 || tt->hostPreset(0) != 90 || tt->hostSetSec() != 105) {
       printf("TIMER FAIL: presets not kept across a restart\n");
       abort();
     }
