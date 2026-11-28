@@ -32,11 +32,11 @@ derived from real fonts:
 |---|---|---|
 | UI Latin, Vietnamese, European (default) | Noto Sans | SIL Open Font License 1.1 |
 | UI Thai (default) | Noto Sans Thai Looped | SIL Open Font License 1.1 |
-| UI Latin, Vietnamese, European and Thai (choice) | KoHo | SIL Open Font License 1.1 |
+| UI Latin, Vietnamese, European and Thai (choice) | Prompt | SIL Open Font License 1.1 |
 | Reading face | Literata | SIL Open Font License 1.1 |
 | Chinese, Japanese, Korean, kana | Noto Sans CJK | SIL Open Font License 1.1 |
 
-The Noto, KoHo, IBM Plex and Literata files are carried unmodified in `tools/fonts/`
+The Noto, Prompt, IBM Plex and Literata files are carried unmodified in `tools/fonts/`
 with their licences (`OFL-*.txt`), so every table can be regenerated. Embedding
 rasterised glyphs in firmware is exactly the use the OFL was written for.
 
@@ -46,7 +46,7 @@ Up to v1.4 the Thai tables came from Loma (TLWG), GPL-2+ with the font
 exception, and this file recorded an open question: whether compiling Loma's
 rasterised outlines into firmware counted as the exception's "embedding", or
 made the firmware a derivative work of a GPL-2 font. v2 replaced Loma with
-Noto Sans Thai Looped and IBM Plex Sans Thai Looped (KoHo since 28 Nov), all OFL 1.1, and the
+Noto Sans Thai Looped and IBM Plex Sans Thai Looped (Prompt since 28 Nov), all OFL 1.1, and the
 question no longer arises for anything this repository builds. (`tools/thai_proof.py`
 still documents how Loma's mark placement was measured.)
 

@@ -349,9 +349,10 @@ const char* StickyHost::fontFor(int slot) const {
                                                      FONT_FAMILY_LEN);
     // v1's default face was called DejaVu; Noto Sans took its place as "".
     if (strcmp(g_fontName[slot], "DejaVu") == 0) g_fontName[slot][0] = 0;
-    // d25: KoHo took IBM Plex Sans's place as the second built-in.
-    if (strcmp(g_fontName[slot], "IBM Plex Sans") == 0) {
-      snprintf(g_fontName[slot], FONT_FAMILY_LEN, "KoHo");
+    // d25: Prompt took IBM Plex Sans's place as the second built-in.
+    // (d-test25/26 had KoHo there: read it as Prompt too.)
+    if (strcmp(g_fontName[slot], "IBM Plex Sans") == 0 || strcmp(g_fontName[slot], "KoHo") == 0) {
+      snprintf(g_fontName[slot], FONT_FAMILY_LEN, "Prompt");
       const_cast<StickyHost*>(this)->prefs().putString(kFontKey[slot], g_fontName[slot]);
     }
   }

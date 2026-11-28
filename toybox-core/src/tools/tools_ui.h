@@ -28,7 +28,7 @@ enum TSize : uint8_t { TS_SMALL = 0, TS_MED = 1, TS_LARGE = 2, TS_HUGE = 3 };
 // small to read. Above that it stays where it was asked to be. (Up to v1.4 it
 // went a step up at every size, because Loma, the Thai face then, drew a good
 // deal smaller than the DejaVu beside it. The v2 faces are drawn as pairs --
-// Noto Sans with Noto Sans Thai Looped, KoHo with its own Thai -- and a
+// Noto Sans with Noto Sans Thai Looped, Prompt with its own Thai -- and a
 // step up made the Thai the bigger of the two.)
 //
 // Han and hangul fill their box the way Latin does, so they only need the box

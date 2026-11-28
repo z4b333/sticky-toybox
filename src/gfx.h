@@ -15,7 +15,7 @@ int drawText(int x, int y, const char* s, int scale, uint8_t color, bool bold = 
 int textWidth(const char* s, int scale, bool bold = false, int spacing = 0);
 
 // The typeface the Latin tables answer with: 0 = Noto Sans (the default),
-// 1 = KoHo (was IBM Plex Sans; Literata left in d24). Set from the slot that is drawing (the
+// 1 = Prompt (was IBM Plex Sans; Literata left in d24). Set from the slot that is drawing (the
 // device's for firmware screens, an app's for its own words) and put back.
 void setTypeface(int n);
 int typeface();

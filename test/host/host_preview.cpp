@@ -4924,10 +4924,10 @@ int main() {
       // ...and it is the same answer settings gives, because it is one
       // setting now rather than two.
       g_dumpEnabled = true;
-      setScreen("tool_epub_koho");  // the page in the second built-in face
+      setScreen("tool_epub_prompt");  // the page in the second built-in face
       stickyHost.refresh(true);
       g_dumpEnabled = false;
-      if (strcmp(stickyHost.fontFor(ToolsHost::FONT_READER), "KoHo") != 0) {
+      if (strcmp(stickyHost.fontFor(ToolsHost::FONT_READER), "Prompt") != 0) {
         printf("EPUB APP FAIL: settings and the reader disagree about the face\n");
         abort();
       }
@@ -7561,7 +7561,7 @@ int main() {
       }
     {
       // Measured under Noto Sans, whose italic is drawn to its own, narrower
-      // fit (KoHo's italic keeps the roman's widths, so a width test there
+      // fit (Prompt's italic keeps the roman's widths, so a width test there
       // proves nothing). If the bake ever falls back to the roman these two
       // numbers become equal and this fails.
 #ifndef TOYBOX_CP_FONTS
@@ -8659,15 +8659,15 @@ int main() {
     g_dumpEnabled = false;
 
     // The built-in faces come first, by name; the default is ticked.
-    // Choosing KoHo dresses the device at once -- no card involved --
+    // Choosing Prompt dresses the device at once -- no card involved --
     // and is remembered by name.
     tapRect(setui::fontRect(1));
     {
       char plex[32] = "";
       prefs.getString("font_uni", plex, sizeof(plex));
-      if (gfx::typeface() != 1 || strcmp(plex, "KoHo") != 0 ||
+      if (gfx::typeface() != 1 || strcmp(plex, "Prompt") != 0 ||
           gfx::cardFaceLive(false)) {
-        printf("FONT PAGE FAIL: KoHo did not take (face %d, kept '%s')\n",
+        printf("FONT PAGE FAIL: Prompt did not take (face %d, kept '%s')\n",
                gfx::typeface(), plex);
         abort();
       }
@@ -12198,12 +12198,12 @@ int main() {
   }
 
   // The second built-in face on the device's own screens: the drawers and
-  // settings in KoHo, for judging its weight against Noto's.
+  // settings in Prompt, for judging its weight against Noto's.
 #ifndef TOYBOX_CP_FONTS
   {
-    stickyHost.fontSet(ToolsHost::FONT_DEVICE, "KoHo");
+    stickyHost.fontSet(ToolsHost::FONT_DEVICE, "Prompt");
     toybox.goHub();
-    static const char* kKoho[3] = {"koho_play", "koho_utility", "koho_study"};
+    static const char* kKoho[3] = {"prompt_play", "prompt_utility", "prompt_study"};
     for (int f = 0; f < 3; f++) {
       g_dumpEnabled = false;
       toybox.hostHub().goHome();
@@ -12212,7 +12212,7 @@ int main() {
       toybox.onTap(80 + f * 160, hubui::DOCK_Y + hubui::DOCK_H / 2);
     }
     g_dumpEnabled = true;
-    setScreen("koho_settings");
+    setScreen("prompt_settings");
     toybox.openSettings();
     stickyHost.fontSet(ToolsHost::FONT_DEVICE, "");
   }
