@@ -32,8 +32,7 @@ derived from real fonts:
 |---|---|---|
 | UI Latin, Vietnamese, European (default) | Noto Sans | SIL Open Font License 1.1 |
 | UI Thai (default) | Noto Sans Thai Looped | SIL Open Font License 1.1 |
-| UI Latin, Vietnamese, European (choice) | IBM Plex Sans | SIL Open Font License 1.1 |
-| UI Thai (choice) | IBM Plex Sans Thai Looped | SIL Open Font License 1.1 |
+| UI Latin, Vietnamese, European and Thai (choice) | KoHo | SIL Open Font License 1.1 |
 | Reading face | Literata | SIL Open Font License 1.1 |
 | Chinese, Japanese, Korean, kana | Noto Sans CJK | SIL Open Font License 1.1 |
 

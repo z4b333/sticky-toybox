@@ -134,7 +134,9 @@ class StickyHost : public ToolsHost {
   // d24: two built in. Literata left the firmware (170 KB); a stored
   // "Literata" now names a card family, which the card may carry.
   int typefaceCount() const override { return 2; }
-  const char* typefaceName(int n) const override { return n == 1 ? "IBM Plex Sans" : "Noto Sans"; }
+  // d25: the second is KoHo, in IBM Plex Sans's place; a stored "IBM Plex
+  // Sans" is read as KoHo (sticky_host.cpp).
+  const char* typefaceName(int n) const override { return n == 1 ? "KoHo" : "Noto Sans"; }
   int typeface() const override { return gfx::typeface(); }
   void setTypeface(int n) override { gfx::setTypeface(n); }
   int deviceOrientation() override {

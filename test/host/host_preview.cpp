@@ -4923,7 +4923,7 @@ int main() {
       }
       // ...and it is the same answer settings gives, because it is one
       // setting now rather than two.
-      if (strcmp(stickyHost.fontFor(ToolsHost::FONT_READER), "IBM Plex Sans") != 0) {
+      if (strcmp(stickyHost.fontFor(ToolsHost::FONT_READER), "KoHo") != 0) {
         printf("EPUB APP FAIL: settings and the reader disagree about the face\n");
         abort();
       }
@@ -7556,19 +7556,16 @@ int main() {
         abort();
       }
     {
-      // Measured under IBM PLEX (d24: Literata left the firmware), not the default face. DejaVu's oblique is
-      // drawn to the roman's own advance widths -- that is how the family is
-      // designed -- so a width test there proves nothing either way. Literata
-      // draws a true italic with its own narrower fit, so if the bake ever
-      // falls back to the roman (make_fonts_read.py warns, and warnings get
-      // scrolled past) these two numbers become equal and this fails.
+      // Measured under Noto Sans, whose italic is drawn to its own, narrower
+      // fit (KoHo's italic keeps the roman's widths, so a width test there
+      // proves nothing). If the bake ever falls back to the roman these two
+      // numbers become equal and this fails.
 #ifndef TOYBOX_CP_FONTS
-      gfx::setTypeface(1);
+      gfx::setTypeface(0);
       const int roman = stickyHost.canvas().textWidth("ende", TS_MED, false, false);
       const int ital = stickyHost.canvas().textWidth("ende", TS_MED, false, true);
-      gfx::setTypeface(0);
       if (roman == ital) {
-        printf("STYLE FAIL: Plex's italic measures the same as its roman (%d px)"
+        printf("STYLE FAIL: Noto's italic measures the same as its roman (%d px)"
                " - the italic tables are the roman face\n", roman);
         abort();
       }
@@ -8658,15 +8655,15 @@ int main() {
     g_dumpEnabled = false;
 
     // The built-in faces come first, by name; the default is ticked.
-    // Choosing IBM Plex Sans dresses the device at once -- no card involved --
+    // Choosing KoHo dresses the device at once -- no card involved --
     // and is remembered by name.
     tapRect(setui::fontRect(1));
     {
       char plex[32] = "";
       prefs.getString("font_uni", plex, sizeof(plex));
-      if (gfx::typeface() != 1 || strcmp(plex, "IBM Plex Sans") != 0 ||
+      if (gfx::typeface() != 1 || strcmp(plex, "KoHo") != 0 ||
           gfx::cardFaceLive(false)) {
-        printf("FONT PAGE FAIL: IBM Plex Sans did not take (face %d, kept '%s')\n",
+        printf("FONT PAGE FAIL: KoHo did not take (face %d, kept '%s')\n",
                gfx::typeface(), plex);
         abort();
       }

@@ -2425,7 +2425,7 @@ void setupRowDraw(ToolsCanvas& c, const TRect& r, const char* label, const char*
 // indexes: 1, 5, 15, 30 minutes, then never.
 constexpr uint8_t kSetupSleep[5] = {1, 2, 3, 4, 0};
 // The built-in faces setup offers for the device's own words.
-constexpr int kSetupFace[2] = {0, 1};  // Noto Sans, IBM Plex Sans
+constexpr int kSetupFace[2] = {0, 1};  // Noto Sans, KoHo
 }  // namespace
 
 // The phone page's "Your Sticky" card: version, battery, font, home Wi-Fi.

@@ -61,7 +61,8 @@ namespace {
 // bold cut (see tools/make_fonts.py). The 8x8 pixel font this replaced was
 // scaled 2x, 3x and 4x, which turned every large letter into a grid of squares
 // -- and its bold was the same glyph smeared one pixel sideways.
-// Which family answers: 0 is Noto Sans (the default), 1 IBM Plex Sans.
+// Which family answers: 0 is Noto Sans (the default), 1 KoHo (IBM Plex Sans
+// until 28 Nov; its tables keep the PLX_ prefix).
 // (d24: Literata left the firmware -- 170 KB -- and is a card font now.) A slot's choice (Settings -> Font) sets it while that
 // slot draws -- the device's for every firmware screen, a book's for the page
 // -- and puts it back. The CrossPoint pass has one stand-in family and ignores
