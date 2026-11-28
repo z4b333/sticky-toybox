@@ -14,16 +14,17 @@ inline constexpr TRect MODE_SW{240, 60, 220, 48};
 
 // countdown
 inline constexpr int PRESET_W = 104, PRESET_H = 52, PRESET_GAP = 8;
-// d20: 32 px lower, for the "tap the time" line under the bar.
-inline constexpr int PRESET_X0 = 20, PRESET_Y0 = 344, PRESET_Y1 = 404;
+// d21 (owner): spread down the page, for the "tap the time" line under the
+// bar and the room the foot had left empty.
+inline constexpr int PRESET_X0 = 20, PRESET_Y0 = 392, PRESET_Y1 = 456;
 // The presets a first start has; the owner's own replace them (24 Nov: the
 // time is typed on a keypad, and "Save as preset" keeps it as a chip).
 inline constexpr int MAX_PRESETS = 8;
 inline constexpr int PRESET_DEF_MIN[MAX_PRESETS] = {1, 3, 5, 10, 15, 25, 30, 60};
 inline constexpr int MIN_SEC = 5, MAX_SEC = 99 * 60 + 59;
-inline constexpr TRect CD_START{40, 476, 200, 66};
-inline constexpr TRect CD_RESET{260, 476, 180, 66};
-inline constexpr TRect SAVE_BTN{20, 564, 440, 60};
+inline constexpr TRect CD_START{40, 556, 200, 66};
+inline constexpr TRect CD_RESET{260, 556, 180, 66};
+inline constexpr TRect SAVE_BTN{20, 660, 440, 60};
 // The big time: tap it to type one.
 inline constexpr TRect TIME_TAP{20, 112, 440, 144};
 
