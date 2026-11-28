@@ -4923,7 +4923,7 @@ int main() {
       }
       // ...and it is the same answer settings gives, because it is one
       // setting now rather than two.
-      if (strcmp(stickyHost.fontFor(ToolsHost::FONT_READER), "Literata") != 0) {
+      if (strcmp(stickyHost.fontFor(ToolsHost::FONT_READER), "IBM Plex Sans") != 0) {
         printf("EPUB APP FAIL: settings and the reader disagree about the face\n");
         abort();
       }
@@ -7556,7 +7556,7 @@ int main() {
         abort();
       }
     {
-      // Measured under LITERATA, not the default face. DejaVu's oblique is
+      // Measured under IBM PLEX (d24: Literata left the firmware), not the default face. DejaVu's oblique is
       // drawn to the roman's own advance widths -- that is how the family is
       // designed -- so a width test there proves nothing either way. Literata
       // draws a true italic with its own narrower fit, so if the bake ever
@@ -7568,7 +7568,7 @@ int main() {
       const int ital = stickyHost.canvas().textWidth("ende", TS_MED, false, true);
       gfx::setTypeface(0);
       if (roman == ital) {
-        printf("STYLE FAIL: Literata's italic measures the same as its roman (%d px)"
+        printf("STYLE FAIL: Plex's italic measures the same as its roman (%d px)"
                " - the italic tables are the roman face\n", roman);
         abort();
       }
@@ -8660,11 +8660,11 @@ int main() {
     // The built-in faces come first, by name; the default is ticked.
     // Choosing IBM Plex Sans dresses the device at once -- no card involved --
     // and is remembered by name.
-    tapRect(setui::fontRect(2));
+    tapRect(setui::fontRect(1));
     {
       char plex[32] = "";
       prefs.getString("font_uni", plex, sizeof(plex));
-      if (gfx::typeface() != 2 || strcmp(plex, "IBM Plex Sans") != 0 ||
+      if (gfx::typeface() != 1 || strcmp(plex, "IBM Plex Sans") != 0 ||
           gfx::cardFaceLive(false)) {
         printf("FONT PAGE FAIL: IBM Plex Sans did not take (face %d, kept '%s')\n",
                gfx::typeface(), plex);

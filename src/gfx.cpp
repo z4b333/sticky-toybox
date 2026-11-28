@@ -22,7 +22,6 @@
 #include "fonts_cp.h"
 #else
 #include "fonts_ui.h"
-#include "fonts_read.h"
 #endif
 
 #ifdef TOYBOX_HOST
@@ -62,8 +61,8 @@ namespace {
 // bold cut (see tools/make_fonts.py). The 8x8 pixel font this replaced was
 // scaled 2x, 3x and 4x, which turned every large letter into a grid of squares
 // -- and its bold was the same glyph smeared one pixel sideways.
-// Which family answers: 0 is Noto Sans (the default), 1 Literata (the reading
-// face), 2 IBM Plex Sans. A slot's choice (Settings -> Font) sets it while that
+// Which family answers: 0 is Noto Sans (the default), 1 IBM Plex Sans.
+// (d24: Literata left the firmware -- 170 KB -- and is a card font now.) A slot's choice (Settings -> Font) sets it while that
 // slot draws -- the device's for every firmware screen, a book's for the page
 // -- and puts it back. The CrossPoint pass has one stand-in family and ignores
 // the knob, faithfully to that firmware.
@@ -80,26 +79,8 @@ int g_typeface = 0;
 bool g_italic = false;
 
 const UiFont* faceFor(int px, bool bold) {
-#ifdef UI_HAS_EXTRAS
-  if (g_typeface == 1) {
-    if (g_italic && !bold) {
-      switch (px) {
-        case 24: return &FONT_LIT_24_ITAL;
-        case 32: return &FONT_LIT_32_ITAL;
-        case 44: return &FONT_LIT_44_ITAL;
-        default: return &FONT_LIT_20_ITAL;
-      }
-    }
-    switch (px) {
-      case 24: return bold ? &FONT_LIT_24_BOLD : &FONT_LIT_24_REG;
-      case 32: return bold ? &FONT_LIT_32_BOLD : &FONT_LIT_32_REG;
-      case 44: return bold ? &FONT_LIT_44_BOLD : &FONT_LIT_44_REG;
-      default: return bold ? &FONT_LIT_20_BOLD : &FONT_LIT_20_REG;
-    }
-  }
-#endif
 #ifdef UI_HAS_PLEX
-  if (g_typeface == 2) {
+  if (g_typeface == 1) {
     if (g_italic && !bold) {
       switch (px) {
         case 24: return &FONT_PLX_24_ITAL;
@@ -248,7 +229,7 @@ struct Hit {
 
 // The family's own Latin-past-ASCII and Thai (fonts_script.cpp), at the UI's
 // four sizes: the largest that is not taller than the line. Plex falls back to
-// Noto for the few letters it does not draw; Literata uses Noto's.
+// Noto for the few letters it does not draw.
 const IntlFace* scriptFor(int px, bool plex) {
   static const IntlFace* const noto[4] = {&SCRIPT_NOTO_20, &SCRIPT_NOTO_24, &SCRIPT_NOTO_32,
                                           &SCRIPT_NOTO_44};
@@ -260,7 +241,7 @@ const IntlFace* scriptFor(int px, bool plex) {
 
 Hit intlFind(int px, int& yAdjust, uint32_t cp) {
   yAdjust = 0;
-  if (g_typeface == 2)
+  if (g_typeface == 1)
     if (const IntlGlyph* g = intlGlyph(scriptFor(px, true), cp)) return {scriptFor(px, true), g};
   if (const IntlGlyph* g = intlGlyph(scriptFor(px, false), cp)) return {scriptFor(px, false), g};
   const IntlFace* baked = intlFor(px, yAdjust);
@@ -571,7 +552,7 @@ int cardFaceLine(int px, bool content) {
 void contentFace(bool on) { g_contentOn = on; }
 bool contentFaceOn() { return g_contentOn; }
 
-void setTypeface(int n) { g_typeface = (n < 0 || n > 2) ? 0 : n; }
+void setTypeface(int n) { g_typeface = (n < 0 || n > 1) ? 0 : n; }
 int typeface() { return g_typeface; }
 void setItalic(bool on) { g_italic = on; }
 bool italic() { return g_italic; }

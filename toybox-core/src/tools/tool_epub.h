@@ -172,7 +172,8 @@ class EpubTool : public ToolApp {
     // carried across the first time it opens the reader.
     if (!h.fontFor(ToolsHost::FONT_READER)[0]) {
       const uint32_t old = prefs().getUInt("rd_face", 0);
-      if (old == 1 && h.typefaceCount() > 1) h.fontSet(ToolsHost::FONT_READER, h.typefaceName(1));
+      // 1 was Literata, a card family since d24: kept if the card has it.
+      if (old == 1) h.fontSet(ToolsHost::FONT_READER, "Literata");
       prefs().remove("rd_face");
     }
     _face = faceIndexOf(h, h.fontFor(ToolsHost::FONT_READER));
