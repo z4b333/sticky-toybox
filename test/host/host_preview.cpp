@@ -9134,24 +9134,20 @@ int main() {
       printf("TIMER FAIL: 9 0 set %d s (want 90)\n", tt->hostSetSec());
       abort();
     }
-    // Eight presets: Save waits until one is held and removed.
+    // d20: eight presets: Save asks which one to replace, and the tapped
+    // chip gives way to 1:30 in its sorted place.
     tapRect(timerui::SAVE_BTN);
     if (tt->hostPresets() != 8) {
       printf("TIMER FAIL: a ninth preset was saved\n");
       abort();
     }
-    {
-      const TRect r = timerui::presetRect(7);  // 60 min
-      toybox.onHold(r.x + r.w / 2, r.y + r.h / 2);
-    }
     g_dumpEnabled = true;
-    setScreen("tool_timer_remove");
+    setScreen("tool_timer_full");
     stickyHost.refresh(true);
     g_dumpEnabled = false;
-    tapRect(timerui::presetRect(7));
-    tapRect(timerui::SAVE_BTN);
+    tapRect(timerui::presetRect(7));  // 60 min goes
     if (tt->hostPresets() != 8 || tt->hostPreset(1) != 90 || tt->hostPreset(7) != 30 * 60) {
-      printf("TIMER FAIL: presets after remove+save: %d, [1]=%d [7]=%d\n", tt->hostPresets(), tt->hostPreset(1),
+      printf("TIMER FAIL: presets after replace: %d, [1]=%d [7]=%d\n", tt->hostPresets(), tt->hostPreset(1),
              tt->hostPreset(7));
       abort();
     }
@@ -9159,15 +9155,29 @@ int main() {
     setScreen("tool_timer_saved");
     stickyHost.refresh(true);
     g_dumpEnabled = false;
+    // Hold still removes one.
+    {
+      const TRect r = timerui::presetRect(0);  // 1 min
+      toybox.onHold(r.x + r.w / 2, r.y + r.h / 2);
+    }
+    g_dumpEnabled = true;
+    setScreen("tool_timer_remove");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
+    tapRect(timerui::presetRect(0));
+    if (tt->hostPresets() != 7 || tt->hostPreset(0) != 90) {
+      printf("TIMER FAIL: hold + Remove left %d, [0]=%d\n", tt->hostPresets(), tt->hostPreset(0));
+      abort();
+    }
     toybox.goHub();
     toybox.open(false, 2);
     tt = static_cast<TimerTool*>(toybox.hostActive());
-    if (tt->hostPresets() != 8 || tt->hostPreset(1) != 90 || tt->hostSetSec() != 90) {
+    if (tt->hostPresets() != 7 || tt->hostPreset(0) != 90 || tt->hostSetSec() != 90) {
       printf("TIMER FAIL: presets not kept across a restart\n");
       abort();
     }
     g_dumpEnabled = true;
-    printf("timer keypad ok (typed 2:30 and 1:30, 3 s refused, preset saved in order and kept)\n");
+    printf("timer keypad ok (typed 2:30 and 1:30, 3 s refused, full presets replace one, hold removes, kept)\n");
   }
 
   // The other half of the same tool. It had never been rendered here, so the

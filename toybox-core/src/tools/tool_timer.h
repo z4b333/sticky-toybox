@@ -14,15 +14,16 @@ inline constexpr TRect MODE_SW{240, 60, 220, 48};
 
 // countdown
 inline constexpr int PRESET_W = 104, PRESET_H = 52, PRESET_GAP = 8;
-inline constexpr int PRESET_X0 = 20, PRESET_Y0 = 312, PRESET_Y1 = 372;
+// d20: 32 px lower, for the "tap the time" line under the bar.
+inline constexpr int PRESET_X0 = 20, PRESET_Y0 = 344, PRESET_Y1 = 404;
 // The presets a first start has; the owner's own replace them (24 Nov: the
 // time is typed on a keypad, and "Save as preset" keeps it as a chip).
 inline constexpr int MAX_PRESETS = 8;
 inline constexpr int PRESET_DEF_MIN[MAX_PRESETS] = {1, 3, 5, 10, 15, 25, 30, 60};
 inline constexpr int MIN_SEC = 5, MAX_SEC = 99 * 60 + 59;
-inline constexpr TRect CD_START{40, 444, 200, 66};
-inline constexpr TRect CD_RESET{260, 444, 180, 66};
-inline constexpr TRect SAVE_BTN{20, 532, 440, 60};
+inline constexpr TRect CD_START{40, 476, 200, 66};
+inline constexpr TRect CD_RESET{260, 476, 180, 66};
+inline constexpr TRect SAVE_BTN{20, 564, 440, 60};
 // The big time: tap it to type one.
 inline constexpr TRect TIME_TAP{20, 112, 440, 144};
 
@@ -186,6 +187,8 @@ class TimerTool : public ToolApp {
     const uint32_t total = (uint32_t)_setSec * 1000u;
     const int permille = total ? (int)((remainMs() * 1000ULL) / total) : 0;
     tdraw::progressBar(c, 20, 262, 440, 12, permille);
+    // d20 (owner): say the big time can be typed.
+    if (!_running) c.textCentered(c.width() / 2, 282, "tap the time to change it", TS_SMALL, true);
 
     char buf[40];
     c.text(PRESET_X0, PRESET_Y0 - 30, "PRESETS", TS_MED, true);
@@ -205,21 +208,19 @@ class TimerTool : public ToolApp {
     c.button(CD_START.x, CD_START.y, CD_START.w, CD_START.h, _running ? "Pause" : "Start", true, TS_LARGE);
     c.button(CD_RESET.x, CD_RESET.y, CD_RESET.w, CD_RESET.h, "Reset", false, TS_LARGE);
 
-    // Save the time on the clock as a chip -- or say why it cannot be.
+    // Save the time on the clock as a chip. Nothing when it already is one
+    // (the filled chip says so). With all eight taken, Save asks which one
+    // to replace (d20, owner): the next tap on a chip swaps it.
     char t[12];
     presetLabel(_setSec, t, sizeof(t));
-    const int have = presetIndex(_setSec);
-    if (have >= 0)
-      snprintf(buf, sizeof(buf), "%s is a preset", t);
-    else if (_nPre >= MAX_PRESETS)
-      snprintf(buf, sizeof(buf), "8 presets: hold one to remove it");
-    else
+    if (_replacing) {
+      c.fillRect(SAVE_BTN.x, SAVE_BTN.y, SAVE_BTN.w, SAVE_BTN.h, true);
+      c.textInBox(SAVE_BTN.x, SAVE_BTN.y, SAVE_BTN.w, SAVE_BTN.h, "Presets full - tap one to replace", TS_MED,
+                  false, true);
+    } else if (presetIndex(_setSec) < 0) {
       snprintf(buf, sizeof(buf), "Save %s as a preset", t);
-    if (have < 0 && _nPre < MAX_PRESETS) {
       c.button(SAVE_BTN.x, SAVE_BTN.y, SAVE_BTN.w, SAVE_BTN.h, buf, false, TS_MED);
     }
-    // d18: nothing when the time is already a preset, or when all eight are
-    // taken -- the filled chip says the first; the "?" card the second.
   }
 
   void tapCountdown(int x, int y) {
@@ -227,6 +228,15 @@ class TimerTool : public ToolApp {
     const int armed = _armPre;
     _armPre = -1;
     if (armed >= 0 && presetRect(armed).hit(x, y)) return removePreset(armed);
+    if (_replacing) {
+      // The question is up: a chip answers it, any other tap takes it down.
+      _replacing = false;
+      for (int i = 0; i < _nPre; i++)
+        if (presetRect(i).hit(x, y)) return replacePreset(i);
+      host().beep(0);
+      host().refresh(false);
+      return;
+    }
     if (!_running && TIME_TAP.hit(x, y)) {
       _typing = true;
       _nd = 0;
@@ -382,8 +392,14 @@ class TimerTool : public ToolApp {
 
   // Kept in order, shortest first, so the chips read like a ruler.
   void savePreset() {
-    if (presetIndex(_setSec) >= 0 || _nPre >= timerui::MAX_PRESETS) {
+    if (presetIndex(_setSec) >= 0) {
       host().beep(2);
+      return;
+    }
+    if (_nPre >= timerui::MAX_PRESETS) {  // full: ask which one goes
+      _replacing = true;
+      host().beep(2);
+      host().refresh(false);
       return;
     }
     int at = _nPre;
@@ -396,6 +412,14 @@ class TimerTool : public ToolApp {
     savePresets();
     host().beep(1);
     host().refresh(false);
+  }
+
+  // The chip tapped while "tap one to replace" was up: out with it, and the
+  // time on the clock in, in its sorted place.
+  void replacePreset(int i) {
+    for (int j = i; j + 1 < _nPre; j++) _pre[j] = _pre[j + 1];
+    _nPre--;
+    savePreset();
   }
 
   void removePreset(int i) {
@@ -509,4 +533,5 @@ class TimerTool : public ToolApp {
   int _nd = 0;
   int _pre[timerui::MAX_PRESETS] = {};
   int _nPre = 0, _armPre = -1;
+  bool _replacing = false;  // d20: presets full, Save asked which to replace
 };
