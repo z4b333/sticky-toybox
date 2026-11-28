@@ -121,8 +121,8 @@ inline bool drawPinnedFullScreen(ToolsCanvas& c, bool live = false) {
   if (live) {
     // The note's own heading already names it, so the footer spends its width on
     // the two things a hand can do instead.
-    c.button(PINNED_HUB.x, PINNED_HUB.y, PINNED_HUB.w, PINNED_HUB.h, "HUB", false, TS_MED);
-    c.button(PINNED_UNPIN.x, PINNED_UNPIN.y, PINNED_UNPIN.w, PINNED_UNPIN.h, "UNPIN", false,
+    c.button(PINNED_HUB.x, PINNED_HUB.y, PINNED_HUB.w, PINNED_HUB.h, "Hub", false, TS_MED);
+    c.button(PINNED_UNPIN.x, PINNED_UNPIN.y, PINNED_UNPIN.w, PINNED_UNPIN.h, "Unpin", false,
              TS_MED);
     // Shorter than they were, because the buttons now take the left half of
     // this band and text that ran under them was unreadable in both directions.
@@ -388,8 +388,8 @@ class NoteTool : public ToolApp {
       c.textInBox(d.x, d.y, d.w, d.h, "x", TS_MED, true);
     }
 
-    c.button(WRITE_BTN.x, WRITE_BTN.y, WRITE_BTN.w, WRITE_BTN.h, "WRITE", true, TS_LARGE);
-    c.button(CARD_BTN.x, CARD_BTN.y, CARD_BTN.w, CARD_BTN.h, "CARD", false, TS_LARGE);
+    c.button(WRITE_BTN.x, WRITE_BTN.y, WRITE_BTN.w, WRITE_BTN.h, "Write", true, TS_LARGE);
+    c.button(CARD_BTN.x, CARD_BTN.y, CARD_BTN.w, CARD_BTN.h, "Card", false, TS_LARGE);
     // d18: the how-to panel is the "?" card now; the count stays.
     snprintf(buf, sizeof(buf), "%d notes", _count);
     c.textCentered(c.width() / 2, WRITE_BTN.y + WRITE_BTN.h + 16, buf, TS_SMALL, true);
@@ -471,7 +471,7 @@ class NoteTool : public ToolApp {
     // than over the list, because the list is what you tap next.
     if (_cardMsg) c.textInBox(PANEL_X, CARD_DONE.y - 88, nui::PANEL_W, 40, _cardMsg, TS_MED, true);
     c.text(PANEL_X, CARD_DONE.y - 40, "tap a file to bring it in", TS_MED, true);
-    c.button(CARD_DONE.x, CARD_DONE.y, CARD_DONE.w, CARD_DONE.h, "DONE", true, TS_LARGE);
+    c.button(CARD_DONE.x, CARD_DONE.y, CARD_DONE.w, CARD_DONE.h, "Done", true, TS_LARGE);
   }
 
   void tapCard(int x, int y) {
@@ -589,16 +589,16 @@ class NoteTool : public ToolApp {
     const bool hasNext = _next < _blockCount;
     const bool hasPrev = _pageDepth > 0;
     if (hasPrev || hasNext) {
-      c.button(PREV_BTN.x, PREV_BTN.y, PREV_BTN.w, PREV_BTN.h, "< BACK", false, TS_MED);
-      c.button(NEXT_BTN.x, NEXT_BTN.y, NEXT_BTN.w, NEXT_BTN.h, "MORE >", hasNext, TS_MED);
+      c.button(PREV_BTN.x, PREV_BTN.y, PREV_BTN.w, PREV_BTN.h, "< Back", false, TS_MED);
+      c.button(NEXT_BTN.x, NEXT_BTN.y, NEXT_BTN.w, NEXT_BTN.h, "More >", hasNext, TS_MED);
       char buf[24];
       snprintf(buf, sizeof(buf), "page %d", _pageDepth + 1);
       c.text(NEXT_BTN.x + NEXT_BTN.w + 24, PREV_BTN.y + 16, buf, TS_MED, true);
     }
     const bool pinned = note::isPinned(_name);
-    c.button(PIN_BTN.x, PIN_BTN.y, PIN_BTN.w, PIN_BTN.h, pinned ? "UNPIN" : "PIN",
+    c.button(PIN_BTN.x, PIN_BTN.y, PIN_BTN.w, PIN_BTN.h, pinned ? "Unpin" : "Pin",
              pinned, TS_MED);
-    c.button(EDIT_BTN.x, EDIT_BTN.y, EDIT_BTN.w, EDIT_BTN.h, "EDIT", false, TS_MED);
+    c.button(EDIT_BTN.x, EDIT_BTN.y, EDIT_BTN.w, EDIT_BTN.h, "Edit", false, TS_MED);
     // The label is the state: one A at each size the body can be.
     c.button(SIZE_BTN.x, SIZE_BTN.y, SIZE_BTN.w, SIZE_BTN.h, "A",
              false, nmd::g_body == TS_MED ? TS_SMALL : nmd::g_body == TS_LARGE ? TS_MED : TS_LARGE);
@@ -879,9 +879,9 @@ class NoteTool : public ToolApp {
       c.text(t.x + 4, t.y + 2, "turn the device -", TS_SMALL, true);
       c.text(t.x + 4, t.y + 26, "the note follows", TS_SMALL, true);
     } else {
-      c.button(t.x, t.y, t.w, t.h, "TURN", false, TS_LARGE);
+      c.button(t.x, t.y, t.w, t.h, "Turn", false, TS_LARGE);
     }
-    c.button(k.x, k.y, k.w, k.h, "THIS WAY UP", true, TS_LARGE);
+    c.button(k.x, k.y, k.w, k.h, "This way up", true, TS_LARGE);
   }
 
   void tapOrient(int x, int y) {

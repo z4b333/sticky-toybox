@@ -77,8 +77,8 @@ inline void drawPager(ToolsCanvas& c, int page, int items) {
   if (pages <= 1) return;
   c.fillRect(16, PAGER_Y - 12, SCREEN_W - 32, 1, true);
   const TRect p = prevRect(), n = nextRect();
-  if (page > 0) c.button(p.x, p.y, p.w, p.h, "< PREV", false, TS_MED);
-  if (page < pages - 1) c.button(n.x, n.y, n.w, n.h, "NEXT >", false, TS_MED);
+  if (page > 0) c.button(p.x, p.y, p.w, p.h, "< Prev", false, TS_MED);
+  if (page < pages - 1) c.button(n.x, n.y, n.w, n.h, "Next >", false, TS_MED);
   char buf[24];
   snprintf(buf, sizeof(buf), "%d / %d", page + 1, pages);
   c.textCentered(SCREEN_W / 2, PAGER_Y + (PAGER_H - c.textHeight(TS_MED)) / 2, buf, TS_MED, true);

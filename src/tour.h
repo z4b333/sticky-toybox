@@ -37,7 +37,7 @@ inline void footer(ToolsCanvas& c, int n) {
       c.drawCircle(cx, 690, 6, 2, true);
   }
   c.button(NEXT_BTN.x, NEXT_BTN.y, NEXT_BTN.w, NEXT_BTN.h,
-           n < CARDS - 1 ? "NEXT" : "START USING IT", false, TS_LARGE);
+           n < CARDS - 1 ? "Next" : "Start using it", true, TS_LARGE);
 }
 
 // Card 1: the dock, and the fact that it is the only touch surface.

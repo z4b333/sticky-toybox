@@ -404,10 +404,10 @@ class SeaTool : public ToolApp {
         c.textCentered(c.width() / 2, 620, "joining...", TS_MED, true, true);
     } else {
       c.textCentered(c.width() / 2, 76, "Two Stickies, one game", TS_MED, true);
-      c.button(HOST_BTN.x, HOST_BTN.y, HOST_BTN.w, HOST_BTN.h, "HOST A GAME", true, TS_LARGE);
+      c.button(HOST_BTN.x, HOST_BTN.y, HOST_BTN.w, HOST_BTN.h, "Host a game", true, TS_LARGE);
       c.textCentered(c.width() / 2, HOST_BTN.y + HOST_BTN.h + 10,
                      "shows a code for the other player", TS_SMALL, true);
-      c.button(BROWSE_BTN.x, BROWSE_BTN.y, BROWSE_BTN.w, BROWSE_BTN.h, "JOIN A GAME", false,
+      c.button(BROWSE_BTN.x, BROWSE_BTN.y, BROWSE_BTN.w, BROWSE_BTN.h, "Join a game", false,
                TS_LARGE);
       c.textCentered(c.width() / 2, BROWSE_BTN.y + BROWSE_BTN.h + 10,
                      "lists the codes it can hear", TS_SMALL, true);
@@ -415,7 +415,7 @@ class SeaTool : public ToolApp {
       c.textCentered(c.width() / 2, 480, "own screen - neither can", TS_MED, true);
       c.textCentered(c.width() / 2, 508, "see the other's fleet.", TS_MED, true);
     }
-    c.button(CANCEL_BTN.x, CANCEL_BTN.y, CANCEL_BTN.w, CANCEL_BTN.h, "BACK", false, TS_MED);
+    c.button(CANCEL_BTN.x, CANCEL_BTN.y, CANCEL_BTN.w, CANCEL_BTN.h, "Back", false, TS_MED);
   }
 
   void tapPair(int x, int y) {

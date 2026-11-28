@@ -367,8 +367,8 @@ void drawWallPager(ToolsCanvas& c, bool lockPage, int page, int pages) {
   using namespace setui;
   if (pages <= 1) return;
   const TRect pv = wallPagerPrev(lockPage), nx = wallPagerNext(lockPage);
-  if (page > 0) c.button(pv.x, pv.y, pv.w, pv.h, "< PREV", false, TS_SMALL);
-  if (page < pages - 1) c.button(nx.x, nx.y, nx.w, nx.h, "NEXT >", false, TS_SMALL);
+  if (page > 0) c.button(pv.x, pv.y, pv.w, pv.h, "< Prev", false, TS_SMALL);
+  if (page < pages - 1) c.button(nx.x, nx.y, nx.w, nx.h, "Next >", false, TS_SMALL);
   char b[16];
   snprintf(b, sizeof(b), "%d / %d", page + 1, pages);
   c.textCentered(SCREEN_W / 2, pv.y + 12, b, TS_MED, true);
@@ -432,7 +432,7 @@ void renderPicturePage(ToolsHost& host, ToolsCanvas& c, const char* title, bool 
     c.textClipped(tx, CUR_Y + 6, SCREEN_W - tx - 16, src[0] ? src : "sent from the phone",
                   TS_MED, true);
     const TRect rm = wallRemoveRect();
-    c.button(rm.x, rm.y, rm.w, rm.h, "REMOVE", false, TS_MED);
+    c.button(rm.x, rm.y, rm.w, rm.h, "Remove", false, TS_MED);
   } else {
     c.text(20, CUR_Y + 6, noneLine, TS_MED, true);
   }
@@ -622,7 +622,7 @@ void SettingsScreen::renderFiles(ToolsHost& host, ToolsCanvas& c) {
 
   if (!_filesOk) {
     c.textCentered(SCREEN_W / 2, 320, "could not start wifi", TS_LARGE, true, true);
-    c.button(filesDoneRect().x, filesDoneRect().y, filesDoneRect().w, filesDoneRect().h, "BACK",
+    c.button(filesDoneRect().x, filesDoneRect().y, filesDoneRect().w, filesDoneRect().h, "Back",
              true, TS_LARGE);
     return;
   }
@@ -670,7 +670,7 @@ void SettingsScreen::renderFiles(ToolsHost& host, ToolsCanvas& c) {
   }
 
   const TRect d = filesDoneRect();
-  c.button(d.x, d.y, d.w, d.h, "DONE", false, TS_LARGE);
+  c.button(d.x, d.y, d.w, d.h, "Done", true, TS_LARGE);
 }
 
 // --- the font page ------------------------------------------------------------
@@ -789,11 +789,11 @@ void SettingsScreen::renderFont(ToolsHost& host, ToolsCanvas& c) {
     c.textCentered(SCREEN_W / 2, fontPagerY() + 10, buf, TS_SMALL, true);
     if (_fontPage > 0) {
       const TRect p = fontPagerPrev();
-      c.button(p.x, p.y, p.w, p.h, "< PREV", false, TS_SMALL);
+      c.button(p.x, p.y, p.w, p.h, "< Prev", false, TS_SMALL);
     }
     if (_fontPage < pages - 1) {
       const TRect n = fontPagerNext();
-      c.button(n.x, n.y, n.w, n.h, "NEXT >", false, TS_SMALL);
+      c.button(n.x, n.y, n.w, n.h, "Next >", false, TS_SMALL);
     }
   }
 
@@ -893,14 +893,14 @@ void SettingsScreen::renderClock(ToolsHost& host, ToolsCanvas& c) {
     }
     c.textCentered(SCREEN_W / 2, 440, "the wifi is off again", TS_SMALL, true);
     const TRect d = clockDoneRect();
-    c.button(d.x, d.y, d.w, d.h, "DONE", false, TS_LARGE);
+    c.button(d.x, d.y, d.w, d.h, "Done", true, TS_LARGE);
     return;
   }
 
   if (!_clockOk) {
     c.textCentered(SCREEN_W / 2, 320, "could not start wifi", TS_LARGE, true, true);
     const TRect d = clockDoneRect();
-    c.button(d.x, d.y, d.w, d.h, "BACK", true, TS_LARGE);
+    c.button(d.x, d.y, d.w, d.h, "Back", true, TS_LARGE);
     return;
   }
 
@@ -952,7 +952,7 @@ void SettingsScreen::renderClock(ToolsHost& host, ToolsCanvas& c) {
     c.textCentered(SCREEN_W / 2, CLOCK_BIG_Y, "the phone sends the time by itself", TS_SMALL, true);
     if (netReady(host)) {
       const TRect n = clockNetRect();
-      c.button(n.x, n.y, n.w, n.h, "FROM THE INTERNET", false, TS_MED);
+      c.button(n.x, n.y, n.w, n.h, "From the internet", false, TS_MED);
     }
   } else {
     c.textCentered(SCREEN_W / 2, 64, "STEP 2 OF 2", TS_MED, true, true);
@@ -964,7 +964,7 @@ void SettingsScreen::renderClock(ToolsHost& host, ToolsCanvas& c) {
   }
 
   const TRect d = clockDoneRect();
-  c.button(d.x, d.y, d.w, d.h, "DONE", false, TS_LARGE);
+  c.button(d.x, d.y, d.w, d.h, "Done", true, TS_LARGE);
 }
 
 bool SettingsScreen::netReady(ToolsHost& host) {
@@ -1500,7 +1500,7 @@ void SettingsScreen::renderLock(ToolsHost& host, ToolsCanvas& c) {
                                              : "stored, black and white";
     c.text(r.x + 4, r.y + 32, kind, TS_SMALL, true);
     const TRect sr = sendRect();
-    c.button(sr.x, sr.y, sr.w, sr.h, lockimg::have() ? "REPLACE" : "FROM CARD", false, TS_MED);
+    c.button(sr.x, sr.y, sr.w, sr.h, lockimg::have() ? "Replace" : "From card", false, TS_MED);
     if (lockimg::have()) {
       const TRect rm = removeRect();
       c.button(rm.x, rm.y, rm.w, rm.h, "x", false, TS_MED);
@@ -1911,7 +1911,7 @@ void SettingsScreen::renderUpdate(ToolsHost& host, ToolsCanvas& c) {
       c.textCentered(SCREEN_W / 2, 220, ota::describe(_upErr), TS_LARGE, true);
       c.textCentered(SCREEN_W / 2, 300, upHint(_upErr), TS_MED, true);
       c.textCentered(SCREEN_W / 2, 440, "the wifi is off again", TS_SMALL, true);
-      c.button(dn.x, dn.y, dn.w, dn.h, "DONE", false, TS_LARGE);
+      c.button(dn.x, dn.y, dn.w, dn.h, "Done", true, TS_LARGE);
       return;
     }
     if (!_upCheck.needApp && !_upCheck.needBase) {
@@ -1920,7 +1920,7 @@ void SettingsScreen::renderUpdate(ToolsHost& host, ToolsCanvas& c) {
       snprintf(buf, sizeof(buf), "the newest on the site is %s", r.version);
       c.textCentered(SCREEN_W / 2, 300, buf, TS_SMALL, true);
       c.textCentered(SCREEN_W / 2, 440, "the wifi is off again", TS_SMALL, true);
-      c.button(dn.x, dn.y, dn.w, dn.h, "DONE", false, TS_LARGE);
+      c.button(dn.x, dn.y, dn.w, dn.h, "Done", true, TS_LARGE);
       return;
     }
     c.textCentered(SCREEN_W / 2, 100, _upCheck.needApp ? "NEW VERSION" : "FONTS NEED REPAIR", TS_MED,
@@ -1951,9 +1951,9 @@ void SettingsScreen::renderUpdate(ToolsHost& host, ToolsCanvas& c) {
       snprintf(buf, sizeof(buf), "battery %d%%: charge to %d%% or plug in", bat, r.minBattery);
       c.textCentered(SCREEN_W / 2, in.y + 16, buf, TS_MED, true, true);
     } else {
-      c.button(in.x, in.y, in.w, in.h, "INSTALL", true, TS_LARGE);
+      c.button(in.x, in.y, in.w, in.h, "Install", true, TS_LARGE);
     }
-    c.button(dn.x, dn.y, dn.w, dn.h, "NOT NOW", false, TS_LARGE);
+    c.button(dn.x, dn.y, dn.w, dn.h, "Not now", false, TS_LARGE);
     return;
   }
 
@@ -1979,7 +1979,7 @@ void SettingsScreen::renderUpdate(ToolsHost& host, ToolsCanvas& c) {
     c.textCentered(SCREEN_W / 2, 300, upHint(_upErr), TS_MED, true);
     c.textCentered(SCREEN_W / 2, 380, "this version keeps running", TS_SMALL, true);
     const TRect dn = updDoneRect();
-    c.button(dn.x, dn.y, dn.w, dn.h, "DONE", false, TS_LARGE);
+    c.button(dn.x, dn.y, dn.w, dn.h, "Done", true, TS_LARGE);
     return;
   }
 
@@ -2017,7 +2017,7 @@ void SettingsScreen::renderUpdate(ToolsHost& host, ToolsCanvas& c) {
       chrome2::dottedRule(c, 16, 668, SCREEN_W - 32);
       c.textCentered(SCREEN_W / 2, 676, note, TS_SMALL, true);
       const TRect dn = TRect{16, 712, SCREEN_W - 32, 56};
-      c.button(dn.x, dn.y, dn.w, dn.h, "DONE", false, TS_LARGE);
+      c.button(dn.x, dn.y, dn.w, dn.h, "Done", true, TS_LARGE);
       return;
     }
     sdIcon(c, SCREEN_W / 2 - 24, 72);
@@ -2044,7 +2044,7 @@ void SettingsScreen::renderUpdate(ToolsHost& host, ToolsCanvas& c) {
     c.textCentered(SCREEN_W / 2, 628, "About a minute. Notes, books and settings stay.", TS_SMALL, true);
     c.textCentered(SCREEN_W / 2, 654, "If it won't start, it goes back.", TS_SMALL, true);
     const TRect no = updCardNoRect(), go = updCardGoRect();
-    c.button(no.x, no.y, no.w, no.h, "NOT NOW", false, TS_MED);
+    c.button(no.x, no.y, no.w, no.h, "Not now", false, TS_MED);
     const int bat = host.batteryPercent();
     if (!host.charging() && bat >= 0 && bat < ota::DEFAULT_MIN_BATTERY) {
       for (int k2 = 0; k2 < go.w; k2 += 10) {
@@ -2060,7 +2060,7 @@ void SettingsScreen::renderUpdate(ToolsHost& host, ToolsCanvas& c) {
       snprintf(buf, sizeof(buf), "%d%% or plug in", ota::DEFAULT_MIN_BATTERY);
       c.textCentered(go.x + go.w / 2, go.y + 8 + c.textHeight(TS_SMALL) + 2, buf, TS_SMALL, true, true);
     } else {
-      c.button(go.x, go.y, go.w, go.h, "INSTALL", true, TS_MED);
+      c.button(go.x, go.y, go.w, go.h, "Install", true, TS_MED);
     }
     return;
   }
@@ -2092,7 +2092,7 @@ void SettingsScreen::renderUpdate(ToolsHost& host, ToolsCanvas& c) {
                    TS_MED, true);
     c.textCentered(SCREEN_W / 2, 380, "this version keeps running", TS_SMALL, true);
     const TRect dn = updDoneRect();
-    c.button(dn.x, dn.y, dn.w, dn.h, "DONE", false, TS_LARGE);
+    c.button(dn.x, dn.y, dn.w, dn.h, "Done", true, TS_LARGE);
     return;
   }
 
@@ -2126,7 +2126,7 @@ void SettingsScreen::renderUpdate(ToolsHost& host, ToolsCanvas& c) {
           c.textCentered(SCREEN_W / 2, 120, "NOT CONNECTED", TS_MED, true, true);
           c.textCentered(SCREEN_W / 2, 220, ota::describe(l->err), TS_LARGE, true);
           c.textCentered(SCREEN_W / 2, 300, upHint(l->err), TS_MED, true);
-          c.button(dn.x, dn.y, dn.w, dn.h, "DONE", false, TS_LARGE);
+          c.button(dn.x, dn.y, dn.w, dn.h, "Done", true, TS_LARGE);
           return;
         }
         break;  // locked out: the code screen says so below
@@ -2150,7 +2150,7 @@ void SettingsScreen::renderUpdate(ToolsHost& host, ToolsCanvas& c) {
       c.textCentered(SCREEN_W / 2, 560, buf, TS_MED, true, true);
       c.textCentered(SCREEN_W / 2, 596, "the page can send again", TS_SMALL, true);
     }
-    c.button(dn.x, dn.y, dn.w, dn.h, "DONE", false, TS_LARGE);
+    c.button(dn.x, dn.y, dn.w, dn.h, "Done", true, TS_LARGE);
     return;
   }
 
@@ -2181,10 +2181,10 @@ void SettingsScreen::renderUpdate(ToolsHost& host, ToolsCanvas& c) {
     // d18: three buttons and nothing under them -- each one's own page says
     // what it does. Reset stats moved to Settings > DEVICE > Apps on the hub.
     (void)wifi;
-    c.button(ck.x, ck.y, ck.w, ck.h, "CHECK FOR UPDATE", false, TS_MED);
-    c.button(ln.x, ln.y, ln.w, ln.h, "FROM A COMPUTER", false, TS_MED);
+    c.button(ck.x, ck.y, ck.w, ck.h, "Check for update", true, TS_MED);
+    c.button(ln.x, ln.y, ln.w, ln.h, "From a computer", false, TS_MED);
     const TRect cd = updCardRect();
-    c.button(cd.x, cd.y, cd.w, cd.h, "FROM SD CARD", false, TS_MED);
+    c.button(cd.x, cd.y, cd.w, cd.h, "From SD card", false, TS_MED);
   }
   if (_note) c.textCentered(SCREEN_W / 2, 776, _note, TS_SMALL, true);
 }

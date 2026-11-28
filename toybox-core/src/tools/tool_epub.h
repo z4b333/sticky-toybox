@@ -324,8 +324,8 @@ class EpubTool : public ToolApp {
     if (pages <= 1) return;
     c.fillRect(16, shelf::PAGER_Y - 12, c.width() - 32, 1, true);
     const TRect p = shelf::prevRect(), n = shelf::nextRect();
-    if (_lpage > 0) c.button(p.x, p.y, p.w, p.h, "< PREV", false, TS_MED);
-    if (_lpage < pages - 1) c.button(n.x, n.y, n.w, n.h, recentPage() ? "ALL >" : "NEXT >", false, TS_MED);
+    if (_lpage > 0) c.button(p.x, p.y, p.w, p.h, "< Prev", false, TS_MED);
+    if (_lpage < pages - 1) c.button(n.x, n.y, n.w, n.h, recentPage() ? "All >" : "Next >", false, TS_MED);
     char buf[24];
     snprintf(buf, sizeof(buf), "%d / %d", _lpage + 1, pages);
     c.textCentered(c.width() / 2, shelf::PAGER_Y + (shelf::PAGER_H - c.textHeight(TS_MED)) / 2, buf, TS_MED, true);
