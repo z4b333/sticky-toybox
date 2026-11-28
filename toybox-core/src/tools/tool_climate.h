@@ -185,9 +185,7 @@ class ClimateTool : public KitGame {
       graph(c);
     }
     outdoor(c);
-    char foot[48];
-    snprintf(foot, sizeof(foot), "the room is read every %s", clim::readName(_readIdx));
-    gk::foot(c, foot);
+    // d18: no footer -- how often the room is read is under More.
   }
 
   void tapPlay(int x, int y) override {

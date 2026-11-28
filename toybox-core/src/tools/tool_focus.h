@@ -12,6 +12,7 @@
 #include "../chrome.h"
 #include "tools_draw.h"
 #include "numpad.h"
+#include "help.h"
 
 namespace focusui {
 inline constexpr int PRESETS = 4;
@@ -81,6 +82,7 @@ class FocusTool : public ToolApp {
       if (_preset[i] < focusui::MIN_MIN || _preset[i] > focusui::MAX_MIN) _preset[i] = focusui::PRESET_MIN[i];
     }
     _stage = Stage::Set;
+    _help = !help::suppressed(prefs(), "fo");
   }
 
   bool wantsTick() const override { return _stage == Stage::Run; }
@@ -148,7 +150,26 @@ class FocusTool : public ToolApp {
       numpad::draw(c);
       return;
     }
-    host().topBar("FOCUS");
+    host().topBar("FOCUS", _stage == Stage::Set);
+    if (_help && _stage == Stage::Set) {
+      // d18: what the set-up page used to say under its buttons.
+      static const help::Text t{{
+                                    "Pick how long, then Start.",
+                                    "Tap the number to type one.",
+                                    "",
+                                    "There is no countdown on the",
+                                    "screen: it only shows that you",
+                                    "are focusing, and since when.",
+                                    "It chimes at the end.",
+                                    "",
+                                    "To stop early, hold the button",
+                                    "at its foot, or UP + DOWN.",
+                                },
+                                false,
+                                13};
+      help::render(c, t, "FOCUS");
+      return;
+    }
     if (_stage == Stage::Done) {
       // Kit "Focus, done".
       sprout(c, SCREEN_W / 2, 150, 110, 5);
@@ -180,7 +201,6 @@ class FocusTool : public ToolApp {
     c.textCentered(SCREEN_W / 2, VALUE.y + 30, buf, TS_HUGE, true, true);
     c.textCentered(SCREEN_W / 2, VALUE.y + 112, "minutes", TS_MED, true);
     chrome2::dottedRule(c, VALUE.x + 80, VALUE.y + VALUE.h - 4, VALUE.w - 160);
-    c.textCentered(SCREEN_W / 2, VALUE.y + VALUE.h + 6, "tap the number to type", TS_MED, true);
     // End tone, under the time.
     c.text(24, 310 + 11, "End tone", TS_MED, true);
     {
@@ -205,8 +225,6 @@ class FocusTool : public ToolApp {
       snprintf(buf, sizeof(buf), "+ keep %d min as a preset", _min);
       c.textCentered(SCREEN_W / 2, SAVE_PRESET.y + 18, buf, TS_MED, true, true);
     }
-    c.textCentered(SCREEN_W / 2, 556, "No countdown on the screen.", TS_MED, true);
-    c.textCentered(SCREEN_W / 2, 592, "Hold its foot to stop early.", TS_MED, true);
     c.button(START.x, START.y, START.w, START.h, "Start", true);
   }
 
@@ -222,6 +240,26 @@ class FocusTool : public ToolApp {
     if (host().isBackTap(x, y)) {
       host().beep(1);
       host().goHub();
+      return;
+    }
+    if (_help && _stage == Stage::Set) {
+      const help::Tap t = help::hit(x, y);
+      if (t == help::Tap::None) return;
+      if (t == help::Tap::Toggle) {
+        host().beep(0);
+        host().refresh(false);
+        return;
+      }
+      if (t == help::Tap::Never) help::suppress(prefs(), "fo");
+      _help = false;
+      host().beep(1);
+      host().refresh(false);
+      return;
+    }
+    if (_stage == Stage::Set && host().isHelpTap(x, y)) {
+      _help = true;
+      host().beep(1);
+      host().refresh(false);
       return;
     }
     if (_stage == Stage::Type) {
@@ -285,6 +323,7 @@ class FocusTool : public ToolApp {
  private:
   enum class Stage : uint8_t { Set, Run, Done, Type };
   Stage _stage = Stage::Set;
+  bool _help = false;  // the "?" card (d18)
   int _min = 25;
   uint32_t _startMs = 0;
   int _startedHH = -1, _startedMM = 0;

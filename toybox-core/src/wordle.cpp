@@ -199,18 +199,9 @@ void WordleApp::drawLegend(ToolsCanvas& c) {
     c.textCentered(c.width() / 2, y, _msg, TS_SMALL, true, true);
     return;
   }
-  const int sq = 16, sy = y + (h - sq) / 2;
-  int x = 30;
-  c.fillRect(x, sy, sq, sq, true);
-  x += sq + 6;
-  c.text(x, y, "right place", TS_SMALL, true);
-  x += c.textWidth("right place", TS_SMALL) + 18;
-  gk::stripes(c, x, sy, sq, sq);
-  c.drawRect(x, sy, sq, sq, 1, true);
-  x += sq + 6;
-  c.text(x, y, "in the word", TS_SMALL, true);
-  x += c.textWidth("in the word", TS_SMALL) + 18;
-  c.text(x, y, "struck: not in it", TS_SMALL, true);
+  // d18: the colour key left -- the "?" card says what the marks mean, and
+  // the row between the board and the keys only ever carries a message now.
+  (void)h;
 }
 
 void WordleApp::drawKeyboard(ToolsCanvas& c) {

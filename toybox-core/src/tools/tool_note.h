@@ -5,6 +5,7 @@
 #pragma once
 #include "card_text.h"
 #include "flash_qr.h"
+#include "help.h"
 #include "import_screen.h"
 #include "lockscreen.h"
 #include "note_md.h"
@@ -210,6 +211,9 @@ class NoteTool : public ToolApp {
     _cardFiles = nullptr;
     _cardCount = 0;
     _screen = Screen::List;
+    // d18: the how-to that crowded the list's foot is a card now, shown the
+    // first time and behind the "?" after that.
+    _help = !help::suppressed(prefs(), "nt");
     refreshList();
   }
 
@@ -258,7 +262,27 @@ class NoteTool : public ToolApp {
     // size and shape it will be asleep, and a top bar in the app's own
     // orientation would be a lie sitting on top of it.
     if (_screen == Screen::Orient) return renderOrient(c);
-    host().topBar(title());
+    host().topBar(title(), _screen == Screen::List);
+    if (_help && _screen == Screen::List) {
+      static const help::Text t{{
+                                    "Notes come from your phone.",
+                                    "",
+                                    "Tap WRITE and scan the code:",
+                                    "the editor opens by itself.",
+                                    "Type, or dictate with the",
+                                    "phone's mic key.",
+                                    "",
+                                    "CARD brings in .md and .txt",
+                                    "files from /notes.",
+                                    "",
+                                    "Tap a line to tick or cross it.",
+                                    "A dot marks the pinned note.",
+                                },
+                                false,
+                                6};
+      help::render(c, t, "NOTES");
+      return;
+    }
     switch (_screen) {
       case Screen::List: renderList(c); break;
       case Screen::View: renderView(c); break;
@@ -271,6 +295,20 @@ class NoteTool : public ToolApp {
     // No back button here: the only ways out are the two buttons on it, and
     // both leave the panel the right way up again.
     if (_screen == Screen::Orient) return tapOrient(x, y);
+    if (_help && _screen == Screen::List && !host().isBackTap(x, y)) {
+      const help::Tap t = help::hit(x, y);
+      if (t == help::Tap::None) return;
+      if (t == help::Tap::Toggle) {
+        host().beep(0);
+        host().refreshUi();
+        return;
+      }
+      if (t == help::Tap::Never) help::suppress(prefs(), "nt");
+      _help = false;
+      host().beep(1);
+      host().refreshUi();
+      return;
+    }
     if (host().isBackTap(x, y)) {
       if (_screen == Screen::View) {
         closeNote();
@@ -352,30 +390,19 @@ class NoteTool : public ToolApp {
 
     c.button(WRITE_BTN.x, WRITE_BTN.y, WRITE_BTN.w, WRITE_BTN.h, "WRITE", true, TS_LARGE);
     c.button(CARD_BTN.x, CARD_BTN.y, CARD_BTN.w, CARD_BTN.h, "CARD", false, TS_LARGE);
-    c.text(PANEL_X, WRITE_BTN.y + WRITE_BTN.h + 8,
-           "your phone, or /notes on the card", TS_MED, true);
-
-    // Body text is 24 px now, so the line pitch is 30 and the block below has
-    // one line less to spend. The dictation step lost its turnover, and the note
-    // count moved up beside the heading that follows it -- a number the list
-    // above already shows does not deserve a line of its own when the panel is
-    // this short of them.
-    c.drawLine(PANEL_X, 556, c.width() - 20, 556, 1, true);
-    c.text(PANEL_X, 564, "ON YOUR PHONE", TS_MED, true);
-    const char* steps[3] = {"1  tap WRITE, scan QR", "2  editor opens by itself",
-                            "3  dictate with the mic key"};
-    for (int i = 0; i < 3; i++) c.text(PANEL_X, 594 + i * 30, steps[i], TS_MED, true);
-
-    c.drawLine(PANEL_X, 686, c.width() - 20, 686, 1, true);
-    c.text(PANEL_X, 694, "ON THE DEVICE", TS_MED, true);
+    // d18: the how-to panel is the "?" card now; the count stays.
     snprintf(buf, sizeof(buf), "%d notes", _count);
-    c.text(c.width() - 20 - c.textWidth(buf, TS_MED), 694, buf, TS_MED, true);
-    c.text(PANEL_X, 724, "tap a line to tick or cross", TS_MED, true);
-    c.text(PANEL_X, 754, "a dot marks the pinned note", TS_MED, true);
+    c.textCentered(c.width() / 2, WRITE_BTN.y + WRITE_BTN.h + 16, buf, TS_SMALL, true);
   }
 
   void tapList(int x, int y) {
     using namespace nui;
+    if (host().isHelpTap(x, y)) {
+      _help = true;
+      host().beep(1);
+      host().refreshUi();
+      return;
+    }
     for (int i = 0; i < _count; i++) {
       if (delRect(i).hit(x, y)) {
         note::remove(_infos[i].name);
@@ -730,7 +757,7 @@ class NoteTool : public ToolApp {
       c.textCentered(c.width() / 2, QR_Y + QR_SIZE + 108,
                      _netNote ? _netNote : "the page opens once the phone joins", _netNote ? TS_MED : TS_SMALL,
                      true, _netNote != nullptr);
-      importui::drawSteps(c, QR_Y + QR_SIZE + 150, kSteps);
+      // d18: the steps are behind "Show the link", with the link itself.
       c.button(ALT_BTN.x, ALT_BTN.y, ALT_BTN.w, ALT_BTN.h, "Show the link", false, TS_MED);
     }
     c.button(DONE_BTN.x, DONE_BTN.y, DONE_BTN.w, DONE_BTN.h, "Done", true, TS_LARGE);
@@ -930,6 +957,7 @@ class NoteTool : public ToolApp {
   static constexpr int kMaxPages = 12;
 
   Screen _screen = Screen::List;
+  bool _help = false;
   note::Info _infos[note::MAX_NOTES] = {};
   int _count = 0;
 

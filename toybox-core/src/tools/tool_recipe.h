@@ -335,7 +335,7 @@ class RecipeTool : public ToolApp {
     }
     if (listPages() > 1) {
       char buf[40];
-      snprintf(buf, sizeof(buf), "page %d of %d - side buttons turn", _page + 1, listPages());
+      snprintf(buf, sizeof(buf), "page %d of %d", _page + 1, listPages());
       c.textCentered(c.width() / 2, 584, buf, TS_MED, true);
     }
     c.button(PHONE_BTN.x, PHONE_BTN.y, PHONE_BTN.w, PHONE_BTN.h, "Add from your phone", false, TS_MED);
@@ -599,7 +599,7 @@ class RecipeTool : public ToolApp {
     const int pages = ingPages();
     if (pages > 1) {
       char buf[40];
-      snprintf(buf, sizeof(buf), "%d of %d - side buttons turn", _ingPage + 1, pages);
+      snprintf(buf, sizeof(buf), "%d of %d", _ingPage + 1, pages);
       c.textCentered(c.width() / 2, ingBottom() + 6, buf, TS_MED, true);
     }
     if (_r.nSteps > 0) {

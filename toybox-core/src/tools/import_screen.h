@@ -72,7 +72,7 @@ inline void draw(ToolsCanvas& c, Net& net, bool altQr, const Words& w, const cha
     char ip[48];
     snprintf(ip, sizeof(ip), "or %s", strncmp(net.ipUrl(), "http://", 7) == 0 ? net.ipUrl() + 7 : net.ipUrl());
     c.textCentered(c.width() / 2, QR_Y + QR_SIZE + 108, ip, TS_MED, true);
-    drawSteps(c, QR_Y + QR_SIZE + 150, w.steps);
+    // d18: no steps here -- the page the phone opens says what to do.
     c.button(ALT_BTN.x, ALT_BTN.y, ALT_BTN.w, ALT_BTN.h, "Use the Sticky's own Wi-Fi", false, TS_MED);
   } else {
     char buf[64];
@@ -88,7 +88,9 @@ inline void draw(ToolsCanvas& c, Net& net, bool altQr, const Words& w, const cha
       c.textCentered(c.width() / 2, QR_Y + QR_SIZE + 70, buf, TS_MED, true);
     }
     if (note) c.textCentered(c.width() / 2, QR_Y + QR_SIZE + 108, note, TS_MED, true, true);
-    drawSteps(c, QR_Y + QR_SIZE + 150, w.steps);
+    // d18: the three steps live behind "Page didn't open?" -- the page for
+    // someone who needs them; the first page is the code and nothing else.
+    if (altQr) drawSteps(c, QR_Y + QR_SIZE + 150, w.steps);
     c.button(ALT_BTN.x, ALT_BTN.y, ALT_BTN.w, ALT_BTN.h, altQr ? "Back to the Wi-Fi code" : "Page didn't open?",
              false, TS_MED);
   }

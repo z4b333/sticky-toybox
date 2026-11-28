@@ -36,6 +36,7 @@ enum Action : int {
   ACT_DASH,    // C6: the charging dashboard on plug-in
   ACT_SYNC,    // D: Reading sync (Readest account, highlights, auto sync)
   ACT_HOME,    // v2: the home screen's style (kit "Settings > Home screen")
+  ACT_SLEEP,   // d18: Sleep & wake, moved off the lock screen page
   ACT_COUNT
 };
 // Visual order groups the rows by what they are about (LOOK first -- the
@@ -53,9 +54,13 @@ enum Action : int {
 // and the rows of the open tab under them. The enum order stays put so a
 // caller aiming at a row by name never has to care which tab it sits in.
 inline constexpr int TAB_LOOK = 0, TAB_CONNECT = 1, TAB_DEVICE = 2, TAB_COUNT = 3;
-//                                      APPS WALL LOCK FILES SOUND UPDATE CLOCK FONT VOLUME SETUP CARE DASH SYNC HOME
-inline constexpr int TAB_OF[ACT_COUNT] = {2,   0,   0,   1,    2,    2,     1,    0,   2,     2,    2,   2,   1,   0};
-inline constexpr int TAB_POS[ACT_COUNT] = {5,  1,   2,   0,    0,    6,     1,    3,   1,     4,    2,   3,   2,   0};
+// d18 (kit "Settings", regrouped): LOOK 5 -- the charging dashboard is what
+// the device looks like on the cable; CONNECT 3; DEVICE 6 -- Sound and Volume
+// are one row of Off / Low / Mid / High, and Sleep & wake has its own page.
+// VOLUME is in no tab (-1): the Sound row's segments do its work.
+//                                      APPS WALL LOCK FILES SOUND UPDATE CLOCK FONT VOLUME SETUP CARE DASH SYNC HOME SLEEP
+inline constexpr int TAB_OF[ACT_COUNT] = {2,   0,   0,   1,    2,    2,     1,    0,   -1,    2,    2,   0,   1,   0,   2};
+inline constexpr int TAB_POS[ACT_COUNT] = {3,  1,   2,   2,    0,    5,     0,    3,   0,     4,    1,   4,   1,   0,   2};
 inline constexpr int TAB_Y = TOPBAR_H + 12, TAB_H = 48, TAB_GAP = 8;
 inline constexpr int TAB_W = (SCREEN_W - 32 - 2 * TAB_GAP) / TAB_COUNT;
 inline constexpr int TAB_ROWS_Y = TAB_Y + TAB_H + 14;
@@ -68,13 +73,17 @@ inline int tabCount(int t) {
 inline TRect actionRect(int i) {
   return TRect{BTN_X, TAB_ROWS_Y + TAB_POS[i] * BTN_STEP, BTN_W, BTN_H};
 }
-// The volume row's three segments, right-aligned in the row.
-inline constexpr int VOL_SEG_W = 70, VOL_SEG_H = 40;
-inline TRect volSeg(int k) {
-  const TRect r = actionRect(ACT_VOLUME);
-  return TRect{r.x + r.w - 3 * VOL_SEG_W + k * VOL_SEG_W, r.y + (r.h - VOL_SEG_H) / 2, VOL_SEG_W,
+// The Sound row's four segments, Off / Low / Mid / High, right-aligned.
+inline constexpr int VOL_SEG_W = 62, VOL_SEG_H = 40;
+inline TRect soundSeg(int k) {
+  const TRect r = actionRect(ACT_SOUND);
+  return TRect{r.x + r.w - 4 * VOL_SEG_W + k * VOL_SEG_W, r.y + (r.h - VOL_SEG_H) / 2, VOL_SEG_W,
                VOL_SEG_H};
 }
+// Low / Mid / High, as the old volume row named them.
+inline TRect volSeg(int k) { return soundSeg(k + 1); }
+// The version line at the foot of every tab (kit).
+inline constexpr int ROOT_VER_Y = 744;
 
 // C6 Dashboard page (kit "Settings > Charging dashboard"): the switch row,
 // then four picture rows with a 48x80 thumbnail each.
@@ -143,7 +152,9 @@ inline TRect fontPagerPrev() { return TRect{16, fontPagerY(), 130, 44}; }
 inline TRect fontPagerNext() { return TRect{SCREEN_W - 16 - 130, fontPagerY(), 130, 44}; }
 
 // The how-to cards, on the apps page now.
-inline TRect appsCardsRect() { return TRect{16, 700, SCREEN_W - 32, 56}; }
+// d18: two buttons side by side -- the cards, and Reset stats (from Update).
+inline TRect appsCardsRect() { return TRect{16, 696, (SCREEN_W - 44) / 2, 56}; }
+inline TRect appsResetRect() { return TRect{28 + (SCREEN_W - 44) / 2, 696, (SCREEN_W - 44) / 2, 56}; }
 // C5: the app list is two pages; the turn sits above the cards button.
 inline TRect appsPrevRect() { return TRect{16, 612, 150, 76}; }
 inline TRect appsNextRect() { return TRect{SCREEN_W - 16 - 150, 612, 150, 76}; }
@@ -169,7 +180,6 @@ inline TRect clockNetRect() { return TRect{16, 620, SCREEN_W - 32, 60}; }
 inline TRect updCheckRect() { return TRect{16, 288, SCREEN_W - 32, 60}; }
 inline TRect updLanRect() { return TRect{16, 380, SCREEN_W - 32, 60}; }
 inline TRect updCardRect() { return TRect{16, 472, SCREEN_W - 32, 60}; }
-inline TRect updResetRect() { return TRect{16, 628, SCREEN_W - 32, 60}; }
 // The SD screen's pair at the foot: NOT NOW, and INSTALL beside it.
 inline TRect updCardNoRect() { return TRect{16, 700, (SCREEN_W - 32 - 12) / 2, 60}; }
 inline TRect updCardGoRect() {
@@ -225,7 +235,10 @@ enum LockRow : int {
 // row, SLEEP as one row of segments, WAKING as Wake to + Turn with the
 // device. The footer toggles are gone -- no clock or temperature on a
 // sleeping panel (they would go stale) -- so their rows sit off the glass.
-inline constexpr int LOCK_ROW_Y[LR_COUNT] = {462, 92, 352, 576, 648, 900, 900, 900};
+// d18: SLEEP and WAKING moved to their own page (Settings > DEVICE > Sleep &
+// wake), so their rows sit at the top of that page; the lock screen page keeps
+// the faces and the picture.
+inline constexpr int LOCK_ROW_Y[LR_COUNT] = {96, 92, 352, 210, 282, 900, 900, 900};
 inline constexpr int LOCK_ROW_H[LR_COUNT] = {56, 250, 56, 56, 62, 0, 0, 0};
 inline TRect lockRect(int i) { return TRect{LOCK_X, LOCK_ROW_Y[i], LOCK_W, LOCK_ROW_H[i]}; }
 
@@ -316,6 +329,7 @@ class SettingsScreen {
 
 #ifdef TOYBOX_HOST
   void hostOpenLock() { _page = 1; }
+  void hostOpenSleep() { _page = 23; }
   void hostOpenLockPic(ToolsHost& host) {
     enterWall(host);
     _page = 5;
@@ -330,6 +344,8 @@ class SettingsScreen {
  private:
   void renderLock(ToolsHost& host, ToolsCanvas& c);
   bool tapLock(ToolsHost& host, int x, int y);
+  void renderSleep(ToolsCanvas& c);
+  bool tapSleep(ToolsHost& host, int x, int y);
   void renderWall(ToolsHost& host, ToolsCanvas& c);
   bool tapWall(ToolsHost& host, int x, int y);
   void enterWall(ToolsHost& host);
@@ -370,7 +386,8 @@ class SettingsScreen {
   // 0 = settings, 1 = lock, 2 = wallpaper, 3 = apps, 4 = files,
   // 5 = the lock screen's picture, off the card, 6 = the clock,
   // 7 = which text to dress, 8 = the families to dress it in,
-  // 9 = update & about, 10..13 = the setup steps
+  // 9 = update & about, 10..16 = the setup steps, 20 = charging dashboard,
+  // 21 = reading sync, 22 = home screen style, 23 = sleep & wake
   uint8_t _page = 0;
   uint8_t _tab = 0;  // which settings tab is open (v2)
   bool _setupBoot = false;  // the setup steps were started by a new device

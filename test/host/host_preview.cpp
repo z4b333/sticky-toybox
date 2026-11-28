@@ -2334,7 +2334,7 @@ int main() {
     printf("SETTINGS FAIL: taps did not land (%d shown)\n", appvis::shown());
     abort();
   }
-  if (stickyHost.soundLevel() == 0) tapAct(setui::ACT_SOUND);
+  // d18: one row, Off / Low / Mid / High.
   tapRect(setui::volSeg(2));
   if (stickyHost.soundLevel() != (levels > 3 ? 3 : levels - 1)) {
     printf("SETTINGS FAIL: High landed on %d\n", stickyHost.soundLevel());
@@ -2345,9 +2345,9 @@ int main() {
     printf("SETTINGS FAIL: Low landed on %d\n", stickyHost.soundLevel());
     abort();
   }
-  tapAct(setui::ACT_SOUND);
+  tapRect(setui::soundSeg(0));
   if (stickyHost.soundLevel() != 0) {
-    printf("SETTINGS FAIL: the switch did not mute\n");
+    printf("SETTINGS FAIL: Off did not mute\n");
     abort();
   }
   // C6: battery care is on out of the box, and its switch flips it both ways.
@@ -2541,8 +2541,7 @@ int main() {
     }
     toybox.openSettings();
     tapRect(setui::tabRect(setui::TAB_DEVICE));
-    tapAct(setui::ACT_SOUND);  // back to muted, the state the walk expects
-    if (stickyHost.soundLevel() != 0) tapAct(setui::ACT_SOUND);
+    tapRect(setui::soundSeg(0));  // back to muted, the state the walk expects
     printf("setup steps ok (%d steps, how/home/sleep/beep write, skip and phone end)\n",
            setui::SETUP_STEPS);
     g_dumpEnabled = wasDump;
@@ -2858,8 +2857,11 @@ int main() {
 
     // --- v2 focus: no countdown, a tap on Stop does nothing, a hold does.
     g_dumpEnabled = true;
-    setScreen("tool_focus");
+    setScreen("help_focus");  // d18: the set-up page's hints are this card now
     toybox.open(false, 13);
+    tapRect(help::NEVER_BTN);
+    setScreen("tool_focus");
+    tapRect(help::OK_BTN);
     FocusTool* ft = static_cast<FocusTool*>(toybox.hostActive());
     // Type 40 on the keypad, save it as a preset: it goes first.
     tapRect(focusui::VALUE);
@@ -2957,11 +2959,6 @@ int main() {
     homenet::saveWifi(stickyHost.prefs(), "\xe0\xb8\x9a\xe0\xb9\x89\xe0\xb8\xb2\xe0\xb8\x99 5G", "password1");
     shot("update_page");
 
-    // Reset stats: two taps, the first only asks.
-    tapRect(setui::updResetRect());
-    shot("update_reset_armed");
-    tapRect(TRect{16, 760, 10, 10});  // anywhere else: disarms
-    shot("update_reset_disarmed");
 
     // Up to date.
     g_fakeOta.result = ota::Check{};
@@ -3162,6 +3159,13 @@ int main() {
     // The four on/off rows have to toggle and land back where they started,
     // or a setting can be moved into a state it cannot be moved out of.
     g_dumpEnabled = false;
+    // d18: Sleep & wake is its own page now (Settings > DEVICE).
+    toybox.hostSettings().back();
+    tapAct(setui::ACT_SLEEP);
+    g_dumpEnabled = true;
+    setScreen("settings_sleep");
+    stickyHost.refresh(true);
+    g_dumpEnabled = false;
     for (int r = setui::LR_ROTATE; r <= setui::LR_BATT; r++) {
       const lock::Config before = lock::config();
       for (int k = 0; k < 2; k++) tapRect(setui::lockRect(r));
@@ -3200,6 +3204,8 @@ int main() {
       }
       tapRect(setui::wakeChipRect(wasWake == lock::WAKE_HUB ? 2 : wasWake == lock::WAKE_APP ? 1 : 0));
     }
+    toybox.hostSettings().back();
+    tapAct(setui::ACT_LOCK);
 
     // Every chip has to be reachable and has to be the one that ends up filled.
     // A chip row where two tap targets overlap looks right and picks the wrong
@@ -8607,10 +8613,14 @@ int main() {
   tapAct(setui::ACT_APPS);
   tapRect(setui::appsCardsRect());
   toybox.hostSettings().back();
-  // Reset lives on the update page now (Settings > Update & about).
-  tapAct(setui::ACT_UPDATE);
-  tapRect(setui::updResetRect());  // armed again
-  tapRect(setui::updResetRect());  // ...and confirmed
+  // Reset lives on the apps page now (d18), beside the cards button.
+  tapAct(setui::ACT_APPS);
+  tapRect(setui::appsResetRect());  // armed
+  g_dumpEnabled = true;
+  setScreen("settings_apps_reset_armed");
+  stickyHost.refresh(true);
+  g_dumpEnabled = false;
+  tapRect(setui::appsResetRect());  // ...and confirmed
   toybox.hostSettings().back();
   // Cleared means gone, not zeroed: a sentinel default proves the key itself
   // was removed, so a fresh device and a reset one read identically.
@@ -10594,8 +10604,16 @@ int main() {
     note::save("house", kNote2, strlen(kNote2));
   }
 
-  setScreen("tool_note_list");
+  // d18: the how-to is a card now, shown the first time; "don't show again".
+  setScreen("help_notes");
   toybox.open(false, 6);
+  tapRect(help::NEVER_BTN);
+  setScreen("tool_note_list");
+  tapRect(help::OK_BTN);
+  if (!help::suppressed(stickyHost.prefs(), "nt")) {
+    printf("NOTES FAIL: the card's switch did not stick\n");
+    abort();
+  }
 
   setScreen("tool_note_view");
   toybox.onTap(20 + 180, 56 + 46 + 20);  // open the richer note

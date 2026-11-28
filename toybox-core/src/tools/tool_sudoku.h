@@ -141,7 +141,7 @@ class SudokuTool : public ToolApp {
     c.button(k.x, k.y, k.w, k.h, "Check", false, TS_LARGE);
 
     if (_msg[0]) c.textCentered(c.width() / 2, MSG_Y, _msg, TS_MED, true, true);
-    snprintf(buf, sizeof(buf), "%s - bold = given, slanted = yours",
+    snprintf(buf, sizeof(buf), "%s",  // d18: the key is on the "?" card
              _puzzleLevel == sud::EASY ? "easy" : _puzzleLevel == sud::MEDIUM ? "medium" : "hard");
     gk::foot(c, buf);
   }

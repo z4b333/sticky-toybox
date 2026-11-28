@@ -217,10 +217,9 @@ class TimerTool : public ToolApp {
       snprintf(buf, sizeof(buf), "Save %s as a preset", t);
     if (have < 0 && _nPre < MAX_PRESETS) {
       c.button(SAVE_BTN.x, SAVE_BTN.y, SAVE_BTN.w, SAVE_BTN.h, buf, false, TS_MED);
-    } else {
-      c.drawRect(SAVE_BTN.x, SAVE_BTN.y, SAVE_BTN.w, SAVE_BTN.h, 1, true);
-      c.textInBox(SAVE_BTN.x, SAVE_BTN.y, SAVE_BTN.w, SAVE_BTN.h, buf, TS_MED, true);
     }
+    // d18: nothing when the time is already a preset, or when all eight are
+    // taken -- the filled chip says the first; the "?" card the second.
   }
 
   void tapCountdown(int x, int y) {

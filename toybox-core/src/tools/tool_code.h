@@ -245,7 +245,7 @@ class CodeTool : public KitGame {
     key(k, sizeof(k), "cb_b", _g.level);
     const int b = geti(k);
     if (!g)
-      snprintf(_foot, sizeof(_foot), "fill the row, then Check");
+      _foot[0] = 0;  // d18: the how-to is on the "?" card
     else if (b)
       snprintf(_foot, sizeof(_foot), "won %d of %d - best %d %s", w, g, b, b == 1 ? "try" : "tries");
     else

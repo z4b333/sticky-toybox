@@ -75,7 +75,7 @@ void MinesApp::finish() {
     levelKey(k, sizeof(k), "ms_l", _b.level);
     prefs().putInt(k, prefs().getInt(k, 0) + 1);
     prefs().putInt("ms_strk", 0);
-    snprintf(_msg, sizeof(_msg), "a mine - New game to try again");
+    snprintf(_msg, sizeof(_msg), "a mine - every mine is showing");
     saveState();
     host().beep(2);
     host().refresh(true);  // every mine shows at once: a full refresh, no ghosts
@@ -147,7 +147,7 @@ void MinesApp::renderBoard(ToolsCanvas& c) {
   gk::statInt(c, statRect(2), "WON", prefs().getInt(k, 0));
   c.button(NEW.x, NEW.y, NEW.w, NEW.h, "New game", lost, TS_LARGE);
   if (_msg[0]) c.textCentered(c.width() / 2, MSG_Y, _msg, TS_MED, true, true);
-  gk::foot(c, lost ? "every mine is showing" : mns::won(_b) ? "cleared" : "");
+  gk::foot(c, lost ? "" : mns::won(_b) ? "cleared" : "");  // d18: one line, not two
 }
 
 void MinesApp::renderResult(ToolsCanvas& c) {

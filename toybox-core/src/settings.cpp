@@ -80,18 +80,6 @@ void checkbox(ToolsCanvas& c, int x, int y, bool on) {
   c.drawLine(x + 12, y + 20, x + 22, y + 8, 3, false);
 }
 
-// A host with only a switch reports two levels and gets the two words it can
-// mean; one with a real volume gets four.
-const char* soundLabel(const ToolsHost& host) {
-  if (host.soundLevels() <= 2) return host.soundOn() ? "Sound: on" : "Sound: off";
-  switch (host.soundLevel()) {
-    case 0: return "Sound: mute";
-    case 1: return "Sound: low";
-    case 2: return "Sound: medium";
-    default: return "Sound: high";
-  }
-}
-
 // The lock screen's mode, in the register a value-on-the-right speaks.
 const char* emptyLabelSmall(uint8_t e) {
   switch (e) {
@@ -197,6 +185,10 @@ inline void draw(ToolsCanvas& c, int act, int cx, int cy, bool dark) {
       c.fillRect(cx - 6, cy + 8, 3, 6, dark);
       c.fillRect(cx + 4, cy + 8, 3, 6, dark);
       break;
+    case ACT_SLEEP:  // a crescent moon
+      c.fillCircle(cx, cy, 12, dark);
+      c.fillCircle(cx + 7, cy - 5, 10, !dark);
+      break;
     case ACT_UPDATE:  // an arrow coming down into a tray
       c.drawLine(cx, cy - 14, cx, cy + 4, 2, dark);
       c.drawLine(cx - 7, cy - 3, cx, cy + 4, 2, dark);
@@ -221,7 +213,8 @@ inline void draw(ToolsCanvas& c, int act, int cx, int cy, bool dark) {
 // ("h_mns"), and C4 adds the six new games.
 constexpr const char* HELP_KEYS[] = {"h_wrd", "h_mns", "h_g20", "h_xo", "h_sea", "h_sud",
                                      "h_fc",  "h_bk",  "h_ep",  "h_rcp", "h_c4", "h_bj",
-                                     "h_hl",  "h_cb",  "h_hn",  "h_mp",  "h_lv", "h_cl"};
+                                     "h_hl",  "h_cb",  "h_hn",  "h_mp",  "h_lv", "h_cl",
+                                     "h_nt",  "h_fo"};
 
 void lightSwitch(ToolsCanvas& c, int x, int y, bool on) { syncpg::lightSwitch(c, x, y, on); }
 
@@ -642,7 +635,6 @@ void SettingsScreen::renderFiles(ToolsHost& host, ToolsCanvas& c) {
     c.textCentered(SCREEN_W / 2, 420, "Scan with your phone camera", TS_MED, true, true);
     snprintf(buf, sizeof(buf), "%s   key %s", _files.ssid(), _files.password());
     c.textCentered(SCREEN_W / 2, 456, buf, TS_MED, true);
-    c.textCentered(SCREEN_W / 2, 492, "this code joins the wifi, nothing more", TS_SMALL, true);
   } else {
     c.textCentered(SCREEN_W / 2, 64, "STEP 2 OF 2", TS_MED, true, true);
     c.textCentered(SCREEN_W / 2, 96, "phone joined", TS_MED, true);
@@ -677,7 +669,6 @@ void SettingsScreen::renderFiles(ToolsHost& host, ToolsCanvas& c) {
     c.textCentered(SCREEN_W / 2, 578, "nothing sent yet", TS_SMALL, true);
   }
 
-  c.textCentered(SCREEN_W / 2, 664, "the screen waits while files are moving", TS_SMALL, true);
   const TRect d = filesDoneRect();
   c.button(d.x, d.y, d.w, d.h, "DONE", false, TS_LARGE);
 }
@@ -958,7 +949,6 @@ void SettingsScreen::renderClock(ToolsHost& host, ToolsCanvas& c) {
     c.textCentered(SCREEN_W / 2, 420, "Scan with your phone camera", TS_MED, true, true);
     snprintf(buf, sizeof(buf), "%s   key %s", _clock.ssid(), _clock.password());
     c.textCentered(SCREEN_W / 2, 456, buf, TS_MED, true);
-    c.textCentered(SCREEN_W / 2, 492, "this code joins the wifi, nothing more", TS_SMALL, true);
     c.textCentered(SCREEN_W / 2, CLOCK_BIG_Y, "the phone sends the time by itself", TS_SMALL, true);
     if (netReady(host)) {
       const TRect n = clockNetRect();
@@ -1031,7 +1021,7 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
     renderSetup(host, c);
     return;
   }
-  if (_page == 1) {
+  if (_page == 1 || _page == 23) {
     renderLock(host, c);
     return;
   }
@@ -1116,8 +1106,12 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
   // build's "-7-gab89111" tail is for the service screen, not this row.
   char upV[24] = "";
   if (ota::Device* d = host.otaDevice()) shortVersion(d->version(), upV, sizeof(upV));
-  const char* sound = soundLabel(host);
-  const char* soundV = strchr(sound, ' ') ? strchr(sound, ' ') + 1 : sound;
+  char sleepV[12];
+  {
+    const int m = lock::SLEEP_MINUTES[lock::config().sleepIdx];
+    if (m) snprintf(sleepV, sizeof(sleepV), "%d min", m);
+    else snprintf(sleepV, sizeof(sleepV), "never");
+  }
   struct Row {
     int act;
     const char* name;
@@ -1143,23 +1137,23 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
       {ACT_SETUP, "Setup", "run again", true},
       {ACT_UPDATE, "Update & about", upV, true},
       {ACT_CARE, "Battery care 80%", "", false},
+      {ACT_SLEEP, "Sleep & wake", sleepV, true},
       {ACT_DASH, "Charging dashboard", host.chargeDash() ? dashPicShort(host.chargePic()) : "Off",
        true},
   };
-  (void)soundV;
   for (const Row& r : rows) {
     if (TAB_OF[r.act] != _tab) continue;
     const TRect a = actionRect(r.act);
     c.fillRect(a.x, a.y + a.h + (BTN_STEP - a.h) / 2, a.w, 1, true);  // the row's hairline
-    if (r.act == ACT_SOUND || r.act == ACT_CARE) {
-      const bool on = r.act == ACT_SOUND ? host.soundLevel() > 0 : host.batteryCare();
-      lightSwitch(c, a.x + a.w - SWITCH_W - 4, a.y + (a.h - SWITCH_H) / 2, on);
-    } else if (r.act == ACT_VOLUME) {
-      static const char* kVol[3] = {"Low", "Mid", "High"};
+    if (r.act == ACT_CARE) {
+      lightSwitch(c, a.x + a.w - SWITCH_W - 4, a.y + (a.h - SWITCH_H) / 2, host.batteryCare());
+    } else if (r.act == ACT_SOUND) {
+      // d18: Sound and Volume are one row -- Off / Low / Mid / High.
+      static const char* kVol[4] = {"Off", "Low", "Mid", "High"};
       const int lv = host.soundLevel();  // 0 = off, 1..3
-      for (int k = 0; k < 3; k++) {
-        const TRect g = volSeg(k);
-        const bool sel = lv == k + 1;
+      for (int k = 0; k < 4; k++) {
+        const TRect g = soundSeg(k);
+        const bool sel = lv == k;
         if (sel) c.fillRect(g.x, g.y, g.w, g.h, true);
         else c.drawRect(g.x, g.y, g.w, g.h, 2, true);
         c.textInBox(g.x, g.y, g.w, g.h, kVol[k], TS_SMALL, !sel, true);
@@ -1183,6 +1177,13 @@ void SettingsScreen::render(ToolsHost& host, ToolsCanvas& c) {
     }
   }
 
+  // The version, quietly at the foot of every tab (kit), so "which one am I
+  // running?" is answered without opening Update & about.
+  if (upV[0]) {
+    char ver[40];
+    snprintf(ver, sizeof(ver), "Toybox %s", upV);
+    c.textCentered(SCREEN_W / 2, ROOT_VER_Y, ver, TS_SMALL, true);
+  }
   if (_note) c.textCentered(SCREEN_W / 2, 776, _note, TS_SMALL, true);
 }
 
@@ -1219,9 +1220,18 @@ void SettingsScreen::renderApps(ToolsHost& host, ToolsCanvas& c) {
 
   // The cards row came off the settings page: it is a row about apps, and this
   // is the page about apps.
+  // d18: and Reset stats, which came here from Update & about -- both are
+  // about the apps, side by side. The reset asks once more before it erases.
   const TRect r = setui::appsCardsRect();
-  c.button(r.x, r.y, r.w, r.h, _note ? "THE CARDS WILL SHOW AGAIN" : "SHOW THE HOW-TO CARDS AGAIN",
-           false, TS_MED);
+  c.button(r.x, r.y, r.w, r.h, "How-to cards", false, TS_MED);
+  const TRect z = setui::appsResetRect();
+  if (_armed) {
+    c.fillRect(z.x, z.y, z.w, z.h, true);
+    c.textInBox(z.x, z.y, z.w, z.h, "Tap to erase", TS_MED, false, true);
+  } else {
+    c.button(z.x, z.y, z.w, z.h, "Reset scores", false, TS_MED);
+  }
+  if (_note) c.textCentered(SCREEN_W / 2, 770, _note, TS_SMALL, true);
 }
 
 // --- Reading sync (D) ----------------------------------------------------------------
@@ -1308,9 +1318,23 @@ bool SettingsScreen::tapDash(ToolsHost& host, int x, int y) {
 }
 
 bool SettingsScreen::tapApps(ToolsHost& host, int x, int y) {
+  const bool wasArmed = _armed;
+  _armed = false;
+  _note = nullptr;
+  if (setui::appsResetRect().hit(x, y)) {
+    if (!wasArmed) {
+      _armed = true;
+      host.beep(2);
+    } else {
+      record::clearAll(host.prefs());
+      _note = "scores and tallies cleared";
+      host.beep(1);
+    }
+    return true;
+  }
   if (setui::appsCardsRect().hit(x, y)) {
     for (const char* k : HELP_KEYS) host.prefs().remove(k);
-    _note = "the rules cards will show again";
+    _note = "the how-to cards will show again";
     host.beep(1);
     return true;
   }
@@ -1331,7 +1355,7 @@ bool SettingsScreen::tapApps(ToolsHost& host, int x, int y) {
     hit = true;
     appvis::toggle(it.game, it.idx);
   });
-  if (!hit) return false;
+  if (!hit) return wasArmed;  // repaint only if a question came down
   appvis::save(host.prefs());
   host.beep(0);
   return true;
@@ -1362,16 +1386,6 @@ const char* rowName(int i) {
     default: return "Show the battery";
   }
 }
-bool rowChecked(int i, const lock::Config& c) {
-  switch (i) {
-    case setui::LR_ROTATE: return c.autoRotate;
-    case setui::LR_TIME: return c.showTime;
-    case setui::LR_TEMP: return c.showTemp;
-    default: return c.showBattery;
-  }
-}
-bool rowIsCheck(int i) { return i >= setui::LR_ROTATE; }
-
 // A section heading in the root page's register: small tracked caps over a
 // hairline, with one quiet line of explanation.
 void lockHead(ToolsCanvas& c, int y, const char* name, const char* sub) {
@@ -1451,6 +1465,10 @@ void segment(ToolsCanvas& c, const TRect& r, const char* label, bool on, bool la
 void SettingsScreen::renderLock(ToolsHost& host, ToolsCanvas& c) {
   using namespace setui;
   (void)host;
+  if (_page == 23) {
+    renderSleep(c);
+    return;
+  }
   drawTopBar(c, "LOCK SCREEN");
 
   // WHEN NOTHING IS PINNED: the four faces as tiles, each a small picture of
@@ -1489,8 +1507,16 @@ void SettingsScreen::renderLock(ToolsHost& host, ToolsCanvas& c) {
     }
   }
 
+  if (_note) c.textCentered(SCREEN_W / 2, 776, _note, TS_SMALL, true);
+}
+
+// d18: Settings > DEVICE > Sleep & wake. The two sections that crowded the
+// lock screen page, on a page of their own.
+void SettingsScreen::renderSleep(ToolsCanvas& c) {
+  using namespace setui;
+  drawTopBar(c, "SLEEP & WAKE");
   // SLEEP: one row, five segments.
-  lockHead(c, 426, "SLEEP", nullptr);
+  lockHead(c, 58, "SLEEP", nullptr);
   {
     const TRect r = lockRect(LR_SLEEP);
     c.text(r.x + 4, r.y + 2, "Sleep after", TS_MED, true);
@@ -1502,7 +1528,7 @@ void SettingsScreen::renderLock(ToolsHost& host, ToolsCanvas& c) {
 
   // WAKING: where the power button lands, and whether the note follows the
   // device's angle while it sleeps.
-  lockHead(c, 540, "WAKING", nullptr);
+  lockHead(c, 172, "WAKING", nullptr);
   {
     const TRect r = lockRect(LR_WAKE);
     c.text(r.x + 4, r.y + (r.h - c.textHeight(TS_MED)) / 2, "Wake to", TS_MED, true);
@@ -1531,6 +1557,7 @@ bool SettingsScreen::tapLock(ToolsHost& host, int x, int y) {
   using namespace setui;
   // The parts inside rows come first: a row-sized hit test would swallow every
   // one of them.
+  if (_page == 23) return tapSleep(host, x, y);
   if (lockimg::have() && removeRect().hit(x, y)) {
     lockimg::remove();
     host.beep(2);
@@ -1598,6 +1625,11 @@ bool SettingsScreen::tapLock(ToolsHost& host, int x, int y) {
     return false;
   }
 
+  return false;
+}
+
+bool SettingsScreen::tapSleep(ToolsHost& host, int x, int y) {
+  using namespace setui;
   // The sleep and wake chips: a direct choice each, nothing to cycle through.
   for (int k = 0; k < lock::SLEEP_COUNT; k++) {
     if (!sleepChipRect(k).hit(x, y)) continue;
@@ -1616,15 +1648,10 @@ bool SettingsScreen::tapLock(ToolsHost& host, int x, int y) {
     return true;
   }
 
-  for (int i = 0; i < LR_COUNT; i++) {
-    if (!lockRect(i).hit(x, y)) continue;
-    if (!rowIsCheck(i)) return false;  // chips and buttons were handled above
-    switch (i) {
-      case LR_ROTATE: _lock.autoRotate = !_lock.autoRotate; break;
-      case LR_TIME: _lock.showTime = !_lock.showTime; break;
-      case LR_TEMP: _lock.showTemp = !_lock.showTemp; break;
-      default: _lock.showBattery = !_lock.showBattery; break;
-    }
+  // The one on/off row left on the glass. (The footer toggles' rows sit off
+  // it; nothing can hit them.)
+  if (lockRect(LR_ROTATE).hit(x, y)) {
+    _lock.autoRotate = !_lock.autoRotate;
     lock::save(host.prefs(), _lock);
     lock::setConfig(_lock);  // takes effect on the next paint, not the next boot
     host.beep(0);
@@ -1635,7 +1662,7 @@ bool SettingsScreen::tapLock(ToolsHost& host, int x, int y) {
 
 bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
   if (inSetup()) return tapSetup(host, x, y);
-  if (_page == 1) return tapLock(host, x, y);
+  if (_page == 1 || _page == 23) return tapLock(host, x, y);
   if (_page == 2) return tapWall(host, x, y);
   if (_page == 5) return tapLockPic(host, x, y);
   if (_page == 3) return tapApps(host, x, y);
@@ -1675,6 +1702,12 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
   if (rowHit(ACT_LOCK)) {
     _lock = lock::load(host.prefs());
     _page = 1;
+    host.beep(1);
+    return true;
+  }
+  if (rowHit(ACT_SLEEP)) {
+    _lock = lock::load(host.prefs());
+    _page = 23;
     host.beep(1);
     return true;
   }
@@ -1740,19 +1773,20 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
     startSetup(false);
     return true;
   }
-  if (rowHit(ACT_SOUND)) {
-    // The switch. Off remembers nothing; on comes back at Mid, the default.
-    const int n = host.soundLevels();
-    if (host.soundLevel() > 0) host.setSoundLevel(0);
-    else host.setSoundLevel(n > 2 ? 2 : n - 1);
-    host.beep(1);
-    return true;
+  if (TAB_OF[ACT_SOUND] == _tab) {
+    // Off / Low / Mid / High, a direct choice each.
+    for (int k = 0; k < 4; k++) {
+      if (!soundSeg(k).hit(x, y)) continue;
+      const int n = host.soundLevels();
+      host.setSoundLevel(k < n ? k : n - 1);
+      host.beep(0);  // at the level just chosen: the only useful preview
+      return true;
+    }
   }
   if (rowHit(ACT_CARE)) {
     // C6: stop charging at 80 %, start again below 75 %. Only while awake;
     // the note says so, because a Sticky left off on the cable fills up.
     host.setBatteryCare(!host.batteryCare());
-    _note = host.batteryCare() ? "holds 80% while the screen is on" : "charges to 100%";
     host.beep(1);
     return true;
   }
@@ -1771,15 +1805,6 @@ bool SettingsScreen::onTap(ToolsHost& host, int x, int y) {
     _page = 20;
     host.beep(1);
     return true;
-  }
-  if (TAB_OF[ACT_VOLUME] == _tab) {
-    for (int k = 0; k < 3; k++) {
-      if (!volSeg(k).hit(x, y)) continue;
-      const int n = host.soundLevels();
-      host.setSoundLevel(k + 1 < n ? k + 1 : n - 1);
-      host.beep(0);  // at the level just chosen: the only useful preview
-      return true;
-    }
   }
 
   return wasArmed;  // only repaint if a question came down
@@ -2124,9 +2149,6 @@ void SettingsScreen::renderUpdate(ToolsHost& host, ToolsCanvas& c) {
       snprintf(buf, sizeof(buf), "last try: %s", ota::describe(l->err));
       c.textCentered(SCREEN_W / 2, 560, buf, TS_MED, true, true);
       c.textCentered(SCREEN_W / 2, 596, "the page can send again", TS_SMALL, true);
-    } else {
-      c.textCentered(SCREEN_W / 2, 560, "the page takes toybox-app.bin", TS_SMALL, true);
-      c.textCentered(SCREEN_W / 2, 588, "notes and settings stay", TS_SMALL, true);
     }
     c.button(dn.x, dn.y, dn.w, dn.h, "DONE", false, TS_LARGE);
     return;
@@ -2156,31 +2178,13 @@ void SettingsScreen::renderUpdate(ToolsHost& host, ToolsCanvas& c) {
   const bool wifi = homenet::haveWifi(host.prefs());
   if (d) {
     const TRect ck = updCheckRect(), ln = updLanRect();
+    // d18: three buttons and nothing under them -- each one's own page says
+    // what it does. Reset stats moved to Settings > DEVICE > Apps on the hub.
+    (void)wifi;
     c.button(ck.x, ck.y, ck.w, ck.h, "CHECK FOR UPDATE", false, TS_MED);
-    if (wifi) {
-      char name[homenet::SSID_MAX];
-      homenet::wifiName(host.prefs(), name, sizeof(name));
-      snprintf(buf, sizeof(buf), "downloads it online, over %s", name);
-    } else {
-      snprintf(buf, sizeof(buf), "save a home wifi first: Settings > Clock");
-    }
-    c.textCentered(SCREEN_W / 2, ck.y + ck.h + 8, buf, TS_SMALL, true);
     c.button(ln.x, ln.y, ln.w, ln.h, "FROM A COMPUTER", false, TS_MED);
-    c.textCentered(SCREEN_W / 2, ln.y + ln.h + 8, "sends a .bin file from toybox.local", TS_SMALL, true);
     const TRect cd = updCardRect();
     c.button(cd.x, cd.y, cd.w, cd.h, "FROM SD CARD", false, TS_MED);
-    c.textCentered(SCREEN_W / 2, cd.y + cd.h + 8, "installs the files in toybox/update", TS_SMALL, true);
-  }
-  c.textTracked(16, 574, "EXTRAS", TS_SMALL, true, false, 1);
-  c.fillRect(16, 596, SCREEN_W - 32, 1, true);
-  {
-    const TRect a = updResetRect();
-    if (_armed) {
-      chrome2::armed(c, a, "Erase every score?");
-    } else {
-      setico::draw(c, -1, a.x + 22, a.y + a.h / 2, true);
-      c.text(a.x + 52, a.y + (a.h - c.textHeight(TS_MED)) / 2, "Reset stats and tallies", TS_MED, true);
-    }
   }
   if (_note) c.textCentered(SCREEN_W / 2, 776, _note, TS_SMALL, true);
 }
@@ -2276,17 +2280,6 @@ bool SettingsScreen::tapUpdate(ToolsHost& host, int x, int y) {
   const bool wasArmed = _armed;
   _armed = false;
   _note = nullptr;
-  if (updResetRect().hit(x, y)) {
-    if (!wasArmed) {
-      _armed = true;
-      host.beep(2);
-    } else {
-      record::clearAll(host.prefs());
-      _note = "scores and tallies cleared";
-      host.beep(1);
-    }
-    return true;
-  }
   if (!d) return wasArmed;
   if (updCheckRect().hit(x, y)) {
     if (!homenet::haveWifi(host.prefs())) {

@@ -3251,9 +3251,7 @@ class EpubTool : public ToolApp {
   // hard to read on glass), and how to leave.
   void moreFoot(ToolsCanvas& c, const TRect& k, const char* pos) {
     const int fy = k.y + k.h - 44;
-    c.text(k.x + 18, fy, pos, TS_MED, true, true);
-    const char* hint = "tap outside to close";
-    c.text(k.x + k.w - 18 - c.textWidth(hint, TS_SMALL), fy + 4, hint, TS_SMALL, true);
+    c.text(k.x + 18, fy, pos, TS_MED, true, true);  // d18: no "tap outside to close"
   }
 
   // More > Settings: Text, Highlights, Reading sync, Start again.
